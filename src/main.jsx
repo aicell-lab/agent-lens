@@ -23,7 +23,6 @@ import { defaults as defaultControls, FullScreen, ZoomSlider } from 'ol/control'
 import { getCenter } from 'ol/extent';
 import * as olExtent from 'ol/extent';
 import * as olProj from 'ol/proj';
-import { hyphaWebsocketClient } from 'imjoy-rpc';
 import WinBox from 'winbox/src/js/winbox';
 
 const originalWidth = 2048;
@@ -81,17 +80,13 @@ const MicroscopeControl = () => {
     const initializeWebRPC = async () => {
         try {
             appendLog('Connecting to server...');
-            const server = await hyphaWebsocketClient.connectToServer({ 
-                "name": "js-client", 
-                "server_url": "https://ai.imjoy.io", 
-                "method_timeout": 10 
-            });
+            const server = await hyphaWebsocketClient.connectToServer({"server_url": "https://hypha.aicell.io", "webrtc": true})                                  
             appendLog('Server connected.');
             appendLog('Getting imasfadsfdsdfasfdsad.');
 
             appendLog('Getting Segmentation service...');
             try {
-                const segmentationService = await server.get_service("interactive-segmentation");
+              const segmentationService = await server.getService("interactive-segmentation");
                 appendLog('Segmentation service acquired.');
                 setSegmentService(segmentationService);  // Set the segmentation service
             } catch (segmentationError) {
@@ -99,11 +94,11 @@ const MicroscopeControl = () => {
             }
             
             appendLog('Getting microscope control service...');
-            const mc = await server.get_service("microscope-control-squid-test");
+            const mc = await server.getService("microscope-control-squid-test");
             appendLog('Microscope control service acquired.');
 
             appendLog('Getting image-embedding-similarity-search service...');
-            const similarityService = await server.get_service("image-embedding-similarity-search");
+            const similarityService = await server.getService("image-embedding-similarity-search");
             appendLog('Similarity search service acquired.');
             console.log('Acquired similarity service:', similarityService);
             setSimilarityService(similarityService);
@@ -112,7 +107,7 @@ const MicroscopeControl = () => {
                         // Poll the server for status updates every 5 seconds
             const statusInterval = setInterval(async () => {
               try {
-                  const status = await mc.get_status();
+                  const status = await mc.getStatus();
                   updateUIBasedOnStatus(status); // Call function to update UI
               } catch (statusError) {
                   appendLog(`Error fetching status: ${statusError.message}`);
@@ -126,7 +121,6 @@ const MicroscopeControl = () => {
             appendLog(`Error: ${error.message}`);
         }
     };
-
     initializeWebRPC();
   }, []);
 
