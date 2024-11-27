@@ -8,3 +8,4 @@ server.js
 *.pkl
 *.idx
 cell_vectors_db
+.DS_Store

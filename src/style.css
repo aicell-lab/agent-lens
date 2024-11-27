@@ -1,0 +1,713 @@
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Roboto', sans-serif;  
+  overflow-y: auto;
+}
+
+h1, h2, h3 {
+  font-weight: 700; /* Fetstil */
+}
+
+label, button, h3 {
+  font-weight: 500; /* Medium */
+}
+
+body, p, input, select {
+  font-weight: 400; /* Vanlig */
+}
+
+#control-chat-section .section-title {
+  margin-top: 15px; /* Adjust the value as needed */
+}
+
+.section-title {
+  font-size: 24px;     /* Adjust to match the "Actions" header size */
+  font-weight: 500;    /* Medium weight to match "Actions" */
+  margin-bottom: 20px; /* Consistent spacing below headers */
+}
+
+#image-display {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100vh; /* Use full viewport height */
+  border: none; /* Remove the border if you don't need it */
+  box-sizing: border-box;
+  background-color: #f0f0f0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden; /* Hide overflow for a cleaner look */
+}
+
+.z_plus-button {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  padding: 10px 15px;
+  z-index: 1000; /* Ensure it appears above other elements */
+  background-color: #007bff;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 8px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow:
+    inset 0 -3px 0 rgba(0, 0, 0, 0.2),
+    0 4px 6px rgba(0, 0, 0, 0.1);
+  transition: background 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+}
+
+.z_plus-button:hover {
+  background-color: #0056b3;
+  box-shadow:
+    inset 0 -3px 0 rgba(0, 0, 0, 0.2),
+    0 6px 8px rgba(0, 0, 0, 0.15);
+  transform: translateY(-2px);
+}
+
+.z_plus-button .icon {
+  margin-right: 8px;
+}
+
+.z_minus-button {
+  position: absolute;
+  top: 60px;
+  left: 10px;
+  padding: 10px 15px;
+  z-index: 1000; /* Ensure it appears above other elements */
+  background-color: #007bff;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 8px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow:
+    inset 0 -3px 0 rgba(0, 0, 0, 0.2),
+    0 4px 6px rgba(0, 0, 0, 0.1);
+  transition: background 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+}
+
+.z_minus-button:hover {
+  background-color: #0056b3;
+  box-shadow:
+    inset 0 -3px 0 rgba(0, 0, 0, 0.2),
+    0 6px 8px rgba(0, 0, 0, 0.15);
+  transform: translateY(-2px);
+}
+
+.z_minus-button .icon {
+  margin-right: 8px;
+}
+
+.search-button {
+  position: absolute;
+  top: 320px;
+  left: 10px;
+  z-index: 1000;
+  background-color: #007bff;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 16px; /* Increased font size */
+  font-weight: 500;
+  cursor: pointer;
+  display: flex; /* Use flexbox */
+  align-items: center; /* Center vertically */
+  justify-content: center; /* Center horizontally */
+  padding: 7px 15px; /* Adjust padding for better spacing */
+  box-shadow:
+    inset 0 -3px 0 rgba(0, 0, 0, 0.2),
+    0 4px 6px rgba(0, 0, 0, 0.1);
+  transition: background 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+}
+
+.search-button:hover {
+  background-color: #0056b3;
+  box-shadow:
+    inset 0 -3px 0 rgba(0, 0, 0, 0.2),
+    0 6px 8px rgba(0, 0, 0, 0.15);
+  transform: translateY(-2px);
+}
+
+.search-button .icon {
+  margin-right: 8px; /* Adjust margin for spacing */
+  font-size: 18px; /* Increase icon size to match text */
+}
+
+
+.segment_cell-button {
+  position: absolute;
+  top: 420px;
+  left: 10px;
+  padding: 10px 15px;
+  z-index: 1000; /* Ensure it appears above other elements */
+  background-color: #007bff;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 8px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow:
+    inset 0 -3px 0 rgba(0, 0, 0, 0.2),
+    0 4px 6px rgba(0, 0, 0, 0.1);
+  transition: background 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+}
+
+.segment_cell-button:hover {
+  background-color: #0056b3;
+  box-shadow:
+    inset 0 -3px 0 rgba(0, 0, 0, 0.2),
+    0 6px 8px rgba(0, 0, 0, 0.15);
+  transform: translateY(-2px);
+}
+
+.segment_cell-button .icon {
+  margin-right: 2px;
+  font-size: 15px;
+}
+
+.add_point-button {
+  position: absolute;
+  top: 520px;
+  left: 10px;
+  padding: 10px 15px;
+  z-index: 1000; /* Ensure it appears above other elements */
+  background-color: #007bff;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 8px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow:
+    inset 0 -3px 0 rgba(0, 0, 0, 0.2),
+    0 4px 6px rgba(0, 0, 0, 0.1);
+  transition: background 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+}
+
+.add_point-button:hover {
+  background-color: #0056b3;
+  box-shadow:
+    inset 0 -3px 0 rgba(0, 0, 0, 0.2),
+    0 6px 8px rgba(0, 0, 0, 0.15);
+  transform: translateY(-2px);
+}
+
+.add_point-button .icon {
+  margin-right: 2px;
+  font-size: 15px;
+}
+
+.add_polygon-button {
+  position: absolute;
+  top: 570px;
+  left: 10px;
+  padding: 10px 15px;
+  z-index: 1000; /* Ensure it appears above other elements */
+  background-color: #007bff;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 8px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow:
+    inset 0 -3px 0 rgba(0, 0, 0, 0.2),
+    0 4px 6px rgba(0, 0, 0, 0.1);
+  transition: background 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+}
+
+.add_polygon-button:hover {
+  background-color: #0056b3;
+  box-shadow:
+    inset 0 -3px 0 rgba(0, 0, 0, 0.2),
+    0 6px 8px rgba(0, 0, 0, 0.15);
+  transform: translateY(-2px);
+}
+
+.add_polygon-button .icon {
+  margin-right: 2px;
+  font-size: 15px;
+}
+
+.segment_all_cells-button {
+  position: absolute;
+  top: 470px;
+  left: 10px;
+  padding: 10px 13px;
+  z-index: 1000; /* Ensure it appears above other elements */
+  background-color: #007bff;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 8px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow:
+    inset 0 -3px 0 rgba(0, 0, 0, 0.2),
+    0 4px 6px rgba(0, 0, 0, 0.1);
+  transition: background 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+}
+
+.segment_all_cells-button:hover {
+  background-color: #0056b3;
+  box-shadow:
+    inset 0 -3px 0 rgba(0, 0, 0, 0.2),
+    0 6px 8px rgba(0, 0, 0, 0.15);
+  transform: translateY(-2px);
+}
+
+.segment_all_cells-button .icon {
+  margin-right: 2px;
+  font-size: 15px;
+}
+
+.segmentation_model-button {
+  position: absolute;
+  top: 370px;
+  left: 10px;
+  right: 1380px;
+  padding: 7px 10px;
+  z-index: 1000; /* Ensure it appears above other elements */
+  background-color: #007bff;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 16px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow:
+    inset 0 -3px 0 rgba(0, 0, 0, 0.2),
+    0 4px 6px rgba(0, 0, 0, 0.1);
+  transition: background 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+}
+
+.segmentation_model-button:hover {
+  background-color: #0056b3;
+  box-shadow:
+    inset 0 -3px 0 rgba(0, 0, 0, 0.2),
+    0 6px 8px rgba(0, 0, 0, 0.15);
+  transform: translateY(-2px);
+}
+
+.segmentation_model-button .icon {
+  margin-right: 10px;
+}
+
+/* Position the Chatbot button in the upper right corner */
+.chatbot-button {
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  padding: 10px 15px;
+  z-index: 1000; /* Ensure it appears above other elements */
+  background-color: #28a745; /* Green background */
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 8px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow:
+    inset 0 -3px 0 rgba(0, 0, 0, 0.2),
+    0 4px 6px rgba(0, 0, 0, 0.1);
+  transition: background 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+}
+
+.chatbot-button:hover {
+  background-color: #218838; /* Darker green on hover */
+  box-shadow:
+    inset 0 -3px 0 rgba(0, 0, 0, 0.2),
+    0 6px 8px rgba(0, 0, 0, 0.15);
+  transform: translateY(-2px);
+}
+
+.chatbot-button .icon {
+  margin: 2px;
+  font-size: 15px;
+}
+
+/* Ensure the parent container is positioned relatively */
+body, #app {
+  position: relative;
+}
+
+.placeholder-text {
+  font-size: 24px;
+  color: #555;
+}
+
+#action-similarity-container {
+  display: flex;
+  width: 100%;
+  height: 40vh; /* Use viewport height for responsiveness */
+  box-sizing: border-box;
+}
+
+#actions {
+  width: 50%;
+  padding: 10px;
+  border-right: 1px solid #ccc;
+  box-sizing: border-box;
+  height: 100%;
+  text-align: left;
+  padding-left: 20px;  /* Adjust the value as needed */
+  padding-right: 20px; /* Adjust the value as needed */
+}
+
+#similarity-search {
+  width: 50%;
+  padding: 10px;
+  box-sizing: border-box;
+  height: 100%;
+  background-color: #f9f9f9;
+  display: flex;
+  flex-direction: column; /* Added for proper flex behavior */
+}
+
+#control-chat-section {
+  position: absolute; /* Change from relative to absolute */
+  top: 300px;
+  right: 0;
+  width: 23%; /* Keep the width as per your original design */
+  height: 40%; /* Full height to cover the image display */
+  background-color: rgba(255, 255, 255, 0.95); /* Semi-transparent background */
+  border-left: 1px solid #ccc;
+  box-sizing: border-box;
+  padding-left: 20px;
+  padding-right: 20px;
+  overflow-y: auto;
+  z-index: 1000; /* Ensure it appears above other elements */
+  border-radius: 10px; /* Adjust corners */
+}
+
+#log-section {
+  margin-top: 10px;
+  width: 100%;
+  background-color: #fafafa;
+  padding: 10px;
+  border-top: 1px solid #ccc;
+  box-sizing: border-box;
+}
+
+input[readonly] {
+  background-color: #e4e1e1; /* Ljusgrå bakgrund */
+  cursor: default; /* Ändra muspekaren till standardpekare */
+}
+
+.icon {
+  margin-right: 8px; /* Justera avståndet mellan ikonen och texten */
+}
+
+
+.illumination-control-container {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  gap: 10px;
+}
+
+.illumination-item {
+    flex: 1;
+}
+
+.control-input {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.control-button {
+  flex: 1; /* Allows buttons to share available space equally */
+  padding:4px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  cursor: pointer;
+  text-align: center;
+  border-radius: 7px; /* Adjust corners */
+}
+
+.control-button:hover {
+  background-color: #0056b3;
+}
+
+.control-input {
+  margin: 5px 0;
+  padding: 8px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.coordinate-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+.coordinate-container {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.aligned-buttons {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.half-button {
+  width: 49%;
+  padding: 7px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  cursor: pointer;
+  text-align: center;
+}
+
+.half-button:hover {
+  background-color: #0056b3;
+}
+
+.horizontal-buttons {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  gap: 20px; /* Add gap between buttons */
+}
+
+.large-button {
+  padding: 10px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  cursor: pointer;
+  text-align: center;
+}
+
+.large-button:hover {
+  background-color: #0056b3;
+}
+
+.snap-button {
+  background: linear-gradient(135deg, #27AE60, #2ECC71);
+}
+
+.snap-button:hover {
+  background: linear-gradient(135deg, #2ECC71, #27AE60);
+}
+
+label {
+  margin-top: 20px;
+  display: block;
+}
+
+.control-group {
+  display: flex;
+  justify-content: center;
+  flex-direction: column;
+  align-items: flex-start;
+  margin-top: 15px;
+}
+
+.log-content {
+  max-height: 200px;
+  overflow-y: auto;
+  background-color: #e9ecef;
+  padding: 10px;
+}
+
+.illumination-settings {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+
+.illumination-intensity,
+.illumination-channel {
+  width: 100%; /* Adjust the width as needed to fit in the current window */
+  box-sizing: border-box;
+}
+
+.intensity-label-row {
+  display: flex;
+  align-items: center;
+}
+
+.intensity-label-row label,
+.intensity-label-row span {
+  display: inline;
+  margin: 10px;
+  margin-top: auto;
+}
+
+.illumination-intensity label,
+.illumination-channel label {
+  display: block;
+  margin-bottom: 10px;
+  margin-top: 1px;
+}
+
+.illumination-intensity input[type="range"] {
+  width: 100%;
+  margin-top: 1px;
+}
+
+.illumination-channel label {
+  margin-top: 1px;
+}
+
+.illumination-channel select {
+  width: 100%;
+  margin-bottom: 5px;
+}
+
+.illumination-channel button {
+  width: 100%;
+}
+
+.camera-exposure-settings {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.camera-exposure-settings label {
+  margin-top: 2px; /* Decrease the margin-top as needed */
+}
+
+.camera-exposure-row {
+  display: flex;
+  align-items: center;
+}
+
+.camera-exposure-row label {
+  margin-right: 10px;
+}
+
+.camera-exposure-input {
+  width: 300px; /* Adjust this width as needed */
+  box-sizing: border-box;
+}
+
+.reset-button {
+  padding: 3px;
+  background: linear-gradient(135deg, #fca61f, #f39c12); /* Orange färg */
+}
+
+.reset-button:hover {
+  background: linear-gradient(135deg, #f39c12, #c38013); /* Mörkare röd vid hovring */
+}
+
+.actions-buttons {
+  display: flex;
+  justify-content: flex-start;
+  gap: 20px; /* Behåll avståndet mellan knapparna */
+}
+
+.actions-button {
+  padding: 10px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  cursor: pointer;
+  text-align: center;
+}
+
+.actions-button:hover {
+  background-color: #0056b3;
+}
+
+button {
+  /* Common styles for all buttons */
+  padding: 12px 20px;
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  text-align: center;
+  border-radius: 6px;
+  font-size: 16px;
+  font-weight: 500;
+
+  /* Modern styling */
+  background: linear-gradient(135deg, #007bff, #0185b1);
+  box-shadow:
+    inset 0 -3px 0 rgba(0, 0, 0, 0.2),
+    0 4px 6px rgba(0, 0, 0, 0.1);
+
+  /* Smooth transitions */
+  transition: background 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+}
+
+button:hover {
+  background: linear-gradient(135deg, #00bfff, #007bff);
+  box-shadow:
+    inset 0 -3px 0 rgba(0, 0, 0, 0.2),
+    0 6px 8px rgba(0, 0, 0, 0.15);
+  transform: translateY(-2px);
+}
+
+.annotation-buttons {
+  display: flex;
+  flex-direction: column;
+  position: absolute;
+  top: 150px; /* Adjust this value as needed */
+  right: 10px; /* Adjust to align with other buttons */
+}
+
+.annotation-buttons button {
+  margin-top: 5px; /* Space between buttons */
+  width: 40px;
+  height: 40px;
+}
+
+#image-display {
+  position: relative;
+}
+
+.settings-button {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  width: 40px;
+  height: 40px;
+  z-index: 1001; /* Ensure it's above the control panel */
+  border-radius: 5px; /* Adjust corners */
+  background-color: #28a745; /* Green background */
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  
+  /* Center the icon */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.settings-button .icon {
+  margin: 0;
+  font-size: 15px;
+}
+
+.close-side-menu-button {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  background: none;
+  border: none;
+  font-size: 18px;
+}
+
+button, input {
+  border-radius: 10px; /* Adjust corners */
+}
