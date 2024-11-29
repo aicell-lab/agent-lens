@@ -4,3 +4,12 @@ clip
 PIL
 faiss
 torch
+segment_anything
+kaibu_utils
+logging
+typing
+requests
+dotenv
+base64
+opencv-python
+sqlite3
