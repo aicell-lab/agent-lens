@@ -164,11 +164,17 @@ agent-lens/
 ├── index.html
 ├── node_modules/
 ├── package.json
-├── package-lock.json
 ├── README.md
 ├── src/
 │   ├── main.jsx
 │   └── style.css
+├── scripts/
+│   ├── embed-image-vectors.py
+│   ├── rebuild_cell_db_512.py
+│   ├── register-sam-service.py
+│   └── register-similarity-search-service.py
+├── test/
+│   └── test_sam_service.py
 ├── tiles_output/
 └── vite.config.mjs
 ```
