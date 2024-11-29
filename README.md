@@ -33,6 +33,8 @@
 
 ## Installation
 
+### Prerequisites
+
 1. **Clone the repository:**
 
    ```bash
@@ -45,7 +47,25 @@
    cd agent-lens
    ```
 
-3. **Install dependencies:**
+### Backend installation
+
+1. **Conda environment:**
+
+   ```bash
+   conda create -n agent-lens python=3.10.13
+   conda activate agent-lens
+   ```
+
+2. **Install dependencies:**
+
+   ```bash
+    pip install -r requirements.txt
+    pip install -e .
+  ```
+
+### Frontend installation
+
+1. **Install dependencies:**
 
    ```bash
    npm install
