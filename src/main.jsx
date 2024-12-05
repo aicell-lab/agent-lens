@@ -29,7 +29,20 @@ const originalWidth = 2048;
 const originalHeight = 2048;
 
 const MicroscopeControl = () => {
+
+  const hyphaCoreInitialized = useRef(false);
     
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [server, setServer] = useState(null);
+
+  const [loginUrl, setLoginUrl] = useState(null);
+
+  const [sessionId, setSessionId] = useState(null);
+  const [userId, setUserId] = useState(null);
+  const [userToken, setUserToken] = useState(null);
+
+  const [manualToken, setManualToken] = useState("");
+  
   const mapRef = useRef(null); // Reference to the map container
   const [map, setMap] = useState(null);
   const [imageLayer, setImageLayer] = useState(null);
@@ -75,127 +88,193 @@ const MicroscopeControl = () => {
   const [segmentService, setSegmentService] = useState(null);
   const [selectedModel, setSelectedModel] = useState('vit_b_lm'); // Default model
   const [similarityService, setSimilarityService] = useState(null);
-  const appendLog = (message) => {
-      setLog(prevLog => prevLog + message + '\n');
+  
+  useEffect(() => {
+    // Generate a unique session ID when the component mounts
+    const generateSessionID = () => `session_${Math.random().toString(36).substr(2, 9)}`;
+    setSessionId(generateSessionID());
+}, []);
+
+const handleLogin = () => {
+  const server_url = "https://hypha.aicell.io";
+  const redirect_uri = encodeURIComponent(window.location.origin);
+
+  const loginUrl = `${server_url}/login?redirect_uri=${redirect_uri}`;
+  window.open(loginUrl, "_blank", "width=500,height=700,top=100,left=100");
+  appendLog("Login window opened. Please copy the token after logging in and paste it below.");
+};
+
+const getTokenFromUrl = () => {
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get("token");
+  if (token) {
+    localStorage.setItem("userToken", token); // Store token for future use
+  }
+  return token || localStorage.getItem("userToken"); // Fallback to stored token
+};
+
+const handleManualTokenSubmit = () => {
+  if (!manualToken) {
+    appendLog("Please paste a valid token.");
+    return;
+  }
+  setUserToken(manualToken);
+  setIsAuthenticated(true);
+  initializeServices(manualToken);
+  appendLog("Token submitted successfully. Initializing services...");
+};
+
+useEffect(() => {
+  const token = getTokenFromUrl();
+  if (!isAuthenticated && token) {
+    setUserToken(token);
+    setIsAuthenticated(true);
+    initializeServices(token); // Initialize services once authenticated
+  }
+}, [isAuthenticated]);
+
+const appendLog = (message) => {
+    setLog((prevLog) => prevLog + message + '\n');
+};
+
+useEffect(() => {
+  const handleMessage = (event) => {
+    if (event.origin !== window.location.origin) return; // Ensure message is from the same origin
+    const { type, token } = event.data;
+
+    if (type === "LOGIN_SUCCESS" && token) {
+      localStorage.setItem("userToken", token); // Store token
+      setUserToken(token);
+      setIsAuthenticated(true);
+      initializeServices(token);
+    }
   };
 
-  useEffect(() => {
-    const initializeWebRPC = async () => {
-      try {
-        appendLog('Connecting to server...');
+  window.addEventListener("message", handleMessage);
+
+  return () => {
+    window.removeEventListener("message", handleMessage);
+  };
+}, []);
+
+const initializeServices = async (token) => {
+    try {
         const server_url = "https://hypha.aicell.io";
-        //const token = await hyphaWebsocketClient.login({"server_url": server_url});
-        const server = await hyphaWebsocketClient.connectToServer({ 
-            "name": "js-client", 
-            "server_url": server_url, 
-            "method_timeout": 10,
-            //"token": token,
+        appendLog('Initializing connection to server...');
+
+        const server = await hyphaWebsocketClient.connectToServer({
+            name: "js-client",
+            server_url,
+            method_timeout: 10,
+            token,
         });
-        appendLog('Server connected.');
+        setServer(server);
 
-        appendLog('Getting Segmentation service...');
+        appendLog('Acquiring Segmentation service...');
+        const segmentationService = await server.getService("agent-lens/Cuee4bQsHfQA7PaUjDcEjP:interactive-segmentation");
+        setSegmentService(segmentationService);
+        appendLog('Segmentation service acquired.');
+
+        appendLog('Acquiring Microscope Control service...');
+        const microscopeControlService = await server.getService("agent-lens/DTCvivYzXHjkY6zJuvyGGq:microscope-control-squid-test");
+        setMicroscopeControl(microscopeControlService);
+        appendLog('Microscope Control service acquired.');
+
+        appendLog('Acquiring Similarity Search service...');
+        const similarityService = await server.getService("agent-lens/dNDF2zDCi8HpbZUjsRMyci:image-embedding-similarity-search");
+        setSimilarityService(similarityService);
+        appendLog('Similarity Search service acquired.');
+
+        const user = await server.getUser();
+        if (user && user.id) {
+            setUserId(user.id);
+            setIsAuthenticated(true);
+            appendLog('User authenticated successfully.');
+        } else {
+            throw new Error('User authentication failed.');
+        }
+    } catch (error) {
+        appendLog(`Error initializing services: ${error.message}`);
+        console.error("Error initializing services:", error);
+        handleLogin();
+    }
+};
+
+const setUrlParams = (newUserId, newSessionId) => {
+  const newUrl = urlPlusParam({
+      userId: newUserId,
+      sessionId: newSessionId,
+  });
+  window.history.replaceState({}, '', newUrl);
+};
+
+useEffect(() => {
+    if (userId && sessionId) {
+        updateUrlParams(userId, sessionId);
+    }
+}, [userId, sessionId]);
+
+useEffect(() => {
+    const statusInterval = setInterval(async () => {
         try {
-          const segmentationService = await server.getService(
-              "ws-user-google-oauth2|103047988474094226050/W3sBK4RR2ZkrixwftvU9d5:interactive-segmentation"
-          );
-          appendLog('Segmentation service acquired.');
-          setSegmentService(segmentationService);
-        } catch (error) {
-          appendLog(`Error acquiring segmentation service: ${error.message}`);
+            if (microscopeControl) {
+                const status = await microscopeControl.get_status();
+                updateUIBasedOnStatus(status);
+            }
+        } catch (statusError) {
+            appendLog(`Error fetching status: ${statusError.message}`);
         }
-        
-        appendLog('Getting microscope control service...');
-        try {
-          const mc = await server.getService(
-              "ws-user-google-oauth2|103047988474094226050/EvAytsZjAYwdiXG5ywVWYw:microscope-control-squid-test"
-          );
-          appendLog('Microscope control service acquired.');
-          setMicroscopeControl(mc);
-        } catch (error) {
-          appendLog(`Error acquiring microscope control service: ${error.message}`);
-        }
+    }, 5000);
 
-        appendLog('Getting Similarity Search Service...');
-        try {
-          const similarityService = await server.getService(
-            "ws-user-google-oauth2|103047988474094226050/SRNhPD5EsrF8PVhrTHTQ9R:image-embedding-similarity-search"
-        );
-          appendLog('Similarity Search Service acquired.');
-          setSimilarityService(similarityService);
-        } catch (error) {
-          appendLog(`Error acquiring Similarity Search Service: ${error.message}`);
-        }
+    return () => clearInterval(statusInterval); // Cleanup on unmount
+}, [microscopeControl]);
 
-        // Poll the server for status updates every 5 seconds
-        const statusInterval = setInterval(async () => {
-          try {
-              if (microscopeControl) {  // Check if microscopeControl is available
-                  const status = await microscopeControl.get_status();
-                  updateUIBasedOnStatus(status);
-              }
-          } catch (statusError) {
-              appendLog(`Error fetching status: ${statusError.message}`);
-          }
-        }, 2000);
+useEffect(() => {
+  const initializeHyphaCore = async () => {
+    if (!hyphaCoreInitialized.current) {
+      hyphaCoreInitialized.current = true;
 
-        // Clear the interval when the component unmounts
-        return () => clearInterval(statusInterval);
-          
-        } catch (error) {
-            appendLog(`Error: ${error.message}`);
-        }
-    };
-    initializeWebRPC();
-  }, []);
+      // Dynamically import HyphaCore
+      const module = await import('https://cdn.jsdelivr.net/npm/hypha-core@0.20.38/dist/hypha-core.mjs');
+      const { HyphaCore } = module;
 
-  useEffect(() => {
-    let hyphaCoreInitialized = false;
-  
-    const initializeHyphaCore = async () => {
-      if (!hyphaCoreInitialized) {
-        hyphaCoreInitialized = true;
-  
-        // Dynamically import HyphaCore
-        const module = await import('https://cdn.jsdelivr.net/npm/hypha-core@0.20.38/dist/hypha-core.mjs');
-        const { HyphaCore } = module;
-  
-        window.hyphaCore = new HyphaCore();
-        window.chatbotWindow = null;
-  
-        window.hyphaCore.on('add_window', (config) => {
-          console.log('Creating window with config:', config); // For debugging
-          console.log('config.window_id:', config.window_id);
-        
-          const wb = new WinBox(config.name || config.src.slice(0, 128), {
-            id: 'chatbot-window', // Assign an ID to the window
-            background: '#448aff',
-            x: 'center',
-            y: 'center',
-            width: '40%',
-            height: '70%',
-            movable: true,
-            resizable: true,
-            minimizable: true, // Allow the window to be minimized
-            index: 9999, // Ensure it appears above other elements
-            onclose: function () {
-              window.chatbotWindow = null; // Reset the reference when closed
-            },
-            buttons: ['min', 'max', 'close'],
-          });
-        
-          // Set the iframe's id to config.window_id
-          wb.body.innerHTML = `<iframe id="${config.window_id}" src="${config.src}" style="width: 100%; height: 100%; border: none;"></iframe>`;
-        
-          return wb;
-        });        
-  
-        await window.hyphaCore.start();
-        window.hyphaApi = window.hyphaCore.api;
-      }
-    };
-  
-    initializeHyphaCore();
-  }, []); // Empty dependency array ensures this runs once when the component mounts
+      window.hyphaCore = new HyphaCore();
+      window.chatbotWindow = null;
+
+      window.hyphaCore.on('add_window', (config) => {
+        console.log('Creating window with config:', config); // For debugging
+        console.log('config.window_id:', config.window_id);
+      
+        const wb = new WinBox(config.name || config.src.slice(0, 128), {
+          id: 'chatbot-window', // Assign an ID to the window
+          background: '#448aff',
+          x: 'center',
+          y: 'center',
+          width: '40%',
+          height: '70%',
+          movable: true,
+          resizable: true,
+          minimizable: true, // Allow the window to be minimized
+          index: 9999, // Ensure it appears above other elements
+          onclose: function () {
+            window.chatbotWindow = null; // Reset the reference when closed
+          },
+          buttons: ['min', 'max', 'close'],
+        });
+      
+        // Set the iframe's id to config.window_id
+        wb.body.innerHTML = `<iframe id="${config.window_id}" src="${config.src}" style="width: 100%; height: 100%; border: none;"></iframe>`;
+      
+        return wb;
+      });        
+
+      await window.hyphaCore.start();
+      window.hyphaApi = window.hyphaCore.api;
+    }
+  };
+
+  initializeHyphaCore();
+}, [server]); // Empty dependency array ensures this runs once when the component mounts
   
 
   useEffect(() => {
@@ -909,204 +988,225 @@ const MicroscopeControl = () => {
     },
     [microscopeControl, appendLog]
   );
-  
-
   return (
     <div className="main-container">
-      {/* Image Display Window */}
-      <div id="image-display">
-        {snapshotImage ? (
-          <div
-          ref={mapRef}
-          style={{ width: '100%', height: '100%' }}
-        ></div>
-        ) : (
-          <p className="placeholder-text">Image Display</p>
-        )}  
-
-        {/* Toggle Control Section Button */}
-        <button
-          className="settings-button"
-          onClick={() => setIsControlSectionOpen(!isControlSectionOpen)}
-        >
-          <i className="fas fa-cog icon"></i>
+      {!isAuthenticated ? (
+        <div className="login-prompt">
+        <p>Please log in to access the application.</p>
+        <button onClick={handleLogin} className="btn btn-primary">
+          Log in to Hypha
         </button>
-
-        <button
-          id="search-similar-images"
-          className="search-button"
-          onClick={handleSimilaritySearch}
-          disabled={!snapshotImage}
-        >
-          <i className="fas fa-search icon"></i> Search Similar 
-        </button>
-
-        <select
-          id="segmentation-model"
-          className="segmentation_model-button"
-          value={selectedModel}
-          onChange={(e) => setSelectedModel(e.target.value)}
-        >
-          <option value="vit_b_lm">ViT-B LM</option>
-          <option value="vit_l_lm">ViT-L LM</option>
-          <option value="vit_b">ViT-B</option>
-          <option value="vit_b_em_organelles">ViT-B EM Organelles</option>
-        </select>
-
-        <button className="segment_cell-button" onClick={activatePenTool}>
-          <i className={`fas ${isPenActive ? "fa-pencil-alt icon" : "fa-magic icon"}`}></i>
-        </button>
-        <button
-          className="segment_all_cells-button"
-          onClick={handleSegmentAllCells}
-          disabled={!snapshotImage || !segmentService}
-        >
-        <i className="fas fa-layer-group icon"></i>
-        </button>
-
-        <button
-          className="add_point-button"
-          onClick={startDrawingPoints}
-        >
-        <i className="fas fa-map-marker-alt icon"></i>
-        </button>
-
-        <button
-          className="add_polygon-button"
-          onClick={startDrawingPolygons}
-        >
-        <i className="fas fa-draw-polygon icon"></i>
-        </button>
-
-        {/* Chatbot Button */}
-        <button
-        id="open-chatbot"
-        className="chatbot-button"
-        onClick={openChatbot}
-        >
-        <i className="fas fa-comments icon"></i>
-        </button>
-      </div>
-
-      {/* Control Panel Section */}
-{isControlSectionOpen && (
-  <div id="control-chat-section">
-    <h3 className="section-title">Manual Control</h3>
-    <div id="manual-control-content">
-
-      {/* Illumination Settings */}
-      <div className="illumination-settings">
-        {/* Illumination Intensity */}
-        <div className="illumination-intensity">
-          <div className="intensity-label-row">
-            <label>Illumination Intensity:</label>
-            <span>{illuminationIntensity}%</span>
-          </div>
-          <input
-            type="range"
-            className="control-input"
-            min="0"
-            max="100"
-            value={illuminationIntensity}
-            onChange={(e) => {
-              const newIntensity = parseInt(e.target.value, 10);
-              setIlluminationIntensity(newIntensity);
-              const key = channelKeyMap[illuminationChannel];
-              if (key) {
-                updateParametersOnServer({
-                  [key]: [newIntensity, cameraExposure],
-                });
-              }
-              setIllumination(); // Call setIllumination when intensity changes
-            }}
-          />
-        </div>
-
-        {/* Illumination Channel */}
-        <div className="illumination-channel">
-          <label>Illumination Channel:</label>
-          <select
-            className="control-input"
-            value={illuminationChannel}
-            onChange={(e) => {
-              setIlluminationChannel(e.target.value);
-              setIllumination(); // Call setIllumination when channel changes
-            }}
-          >
-            <option value="0">BF LED matrix full</option>
-            <option value="11">Fluorescence 405 nm Ex</option>
-            <option value="12">Fluorescence 488 nm Ex</option>
-            <option value="13">Fluorescence 638 nm Ex</option>
-            <option value="14">Fluorescence 561 nm Ex</option>
-            <option value="15">Fluorescence 730 nm Ex</option>
-          </select>
-        </div>
-      </div>
-
-      {/* Camera Exposure Settings */}
-      <div className="camera-exposure-settings">
-        <label>Camera Exposure:</label>
+        <p>After logging in, copy the access token and paste it below:</p>
         <input
-          type="number"
-          className="control-input camera-exposure-input"
-          value={cameraExposure}
-          onChange={(e) => {
-            const newExposure = parseInt(e.target.value, 10);
-            setCameraExposure(newExposure);
-            const key = channelKeyMap[illuminationChannel];
-            if (key) {
-              updateParametersOnServer({
-                [key]: [illuminationIntensity, newExposure],
-              });
-            }
-          }}
+          type="text"
+          className="form-control"
+          placeholder="Paste your token here"
+          value={manualToken}
+          onChange={(e) => setManualToken(e.target.value)}
         />
+        <button onClick={handleManualTokenSubmit} className="btn btn-success mt-2">
+          Submit Token
+        </button>
+        <div className="log-content">
+          <pre id="log-text">{log}</pre>
+        </div>
       </div>
-
-      {/* Control Buttons */}
-<div className="control-group">
-  {/* First Row of Buttons */}
-  <div className="horizontal-buttons">
-    <button
-      className="control-button"
-      onClick={toggleLight}
-      disabled={!microscopeControl}
-    >
-      <i className="fas fa-lightbulb icon"></i> {isLightOn ? 'Turn Light Off' : 'Turn Light On'}
-    </button>
-    <button
-      className="control-button"
-      onClick={autoFocus}
-      disabled={!microscopeControl}
-    >
-      <i className="fas fa-crosshairs icon"></i> Autofocus
-    </button>
-  </div>
-
-  {/* Second Row of Buttons */}
-  <div className="horizontal-buttons" style={{ marginTop: '15px' }}>
-    <button
-      className="control-button snap-button"
-      onClick={snapImage}
-      disabled={!microscopeControl}
-    >
-      <i className="fas fa-camera icon"></i> Snap Image
-    </button>
-    <button
-      className="control-button reset-button"
-      onClick={handleResetEmbedding}
-      disabled={!segmentService}
-    >
-      <i className="fas fa-sync icon"></i> Reset
-    </button>
-  </div>
-</div>
-
-    </div>
-  </div>
-)}
-
-      
+      ) : (
+        <>
+          <div id="image-display">
+            {/* Image Display Window */}
+            {snapshotImage ? (
+              <div
+                ref={mapRef}
+                style={{ width: '100%', height: '100%' }}
+              ></div>
+            ) : (
+              <p className="placeholder-text">Image Display</p>
+            )}
+  
+            {/* Toggle Control Section Button */}
+            <button
+              className="settings-button"
+              onClick={() => setIsControlSectionOpen(!isControlSectionOpen)}
+            >
+              <i className="fas fa-cog icon"></i>
+            </button>
+  
+            <button
+              id="search-similar-images"
+              className="search-button"
+              onClick={handleSimilaritySearch}
+              disabled={!snapshotImage}
+            >
+              <i className="fas fa-search icon"></i> Search Similar 
+            </button>
+  
+            <select
+              id="segmentation-model"
+              className="segmentation_model-button"
+              value={selectedModel}
+              onChange={(e) => setSelectedModel(e.target.value)}
+            >
+              <option value="vit_b_lm">ViT-B LM</option>
+              <option value="vit_l_lm">ViT-L LM</option>
+              <option value="vit_b">ViT-B</option>
+              <option value="vit_b_em_organelles">ViT-B EM Organelles</option>
+            </select>
+  
+            <button className="segment_cell-button" onClick={activatePenTool}>
+              <i className={`fas ${isPenActive ? "fa-pencil-alt icon" : "fa-magic icon"}`}></i>
+            </button>
+            <button
+              className="segment_all_cells-button"
+              onClick={handleSegmentAllCells}
+              disabled={!snapshotImage || !segmentService}
+            >
+              <i className="fas fa-layer-group icon"></i>
+            </button>
+  
+            <button
+              className="add_point-button"
+              onClick={startDrawingPoints}
+            >
+              <i className="fas fa-map-marker-alt icon"></i>
+            </button>
+  
+            <button
+              className="add_polygon-button"
+              onClick={startDrawingPolygons}
+            >
+              <i className="fas fa-draw-polygon icon"></i>
+            </button>
+  
+            {/* Chatbot Button */}
+            <button
+              id="open-chatbot"
+              className="chatbot-button"
+              onClick={openChatbot}
+            >
+              <i className="fas fa-comments icon"></i>
+            </button>
+          </div>
+  
+          {/* Control Panel Section */}
+          {isControlSectionOpen && (
+            <div id="control-chat-section">
+              <h3 className="section-title">Manual Control</h3>
+              <div id="manual-control-content">
+                {/* Illumination Settings */}
+                <div className="illumination-settings">
+                  {/* Illumination Intensity */}
+                  <div className="illumination-intensity">
+                    <div className="intensity-label-row">
+                      <label>Illumination Intensity:</label>
+                      <span>{illuminationIntensity}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      className="control-input"
+                      min="0"
+                      max="100"
+                      value={illuminationIntensity}
+                      onChange={(e) => {
+                        const newIntensity = parseInt(e.target.value, 10);
+                        setIlluminationIntensity(newIntensity);
+                        const key = channelKeyMap[illuminationChannel];
+                        if (key) {
+                          updateParametersOnServer({
+                            [key]: [newIntensity, cameraExposure],
+                          });
+                        }
+                        setIllumination(); // Call setIllumination when intensity changes
+                      }}
+                    />
+                  </div>
+  
+                  {/* Illumination Channel */}
+                  <div className="illumination-channel">
+                    <label>Illumination Channel:</label>
+                    <select
+                      className="control-input"
+                      value={illuminationChannel}
+                      onChange={(e) => {
+                        setIlluminationChannel(e.target.value);
+                        setIllumination(); // Call setIllumination when channel changes
+                      }}
+                    >
+                      <option value="0">BF LED matrix full</option>
+                      <option value="11">Fluorescence 405 nm Ex</option>
+                      <option value="12">Fluorescence 488 nm Ex</option>
+                      <option value="13">Fluorescence 638 nm Ex</option>
+                      <option value="14">Fluorescence 561 nm Ex</option>
+                      <option value="15">Fluorescence 730 nm Ex</option>
+                    </select>
+                  </div>
+                </div>
+  
+                {/* Camera Exposure Settings */}
+                <div className="camera-exposure-settings">
+                  <label>Camera Exposure:</label>
+                  <input
+                    type="number"
+                    className="control-input camera-exposure-input"
+                    value={cameraExposure}
+                    onChange={(e) => {
+                      const newExposure = parseInt(e.target.value, 10);
+                      setCameraExposure(newExposure);
+                      const key = channelKeyMap[illuminationChannel];
+                      if (key) {
+                        updateParametersOnServer({
+                          [key]: [illuminationIntensity, newExposure],
+                        });
+                      }
+                    }}
+                  />
+                </div>
+  
+                {/* Control Buttons */}
+                <div className="control-group">
+                  {/* First Row of Buttons */}
+                  <div className="horizontal-buttons">
+                    <button
+                      className="control-button"
+                      onClick={toggleLight}
+                      disabled={!microscopeControl}
+                    >
+                      <i className="fas fa-lightbulb icon"></i>{' '}
+                      {isLightOn ? 'Turn Light Off' : 'Turn Light On'}
+                    </button>
+                    <button
+                      className="control-button"
+                      onClick={autoFocus}
+                      disabled={!microscopeControl}
+                    >
+                      <i className="fas fa-crosshairs icon"></i> Autofocus
+                    </button>
+                  </div>
+  
+                  {/* Second Row of Buttons */}
+                  <div className="horizontal-buttons" style={{ marginTop: '15px' }}>
+                    <button
+                      className="control-button snap-button"
+                      onClick={snapImage}
+                      disabled={!microscopeControl}
+                    >
+                      <i className="fas fa-camera icon"></i> Snap Image
+                    </button>
+                    <button
+                      className="control-button reset-button"
+                      onClick={handleResetEmbedding}
+                      disabled={!segmentService}
+                    >
+                      <i className="fas fa-sync icon"></i> Reset
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+  
       {/* Log Section */}
       <div id="log-section">
         <h3>Log</h3>
