@@ -89,7 +89,7 @@ const appendLog = (message) => {
 };
 
 const initializeServices = async (token) => {
-    const server_url = "https://hypha.aicell.io";
+    const server_url = "https://chat.bioimage.io";
     appendLog('Initializing connection to server...');
 
     const server = await hyphaWebsocketClient.connectToServer({
@@ -104,7 +104,7 @@ const initializeServices = async (token) => {
 
     const segmentationService = await tryGetService(server, "Acquiring Segmentation", "agent-lens/interactive-segmentation", "interactive-segmentation");
     setSegmentService(segmentationService);
-    const microscopeControlService = await tryGetService(server, "Microscope Control", "agent-lens/microscope-control-squid-test");
+    const microscopeControlService = await tryGetService(server, "Microscope Control", "agent-lens/microscope-control", "microscope-control");
     setMicroscopeControl(microscopeControlService);
     const similarityService = await tryGetService(server, "Similarity Search", "agent-lens/image-embedding-similarity-search", "image-embedding-similarity-search");
     setSimilarityService(similarityService);
@@ -438,32 +438,50 @@ useEffect(() => {
     }
   };
 
-  useEffect(() => {
-    if (map && userId) {
-      // Remove existing image layer if any
-      if (imageLayer) {
-        map.removeLayer(imageLayer);
-      }
+ 
+  
+  // Add this mapping near the top of the component, after the constants
+const channelToTileMapping = {
+  "0": "Brightfield",
+  "11": "Fluorescence_405_nm",
+  "12": "Fluorescence_488_nm",
+  "13": "Fluorescence_638_nm",
+  "14": "Fluorescence_561_nm",
+  "15": "Fluorescence_730_nm"
+};
 
-      const tileUrl = isLocal()?
-        `https://hypha.aicell.io/${userId}/apps/microscope-control/tiles`
-        : "https://hypha.aicell.io/agent-lens/apps/microscope-control/tiles";
-  
-      const tileLayer = new TileLayer({
-        source: new XYZ({
-          url: `${tileUrl}/{z}/{x}/{y}.jpg`, // Update with your tile server URL
-          crossOrigin: 'anonymous',
-          tileSize: 256,
-          maxZoom: 10, // Adjust based on your generated tiles
-        }),
-      });
-  
-      map.addLayer(tileLayer);
-      setImageLayer(tileLayer);
+// Update the useEffect that handles the tile layer
+useEffect(() => {
+  if (map && userId) {
+    // Remove existing image layer if any
+    if (imageLayer) {
+      map.removeLayer(imageLayer);
     }
-  }, [map, userId]);
-  
-  
+
+    const currentChannel = channelToTileMapping[illuminationChannel] || "Brightfield";
+    
+    const tileLayer = new TileLayer({
+      source: new XYZ({
+        url: `https://hypha.aicell.io/squid-control/services/tile-streaming-whole-view/get_tile?channel_name=${currentChannel}&z={z}&x={x}&y={y}`,
+        crossOrigin: 'anonymous',
+        tileSize: 256,
+        maxZoom: 10,
+        // Add error handling for missing tiles
+        imageLoadFunction: function(image, src) {
+          image.getImage().src = src;
+          image.getImage().onerror = function() {
+            // Load a blank tile or handle the error
+            console.log(`Failed to load tile: ${src}`);
+          };
+        }
+      }),
+    });
+
+    map.addLayer(tileLayer);
+    setImageLayer(tileLayer);
+  }
+}, [map, userId, illuminationChannel]); // Added illuminationChannel as dependency
+
   useEffect(() => {
     if (map) {
       const handleMapClick = (event) => {
