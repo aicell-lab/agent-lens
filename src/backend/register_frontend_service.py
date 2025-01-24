@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from hypha_rpc import connect_to_server, login
+import uuid
 
 dotenv.load_dotenv()
 
@@ -24,16 +25,34 @@ async def start_hypha_server(server, service_id):
     async def root():
         return FileResponse(os.path.join(dist_dir, "index.html"))
 
-    await server.register_service(
-        {
-            "id": service_id,
-            "name": "Microscope Control",
-            "type": "asgi",
-            "serve": serve_fastapi,
-            "config": {"visibility": "public"},
-        }
-    )
-    
+    # Create a service instance with methods
+    class MicroscopeService:
+        async def get_chatbot_url(self):
+            return "https://ai.imjoy.io/public/apps/bioimageio-chatbot-client/index"
+
+        async def serve(self, args, context=None):
+            await serve_fastapi(args, context)
+
+    service = MicroscopeService()
+
+    # Generate a unique service ID
+    unique_service_id = f"microscope-control-{str(uuid.uuid4())[:8]}"
+
+    # Register the service with both the serve method and additional methods
+    await server.register_service({
+        "id": unique_service_id,  # Use unique ID
+        "name": "Microscope Control",
+        "type": "asgi",
+        "config": {
+            "visibility": "public",
+            "mode": "single"  # Ensure only one instance
+        },
+        "instance": service
+    })
+
+    print(f"Registered service with ID: {unique_service_id}")
+    return unique_service_id
+
 async def setup(workspace=None, server_url="https://hypha.aicell.io"):
     token = os.environ.get("WORKSPACE_TOKEN")
     if token is None or workspace is None:
