@@ -163,7 +163,7 @@ async def setup_service(server):
 
     await make_service(
         service={
-            "id": "image-embedding-similarity-search",
+            "id": "similarity-search",
             "config":{
                 "visibility": "public",
                 "run_in_executor": True,
@@ -172,7 +172,7 @@ async def setup_service(server):
             "type": "echo",
             "find_similar_cells": find_similar_cells,
             "save_cell_image": save_cell_image,
-            "setup": create_collection,
+            "setup": lambda user_id: create_collection(artifact_manager, user_id),
         },
         server=server
     )

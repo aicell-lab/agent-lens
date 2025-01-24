@@ -26,7 +26,7 @@ export const initializeServices = async (server, setMicroscopeControlService, se
   setSegmentService(segmentationService);
   const microscopeControlService = await tryGetService(server, "Microscope Control", "squid-control/microscope-control-squid-simulation", null, appendLog);
   setMicroscopeControlService(microscopeControlService);
-  const similarityService = await tryGetService(server, "Similarity Search", "agent-lens/image-embedding-similarity-search", "image-embedding-similarity-search", appendLog);
+  const similarityService = await tryGetService(server, "Similarity Search", "agent-lens/similarity-search", "similarity-search", appendLog);
   setSimilarityService(similarityService);
 };
 
