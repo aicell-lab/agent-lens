@@ -9,7 +9,7 @@ npm run build --prefix frontend
 
 trap cleanup SIGINT
 export PYTHONPATH=$(pwd)
-python agent_lens/__main__.py &
+python agent_lens/__main__.py --port=9527 &
 PYTHON_PID=$!
 
 echo "App is now running. Access it at http://localhost:9527/public/apps/microscope-control"
