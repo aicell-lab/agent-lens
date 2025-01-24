@@ -74,17 +74,13 @@ class AgentLensArtifactManager:
             overwrite (bool, optional): Whether to overwrite the existing collection.
         """
         art_id = self._artifact_id(user_id, name)
-        try:
-            await self._svc.create(
-                alias=name,
-                type="vector-collection",
-                manifest=manifest,
-                config=config,
-            )
-        except Exception:
-            if overwrite:
-                await self._svc.edit(art_id, manifest)
-                await self._svc.commit(art_id)
+        await self._svc.create(
+            alias=art_id,
+            type="vector-collection",
+            manifest=manifest,
+            config=config,
+            overwrite=overwrite
+        )
 
     async def add_vectors(self, user_id, coll_name, *vectors):
         """

@@ -20,34 +20,36 @@ async def create_collection(artifact_manager, user_id):
         artifact_manager (ArtifactManager): The artifact manager instance.
         user_id (str): The user ID.
     """
-    await artifact_manager.create_vector_collection(
-        user_id=user_id,
-        name="cell-images",
-        manifest={
-            "name": "Cell images",
-            "description": "Collection of cell images",
-        },
-        config={
-            "vector_fields": [
-                {
-                    "type": "VECTOR",
-                    "name": "vector",
-                    "algorithm": "FLAT",
-                    "attributes": {
-                        "TYPE": "FLOAT32",
-                        "DIM": 512,
-                        "DISTANCE_METRIC": "COSINE",
-                    },
-                },
-                {"type": "TAG", "name": "annotation"},
-                {"type": "STRING", "name": "thumbnail"},
-            ],
-            "embedding_models": {
-                "vector": "fastembed:BAAI/bge-small-en-v1.5",
+    try:
+        await artifact_manager.create_vector_collection(
+            user_id=user_id,
+            name="cell-images",
+            manifest={
+                "name": "Cell images",
+                "description": "Collection of cell images",
             },
-        },
-        overwrite=True
-    )
+            config={
+                "vector_fields": [
+                    {
+                        "type": "VECTOR",
+                        "name": "vector",
+                        "algorithm": "FLAT",
+                        "attributes": {
+                            "TYPE": "FLOAT32",
+                            "DIM": 512,
+                            "DISTANCE_METRIC": "COSINE",
+                        },
+                    },
+                    {"type": "TAG", "name": "annotation"},
+                    {"type": "STRING", "name": "thumbnail"},
+                ],
+                "embedding_models": {
+                    "vector": "fastembed:BAAI/bge-small-en-v1.5",
+                },
+            }
+        )
+    except FileExistsError:
+        pass
 
 
 def get_image_tensor(image_path, preprocess, device):
@@ -136,10 +138,12 @@ async def init_methods(artifact_manager):
 
     async def find_similar_cells(search_cell_image, user_id, top_k=5):
         query_vector = image_to_vector(search_cell_image, model, preprocess, device)
+        await create_collection(artifact_manager, user_id)
         return await artifact_manager.search_vectors(user_id, "cell-images", query_vector, top_k)
 
     async def save_cell_image(cell_image, user_id, annotation=""):
         image_vector = image_to_vector(cell_image, model, preprocess, device)
+        await create_collection(artifact_manager, user_id)
         await artifact_manager.add_vectors(user_id, "cell-images", {
             "vector": image_vector,
             "annotation": annotation,
@@ -172,7 +176,6 @@ async def setup_service(server):
             "type": "echo",
             "find_similar_cells": find_similar_cells,
             "save_cell_image": save_cell_image,
-            "setup": lambda user_id: create_collection(artifact_manager, user_id),
         },
         server=server
     )
