@@ -64,9 +64,9 @@ async def register_service(service, workspace=None, server_url="https://hypha.ai
         token = get_token(workspace)
         server = await get_server(token, workspace, server_url)
     else:
-        await server.register_service(service)
         server_url = "0.0.0.0:9527"
 
+    await server.register_service(service)
     print(f"Service registered at: {server_url}/{server.config.workspace}/services/{service['id']}")
 
 

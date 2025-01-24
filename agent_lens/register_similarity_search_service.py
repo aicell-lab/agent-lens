@@ -12,7 +12,7 @@ from PIL import Image
 from agent_lens.service_utils import make_service
 from agent_lens.artifact_manager import AgentLensArtifactManager
 
-async def create_collection(artifact_manager, user_id):
+async def try_create_collection(artifact_manager, user_id):
     """
     Creates a vector collection in the artifact manager for storing image embeddings.
 
@@ -52,19 +52,19 @@ async def create_collection(artifact_manager, user_id):
         pass
 
 
-def get_image_tensor(image_path, preprocess, device):
+def get_image_tensor(image_data, preprocess, device):
     """
-    Convert an image to a tensor.
+    Convert base64 encoded image data to a tensor.
 
     Args:
-        image_path (str): The path to the image.
+        image_data (str): The base64 encoded image data.
         preprocess (function): The preprocessing function.
         device (str): The device to use.
 
     Returns:
         Tensor: The image tensor.
     """
-    image = Image.open(image_path).convert("RGB")
+    image = Image.open(io.BytesIO(base64.b64decode(image_data))).convert("RGB")
     return preprocess(image).unsqueeze(0).to(device)
 
 
@@ -85,12 +85,12 @@ def process_image_tensor(image_tensor, model):
     return image_features
 
 
-def image_to_vector(input_image, model, preprocess, device, length=512):
+def image_to_vector(image_data, model, preprocess, device, length=512):
     """
     Convert an image to a vector.
 
     Args:
-        input_image (str): The path to the input image.
+        image_data (str): Base64 encoded image data.
         model (Model): The model to use.
         preprocess (function): The preprocessing function.
         device (str): The device to use.
@@ -99,7 +99,7 @@ def image_to_vector(input_image, model, preprocess, device, length=512):
     Returns:
         ndarray: The image vector.
     """
-    image_tensor = get_image_tensor(input_image, preprocess, device)
+    image_tensor = get_image_tensor(image_data, preprocess, device)
     query_vector = process_image_tensor(image_tensor, model).reshape(1, length).astype(np.float32)
 
     return query_vector
@@ -138,12 +138,12 @@ async def init_methods(artifact_manager):
 
     async def find_similar_cells(search_cell_image, user_id, top_k=5):
         query_vector = image_to_vector(search_cell_image, model, preprocess, device)
-        await create_collection(artifact_manager, user_id)
+        await try_create_collection(artifact_manager, user_id)
         return await artifact_manager.search_vectors(user_id, "cell-images", query_vector, top_k)
 
     async def save_cell_image(cell_image, user_id, annotation=""):
         image_vector = image_to_vector(cell_image, model, preprocess, device)
-        await create_collection(artifact_manager, user_id)
+        await try_create_collection(artifact_manager, user_id)
         await artifact_manager.add_vectors(user_id, "cell-images", {
             "vector": image_vector,
             "annotation": annotation,
