@@ -1,7 +1,7 @@
 import React from 'react';
 import PropTypes from 'prop-types';
 import MapButton from './MapButton';
-import { getSnapshotArray, overlaySegmentationMask } from './Segmentation';
+import { getSnapshotArray, overlaySegmentationMask } from './Segment';
 
 const SegmentButton = ({ appendLog, snapshotImage, segmentService, map, extent, selectedModel, setSelectedModel }) => {
 

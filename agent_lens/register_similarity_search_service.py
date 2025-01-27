@@ -64,7 +64,7 @@ def get_image_tensor(image_data, preprocess, device):
     Returns:
         Tensor: The image tensor.
     """
-    image = Image.open(io.BytesIO(base64.b64decode(image_data))).convert("RGB")
+    image = decode_base64_image(image_data).convert("RGB")
     return preprocess(image).unsqueeze(0).to(device)
 
 
@@ -104,18 +104,31 @@ def image_to_vector(image_data, model, preprocess, device, length=512):
 
     return query_vector
 
+def decode_base64_image(image_data):
+    """
+    Decode a base64 encoded image.
 
-def make_thumbnail(image, size=(256, 256)):
+    Args:
+        image_data (str): The base64 encoded image data.
+
+    Returns:
+        Image: The decoded image.
+    """
+    return Image.open(io.BytesIO(base64.b64decode(image_data)))
+
+
+def make_thumbnail(image_data, size=(256, 256)):
     """
     Create a thumbnail from an image.
 
     Args:
-        image (Image): The input image.
+        image_data (str): Base64 encoded image data.
         size (tuple): The size of the thumbnail.
 
     Returns:
         str: The base64-encoded thumbnail.
     """
+    image = decode_base64_image(image_data).convert("RGB")
     image.thumbnail(size)
     buffered = io.BytesIO()
     image.save(buffered, format="PNG")
@@ -159,7 +172,6 @@ async def setup_service(server):
 
     Args:
         server (Server): The server instance.
-        artifact_manager (ArtifactManager): The artifact manager instance.
     """
     artifact_manager = AgentLensArtifactManager()
     await artifact_manager.connect_server(server)

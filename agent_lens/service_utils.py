@@ -117,7 +117,6 @@ async def make_service(service, default_workspace=None,
             service,
             service_args.workspace_name,
             service_args.server_url,
-            server
         )
     else:
         await register_service(service, server=server)
