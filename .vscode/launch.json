@@ -9,8 +9,22 @@
             "justMyCode": false,
             "preLaunchTask": "Prepare app",
             "args": [
+                "start-server",
                 "--port=9527",
             ],
         },
+        {
+            "name": "Python: connect-server",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "agent_lens",
+            "justMyCode": false,
+            "preLaunchTask": "Build Frontend",
+            "args": [
+                "connect-server",
+                "--workspace_name=agent-lens",
+                "--server_url=https://hypha.aicell.io"
+            ],
+        }
     ]
 }

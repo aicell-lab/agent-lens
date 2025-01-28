@@ -5,12 +5,20 @@ that processes and stores image embeddings, and allows for searching similar ima
 
 import io
 import base64
+from functools import partial
 import numpy as np
 import torch
 import clip
 from PIL import Image
-from agent_lens.service_utils import make_service
 from agent_lens.artifact_manager import AgentLensArtifactManager
+
+class TorchConfig:
+    def __init__(self):
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        model, preprocess = clip.load("ViT-B/32", device=self.device)
+        self.model = model
+        self.preprocess = preprocess
+
 
 async def try_create_collection(artifact_manager, user_id):
     """
@@ -85,7 +93,7 @@ def process_image_tensor(image_tensor, model):
     return image_features
 
 
-def image_to_vector(image_data, model, preprocess, device, length=512):
+def image_to_vector(image_data, torch_config, length=512):
     """
     Convert an image to a vector.
 
@@ -99,8 +107,9 @@ def image_to_vector(image_data, model, preprocess, device, length=512):
     Returns:
         ndarray: The image vector.
     """
-    image_tensor = get_image_tensor(image_data, preprocess, device)
-    query_vector = process_image_tensor(image_tensor, model).reshape(1, length).astype(np.float32)
+    
+    image_tensor = get_image_tensor(image_data, torch_config.preprocess, torch_config.device)
+    query_vector = process_image_tensor(image_tensor, torch_config.model).reshape(1, length).astype(np.float32)
 
     return query_vector
 
@@ -136,34 +145,20 @@ def make_thumbnail(image_data, size=(256, 256)):
     return img_str
 
 
-async def init_methods(artifact_manager):
-    """
-    Initialize the methods for the service.
+async def find_similar_cells(artifact_manager, torch_config, search_cell_image, user_id, top_k=5):
+    query_vector = image_to_vector(search_cell_image, torch_config)
+    await try_create_collection(artifact_manager, user_id)
+    return await artifact_manager.search_vectors(user_id, "cell-images", query_vector, top_k)
 
-    Args:
-        artifact_manager (ArtifactManager): The artifact manager instance.
 
-    Returns:
-        tuple: The initialized methods.
-    """
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model, preprocess = clip.load("ViT-B/32", device=device)
-
-    async def find_similar_cells(search_cell_image, user_id, top_k=5):
-        query_vector = image_to_vector(search_cell_image, model, preprocess, device)
-        await try_create_collection(artifact_manager, user_id)
-        return await artifact_manager.search_vectors(user_id, "cell-images", query_vector, top_k)
-
-    async def save_cell_image(cell_image, user_id, annotation=""):
-        image_vector = image_to_vector(cell_image, model, preprocess, device)
-        await try_create_collection(artifact_manager, user_id)
-        await artifact_manager.add_vectors(user_id, "cell-images", {
-            "vector": image_vector,
-            "annotation": annotation,
-            "thumbnail": make_thumbnail(cell_image),
-        })
-
-    return find_similar_cells, save_cell_image
+async def save_cell_image(artifact_manager, torch_config, cell_image, user_id, annotation=""):
+    image_vector = image_to_vector(cell_image, torch_config)
+    await try_create_collection(artifact_manager, user_id)
+    await artifact_manager.add_vectors(user_id, "cell-images", {
+        "vector": image_vector,
+        "annotation": annotation,
+        "thumbnail": make_thumbnail(cell_image),
+    })
 
 
 async def setup_service(server):
@@ -175,19 +170,19 @@ async def setup_service(server):
     """
     artifact_manager = AgentLensArtifactManager()
     await artifact_manager.connect_server(server)
-    find_similar_cells, save_cell_image = await init_methods(artifact_manager)
+    torch_config = TorchConfig()
 
-    await make_service(
-        service={
-            "id": "similarity-search",
-            "config":{
-                "visibility": "public",
-                "run_in_executor": True,
-                "require_context": False,   
-            },
-            "type": "echo",
-            "find_similar_cells": find_similar_cells,
-            "save_cell_image": save_cell_image,
+    await server.register_service({
+        "id": "similarity-search",
+        "config":{
+            "visibility": "public",
+            "run_in_executor": True,
+            "require_context": False,   
         },
-        server=server
-    )
+        "type": "echo",
+        "find_similar_cells": partial(find_similar_cells, artifact_manager, torch_config),
+        "save_cell_image": partial(save_cell_image, artifact_manager, torch_config),
+    })
+    
+    print("Similarity search service registered successfully.")
+

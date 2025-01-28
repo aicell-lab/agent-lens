@@ -11,7 +11,6 @@ import torch
 from dotenv import find_dotenv, load_dotenv
 from kaibu_utils import mask_to_features
 from segment_anything import SamPredictor, sam_model_registry, SamAutomaticMaskGenerator
-from agent_lens.service_utils import make_service
 
 dotenv.load_dotenv()
 
@@ -311,32 +310,24 @@ def segment_all_cells(model_name: str, image_bytes: bytes) -> dict:
     logger.info(f"Segmented {len(bounding_boxes)} cells.")
     return {"bounding_boxes": bounding_boxes, "masks": mask_data}
 
-async def setup_service(server=None) -> None:
+async def setup_service(server) -> None:
     """
     Register the SAM annotation service on the BioImageIO Colab workspace.
     """
-    await make_service(
-        service={
-            "name": "Interactive Segmentation",
-            "id": "interactive-segmentation",
-            "config": {
-                "visibility": "public",
-                "require_context": False,
-                "run_in_executor": True,
-            },
-            "type": "echo",
-            "compute_embedding_with_initial_segment": compute_embedding_with_initial_segment,
-            "segment": segment,
-            "segment_with_existing_embedding": segment_with_existing_embedding,
-            "reset_embedding": reset_embedding,
-            "segment_all_cells": segment_all_cells,
+    await server.register_service({
+        "name": "Interactive Segmentation",
+        "id": "interactive-segmentation",
+        "config": {
+            "visibility": "public",
+            "require_context": False,
+            "run_in_executor": True,
         },
-        server=server,
-    )
-
-if __name__ == "__main__":
-    import asyncio
-
-    loop = asyncio.get_event_loop()
-    loop.create_task(setup_service())
-    loop.run_forever()
+        "type": "echo",
+        "compute_embedding_with_initial_segment": compute_embedding_with_initial_segment,
+        "segment": segment,
+        "segment_with_existing_embedding": segment_with_existing_embedding,
+        "reset_embedding": reset_embedding,
+        "segment_all_cells": segment_all_cells,
+    })
+    
+    print("SAM service registered successfully.")

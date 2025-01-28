@@ -7,20 +7,35 @@ import sys
 import subprocess
 import argparse
 import os
+import asyncio
 from dotenv import load_dotenv
+from hypha_rpc import connect_to_server
+from agent_lens import (
+    register_frontend_service,
+    # register_sam_service,
+    # register_similarity_search_service,
+)
 
-dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'minio.env')
-load_dotenv(dotenv_path)
 
-def main():
+async def start_services(server):
+    """
+    Set up the services and connect to the server.
+
+    Args:
+        server (Server): The server instance.
+    """
+    await register_frontend_service.setup_service(server)
+    # await register_sam_service.setup_service(server)
+    # await register_similarity_search_service.setup_service(server)
+
+
+def start_server(args):
     """
     Parse command-line arguments and start the Hypha server.
     """
-    parser = argparse.ArgumentParser(description="Start the Hypha server")
-    parser.add_argument("--host", type=str, default="0.0.0.0")
-    parser.add_argument("--port", type=int, default=9009)
-    parser.add_argument("--public-base-url", type=str, default="")
-    args = parser.parse_args()
+
+    dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'minio.env')
+    load_dotenv(dotenv_path)
 
     command = [
         sys.executable,
@@ -35,11 +50,73 @@ def main():
         f"--endpoint-url={os.getenv('MINIO_SERVER_URL')}",
         f"--endpoint-url-public={os.getenv('MINIO_SERVER_URL')}",
         "--s3-admin-type=minio",
-        "--startup-functions=agent_lens.start_services:setup"
+        "--startup-functions=agent_lens.__main__:start_services"
     ]
     subprocess.run(command, check=True)
+
+    print(f"Hypha server started. Access at {args.host}:{args.port}/public/apps/microscope-control")
+
+
+def get_token(workspace=None):
+    """
+    Retrieve the token from environment variables.
+
+    Args:
+        workspace (str, optional): The workspace name.
+
+    Returns:
+        str: The token.
+    """
+    load_dotenv()
+
+    token = os.environ.get("WORKSPACE_TOKEN")
+    if token is None or workspace is None:
+        token = os.environ.get("PERSONAL_TOKEN")
+
+    return token
+
+
+async def connect_server(args):
+    token = get_token(args.workspace_name)
+
+    server = await connect_to_server({
+        "server_url": args.server_url,
+        "token": token,
+        "method_timeout": 500,
+        "workspace": args.workspace_name,
+    })
     
-    print("Hypha server started. Access app at http://localhost:9527/public/apps/microscope-control")
+    await start_services(server)
+    
+    
+
+def start_connect_server(args):
+    loop = asyncio.get_event_loop()
+    loop.create_task(connect_server(args))
+    loop.run_forever()
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Start the Hypha server")
+    subparsers = parser.add_subparsers()
+
+    parser_start_server = subparsers.add_parser("start-server")
+    parser_start_server.add_argument("--host", type=str, default="localhost")
+    parser_start_server.add_argument("--port", type=int, default=9527)
+    parser_start_server.add_argument("--public-base-url", type=str, default="")
+    parser_start_server.set_defaults(func=start_server)
+
+    parser_connect_server = subparsers.add_parser("connect-server")
+    parser_connect_server.add_argument("--server_url", type=str)
+    parser_connect_server.add_argument("--workspace_name", type=str, default=None, required=False)
+    parser_connect_server.set_defaults(func=start_connect_server)
+
+    args = parser.parse_args()
+    if hasattr(args, 'func'):
+        args.func(args)
+    else:
+        parser.print_help()
+
 
 if __name__ == "__main__":
     main()

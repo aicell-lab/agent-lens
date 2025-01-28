@@ -5,8 +5,6 @@ export default defineConfig({
   base: '',
   plugins: [react()],
   build: {
-    rollupOptions: {
-      external: ['prop-types']
-    }
+    sourcemap: true,
   }
 });
