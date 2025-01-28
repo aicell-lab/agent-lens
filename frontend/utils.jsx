@@ -54,24 +54,21 @@ const login_callback = (context) => {
   window.open(context.login_url);
 }
 
+const isTokenExpired = (token) => {
+return Date.now() >= (JSON.parse(atob(token.split('.')[1]))).exp * 1000
+}
+
 export const login = async () => {
   const serverUrl = getServerUrl();
   let token = localStorage.getItem("token");
-  if (token) {
-    const tokenExpiry = localStorage.getItem("tokenExpiry");
-    if (tokenExpiry && new Date(tokenExpiry) > new Date()) {
-      console.log("Using saved token:", token);
-      return token;
-    }
+  if (token && !isTokenExpired(token)) {
+    console.log("Using saved token:", token);
+    return token;
   }
   token = await hyphaWebsocketClient.login({
     server_url: serverUrl,
     login_callback: login_callback,
   });
   localStorage.setItem("token", token);
-  localStorage.setItem(
-    "tokenExpiry",
-    new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString()
-  );
   return token;
-};
+}

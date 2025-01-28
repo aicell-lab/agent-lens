@@ -1,4 +1,4 @@
-import React, { StrictMode, useState } from 'react';
+import React, { StrictMode, useEffect, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import '@fortawesome/fontawesome-free/css/all.min.css';
@@ -14,6 +14,16 @@ const MicroscopeControl = () => {
   const [similarityService, setSimilarityService] = useState(null);
   const [log, setLog] = useState('');
   const [segmentService, setSegmentService] = useState(null);
+
+  useEffect(() => {
+    const checkToken = async () => {
+      if (localStorage.getItem("token")) {
+        await handleLogin();
+      }
+    }
+
+    checkToken();
+  }, []);
 
   const handleLogin = async () => {
     const token = await login();
