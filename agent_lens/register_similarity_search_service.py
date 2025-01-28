@@ -174,12 +174,7 @@ async def setup_service(server):
 
     await server.register_service({
         "id": "similarity-search",
-        "config":{
-            "visibility": "public",
-            "run_in_executor": True,
-            "require_context": False,   
-        },
-        "type": "echo",
+        "config": {"visibility": "public"},
         "find_similar_cells": partial(find_similar_cells, artifact_manager, torch_config),
         "save_cell_image": partial(save_cell_image, artifact_manager, torch_config),
     })

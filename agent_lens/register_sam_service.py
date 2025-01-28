@@ -322,7 +322,6 @@ async def setup_service(server) -> None:
             "require_context": False,
             "run_in_executor": True,
         },
-        "type": "echo",
         "compute_embedding_with_initial_segment": compute_embedding_with_initial_segment,
         "segment": segment,
         "segment_with_existing_embedding": segment_with_existing_embedding,

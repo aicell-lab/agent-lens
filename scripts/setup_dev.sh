@@ -18,7 +18,7 @@ echo
 
 # Create .env file with environment variables
 echo "Creating .env file..."
-cat <<EOT > .env
+cat <<EOT > agent_lens/.env
 WORKSPACE_TOKEN=$WORKSPACE_TOKEN
 PERSONAL_TOKEN=$PERSONAL_TOKEN
 JWT_SECRET=1337
