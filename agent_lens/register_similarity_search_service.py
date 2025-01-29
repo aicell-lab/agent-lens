@@ -49,7 +49,7 @@ async def try_create_collection(artifact_manager, user_id):
                         },
                     },
                     {"type": "TAG", "name": "annotation"},
-                    {"type": "STRING", "name": "thumbnail"},
+                    {"type": "TEXT", "name": "thumbnail"},
                 ],
                 "embedding_models": {
                     "vector": "fastembed:BAAI/bge-small-en-v1.5",

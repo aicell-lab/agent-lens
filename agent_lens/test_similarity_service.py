@@ -10,8 +10,8 @@ import numpy as np
 from PIL import Image
 import torch
 import dotenv
-from agent_lens import register_similarity_search_service
-from hypha_rpc import connect_to_server
+import json
+from hypha_rpc import connect_to_server, login
 
 dotenv.load_dotenv()
 
@@ -32,7 +32,7 @@ class TestSimilaritySearchService(unittest.TestCase):
             "-m",
             "hypha.server",
             "--host=localhost",
-            "--port=8099",
+            "--port=9527",
             "--enable-s3",
             "--access-key-id=minio",
             "--secret-access-key=minio123",
@@ -66,32 +66,39 @@ class TestSimilaritySearchService(unittest.TestCase):
     def _generate_random_image():
         image = Image.fromarray(np.random.randint(0, 256, (224, 224, 3), dtype=np.uint8))
         buffered = io.BytesIO()
-        image.save(buffered, format="JPEG")
+        image.save(buffered, format="PNG")
         return base64.b64encode(buffered.getvalue()).decode('utf-8')
 
     @staticmethod
     def _generate_random_images(database, count):
         for _ in range(count):
             image_data = TestSimilaritySearchService._generate_random_image()
-            torch_config = register_similarity_search_service.TorchConfig()
-            vector = register_similarity_search_service.image_to_vector(
-                image_data,
-                torch_config
-            )
-            database.append(vector)
+            database.append(image_data)
+
+    def parse_jwt(self, token):
+        payload = token.split('.')[1]
+        decoded_payload = base64.urlsafe_b64decode(payload + '==')
+        return json.loads(decoded_payload)
 
     async def async_test_find_similar_cells(self):
-        server = await connect_to_server({"server_url": "http://127.0.0.1:8099"})
-        similarity_service = await server.get_service("similarity-search")
+        # Wait 10 seconds
+        await asyncio.sleep(10)
+        token = await login({"server_url": "http://localhost:9527"})
+        server = await connect_to_server({
+            "server_url": "http://localhost:9527",
+            "token": token
+        })
+        similarity_service = await server.get_service("public/similarity-search")
+        user_id = server.config.workspace.replace("ws-user-", "")
         for vector in self.database:
             await similarity_service.save_cell_image(
                 vector,
-                "test-user"
+                user_id,
             )
         query_image = self._generate_random_image()
         results = await similarity_service.find_similar_cells(
             query_image,
-            "test-user",
+            user_id,
             top_k=5
         )
         print(results)

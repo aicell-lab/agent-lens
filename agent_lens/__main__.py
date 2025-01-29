@@ -57,27 +57,27 @@ def start_server(args):
     print(f"Hypha server started. Access at {args.host}:{args.port}/public/apps/microscope-control")
 
 
-def get_token(workspace=None):
+def get_token(is_workspace=False):
     """
     Retrieve the token from environment variables.
 
     Args:
-        workspace (str, optional): The workspace name.
+        workspace (boolean, optional): Whether to get the workspace token. Defaults to False.
 
     Returns:
         str: The token.
     """
     load_dotenv()
 
-    token = os.environ.get("WORKSPACE_TOKEN")
-    if token is None or workspace is None:
-        token = os.environ.get("PERSONAL_TOKEN")
-
-    return token
+    if is_workspace:
+        return os.environ.get("WORKSPACE_TOKEN")
+    
+    return os.environ.get("PERSONAL_TOKEN")
 
 
 async def connect_server(args):
-    token = get_token(args.workspace_name)
+    is_workspace = args.workspace_name is not None
+    token = get_token(is_workspace)
 
     server = await connect_to_server({
         "server_url": args.server_url,
