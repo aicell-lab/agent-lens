@@ -7,3 +7,18 @@ services:
     env_file:
       - ../minio.env
     command: server /data --console-address ":9001"
+  redis:
+    image: redis/redis-stack:6.2.6-v18
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes --protected-mode no
+
+volumes:
+  redis-data:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=100m,uid=1001,gid=1001

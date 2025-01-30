@@ -8,10 +8,14 @@
             "module": "agent_lens",
             "justMyCode": false,
             "preLaunchTask": "Prepare app",
+            "env": {
+                "JWT_SECRET": "1337",
+            },
             "args": [
                 "start-server",
                 "--port=9527",
             ],
+            "postDebugTask": "Stop MinIO",
         },
         {
             "name": "Python: connect-server",

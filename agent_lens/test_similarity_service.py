@@ -16,44 +16,69 @@ from hypha_rpc import connect_to_server, login
 dotenv.load_dotenv()
 
 class TestSimilaritySearchService(unittest.TestCase):
+    running_processes = []
 
     @classmethod
     def setUpClass(cls):
-        # Start MinIO service using docker-compose
-        subprocess.run(["docker-compose", "-f",
-                        "docker/docker-compose.yml", "up", "-d", "minio"], check=True)
-
-        # Wait for MinIO to be ready
-        time.sleep(2)  # Adjust the sleep time as needed
-
-        # Start hypha.server with the necessary parameters
-        command = [
-            sys.executable,
-            "-m",
-            "hypha.server",
-            "--host=localhost",
-            "--port=9527",
-            "--enable-s3",
-            "--access-key-id=minio",
-            "--secret-access-key=minio123",
-            "--endpoint-url=http://localhost:9000",
-            "--endpoint-url-public=http://localhost:9000",
-            "--s3-admin-type=minio",
-            "--startup-functions=agent_lens.register_similarity_search_service:setup_service"
-        ]
-        cls.server_process = subprocess.Popen(command)
+        minio_process = cls.start_process(
+            ["docker-compose", "-f", "docker/docker-compose.yml", "up", "-d", "minio"],
+            "Running"
+        )
+        redis_process = cls.start_process(
+            ["docker-compose", "-f", "docker/docker-compose.yml", "up", "-d", "redis"],
+            "Running"
+        )
+        cls.wait_for_process(minio_process)
+        cls.wait_for_process(redis_process)
+        
+        server_process = cls.start_process(
+            [
+                sys.executable,
+                "-m",
+                "hypha.server",
+                "--host=localhost",
+                "--port=9527",
+                "--enable-s3",
+                "--access-key-id=minio",
+                "--secret-access-key=minio123",
+                "--endpoint-url=http://localhost:9000",
+                "--endpoint-url-public=http://localhost:9000",
+                "--s3-admin-type=minio",
+                "--redis-uri=redis://localhost:6379/0",
+                "--startup-functions=agent_lens.register_similarity_search_service:setup_service"
+            ],
+            "successfully"
+        )
+        cls.wait_for_process(server_process)
 
         cls.database = []
         cls._generate_random_images(cls.database, 10)
 
     @classmethod
     def tearDownClass(cls):
-        # Stop the hypha.server process
-        cls.server_process.terminate()
-        cls.server_process.wait()
+        # Stop all running processes
+        for process, _ in cls.running_processes:
+            process.terminate()
+            process.wait()
 
-        # Stop the MinIO service
+        # Stop the Docker Compose services
         subprocess.run(["docker-compose", "-f", "docker/docker-compose.yml", "down"], check=True)
+
+    @classmethod
+    def start_process(cls, command_args, wait_for_string):
+        process = subprocess.Popen(command_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        cls.running_processes.append((process, wait_for_string))
+        return (process, wait_for_string)
+
+    @classmethod
+    def wait_for_process(cls, process_tuple):
+        process, wait_for_string = process_tuple
+        while True:
+            output = process.stdout.readline().decode('utf-8')
+            if wait_for_string.lower() in output.lower():
+                break
+            if process.poll() is None:
+                raise RuntimeError(f"Process terminated before outputting '{wait_for_string}'")
 
     @staticmethod
     def _mock_model():
@@ -82,7 +107,6 @@ class TestSimilaritySearchService(unittest.TestCase):
 
     async def async_test_find_similar_cells(self):
         # Wait 10 seconds
-        await asyncio.sleep(10)
         token = await login({"server_url": "http://localhost:9527"})
         server = await connect_to_server({
             "server_url": "http://localhost:9527",

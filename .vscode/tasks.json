@@ -8,6 +8,12 @@
             "problemMatcher": [],
         },
         {
+            "label": "Start Redis",
+            "type": "shell",
+            "command": "docker-compose -f docker/docker-compose.yml up -d redis",
+            "problemMatcher": [],
+        },
+        {
             "label": "Build Frontend",
             "type": "shell",
             "command": "npm run build --prefix frontend",
@@ -17,8 +23,15 @@
             "label": "Prepare app",
             "dependsOn": [
                 "Start MinIO",
-                "Build Frontend"
+                "Build Frontend",
+                "Start Redis"
             ],
+        },
+        {
+            "label": "Stop MinIO",
+            "type": "shell",
+            "command": "docker-compose -f docker/docker-compose.yml down minio",
+            "problemMatcher": [],
         }
     ]
 }

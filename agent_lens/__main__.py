@@ -50,6 +50,7 @@ def start_server(args):
         f"--endpoint-url={os.getenv('MINIO_SERVER_URL')}",
         f"--endpoint-url-public={os.getenv('MINIO_SERVER_URL')}",
         "--s3-admin-type=minio",
+        "--redis-uri=redis://localhost:6379/0",
         "--startup-functions=agent_lens.__main__:start_services"
     ]
     subprocess.run(command, check=True)
