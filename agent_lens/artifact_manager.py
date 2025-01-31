@@ -62,7 +62,7 @@ class AgentLensArtifactManager:
         """
         return f"{self._workspace_id(user_id)}/{self._artifact_alias(name)}"
 
-    async def create_vector_collection(self, user_id, name, manifest, config, overwrite=False):
+    async def create_vector_collection(self, user_id, name, manifest, config, overwrite=False, exists_ok=False):
         """
         Create a vector collection.
 
@@ -74,13 +74,17 @@ class AgentLensArtifactManager:
             overwrite (bool, optional): Whether to overwrite the existing collection.
         """
         art_id = self._artifact_id(user_id, name)
-        await self._svc.create(
-            alias=art_id,
-            type="vector-collection",
-            manifest=manifest,
-            config=config,
-            overwrite=overwrite
-        )
+        try:
+            await self._svc.create(
+                alias=art_id,
+                type="vector-collection",
+                manifest=manifest,
+                config=config,
+                overwrite=overwrite
+            )
+        except FileExistsError as e:
+            if not exists_ok:
+                raise e
 
     async def add_vectors(self, user_id, coll_name, *vectors):
         """

@@ -28,36 +28,34 @@ async def try_create_collection(artifact_manager, user_id):
         artifact_manager (ArtifactManager): The artifact manager instance.
         user_id (str): The user ID.
     """
-    try:
-        await artifact_manager.create_vector_collection(
-            user_id=user_id,
-            name="cell-images",
-            manifest={
-                "name": "Cell images",
-                "description": "Collection of cell images",
-            },
-            config={
-                "vector_fields": [
-                    {
-                        "type": "VECTOR",
-                        "name": "vector",
-                        "algorithm": "FLAT",
-                        "attributes": {
-                            "TYPE": "FLOAT32",
-                            "DIM": 512,
-                            "DISTANCE_METRIC": "COSINE",
-                        },
+    await artifact_manager.create_vector_collection(
+        user_id=user_id,
+        name="cell-images",
+        manifest={
+            "name": "Cell images",
+            "description": "Collection of cell images",
+        },
+        config={
+            "vector_fields": [
+                {
+                    "type": "VECTOR",
+                    "name": "vector",
+                    "algorithm": "FLAT",
+                    "attributes": {
+                        "TYPE": "FLOAT32",
+                        "DIM": 512,
+                        "DISTANCE_METRIC": "COSINE",
                     },
-                    {"type": "TAG", "name": "annotation"},
-                    {"type": "TEXT", "name": "thumbnail"},
-                ],
-                "embedding_models": {
-                    "vector": "fastembed:BAAI/bge-small-en-v1.5",
                 },
-            }
-        )
-    except FileExistsError:
-        pass
+                {"type": "TAG", "name": "annotation"},
+                {"type": "TEXT", "name": "thumbnail"},
+            ],
+            "embedding_models": {
+                "vector": "fastembed:BAAI/bge-small-en-v1.5",
+            },
+        },
+        exists_ok=True,
+    )
 
 
 def get_image_tensor(image_data, preprocess, device):
