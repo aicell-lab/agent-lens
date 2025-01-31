@@ -35,7 +35,7 @@ MODELS = {
     "vit_l_lm": "https://zenodo.org/records/11111177/files/vit_l.pt",
     "vit_b_em_organelles": "https://uk1s3.embassy.ebi.ac.uk/public-datasets/bioimage.io/noisy-ox/1/files/vit_b.pt",
 }
-STORAGE = {
+MODEL_STORAGE_PATHS = {
     "vit_b": "models/sam_vit_b_01ec64.pth",
     "vit_b_lm": "models/vit_b_lm.pt",
     "vit_l_lm": "models/vit_l_lm.pt"
@@ -56,8 +56,8 @@ def _load_model(model_name: str) -> torch.nn.Module:
         )
 
     # Check if the model is available in local storage
-    if model_name in STORAGE:
-        local_path = STORAGE[model_name]
+    if model_name in MODEL_STORAGE_PATHS:
+        local_path = MODEL_STORAGE_PATHS[model_name]
         if os.path.exists(local_path):
             logger.info("Loading model %s from local storage at %s...", model_name, local_path)
             device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -91,10 +91,10 @@ def _load_model(model_name: str) -> torch.nn.Module:
 
 
     # Optionally, save the downloaded model to local storage for future use
-    os.makedirs(os.path.dirname(STORAGE[model_name]), exist_ok=True)
-    with open(STORAGE[model_name], 'wb') as f:
+    os.makedirs(os.path.dirname(MODEL_STORAGE_PATHS[model_name]), exist_ok=True)
+    with open(MODEL_STORAGE_PATHS[model_name], 'wb') as f:
         f.write(buffer.getvalue())
-    logger.info("Model %s cached to %s", model_name, STORAGE[model_name])
+    logger.info("Model %s cached to %s", model_name, MODEL_STORAGE_PATHS[model_name])
 
     CURRENT_MODEL["name"] = model_name
     CURRENT_MODEL["model"] = sam
@@ -118,6 +118,17 @@ def _to_image(input_: np.ndarray) -> np.ndarray:
         )
     return image
 
+
+def reset_embedding() -> bool:
+    if 'current_embedding' not in MODEL_STORAGE_PATHS:
+        logger.info("No embedding found in storage.")
+        return False
+    
+    logger.info("Resetting embedding...")
+    del MODEL_STORAGE_PATHS['current_embedding']
+    return True
+
+
 def compute_embedding_with_initial_segment(
     model_name: str,
     image_bytes: bytes,
@@ -130,29 +141,18 @@ def compute_embedding_with_initial_segment(
 
     # Load model
     sam = _load_model(model_name)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info("Computing embedding of model %s with initial segmentation...", model_name)
     predictor = SamPredictor(sam)
     predictor.set_image(_to_image(image))
 
     # Perform initial segmentation
-    if isinstance(point_coordinates, list):
-        point_coordinates = np.array(point_coordinates, dtype=np.float32)
-    if isinstance(point_labels, list):
-        point_labels = np.array(point_labels, dtype=np.float32)
-
-    # Move point coordinates and labels to the GPU
-    point_coordinates_tensor = torch.tensor(point_coordinates).to(device)
-    point_labels_tensor = torch.tensor(point_labels).to(device)
-
-    # Convert tensors back to numpy arrays for the predictor
-    point_coordinates = point_coordinates_tensor.cpu().numpy()
-    point_labels = point_labels_tensor.cpu().numpy()
-
+    point_coordinates = np.array(point_coordinates, dtype=np.float32)
+    point_labels = np.array(point_labels, dtype=np.float32)
+    
     mask, scores, logits = predictor.predict(
-    point_coords=point_coordinates,
-    point_labels=point_labels,
-    multimask_output=False,
+        point_coords=point_coordinates,
+        point_labels=point_labels,
+        multimask_output=False,
     )
 
     # Ensure the mask is not empty
@@ -171,54 +171,32 @@ def compute_embedding_with_initial_segment(
         mask_image.size
     )
     # Store the embedding in STORAGE
-    STORAGE['current_embedding'] = {
+    MODEL_STORAGE_PATHS['current_embedding'] = {
         'model_name': model_name,
         'embedding': (mask, scores, logits)  # Store the necessary data
     }
     return {"mask": mask_base64}
 
 
-
-
-def reset_embedding() -> bool:
-    if 'current_embedding' not in STORAGE:
-        logger.info("No embedding found in storage.")
-        return False
-    else:
-        logger.info("Resetting embedding...")
-        del STORAGE['current_embedding']
-        return True
-
 def segment(
     point_coordinates: Union[list, np.ndarray],
     point_labels: Union[list, np.ndarray],
 ) -> list:
-    if 'current_embedding' not in STORAGE:
+    if 'current_embedding' not in MODEL_STORAGE_PATHS:
         logger.info("No embedding found in storage.")
         return []
 
-    logger.info("Segmenting with model %s...", STORAGE['current_embedding'].get('model_name'))
+    logger.info("Segmenting with model %s...", MODEL_STORAGE_PATHS['current_embedding'].get('model_name'))
     # Load the model with the pre-computed embedding
-    sam = _load_model(STORAGE['current_embedding'].get('model_name'))
+    sam = _load_model(MODEL_STORAGE_PATHS['current_embedding'].get('model_name'))
     predictor = SamPredictor(sam)
-    for key, value in STORAGE['current_embedding'].items():
+    
+    for key, value in MODEL_STORAGE_PATHS['current_embedding'].items():
         if key != "model_name":
             setattr(predictor, key, value)
-    # Run the segmentation
-    logger.debug("Point coordinates: %s, %s", point_coordinates, point_labels)
-    if isinstance(point_coordinates, list):
-        point_coordinates = np.array(point_coordinates, dtype=np.float32)
-    if isinstance(point_labels, list):
-        point_labels = np.array(point_labels, dtype=np.float32)
 
-    # Move point coordinates and labels to the GPU
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    point_coordinates_tensor = torch.tensor(point_coordinates).to(device)
-    point_labels_tensor = torch.tensor(point_labels).to(device)
-
-    # Convert tensors back to numpy arrays for the predictor
-    point_coordinates = point_coordinates_tensor.cpu().numpy()
-    point_labels = point_labels_tensor.cpu().numpy()
+    point_coordinates = np.array(point_coordinates, dtype=np.float32)
+    point_labels = np.array(point_labels, dtype=np.float32)
 
     mask, _, _ = predictor.predict(
         point_coords=point_coordinates,
@@ -235,12 +213,12 @@ def segment_with_existing_embedding(
     point_coordinates: Union[list, np.ndarray],
     point_labels: Union[list, np.ndarray]
 ) -> dict:
-    if 'current_embedding' not in STORAGE:
+    if 'current_embedding' not in MODEL_STORAGE_PATHS:
         logger.info("No embedding found in storage.")
         return {"error": "No embedding found in storage."}
 
     # Retrieve the stored embedding
-    embedding_data = STORAGE['current_embedding']
+    embedding_data = MODEL_STORAGE_PATHS['current_embedding']
     model_name = embedding_data['model_name']
 
     # Convert bytes to a numpy array
@@ -248,9 +226,9 @@ def segment_with_existing_embedding(
     logger.info("Image size: %s, Point coordinates received: %s", image.shape, point_coordinates)
 
     logger.info("Segmenting with existing embedding from model %s...", model_name)
+    
     sam = _load_model(model_name)
     predictor = SamPredictor(sam)
-
     # Set the image on the predictor
     predictor.set_image(_to_image(image))
 
@@ -259,19 +237,8 @@ def segment_with_existing_embedding(
         if key not in ["model_name", "is_image_set"]:
             setattr(predictor, key, value)
 
-    if isinstance(point_coordinates, list):
-        point_coordinates = np.array(point_coordinates, dtype=np.float32)
-    if isinstance(point_labels, list):
-        point_labels = np.array(point_labels, dtype=np.float32)
-
-    # Move point coordinates and labels to the GPU
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    point_coordinates_tensor = torch.tensor(point_coordinates).to(device)
-    point_labels_tensor = torch.tensor(point_labels).to(device)
-
-    # Convert tensors back to numpy arrays for the predictor
-    point_coordinates = point_coordinates_tensor.cpu().numpy()
-    point_labels = point_labels_tensor.cpu().numpy()
+    point_coordinates = np.array(point_coordinates, dtype=np.float32)
+    point_labels = np.array(point_labels, dtype=np.float32)
 
     mask, _, _ = predictor.predict(
         point_coords=point_coordinates,
@@ -287,44 +254,42 @@ def segment_with_existing_embedding(
 
     return {"mask": mask_base64}
 
-def segment_all_cells(model_name: str, image_bytes: bytes) -> dict:
-    # Convert bytes to a numpy array
-    image = np.array(Image.open(io.BytesIO(image_bytes)).convert("RGB"))
-    logger.info("Image size: %s", image.shape)
-
-    # Load model
-    sam = _load_model(model_name)
-
-    # Move the model to the GPU
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    sam.to(device)
-
-    # Create an automatic mask generator
-    mask_generator = SamAutomaticMaskGenerator(sam)
-
-    # Generate the masks
-    masks = mask_generator.generate(image)
-
-    # Check if any masks were generated
-    if not masks:
-        logger.error("No masks generated.")
-        return {"error": "No masks generated."}
-
-    # Process the masks
-    bounding_boxes = []
+def get_mask_data_bboxes(masks):
     mask_data = []
+    bounding_boxes = []
     for mask in masks:
         bbox = mask['bbox']  # x, y, width, height
         bounding_boxes.append(bbox)
-
+        
         mask_array = mask['segmentation']  # 2D numpy array of bools
 
-        # Convert mask to base64
         mask_image = Image.fromarray((mask_array * 255).astype(np.uint8))
         buffer = io.BytesIO()
         mask_image.save(buffer, format="PNG")
         mask_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
         mask_data.append(mask_base64)
+    return mask_data, bounding_boxes
+
+def segment_all_cells(model_name: str, image_bytes: bytes) -> dict:
+    # Convert bytes to a numpy array
+    image = np.array(Image.open(io.BytesIO(image_bytes)).convert("RGB"))
+    logger.info("Image size: %s", image.shape)
+
+    sam = _load_model(model_name)
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    sam.to(device)
+
+    mask_generator = SamAutomaticMaskGenerator(sam)
+
+    masks = mask_generator.generate(image)
+
+    if not masks:
+        logger.error("No masks generated.")
+        return {"error": "No masks generated."}
+
+    # Process the masks
+    mask_data, bounding_boxes = get_mask_data_bboxes(masks)
 
     logger.info("Segmented %d cells.", len(bounding_boxes))
     return {"bounding_boxes": bounding_boxes, "masks": mask_data}
