@@ -15,11 +15,15 @@ from segment_anything import SamPredictor, sam_model_registry, SamAutomaticMaskG
 dotenv.load_dotenv()
 
 
-#Acknowledgement: This script is adapted from the original script provided by the authors: @Nils Mechetel, https://github.com/bioimage-io/bioimageio-colab/blob/main/bioimageio_colab/register_sam_service.py.
+# Acknowledgement: This script is adapted from the original script provided by the authors
+# @Nils Mechetel,
+# https://github.com/bioimage-io/bioimageio-colab/blob/main/bioimageio_colab/register_sam_service.py.
 
-# This Python script registers a SAM (Segment Anything Model) annotation service on the BioImageIO Colab workspace, 
-# enabling interactive image segmentation functionalities through a series of image-processing and mask-generation utilities. 
-# Users can load models, compute embeddings, perform segmentation with initial or existing embeddings, and segment all cells in an image.
+# This Python script registers a SAM (Segment Anything Model) annotation service on
+# the BioImageIO Colab workspace, enabling interactive image segmentation
+# functionalities through a series of image-processing and mask-generation utilities.
+# Users can load models, compute embeddings, perform segmentation with initial or existing
+# embeddings, and segment all cells in an image.
 
 ENV_FILE = find_dotenv()
 if ENV_FILE:
@@ -31,68 +35,70 @@ MODELS = {
     "vit_l_lm": "https://zenodo.org/records/11111177/files/vit_l.pt",
     "vit_b_em_organelles": "https://uk1s3.embassy.ebi.ac.uk/public-datasets/bioimage.io/noisy-ox/1/files/vit_b.pt",
 }
-STORAGE = {"vit_b": "models/sam_vit_b_01ec64.pth", "vit_b_lm": "models/vit_b_lm.pt", "vit_l_lm": "models/vit_l_lm.pt"}
+STORAGE = {
+    "vit_b": "models/sam_vit_b_01ec64.pth",
+    "vit_b_lm": "models/vit_b_lm.pt",
+    "vit_l_lm": "models/vit_l_lm.pt"
+}
 CURRENT_MODEL = {"name": None, "model": None}
 
 logger = getLogger(__name__)
 logger.setLevel("INFO")
 
 def _load_model(model_name: str) -> torch.nn.Module:
-  global CURRENT_MODEL
-  
-  if CURRENT_MODEL["name"] == model_name and CURRENT_MODEL["model"] is not None:
-      logger.info(f"Model {model_name} is already loaded, reusing it.")
-      return CURRENT_MODEL["model"]
+    if CURRENT_MODEL["name"] == model_name and CURRENT_MODEL["model"] is not None:
+        logger.info("Model %s is already loaded, reusing it.", model_name)
+        return CURRENT_MODEL["model"]
 
-  if model_name not in MODELS:
-      raise ValueError(
-          f"Model {model_name} not found. Available models: {list(MODELS.keys())}"
-      )
+    if model_name not in MODELS:
+        raise ValueError(
+            f"Model {model_name} not found. Available models: {list(MODELS.keys())}"
+        )
 
-  # Check if the model is available in local storage
-  if model_name in STORAGE:
-      local_path = STORAGE[model_name]
-      if os.path.exists(local_path):
-          logger.info(f"Loading model {model_name} from local storage at {local_path}...")
-          device = "cuda" if torch.cuda.is_available() else "cpu"
-          print(device)
-          ckpt = torch.load(local_path, map_location=device)
-          model_type = model_name[:5]
-          sam = sam_model_registry[model_type]()
-          sam.load_state_dict(ckpt)
-          sam.to(device)
-          CURRENT_MODEL["name"] = model_name
-          CURRENT_MODEL["model"] = sam
-          return sam
-      else:
-          logger.warning(f"Model file {local_path} not found in local storage.")
+    # Check if the model is available in local storage
+    if model_name in STORAGE:
+        local_path = STORAGE[model_name]
+        if os.path.exists(local_path):
+            logger.info("Loading model %s from local storage at %s...", model_name, local_path)
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            print(device)
+            ckpt = torch.load(local_path, map_location=device)
+            model_type = model_name[:5]
+            sam = sam_model_registry[model_type]()
+            sam.load_state_dict(ckpt)
+            sam.to(device)
+            CURRENT_MODEL["name"] = model_name
+            CURRENT_MODEL["model"] = sam
+            return sam
+        else:
+            logger.warning("Model file %s not found in local storage.", local_path)
 
-  # If not in local storage, download the model
-  model_url = MODELS[model_name]
-  logger.info(f"Loading model {model_name} from {model_url}...")
-  response = requests.get(model_url)
-  if response.status_code != 200:
-      raise RuntimeError(f"Failed to download model from {model_url}")
-  buffer = io.BytesIO(response.content)
+    # If not in local storage, download the model
+    model_url = MODELS[model_name]
+    logger.info("Loading model %s from %s...", model_name, model_url)
+    response = requests.get(model_url, timeout=20)
+    if response.status_code != 200:
+        raise RuntimeError(f"Failed to download model from {model_url}")
+    buffer = io.BytesIO(response.content)
 
-  # Load model state
-  device = "cuda" if torch.cuda.is_available() else "cpu"
-  ckpt = torch.load(buffer, map_location=device)
-  model_type = model_name[:5]
-  sam = sam_model_registry[model_type]()
-  sam.load_state_dict(ckpt)
-  sam.to(device)
-  
+    # Load model state
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    ckpt = torch.load(buffer, map_location=device)
+    model_type = model_name[:5]
+    sam = sam_model_registry[model_type]()
+    sam.load_state_dict(ckpt)
+    sam.to(device)
 
-  # Optionally, save the downloaded model to local storage for future use
-  os.makedirs(os.path.dirname(STORAGE[model_name]), exist_ok=True)
-  with open(STORAGE[model_name], 'wb') as f:
-      f.write(buffer.getvalue())
-  logger.info(f"Model {model_name} cached to {STORAGE[model_name]}")
 
-  CURRENT_MODEL["name"] = model_name
-  CURRENT_MODEL["model"] = sam
-  return sam
+    # Optionally, save the downloaded model to local storage for future use
+    os.makedirs(os.path.dirname(STORAGE[model_name]), exist_ok=True)
+    with open(STORAGE[model_name], 'wb') as f:
+        f.write(buffer.getvalue())
+    logger.info("Model %s cached to %s", model_name, STORAGE[model_name])
+
+    CURRENT_MODEL["name"] = model_name
+    CURRENT_MODEL["model"] = sam
+    return sam
 
 def _to_image(input_: np.ndarray) -> np.ndarray:
     # we require the input to be uint8
@@ -112,15 +118,20 @@ def _to_image(input_: np.ndarray) -> np.ndarray:
         )
     return image
 
-def compute_embedding_with_initial_segment(model_name: str, image_bytes: bytes, point_coordinates: Union[list, np.ndarray], point_labels: Union[list, np.ndarray]) -> dict:
+def compute_embedding_with_initial_segment(
+    model_name: str,
+    image_bytes: bytes,
+    point_coordinates: Union[list, np.ndarray],
+    point_labels: Union[list, np.ndarray]
+) -> dict:
     # Convert bytes to a numpy array
     image = np.array(Image.open(io.BytesIO(image_bytes)).convert("RGB"))
-    logger.info(f"Image size: {image.shape}, Point coordinates received: {point_coordinates}")
+    logger.info("Image size: %s, Point coordinates received: %s", image.shape, point_coordinates)
 
     # Load model
     sam = _load_model(model_name)
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    logger.info(f"Computing embedding of model {model_name} with initial segmentation...")
+    logger.info("Computing embedding of model %s with initial segmentation...", model_name)
     predictor = SamPredictor(sam)
     predictor.set_image(_to_image(image))
 
@@ -154,7 +165,11 @@ def compute_embedding_with_initial_segment(model_name: str, image_bytes: bytes, 
     buffer = io.BytesIO()
     mask_image.save(buffer, format="PNG")
     mask_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
-    logger.info(f"Computed embedding of model {model_name} with initial segmentation. Mask size: {mask_image.size}")
+    logger.info(
+        "Computed embedding of model %s with initial segmentation. Mask size: %s",
+        model_name,
+        mask_image.size
+    )
     # Store the embedding in STORAGE
     STORAGE['current_embedding'] = {
         'model_name': model_name,
@@ -182,7 +197,7 @@ def segment(
         logger.info("No embedding found in storage.")
         return []
 
-    logger.info(f"Segmenting with model {STORAGE['current_embedding'].get('model_name')}...")
+    logger.info("Segmenting with model %s...", STORAGE['current_embedding'].get('model_name'))
     # Load the model with the pre-computed embedding
     sam = _load_model(STORAGE['current_embedding'].get('model_name'))
     predictor = SamPredictor(sam)
@@ -190,7 +205,7 @@ def segment(
         if key != "model_name":
             setattr(predictor, key, value)
     # Run the segmentation
-    logger.debug(f"Point coordinates: {point_coordinates}, {point_labels}")
+    logger.debug("Point coordinates: %s, %s", point_coordinates, point_labels)
     if isinstance(point_coordinates, list):
         point_coordinates = np.array(point_coordinates, dtype=np.float32)
     if isinstance(point_labels, list):
@@ -205,17 +220,21 @@ def segment(
     point_coordinates = point_coordinates_tensor.cpu().numpy()
     point_labels = point_labels_tensor.cpu().numpy()
 
-    mask, scores, logits = predictor.predict(
-    point_coords=point_coordinates,
-    point_labels=point_labels,
-    multimask_output=False,
+    mask, _, _ = predictor.predict(
+        point_coords=point_coordinates,
+        point_labels=point_labels,
+        multimask_output=False,
     )
-    
-    logger.debug(f"Predicted mask of shape {mask.shape}")
+
+    logger.debug("Predicted mask of shape %s", mask.shape)
     features = mask_to_features(mask[0])
     return features
 
-def segment_with_existing_embedding(image_bytes: bytes, point_coordinates: Union[list, np.ndarray], point_labels: Union[list, np.ndarray]) -> dict:
+def segment_with_existing_embedding(
+    image_bytes: bytes,
+    point_coordinates: Union[list, np.ndarray],
+    point_labels: Union[list, np.ndarray]
+) -> dict:
     if 'current_embedding' not in STORAGE:
         logger.info("No embedding found in storage.")
         return {"error": "No embedding found in storage."}
@@ -226,9 +245,9 @@ def segment_with_existing_embedding(image_bytes: bytes, point_coordinates: Union
 
     # Convert bytes to a numpy array
     image = np.array(Image.open(io.BytesIO(image_bytes)).convert("RGB"))
-    logger.info(f"Image size: {image.shape}, Point coordinates received: {point_coordinates}")
+    logger.info("Image size: %s, Point coordinates received: %s", image.shape, point_coordinates)
 
-    logger.info(f"Segmenting with existing embedding from model {model_name}...")
+    logger.info("Segmenting with existing embedding from model %s...", model_name)
     sam = _load_model(model_name)
     predictor = SamPredictor(sam)
 
@@ -254,10 +273,10 @@ def segment_with_existing_embedding(image_bytes: bytes, point_coordinates: Union
     point_coordinates = point_coordinates_tensor.cpu().numpy()
     point_labels = point_labels_tensor.cpu().numpy()
 
-    mask, scores, logits = predictor.predict(
-    point_coords=point_coordinates,
-    point_labels=point_labels,
-    multimask_output=False,
+    mask, _, _ = predictor.predict(
+        point_coords=point_coordinates,
+        point_labels=point_labels,
+        multimask_output=False,
     )
 
     # Convert mask to an image
@@ -271,7 +290,7 @@ def segment_with_existing_embedding(image_bytes: bytes, point_coordinates: Union
 def segment_all_cells(model_name: str, image_bytes: bytes) -> dict:
     # Convert bytes to a numpy array
     image = np.array(Image.open(io.BytesIO(image_bytes)).convert("RGB"))
-    logger.info(f"Image size: {image.shape}")
+    logger.info("Image size: %s", image.shape)
 
     # Load model
     sam = _load_model(model_name)
@@ -307,7 +326,7 @@ def segment_all_cells(model_name: str, image_bytes: bytes) -> dict:
         mask_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
         mask_data.append(mask_base64)
 
-    logger.info(f"Segmented {len(bounding_boxes)} cells.")
+    logger.info("Segmented %d cells.", len(bounding_boxes))
     return {"bounding_boxes": bounding_boxes, "masks": mask_data}
 
 async def setup_service(server) -> None:
@@ -328,5 +347,5 @@ async def setup_service(server) -> None:
         "reset_embedding": reset_embedding,
         "segment_all_cells": segment_all_cells,
     })
-    
+
     print("SAM service registered successfully.")
