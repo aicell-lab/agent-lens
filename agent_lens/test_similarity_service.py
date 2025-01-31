@@ -1,7 +1,6 @@
 import unittest
 import base64
 import io
-import os
 import asyncio
 import subprocess
 import sys
@@ -16,23 +15,14 @@ from hypha_rpc import connect_to_server, login
 dotenv.load_dotenv()
 
 class TestSimilaritySearchService(unittest.TestCase):
-    running_processes = []
-
     @classmethod
     def setUpClass(cls):
-        minio_process = cls.start_process(
-            ["docker-compose", "-f", "docker/docker-compose.yml", "up", "-d", "minio"],
-            "Running"
-        )
-        redis_process = cls.start_process(
-            ["docker-compose", "-f", "docker/docker-compose.yml", "up", "-d", "redis"],
-            "Running"
-        )
-        cls.wait_for_process(minio_process)
-        cls.wait_for_process(redis_process)
+        cls.remove_existing_containers_and_networks()
+        subprocess.run(["docker-compose", "-f", "docker/docker-compose.yml", "up", "-d", "minio"], check=True)
+        subprocess.run(["docker-compose", "-f", "docker/docker-compose.yml", "up", "-d", "redis"], check=True)
+        time.sleep(10)
         
-        server_process = cls.start_process(
-            [
+        cls.running_process = subprocess.Popen([
                 sys.executable,
                 "-m",
                 "hypha.server",
@@ -46,39 +36,26 @@ class TestSimilaritySearchService(unittest.TestCase):
                 "--s3-admin-type=minio",
                 "--redis-uri=redis://localhost:6379/0",
                 "--startup-functions=agent_lens.register_similarity_search_service:setup_service"
-            ],
-            "successfully"
-        )
-        cls.wait_for_process(server_process)
+        ])
+        time.sleep(20)
 
         cls.database = []
         cls._generate_random_images(cls.database, 10)
 
     @classmethod
+    def remove_existing_containers_and_networks(cls):
+        # Remove any existing containers and networks
+        subprocess.run(["docker-compose", "-f", "docker/docker-compose.yml", "down", "--remove-orphans"], check=True)
+        subprocess.run(["docker", "network", "prune", "-f"], check=True)
+        subprocess.run(["docker", "volume", "prune", "-f"], check=True)
+        time.sleep(5)
+
+    @classmethod
     def tearDownClass(cls):
-        # Stop all running processes
-        for process, _ in cls.running_processes:
-            process.terminate()
-            process.wait()
-
+        cls.running_process.terminate()
+        cls.running_process.wait()
         # Stop the Docker Compose services
-        subprocess.run(["docker-compose", "-f", "docker/docker-compose.yml", "down"], check=True)
-
-    @classmethod
-    def start_process(cls, command_args, wait_for_string):
-        process = subprocess.Popen(command_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        cls.running_processes.append((process, wait_for_string))
-        return (process, wait_for_string)
-
-    @classmethod
-    def wait_for_process(cls, process_tuple):
-        process, wait_for_string = process_tuple
-        while True:
-            output = process.stdout.readline().decode('utf-8')
-            if wait_for_string.lower() in output.lower():
-                break
-            if process.poll() is None:
-                raise RuntimeError(f"Process terminated before outputting '{wait_for_string}'")
+        cls.remove_existing_containers_and_networks()
 
     @staticmethod
     def _mock_model():
@@ -106,7 +83,6 @@ class TestSimilaritySearchService(unittest.TestCase):
         return json.loads(decoded_payload)
 
     async def async_test_find_similar_cells(self):
-        # Wait 10 seconds
         token = await login({"server_url": "http://localhost:9527"})
         server = await connect_to_server({
             "server_url": "http://localhost:9527",
