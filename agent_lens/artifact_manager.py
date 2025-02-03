@@ -86,7 +86,7 @@ class AgentLensArtifactManager:
             if not exists_ok:
                 raise e
 
-    async def add_vectors(self, user_id, coll_name, *vectors):
+    async def add_vectors(self, user_id, coll_name, vectors):
         """
         Add vectors to the collection.
 

@@ -8,7 +8,7 @@ services:
       - ../minio.env
     command: server /data --console-address ":9001"
   redis:
-    image: redis/redis-stack:6.2.6-v18
+    image: redis/redis-stack:7.2.0-v13
     ports:
       - '6379:6379'
     volumes:

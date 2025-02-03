@@ -39,7 +39,7 @@ async def try_create_collection(artifact_manager, user_id):
             "vector_fields": [
                 {
                     "type": "VECTOR",
-                    "name": "vector",
+                    "name": "cell_image_vector",
                     "algorithm": "FLAT",
                     "attributes": {
                         "TYPE": "FLOAT32",
@@ -47,12 +47,9 @@ async def try_create_collection(artifact_manager, user_id):
                         "DISTANCE_METRIC": "COSINE",
                     },
                 },
-                {"type": "TAG", "name": "annotation"},
                 {"type": "TEXT", "name": "thumbnail"},
-            ],
-            "embedding_models": {
-                "vector": "fastembed:BAAI/bge-small-en-v1.5",
-            },
+                {"type": "TAG", "name": "annotation"},
+            ]
         },
         exists_ok=True,
     )
@@ -146,17 +143,17 @@ def make_thumbnail(image_data, size=(256, 256)):
 async def find_similar_cells(artifact_manager, torch_config, search_cell_image, user_id, top_k=5):
     query_vector = image_to_vector(search_cell_image, torch_config)
     await try_create_collection(artifact_manager, user_id)
-    return await artifact_manager.search_vectors(user_id, "cell-images", query_vector, top_k)
+    return await artifact_manager.search_vectors(user_id, "cell-images", query_vector.tolist(), top_k)
 
 
 async def save_cell_image(artifact_manager, torch_config, cell_image, user_id, annotation=""):
     image_vector = image_to_vector(cell_image, torch_config)
     await try_create_collection(artifact_manager, user_id)
-    await artifact_manager.add_vectors(user_id, "cell-images", {
-        "vector": image_vector,
+    await artifact_manager.add_vectors(user_id, "cell-images", [{
+        "vector": image_vector.tolist(),
         "annotation": annotation,
         "thumbnail": make_thumbnail(cell_image),
-    })
+    }])
 
 
 async def setup_service(server):
