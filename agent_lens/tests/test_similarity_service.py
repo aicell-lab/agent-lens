@@ -108,7 +108,6 @@ class TestSimilaritySearchService(unittest.TestCase):
             user_id,
             top_k=5
         )
-        print(results)
         self.assertEqual(len(results), 5)
         for result in results:
             self.assertIn("score", result)
