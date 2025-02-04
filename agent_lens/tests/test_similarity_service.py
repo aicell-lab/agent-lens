@@ -39,8 +39,10 @@ class TestSimilaritySearchService(unittest.TestCase):
         ])
         time.sleep(20)
 
-        cls.database = []
-        cls._generate_random_images(cls.database, 10)
+        cls.cell_images = []
+        cls.annotations = []
+        cls._generate_random_images(cls.cell_images, 10)
+        cls._generate_random_strings(cls.annotations, 10)
 
     @classmethod
     def remove_existing_containers_and_networks(cls):
@@ -76,6 +78,11 @@ class TestSimilaritySearchService(unittest.TestCase):
         for _ in range(count):
             image_data = TestSimilaritySearchService._generate_random_image()
             database.append(image_data)
+            
+    @staticmethod
+    def _generate_random_strings(database, count):
+        for _ in range(count):
+            database.append(''.join(np.random.choice(list("abcdefghijklmnopqrstuvwxyz"), 10)))
 
     def parse_jwt(self, token):
         payload = token.split('.')[1]
@@ -90,11 +97,11 @@ class TestSimilaritySearchService(unittest.TestCase):
         })
         similarity_service = await server.get_service("public/similarity-search")
         user_id = server.config.workspace.replace("ws-user-", "")
-        for vector in self.database:
-            await similarity_service.save_cell_image(
-                vector,
-                user_id,
-            )
+        await similarity_service.save_cell_images(
+            self.cell_images,
+            user_id,
+            self.annotations,
+        )
         query_image = self._generate_random_image()
         results = await similarity_service.find_similar_cells(
             query_image,
@@ -103,11 +110,19 @@ class TestSimilaritySearchService(unittest.TestCase):
         )
         print(results)
         self.assertEqual(len(results), 5)
-        for _, similarity in results:
-            self.assertTrue(0 <= similarity <= 1)
+        for result in results:
+            self.assertIn("score", result)
+            self.assertIn("id", result)
+            self.assertIn("annotation", result)
+            self.assertIn("thumbnail", result)
+            self.assertIsInstance(result["score"], str)
+            self.assertIsInstance(result["id"], str)
+            self.assertIsInstance(result["annotation"], str)
+            self.assertIsInstance(result["thumbnail"], str)
+            self.assertIn(result["annotation"], self.annotations)
+            score = float(result["score"])
+            self.assertGreaterEqual(score, 0)
+            self.assertLessEqual(score, 1)
 
     def test_find_similar_cells(self):
         asyncio.run(self.async_test_find_similar_cells())
-
-if __name__ == "__main__":
-    unittest.main()

@@ -106,7 +106,22 @@ def image_to_vector(image_data, torch_config, length=512):
     image_tensor = get_image_tensor(image_data, torch_config.preprocess, torch_config.device)
     query_vector = process_image_tensor(image_tensor, torch_config.model).reshape(1, length).astype(np.float32)
 
-    return query_vector
+    return query_vector.flatten()
+
+def images_to_vectors(images, torch_config):
+    """
+    Convert a list of images to vectors.
+
+    Args:
+        images (list): A list of base64 encoded images.
+        model (Model): The model to use.
+        preprocess (function): The preprocessing function.
+        device (str): The device to use.
+
+    Returns:
+        list: The image vectors.
+    """
+    return [image_to_vector(image, torch_config).tolist() for image in images]
 
 def decode_base64_image(image_data):
     """
@@ -141,19 +156,25 @@ def make_thumbnail(image_data, size=(256, 256)):
 
 
 async def find_similar_cells(artifact_manager, torch_config, search_cell_image, user_id, top_k=5):
-    query_vector = image_to_vector(search_cell_image, torch_config)
     await try_create_collection(artifact_manager, user_id)
+    query_vector = image_to_vector(search_cell_image, torch_config)
     return await artifact_manager.search_vectors(user_id, "cell-images", query_vector.tolist(), top_k)
 
 
-async def save_cell_image(artifact_manager, torch_config, cell_image, user_id, annotation=""):
-    image_vector = image_to_vector(cell_image, torch_config)
+async def save_cell_images(artifact_manager, torch_config, cell_images, user_id, annotations=None):
     await try_create_collection(artifact_manager, user_id)
-    await artifact_manager.add_vectors(user_id, "cell-images", [{
-        "vector": image_vector.tolist(),
-        "annotation": annotation,
-        "thumbnail": make_thumbnail(cell_image),
-    }])
+    cell_image_vectors = images_to_vectors(cell_images, torch_config)
+    annotations = annotations or ["" for _ in range(len(cell_images))]
+    thumbnails = [make_thumbnail(cell_image) for cell_image in cell_images]
+    vector_data = zip(cell_image_vectors, annotations, thumbnails)
+    cell_vectors = [{
+            "cell_image_vector": cell_image_vector,
+            "annotation": annotation,
+            "thumbnail": thumbnail,
+        }
+        for cell_image_vector, annotation, thumbnail in vector_data
+    ]
+    await artifact_manager.add_vectors(user_id, "cell-images", cell_vectors)
 
 
 async def setup_service(server):
@@ -171,7 +192,7 @@ async def setup_service(server):
         "id": "similarity-search",
         "config": {"visibility": "public"},
         "find_similar_cells": partial(find_similar_cells, artifact_manager, torch_config),
-        "save_cell_image": partial(save_cell_image, artifact_manager, torch_config),
+        "save_cell_images": partial(save_cell_images, artifact_manager, torch_config),
     })
     
     print("Similarity search service registered successfully.")

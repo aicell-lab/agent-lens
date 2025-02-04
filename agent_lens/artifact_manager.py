@@ -5,6 +5,7 @@ and handling file uploads and downloads.
 """
 
 import httpx
+from hypha_rpc.rpc import RemoteException
 
 class AgentLensArtifactManager:
     """
@@ -82,7 +83,7 @@ class AgentLensArtifactManager:
                 config=config,
                 overwrite=overwrite
             )
-        except FileExistsError as e:
+        except RemoteException as e:
             if not exists_ok:
                 raise e
 
@@ -118,7 +119,7 @@ class AgentLensArtifactManager:
         art_id = self._artifact_id(user_id, coll_name)
         return await self._svc.search_vectors(
             artifact_id=art_id,
-            query={"vector": vector},
+            query={"cell_image_vector": vector},
             limit=top_k
         )
 
