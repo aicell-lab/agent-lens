@@ -2,7 +2,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python: start-server",
+            "name": "Run locally",
             "type": "debugpy",
             "request": "launch",
             "module": "agent_lens",
@@ -15,15 +15,18 @@
                 "start-server",
                 "--port=9527",
             ],
-            "postDebugTask": "Stop MinIO",
+            "postDebugTask": "Stop",
         },
         {
-            "name": "Python: connect-server",
+            "name": "Run on Hypha",
             "type": "debugpy",
             "request": "launch",
             "module": "agent_lens",
             "justMyCode": false,
             "preLaunchTask": "Build Frontend",
+            "env": {
+                "JWT_SECRET": "1337",
+            },
             "args": [
                 "connect-server",
                 "--workspace_name=agent-lens",

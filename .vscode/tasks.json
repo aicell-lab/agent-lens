@@ -4,13 +4,13 @@
         {
             "label": "Start MinIO",
             "type": "shell",
-            "command": "docker-compose -f docker/docker-compose.yml up -d minio",
+            "command": "docker-compose -f docker/docker-compose.yml up -d --no-recreate minio",
             "problemMatcher": [],
         },
         {
             "label": "Start Redis",
             "type": "shell",
-            "command": "docker-compose -f docker/docker-compose.yml up -d redis",
+            "command": "docker-compose -f docker/docker-compose.yml up -d --no-recreate redis",
             "problemMatcher": [],
         },
         {
@@ -28,9 +28,9 @@
             ],
         },
         {
-            "label": "Stop MinIO",
+            "label": "Stop",
             "type": "shell",
-            "command": "docker-compose -f docker/docker-compose.yml down minio",
+            "command": "docker-compose -f docker/docker-compose.yml down",
             "problemMatcher": [],
         }
     ]
