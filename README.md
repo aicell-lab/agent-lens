@@ -75,7 +75,7 @@ If you prefer to set up the application manually, follow the steps below:
 
 1a. **Start application in VSCode:**
 
-  Go to "Run and Debug" and select "Python: start-server" as the debug configuration. Press run.
+  Go to "Run and Debug" and select "Run locally" as the debug configuration. Press run.
 
 1b. **Start application manually:**
 

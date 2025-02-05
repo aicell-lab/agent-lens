@@ -12,7 +12,7 @@
                 "JWT_SECRET": "1337",
             },
             "args": [
-                "start-server",
+                "local",
                 "--port=9527",
             ],
             "postDebugTask": "Stop",
@@ -28,7 +28,7 @@
                 "JWT_SECRET": "1337",
             },
             "args": [
-                "connect-server",
+                "remote",
                 "--workspace_name=agent-lens",
                 "--server_url=https://hypha.aicell.io"
             ],

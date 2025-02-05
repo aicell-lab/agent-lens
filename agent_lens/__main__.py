@@ -29,10 +29,12 @@ async def start_services(server):
     # await register_similarity_search_service.setup_service(server)
 
 
-def start_server(args):
+def run_locally(args):
     """
     Parse command-line arguments and start the Hypha server.
     """
+    # TODO: if server is running on {args.server_url}, then:
+    #   connect_server(args)
 
     dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'minio.env')
     load_dotenv(dotenv_path)
@@ -41,7 +43,7 @@ def start_server(args):
         sys.executable,
         "-m",
         "hypha.server",
-        f"--host={args.host}",
+        f"--host={args.server_url}",
         f"--port={args.port}",
         f"--public-base-url={args.public_base_url}",
         "--enable-s3",
@@ -55,7 +57,7 @@ def start_server(args):
     ]
     subprocess.run(command, check=True)
 
-    print(f"Hypha server started. Access at {args.host}:{args.port}/public/apps/microscope-control")
+    print(f"Hypha server started. Access at {args.server_url}:{args.port}/public/apps/microscope-control")
 
 
 def get_token(is_workspace=False):
@@ -101,16 +103,17 @@ def main():
     parser = argparse.ArgumentParser(description="Start the Hypha server")
     subparsers = parser.add_subparsers()
 
-    parser_start_server = subparsers.add_parser("start-server")
-    parser_start_server.add_argument("--host", type=str, default="localhost")
-    parser_start_server.add_argument("--port", type=int, default=9527)
-    parser_start_server.add_argument("--public-base-url", type=str, default="")
-    parser_start_server.set_defaults(func=start_server)
+    parser_local = subparsers.add_parser("local")
+    parser_local.add_argument("--server_url", type=str, default="localhost")
+    parser_local.add_argument("--port", type=int, default=9527)
+    parser_local.add_argument("--workspace_name", type=str, default=None, required=False)
+    parser_local.add_argument("--public-base-url", type=str, default="")
+    parser_local.set_defaults(func=run_locally)
 
-    parser_connect_server = subparsers.add_parser("connect-server")
-    parser_connect_server.add_argument("--server_url", type=str)
-    parser_connect_server.add_argument("--workspace_name", type=str, default=None, required=False)
-    parser_connect_server.set_defaults(func=start_connect_server)
+    parser_remote = subparsers.add_parser("remote")
+    parser_remote.add_argument("--server_url", type=str)
+    parser_remote.add_argument("--workspace_name", type=str, default=None, required=False)
+    parser_remote.set_defaults(func=start_connect_server)
 
     args = parser.parse_args()
     if hasattr(args, 'func'):
