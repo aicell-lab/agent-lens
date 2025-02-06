@@ -10,6 +10,7 @@ import os
 import asyncio
 from dotenv import load_dotenv
 from hypha_rpc import connect_to_server
+from hypha_rpc.sync import connect_to_server as sync_connect_to_server
 from agent_lens import (
     register_frontend_service,
     # register_sam_service,
@@ -33,8 +34,11 @@ def run_locally(args):
     """
     Parse command-line arguments and start the Hypha server.
     """
-    # TODO: if server is running on {args.server_url}, then:
-    #   connect_server(args)
+    try:
+        sync_connect_to_server(args.server_url)
+    except Exception as e:
+        print("=== Error starting Hypha server ===")
+        print(f"Error: {e}")
 
     dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'minio.env')
     load_dotenv(dotenv_path)
@@ -104,7 +108,7 @@ def main():
     subparsers = parser.add_subparsers()
 
     parser_local = subparsers.add_parser("local")
-    parser_local.add_argument("--server_url", type=str, default="localhost")
+    parser_local.add_argument("--server_url", type=str, default="127.0.0.1")
     parser_local.add_argument("--port", type=int, default=9527)
     parser_local.add_argument("--workspace_name", type=str, default=None, required=False)
     parser_local.add_argument("--public-base-url", type=str, default="")

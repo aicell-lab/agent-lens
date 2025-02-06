@@ -7,8 +7,6 @@ services:
     env_file:
       - ../minio.env
     command: server /data --console-address ":9001"
-    networks:
-      - hypha_services_network
   redis:
     image: redis/redis-stack:7.2.0-v13
     ports:
@@ -16,12 +14,6 @@ services:
     volumes:
       - redis-data:/data
     command: redis-stack-server --dir /data --port 6379 --bind 0.0.0.0 --appendonly yes --protected-mode no
-    networks:
-      - hypha_services_network
-
-networks:
-  hypha_services_network:
-    driver: bridge
 
 volumes:
   redis-data:
