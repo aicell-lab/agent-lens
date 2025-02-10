@@ -2,7 +2,7 @@
     "python.testing.unittestArgs": [
         "-v",
         "-s",
-        "./agent_lens",
+        "./agent_lens/tests",
         "-p",
         "test_*.py"
     ],

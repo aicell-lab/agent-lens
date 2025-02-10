@@ -31,7 +31,7 @@ def get_frontend_api():
     return serve_fastapi
 
 
-async def setup_service(server):
+async def setup_service(server, server_id="microscope-control"):
     """
     Set up the frontend service.
 
@@ -39,11 +39,11 @@ async def setup_service(server):
         server (Server): The server instance.
     """
     await server.register_service({
-            "id": "microscope-control",
+            "id": server_id,
             "name": "Microscope Control",
             "type": "asgi",
             "serve": get_frontend_api(),
             "config": {"visibility": "public"},
     })
-    
+
     print("Frontend service registered successfully.")
