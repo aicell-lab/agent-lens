@@ -20,7 +20,7 @@ class TorchConfig:
         self.preprocess = preprocess
 
 
-async def try_create_collection(artifact_manager, workspace):
+async def try_create_collection(artifact_manager, workspace, artifact_id):
     """
     Creates a vector collection in the artifact manager for storing image embeddings.
 
@@ -30,7 +30,7 @@ async def try_create_collection(artifact_manager, workspace):
     """
     await artifact_manager.create_vector_collection(
         workspace=workspace,
-        name="cell-images",
+        name=artifact_id,
         manifest={
             "name": "Cell images",
             "description": "Collection of cell images",
@@ -155,14 +155,14 @@ def make_thumbnail(image_data, size=(256, 256)):
     return img_str
 
 
-async def find_similar_cells(artifact_manager, torch_config, search_cell_image, workspace, top_k=5):
-    await try_create_collection(artifact_manager, workspace)
+async def find_similar_cells(artifact_manager, torch_config, search_cell_image, workspace, artifact_id, top_k=5):
+    await try_create_collection(artifact_manager, workspace, artifact_id)
     query_vector = image_to_vector(search_cell_image, torch_config)
-    return await artifact_manager.search_vectors(workspace, "cell-images", query_vector.tolist(), top_k)
+    return await artifact_manager.search_vectors(workspace, artifact_id, query_vector.tolist(), top_k)
 
 
-async def save_cell_images(artifact_manager, torch_config, cell_images, workspace, annotations=None):
-    await try_create_collection(artifact_manager, workspace)
+async def save_cell_images(artifact_manager, torch_config, cell_images, workspace, artifact_id, annotations=None):
+    await try_create_collection(artifact_manager, workspace, artifact_id)
     cell_image_vectors = images_to_vectors(cell_images, torch_config)
     annotations = annotations or ["" for _ in range(len(cell_images))]
     thumbnails = [make_thumbnail(cell_image) for cell_image in cell_images]
@@ -174,7 +174,11 @@ async def save_cell_images(artifact_manager, torch_config, cell_images, workspac
         }
         for cell_image_vector, annotation, thumbnail in vector_data
     ]
-    await artifact_manager.add_vectors(workspace, "cell-images", cell_vectors)
+    await artifact_manager.add_vectors(workspace, artifact_id, cell_vectors)
+    
+async def remove_vectors(artifact_manager, workspace, artifact_id):
+    await try_create_collection(artifact_manager, workspace, artifact_id)
+    await artifact_manager.remove_vectors(workspace, artifact_id)
 
 
 async def setup_service(server, service_id="similarity-search"):
@@ -193,7 +197,7 @@ async def setup_service(server, service_id="similarity-search"):
         "config": {"visibility": "public"},
         "find_similar_cells": partial(find_similar_cells, artifact_manager, torch_config),
         "save_cell_images": partial(save_cell_images, artifact_manager, torch_config),
-        "remove_vectors": partial(artifact_manager.remove_vectors, "cell-images"),
+        "remove_vectors": partial(remove_vectors, artifact_manager),
     })
     
     print("Similarity search service registered successfully.")

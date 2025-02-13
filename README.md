@@ -33,6 +33,13 @@
 
 ## Installation
 
+### Pre-requisites
+
+- Docker
+- Conda
+- NPM
+- Python 3.10
+
 ### Automatic Installation
 
 Run the following command to install the application and its dependencies automatically:
@@ -64,7 +71,7 @@ If you prefer to set up the application manually, follow the steps below:
     PERSONAL_TOKEN=<personal_workspace_token>
     ```
 
-  You can get the `agent-lens_workspace_token` and `personal_workspace_token` from [Hypha](https://hypha.aicell.io). The `JWT_SECRET` can be any integer, e.g. `1337`.
+  You can get the `agent-lens_workspace_token` and `personal_workspace_token` from [Hypha](https://hypha.aicell.io).
 
 4. **Install npm dependencies:**
     ```bash

@@ -63,7 +63,7 @@ const ImageDisplay = ({ appendLog, segmentService, microscopeControlService }) =
 
     const tileLayer = new TileLayer({
       source: new XYZ({
-        url: `https://hypha.aicell.io/squid-control/services/microscope_tile_service_test/get_tile_base64?channel_name=${channelName}&z={z}&x={x}&y={y}`,
+        url: `https://hypha.aicell.io/agent-lens/services/microscope-tile-service/get_tile_base64?channel_name=${channelName}&z={z}&x={x}&y={y}`,
         crossOrigin: 'anonymous',
         tileSize: 256,
         maxZoom: 10,

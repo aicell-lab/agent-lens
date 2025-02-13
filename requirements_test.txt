@@ -1,0 +1,6 @@
+-r requirements.txt
+pytest==8.2.2
+pytest-asyncio==0.23.7
+pillow==11.0.0
+torch==2.5.1
+clip @ git+https://github.com/openai/CLIP.git

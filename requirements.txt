@@ -6,8 +6,11 @@ torch==2.5.1
 # segment-anything==1.0
 # kaibu_utils==0.1.14
 httpx==0.28.1
-# requests==2.32.3
 python-dotenv==1.0.1
 fastapi==0.106.0
 aiobotocore==2.19.0
-clip @ git+https://github.com/openai/CLIP.git
+
+# Segmentation service (unused):
+# segment-anything==1.0
+# kaibu_utils==0.1.14
+# requests==2.32.3

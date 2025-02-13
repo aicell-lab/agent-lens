@@ -3,11 +3,11 @@
 # Create and activate conda environment
 echo "Creating and activating conda environment..."
 conda create -n agent-lens python=3.10.13 -y
-source activate agent-lens
+conda activate agent-lens
 
 # Install Python dependencies
 echo "Installing Python dependencies..."
-pip install -r requirements.txt
+pip install -r requirements_test.txt
 pip install -e .
 
 # Prompt user for secret tokens

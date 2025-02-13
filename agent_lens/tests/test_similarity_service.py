@@ -1,4 +1,4 @@
-import unittest
+import pytest
 import base64
 import io
 import os
@@ -10,7 +10,7 @@ from agent_lens import register_similarity_search_service
 
 dotenv.load_dotenv()
 
-class TestSimilaritySearchService(unittest.TestCase):
+class TestSimilaritySearchService:
     @staticmethod
     def _generate_random_image():
         image = Image.fromarray(np.random.randint(0, 256, (224, 224, 3), dtype=np.uint8))
@@ -26,39 +26,45 @@ class TestSimilaritySearchService(unittest.TestCase):
             
         return random_strings
 
-    async def test_find_similar_cells(self):
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_find_similar_cells():
         cell_images = [TestSimilaritySearchService._generate_random_image() for _ in range(10)]
         annotations = TestSimilaritySearchService._generate_random_strings(10)
+        token = os.getenv("TEST_TOKEN")
+        if not token:
+            raise EnvironmentError("TEST_TOKEN not found in environment variables")
         server = await connect_to_server({
             "server_url": "https://hypha.aicell.io",
-            "token": os.getenv("TEST_TOKEN")
+            "token": token
         })
         await register_similarity_search_service.setup_service(server, "similarity-search-test")
         similarity_service = await server.get_service("similarity-search-test")
         workspace = server.config.workspace
-        await similarity_service.remove_vectors(workspace)
+        await similarity_service.remove_vectors(workspace, "similarity-search-test")
         await similarity_service.save_cell_images(
             cell_images,
             workspace,
+            "similarity-search-test",
             annotations,
         )
-        query_image = self._generate_random_image()
+        query_image = TestSimilaritySearchService._generate_random_image()
         results = await similarity_service.find_similar_cells(
             query_image,
             workspace,
+            "similarity-search-test",
             top_k=5
         )
-        self.assertEqual(len(results), 5)
+        assert len(results) == 5
         for result in results:
-            self.assertIn("score", result)
-            self.assertIn("id", result)
-            self.assertIn("annotation", result)
-            self.assertIn("thumbnail", result)
-            self.assertIsInstance(result["score"], str)
-            self.assertIsInstance(result["id"], str)
-            self.assertIsInstance(result["annotation"], str)
-            self.assertIsInstance(result["thumbnail"], str)
-            self.assertIn(result["annotation"], annotations)
+            assert "score" in result
+            assert "id" in result
+            assert "annotation" in result
+            assert "thumbnail" in result
+            assert isinstance(result["score"], str)
+            assert isinstance(result["id"], str)
+            assert isinstance(result["annotation"], str)
+            assert isinstance(result["thumbnail"], str)
+            assert result["annotation"] in annotations
             score = float(result["score"])
-            self.assertGreaterEqual(score, 0)
-            self.assertLessEqual(score, 1)
+            assert 0 <= score <= 1
