@@ -21,5 +21,7 @@ jobs:
         pip install -e .
     
     - name: Run tests
+      env:
+        TEST_TOKEN: ${{ secrets.TEST_TOKEN }}
       run: |
         pytest ./agent_lens/tests
