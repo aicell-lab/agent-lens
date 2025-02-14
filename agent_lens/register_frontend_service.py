@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+
 def get_frontend_api():
     """
     Create the FastAPI application for serving the frontend.
@@ -38,12 +39,14 @@ async def setup_service(server, server_id="microscope-control"):
     Args:
         server (Server): The server instance.
     """
-    await server.register_service({
+    await server.register_service(
+        {
             "id": server_id,
             "name": "Microscope Control",
             "type": "asgi",
             "serve": get_frontend_api(),
             "config": {"visibility": "public"},
-    })
+        }
+    )
 
     print("Frontend service registered successfully.")
