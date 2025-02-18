@@ -7,6 +7,7 @@ and handling file uploads and downloads.
 import httpx
 from hypha_rpc.rpc import RemoteException
 
+
 class AgentLensArtifactManager:
     """
     Manages artifacts for the application.
@@ -51,7 +52,9 @@ class AgentLensArtifactManager:
         """
         return f"{workspace}/{self._artifact_alias(name)}"
 
-    async def create_vector_collection(self, workspace, name, manifest, config, overwrite=False, exists_ok=False):
+    async def create_vector_collection(
+        self, workspace, name, manifest, config, overwrite=False, exists_ok=False
+    ):
         """
         Create a vector collection.
 
@@ -69,7 +72,7 @@ class AgentLensArtifactManager:
                 type="vector-collection",
                 manifest=manifest,
                 config=config,
-                overwrite=overwrite
+                overwrite=overwrite,
             )
         except RemoteException as e:
             if not exists_ok:
@@ -85,10 +88,7 @@ class AgentLensArtifactManager:
             vectors (list): The vectors to add.
         """
         art_id = self._artifact_id(workspace, coll_name)
-        await self._svc.add_vectors(
-            artifact_id=art_id,
-            vectors=vectors
-        )
+        await self._svc.add_vectors(artifact_id=art_id, vectors=vectors)
         await self._svc.commit(art_id)
 
     async def search_vectors(self, workspace, coll_name, vector, top_k=None):
@@ -106,9 +106,7 @@ class AgentLensArtifactManager:
         """
         art_id = self._artifact_id(workspace, coll_name)
         return await self._svc.search_vectors(
-            artifact_id=art_id,
-            query={"cell_image_vector": vector},
-            limit=top_k
+            artifact_id=art_id, query={"cell_image_vector": vector}, limit=top_k
         )
 
     async def add_file(self, workspace, coll_name, file_content, file_path):
@@ -142,13 +140,13 @@ class AgentLensArtifactManager:
         """
         art_id = self._artifact_id(workspace, coll_name)
         get_url = await self._svc.get_file(art_id, file_path)
-        
+
         async with httpx.AsyncClient() as client:
             response = await client.get(get_url, timeout=500)
         response.raise_for_status()
-        
+
         return response.content
-    
+
     async def remove_vectors(self, workspace, coll_name, vector_ids=None):
         """
         Clear the vectors in the collection.

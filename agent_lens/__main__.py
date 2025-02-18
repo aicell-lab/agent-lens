@@ -3,6 +3,7 @@ This script starts the Hypha server with specified command-line arguments and en
 It loads environment variables from a .env file, parses command-line arguments, and constructs a command
 to run the Hypha server with the specified options.
 """
+
 import sys
 import subprocess
 import argparse
@@ -34,7 +35,7 @@ def start_server(args):
     Parse command-line arguments and start the Hypha server.
     """
 
-    dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'minio.env')
+    dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "minio.env")
     load_dotenv(dotenv_path)
 
     command = [
@@ -51,11 +52,13 @@ def start_server(args):
         f"--endpoint-url-public={os.getenv('MINIO_SERVER_URL')}",
         "--s3-admin-type=minio",
         "--redis-uri=redis://localhost:6379/0",
-        "--startup-functions=agent_lens.__main__:start_services"
+        "--startup-functions=agent_lens.__main__:start_services",
     ]
     subprocess.run(command, check=True)
 
-    print(f"Hypha server started. Access at {args.host}:{args.port}/public/apps/microscope-control")
+    print(
+        f"Hypha server started. Access at {args.host}:{args.port}/public/apps/microscope-control"
+    )
 
 
 def get_token(is_workspace=False):
@@ -72,7 +75,7 @@ def get_token(is_workspace=False):
 
     if is_workspace:
         return os.environ.get("WORKSPACE_TOKEN")
-    
+
     return os.environ.get("PERSONAL_TOKEN")
 
 
@@ -80,16 +83,17 @@ async def connect_server(args):
     is_workspace = args.workspace_name is not None
     token = get_token(is_workspace)
 
-    server = await connect_to_server({
-        "server_url": args.server_url,
-        "token": token,
-        "method_timeout": 500,
-        "workspace": args.workspace_name,
-    })
-    
+    server = await connect_to_server(
+        {
+            "server_url": args.server_url,
+            "token": token,
+            "method_timeout": 500,
+            "workspace": args.workspace_name,
+        }
+    )
+
     await start_services(server)
-    
-    
+
 
 def start_connect_server(args):
     loop = asyncio.get_event_loop()
@@ -109,11 +113,13 @@ def main():
 
     parser_connect_server = subparsers.add_parser("connect-server")
     parser_connect_server.add_argument("--server_url", type=str)
-    parser_connect_server.add_argument("--workspace_name", type=str, default=None, required=False)
+    parser_connect_server.add_argument(
+        "--workspace_name", type=str, default=None, required=False
+    )
     parser_connect_server.set_defaults(func=start_connect_server)
 
     args = parser.parse_args()
-    if hasattr(args, 'func'):
+    if hasattr(args, "func"):
         args.func(args)
     else:
         parser.print_help()

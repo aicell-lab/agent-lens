@@ -12,6 +12,7 @@ import clip
 from PIL import Image
 from agent_lens.artifact_manager import AgentLensArtifactManager
 
+
 class TorchConfig:
     def __init__(self):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -102,11 +103,18 @@ def image_to_vector(image_data, torch_config, length=512):
     Returns:
         ndarray: The image vector.
     """
-    
-    image_tensor = get_image_tensor(image_data, torch_config.preprocess, torch_config.device)
-    query_vector = process_image_tensor(image_tensor, torch_config.model).reshape(1, length).astype(np.float32)
+
+    image_tensor = get_image_tensor(
+        image_data, torch_config.preprocess, torch_config.device
+    )
+    query_vector = (
+        process_image_tensor(image_tensor, torch_config.model)
+        .reshape(1, length)
+        .astype(np.float32)
+    )
 
     return query_vector.flatten()
+
 
 def images_to_vectors(images, torch_config):
     """
@@ -122,6 +130,7 @@ def images_to_vectors(images, torch_config):
         list: The image vectors.
     """
     return [image_to_vector(image, torch_config).tolist() for image in images]
+
 
 def decode_base64_image(image_data):
     """
@@ -155,19 +164,31 @@ def make_thumbnail(image_data, size=(256, 256)):
     return img_str
 
 
-async def find_similar_cells(artifact_manager, torch_config, search_cell_image, workspace, artifact_id, top_k=5):
+async def find_similar_cells(
+    artifact_manager, torch_config, search_cell_image, workspace, artifact_id, top_k=5
+):
     await try_create_collection(artifact_manager, workspace, artifact_id)
     query_vector = image_to_vector(search_cell_image, torch_config)
-    return await artifact_manager.search_vectors(workspace, artifact_id, query_vector.tolist(), top_k)
+    return await artifact_manager.search_vectors(
+        workspace, artifact_id, query_vector.tolist(), top_k
+    )
 
 
-async def save_cell_images(artifact_manager, torch_config, cell_images, workspace, artifact_id, annotations=None):
+async def save_cell_images(
+    artifact_manager,
+    torch_config,
+    cell_images,
+    workspace,
+    artifact_id,
+    annotations=None,
+):
     await try_create_collection(artifact_manager, workspace, artifact_id)
     cell_image_vectors = images_to_vectors(cell_images, torch_config)
     annotations = annotations or ["" for _ in range(len(cell_images))]
     thumbnails = [make_thumbnail(cell_image) for cell_image in cell_images]
     vector_data = zip(cell_image_vectors, annotations, thumbnails)
-    cell_vectors = [{
+    cell_vectors = [
+        {
             "cell_image_vector": cell_image_vector,
             "annotation": annotation,
             "thumbnail": thumbnail,
@@ -175,7 +196,8 @@ async def save_cell_images(artifact_manager, torch_config, cell_images, workspac
         for cell_image_vector, annotation, thumbnail in vector_data
     ]
     await artifact_manager.add_vectors(workspace, artifact_id, cell_vectors)
-    
+
+
 async def remove_vectors(artifact_manager, workspace, artifact_id):
     await try_create_collection(artifact_manager, workspace, artifact_id)
     await artifact_manager.remove_vectors(workspace, artifact_id)
@@ -192,13 +214,18 @@ async def setup_service(server, service_id="similarity-search"):
     await artifact_manager.connect_server(server)
     torch_config = TorchConfig()
 
-    await server.register_service({
-        "id": service_id,
-        "config": {"visibility": "public"},
-        "find_similar_cells": partial(find_similar_cells, artifact_manager, torch_config),
-        "save_cell_images": partial(save_cell_images, artifact_manager, torch_config),
-        "remove_vectors": partial(remove_vectors, artifact_manager),
-    })
-    
-    print("Similarity search service registered successfully.")
+    await server.register_service(
+        {
+            "id": service_id,
+            "config": {"visibility": "public"},
+            "find_similar_cells": partial(
+                find_similar_cells, artifact_manager, torch_config
+            ),
+            "save_cell_images": partial(
+                save_cell_images, artifact_manager, torch_config
+            ),
+            "remove_vectors": partial(remove_vectors, artifact_manager),
+        }
+    )
 
+    print("Similarity search service registered successfully.")
