@@ -17,6 +17,7 @@ jobs:
     
     - name: Install dependencies
       run: |
+        npm install vite
         pip install -r requirements_test.txt
         pip install -e .
         npm run build --prefix frontend
