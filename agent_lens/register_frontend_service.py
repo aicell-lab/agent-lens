@@ -54,8 +54,15 @@ def get_frontend_api():
     # New endpoint to serve tiles from the new TileManager
     @app.get("/tile")
     async def tile_endpoint(channel_name: str = DEFAULT_CHANNEL, z: int = 0, x: int = 0, y: int = 0):
-        tile_b64 = await tile_manager.get_tile_base64(channel_name, z, x, y)
-        return tile_b64
+        try:
+            tile_b64 = await tile_manager.get_tile_base64(channel_name, z, x, y)
+            return tile_b64
+        except FileNotFoundError as e:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=404,
+                content={"message": str(e), "error": "Tile not found"}
+            )
 
     @app.get("/datasets")
     async def get_datasets():
@@ -280,6 +287,37 @@ def get_frontend_api():
                 "timepoints": []
             }
 
+    @app.get("/tile-dimensions")
+    async def tile_dimensions_endpoint(dataset_id: str = None, timepoint: str = None, channel_name: str = DEFAULT_CHANNEL, z: int = 0):
+        """
+        Endpoint to get the dimensions of tiles at a specific zoom level.
+        This is especially useful for higher zoom levels (4-5) where tile sizes vary.
+
+        Args:
+            dataset_id (str, optional): The ID of the dataset for timepoint-based requests.
+            timepoint (str, optional): The timepoint for timepoint-based requests.
+            channel_name (str): The channel name.
+            z (int): The zoom level.
+
+        Returns:
+            dict: Object containing the width and height of tiles at the given zoom level.
+        """
+        try:
+            dimensions = await tile_manager.get_tile_dimensions(channel_name, z)
+            return {
+                "success": True,
+                "dimensions": dimensions
+            }
+        except Exception as e:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "success": False,
+                    "message": f"Error getting tile dimensions: {str(e)}"
+                }
+            )
+
     @app.get("/tile-for-timepoint")
     async def tile_for_timepoint(dataset_id: str, timepoint: str, channel_name: str = DEFAULT_CHANNEL, z: int = 0, x: int = 0, y: int = 0):
         """
@@ -319,7 +357,14 @@ def get_frontend_api():
                             compressed_data = response.content
                             decompressed_data = tile_manager.compressor.decode(compressed_data)
                             tile_data = np.frombuffer(decompressed_data, dtype=np.uint8)
-                            tile_data = tile_data.reshape((tile_manager.tile_size, tile_manager.tile_size))
+                            
+                            # For higher zoom levels (z >= 4), we need to handle variable tile sizes
+                            if z <= 3:
+                                tile_data = tile_data.reshape((tile_manager.tile_size, tile_manager.tile_size))
+                            else:
+                                # For higher scales, determine dimensions from data
+                                dimension = int(np.sqrt(len(tile_data)))
+                                tile_data = tile_data.reshape((dimension, dimension))
                             
                             # Convert to PNG
                             image = Image.fromarray(tile_data)
@@ -333,25 +378,27 @@ def get_frontend_api():
                             return base64.b64encode(response.content).decode('utf-8')
                     except Exception as e:
                         print(f"Error processing tile: {e}")
-                        # Return a blank tile
-                        blank_image = Image.new("L", (tile_manager.tile_size, tile_manager.tile_size), color=0)
-                        buffer = io.BytesIO()
-                        blank_image.save(buffer, format="PNG")
-                        return base64.b64encode(buffer.getvalue()).decode('utf-8')
+                        from fastapi.responses import JSONResponse
+                        return JSONResponse(
+                            status_code=500,
+                            content={"message": f"Error processing tile: {str(e)}", "error": "Processing error"}
+                        )
                 else:
                     print(f"Failed to fetch tile: {response.status_code}")
-                    blank_image = Image.new("L", (tile_manager.tile_size, tile_manager.tile_size), color=0)
-                    buffer = io.BytesIO()
-                    blank_image.save(buffer, format="PNG")
-                    return base64.b64encode(buffer.getvalue()).decode('utf-8')
+                    from fastapi.responses import JSONResponse
+                    return JSONResponse(
+                        status_code=404,
+                        content={"message": f"Tile not found at {file_path}", "error": "Tile not found"}
+                    )
         except Exception as e:
             print(f"Error fetching tile for timepoint: {e}")
             import traceback
             print(traceback.format_exc())
-            blank_image = Image.new("L", (tile_manager.tile_size, tile_manager.tile_size), color=0)
-            buffer = io.BytesIO()
-            blank_image.save(buffer, format="PNG")
-            return base64.b64encode(buffer.getvalue()).decode('utf-8')
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=404,
+                content={"message": f"Error fetching tile: {str(e)}", "error": "Tile not found"}
+            )
 
     async def serve_fastapi(args):
         await app(args["scope"], args["receive"], args["send"])
