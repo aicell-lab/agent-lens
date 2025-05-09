@@ -18,6 +18,7 @@ from PIL import Image
 from skimage import exposure, util, color
 import sys
 import asyncio
+import time
 
 # Configure logging
 import logging
@@ -54,6 +55,58 @@ artifact_manager_instance = AgentLensArtifactManager()
 SERVER_URL = "https://hypha.aicell.io"
 WORKSPACE_TOKEN = os.getenv("WORKSPACE_TOKEN")
 
+# Create a tile processing semaphore to limit concurrent processing
+TILE_CONCURRENCY_LIMIT = 20  # Maximum number of concurrent tile processing operations
+tile_semaphore = asyncio.Semaphore(TILE_CONCURRENCY_LIMIT)
+
+# Create a response cache to avoid reprocessing identical requests
+tile_response_cache = {}
+CACHE_SIZE_LIMIT = 500  # Maximum number of cached responses
+CACHE_EXPIRY = 300  # Cache expiry in seconds (5 minutes)
+
+# Track when cached items were added
+cache_timestamps = {}
+
+async def cleanup_cache():
+    """Periodically clean up expired items from the response cache"""
+    while True:
+        try:
+            current_time = time.time()
+            # Find keys to remove
+            keys_to_remove = [
+                key for key, timestamp in cache_timestamps.items() 
+                if current_time - timestamp > CACHE_EXPIRY
+            ]
+            
+            # Remove expired items
+            for key in keys_to_remove:
+                if key in tile_response_cache:
+                    del tile_response_cache[key]
+                if key in cache_timestamps:
+                    del cache_timestamps[key]
+                    
+            # If still too many items, remove oldest
+            if len(tile_response_cache) > CACHE_SIZE_LIMIT:
+                # Sort by timestamp
+                oldest_keys = sorted(
+                    cache_timestamps.keys(),
+                    key=lambda k: cache_timestamps.get(k, 0)
+                )[:len(tile_response_cache) - CACHE_SIZE_LIMIT]
+                
+                # Remove oldest
+                for key in oldest_keys:
+                    if key in tile_response_cache:
+                        del tile_response_cache[key]
+                    if key in cache_timestamps:
+                        del cache_timestamps[key]
+            
+            logger.info(f"Cache cleanup: {len(tile_response_cache)} items remaining")
+        except Exception as e:
+            logger.error(f"Error in cache cleanup: {e}")
+            
+        # Run every minute
+        await asyncio.sleep(60)
+
 async def get_artifact_manager():
     """Get a new connection to the artifact manager."""
     api = await connect_to_server(
@@ -75,83 +128,31 @@ def get_frontend_api():
     assets_dir = os.path.join(dist_dir, "assets")
     app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
+    # Start the cache cleanup task when the app starts
+    @app.on_event("startup")
+    async def startup_event():
+        # Start the cache cleanup task
+        asyncio.create_task(cleanup_cache())
+
     @app.get("/", response_class=HTMLResponse)
     async def root():
         return FileResponse(os.path.join(dist_dir, "index.html"))
 
-    # Updated endpoint to serve tiles using ZarrTileManager
-    @app.get("/tile")
-    async def tile_endpoint(
-        channel_name: str = DEFAULT_CHANNEL, 
-        z: int = 0, 
-        x: int = 0, 
-        y: int = 0,
-        dataset_id: str = ARTIFACT_ALIAS,
-        timestamp: str = "2025-04-29_16-38-27",  # Default timestamp folder
-        # New parameters for image processing settings
-        contrast_settings: str = None,
-        brightness_settings: str = None,
-        threshold_settings: str = None,
-        color_settings: str = None,
-        priority: int = 10  # Default priority (lower is higher priority)
+    # Updated tile processing helper function to handle image manipulation
+    async def process_tile_data(
+        tile_data, 
+        channel_key, 
+        contrast_dict={}, 
+        brightness_dict={}, 
+        threshold_dict={}, 
+        color_dict={}
     ):
-        """
-        Endpoint to serve tiles with customizable image processing settings.
-        Now uses Zarr-based tile access for better performance.
-        
-        Args:
-            channel_name (str): The channel name to retrieve
-            z (int): Zoom level
-            x (int): X coordinate
-            y (int): Y coordinate
-            dataset_id (str): The dataset ID (defaults to global ARTIFACT_ALIAS)
-            timestamp (str): The timestamp folder name (defaults to "2025-04-29_16-38-27")
-            contrast_settings (str, optional): JSON string with contrast settings
-            brightness_settings (str, optional): JSON string with brightness settings
-            threshold_settings (str, optional): JSON string with min/max threshold settings
-            color_settings (str, optional): JSON string with color settings
-            priority (int, optional): Priority level for tile loading (lower is higher priority)
-        
-        Returns:
-            str: Base64 encoded tile image
-        """
-        import json
-        
+        """Process tile data with the specified settings - extracted to reduce code duplication"""
         try:
-            # Queue the tile request with the specified priority
-            # This allows the frontend to prioritize visible tiles
-            await tile_manager.request_tile(dataset_id, timestamp, channel_name, z, x, y, priority)
-            
-            # Get the raw tile data as numpy array using ZarrTileManager
-            # ZarrTileManager will handle URL expiration internally
-            tile_data = await tile_manager.get_tile_np_data(dataset_id, timestamp, channel_name, z, x, y)
-            
-            # Parse settings from JSON strings if provided
-            try:
-                contrast_dict = json.loads(contrast_settings) if contrast_settings else {}
-                brightness_dict = json.loads(brightness_settings) if brightness_settings else {}
-                threshold_dict = json.loads(threshold_settings) if threshold_settings else {}
-                color_dict = json.loads(color_settings) if color_settings else {}
-            except json.JSONDecodeError as e:
-                logger.error(f"Error parsing settings JSON: {e}")
-                contrast_dict = {}
-                brightness_dict = {}
-                threshold_dict = {}
-                color_dict = {}
-            
-            # Channel mapping to keys
-            channel_key = None
-            for key, name in {
-                '0': 'BF_LED_matrix_full',
-                '11': 'Fluorescence_405_nm_Ex', 
-                '12': 'Fluorescence_488_nm_Ex',
-                '14': 'Fluorescence_561_nm_Ex',
-                '13': 'Fluorescence_638_nm_Ex'
-            }.items():
-                if name == channel_name:
-                    channel_key = key
-                    break
-            
+            # Check if tile data is valid
+            if tile_data is None or tile_data.size == 0:
+                return Image.new("L", (tile_manager.tile_size, tile_manager.tile_size), color=0)
+                
             # If channel key is found and we have custom settings, apply processing
             if channel_key and tile_data is not None and len(tile_data.shape) == 2:
                 # Check if any non-default settings are provided
@@ -169,7 +170,7 @@ def get_frontend_api():
                 # If using default settings, return original image without normalization
                 if not has_custom_settings:
                     # For grayscale, just use the original image
-                    pil_image = Image.fromarray(tile_data)
+                    return Image.fromarray(tile_data)
                 else:
                     # Get channel-specific settings with defaults
                     contrast = float(contrast_dict.get(channel_key, 0.03))  # Default CLAHE clip limit
@@ -212,25 +213,126 @@ def get_frontend_api():
                         rgb_image[..., 2] = enhanced * (color[2] / 255.0)  # B
                         
                         # Convert to PIL image
-                        pil_image = Image.fromarray(rgb_image)
+                        return Image.fromarray(rgb_image)
                     else:
                         # For grayscale, just use the enhanced image
-                        pil_image = Image.fromarray(enhanced)
+                        return Image.fromarray(enhanced)
             else:
                 # If no processing applied, convert directly to PIL image
-                pil_image = Image.fromarray(tile_data)
-            
-            # Convert to base64
-            buffer = io.BytesIO()
-            pil_image.save(buffer, format="PNG")
-            return base64.b64encode(buffer.getvalue()).decode('utf-8')
-            
+                return Image.fromarray(tile_data)
         except Exception as e:
-            logger.error(f"Error in tile_endpoint: {e}")
-            blank_image = Image.new("L", (tile_manager.tile_size, tile_manager.tile_size), color=0)
-            buffer = io.BytesIO()
-            blank_image.save(buffer, format="PNG")
-            return base64.b64encode(buffer.getvalue()).decode('utf-8')
+            logger.error(f"Error in process_tile_data: {e}")
+            return Image.new("L", (tile_manager.tile_size, tile_manager.tile_size), color=0)
+
+    # Updated endpoint to serve tiles using ZarrTileManager
+    @app.get("/tile")
+    async def tile_endpoint(
+        channel_name: str = DEFAULT_CHANNEL, 
+        z: int = 0, 
+        x: int = 0, 
+        y: int = 0,
+        dataset_id: str = ARTIFACT_ALIAS,
+        timestamp: str = "2025-04-29_16-38-27",  # Default timestamp folder
+        # New parameters for image processing settings
+        contrast_settings: str = None,
+        brightness_settings: str = None,
+        threshold_settings: str = None,
+        color_settings: str = None,
+        priority: int = 10  # Default priority (lower is higher priority)
+    ):
+        """
+        Endpoint to serve tiles with customizable image processing settings.
+        Now uses Zarr-based tile access for better performance.
+        
+        Args:
+            channel_name (str): The channel name to retrieve
+            z (int): Zoom level
+            x (int): X coordinate
+            y (int): Y coordinate
+            dataset_id (str): The dataset ID (defaults to global ARTIFACT_ALIAS)
+            timestamp (str): The timestamp folder name (defaults to "2025-04-29_16-38-27")
+            contrast_settings (str, optional): JSON string with contrast settings
+            brightness_settings (str, optional): JSON string with brightness settings
+            threshold_settings (str, optional): JSON string with min/max threshold settings
+            color_settings (str, optional): JSON string with color settings
+            priority (int, optional): Priority level for tile loading (lower is higher priority)
+        
+        Returns:
+            str: Base64 encoded tile image
+        """
+        import json
+        
+        # Create a cache key for this specific request
+        cache_key = f"tile:{dataset_id}:{timestamp}:{channel_name}:{z}:{x}:{y}:{contrast_settings}:{brightness_settings}:{threshold_settings}:{color_settings}"
+        
+        # Check if we have a cached response
+        if cache_key in tile_response_cache:
+            return tile_response_cache[cache_key]
+            
+        # Use semaphore to limit concurrent processing
+        async with tile_semaphore:
+            try:
+                # Queue the tile request with the specified priority
+                # This allows the frontend to prioritize visible tiles
+                await tile_manager.request_tile(dataset_id, timestamp, channel_name, z, x, y, priority)
+                
+                # Get the raw tile data as numpy array using ZarrTileManager
+                # ZarrTileManager will handle URL expiration internally
+                tile_data = await tile_manager.get_tile_np_data(dataset_id, timestamp, channel_name, z, x, y)
+                
+                # Parse settings from JSON strings if provided
+                try:
+                    contrast_dict = json.loads(contrast_settings) if contrast_settings else {}
+                    brightness_dict = json.loads(brightness_settings) if brightness_settings else {}
+                    threshold_dict = json.loads(threshold_settings) if threshold_settings else {}
+                    color_dict = json.loads(color_settings) if color_settings else {}
+                except json.JSONDecodeError as e:
+                    logger.error(f"Error parsing settings JSON: {e}")
+                    contrast_dict = {}
+                    brightness_dict = {}
+                    threshold_dict = {}
+                    color_dict = {}
+                
+                # Channel mapping to keys
+                channel_key = None
+                for key, name in {
+                    '0': 'BF_LED_matrix_full',
+                    '11': 'Fluorescence_405_nm_Ex', 
+                    '12': 'Fluorescence_488_nm_Ex',
+                    '14': 'Fluorescence_561_nm_Ex',
+                    '13': 'Fluorescence_638_nm_Ex'
+                }.items():
+                    if name == channel_name:
+                        channel_key = key
+                        break
+                
+                # Process the tile with any requested image enhancements
+                pil_image = await process_tile_data(
+                    tile_data,
+                    channel_key,
+                    contrast_dict,
+                    brightness_dict,
+                    threshold_dict,
+                    color_dict
+                )
+                
+                # Convert to base64
+                buffer = io.BytesIO()
+                pil_image.save(buffer, format="PNG")
+                response = base64.b64encode(buffer.getvalue()).decode('utf-8')
+                
+                # Cache the response
+                tile_response_cache[cache_key] = response
+                cache_timestamps[cache_key] = time.time()
+                
+                return response
+                
+            except Exception as e:
+                logger.error(f"Error in tile_endpoint: {e}")
+                blank_image = Image.new("L", (tile_manager.tile_size, tile_manager.tile_size), color=0)
+                buffer = io.BytesIO()
+                blank_image.save(buffer, format="PNG")
+                return base64.b64encode(buffer.getvalue()).decode('utf-8')
 
     # Updated endpoint to serve merged tiles
     @app.get("/merged-tiles")
@@ -269,221 +371,242 @@ def get_frontend_api():
             str: Base64 encoded merged tile image
         """
         import json
+        import time
         
-        channel_keys = [int(key) for key in channels.split(',') if key]
+        # Create a cache key for this specific request
+        cache_key = f"merged:{dataset_id}:{timepoint}:{channels}:{z}:{x}:{y}:{contrast_settings}:{brightness_settings}:{threshold_settings}:{color_settings}"
         
-        if not channel_keys:
-            # Return a blank tile if no channels are specified
-            blank_image = Image.new("RGB", (tile_manager.tile_size, tile_manager.tile_size), color=(0, 0, 0))
-            buffer = io.BytesIO()
-            blank_image.save(buffer, format="PNG")
-            return base64.b64encode(buffer.getvalue()).decode('utf-8')
+        # Check if we have a cached response
+        if cache_key in tile_response_cache:
+            return tile_response_cache[cache_key]
         
-        # Default channel colors (RGB format)
-        default_channel_colors = {
-            0: None,  # Brightfield - grayscale, no color overlay
-            11: (153, 85, 255),  # 405nm - violet
-            12: (34, 255, 34),   # 488nm - green
-            14: (255, 85, 85),   # 561nm - red-orange 
-            13: (255, 0, 0)      # 638nm - deep red
-        }
-        
-        # Parse settings from JSON strings if provided
-        try:
-            contrast_dict = json.loads(contrast_settings) if contrast_settings else {}
-            brightness_dict = json.loads(brightness_settings) if brightness_settings else {}
-            threshold_dict = json.loads(threshold_settings) if threshold_settings else {}
-            color_dict = json.loads(color_settings) if color_settings else {}
-        except json.JSONDecodeError as e:
-            logger.error(f"Error parsing settings JSON: {e}")
-            contrast_dict = {}
-            brightness_dict = {}
-            threshold_dict = {}
-            color_dict = {}
-        
-        # Check if any custom settings are provided
-        has_custom_settings = False
-        for channel_key in channel_keys:
-            channel_key_str = str(channel_key)
-            if channel_key_str in contrast_dict and contrast_dict[channel_key_str] != 0.03:
-                has_custom_settings = True
-            if channel_key_str in brightness_dict and brightness_dict[channel_key_str] != 1.0:
-                has_custom_settings = True
-            if channel_key_str in threshold_dict:
-                has_custom_settings = True
-            # Color is expected for fluorescence channels, so only consider it non-default if changed
-            if channel_key != 0 and channel_key_str in color_dict and tuple(color_dict[channel_key_str]) != default_channel_colors.get(channel_key):
-                has_custom_settings = True
-        
-        # Channel names mapping
-        channel_names = {
-            0: 'BF_LED_matrix_full',
-            11: 'Fluorescence_405_nm_Ex', 
-            12: 'Fluorescence_488_nm_Ex',
-            14: 'Fluorescence_561_nm_Ex',
-            13: 'Fluorescence_638_nm_Ex'
-        }
-        
-        # Get tiles for each channel using ZarrTileManager
-        channel_tiles = []
-        for channel_key in channel_keys:
-            channel_name = channel_names.get(channel_key, DEFAULT_CHANNEL)
+        # Use semaphore to limit concurrent processing
+        async with tile_semaphore:
+            channel_keys = [int(key) for key in channels.split(',') if key]
             
+            if not channel_keys:
+                # Return a blank tile if no channels are specified
+                blank_image = Image.new("RGB", (tile_manager.tile_size, tile_manager.tile_size), color=(0, 0, 0))
+                buffer = io.BytesIO()
+                blank_image.save(buffer, format="PNG")
+                response = base64.b64encode(buffer.getvalue()).decode('utf-8')
+                tile_response_cache[cache_key] = response
+                cache_timestamps[cache_key] = time.time()
+                return response
+            
+            # Default channel colors (RGB format)
+            default_channel_colors = {
+                0: None,  # Brightfield - grayscale, no color overlay
+                11: (153, 85, 255),  # 405nm - violet
+                12: (34, 255, 34),   # 488nm - green
+                14: (255, 85, 85),   # 561nm - red-orange 
+                13: (255, 0, 0)      # 638nm - deep red
+            }
+            
+            # Parse settings from JSON strings if provided
             try:
-                # Queue the tile request with the specified priority
-                # This allows the frontend to prioritize visible tiles
-                await tile_manager.request_tile(dataset_id, timepoint, channel_name, z, x, y, priority)
-                
-                # Get tile from Zarr store - ZarrTileManager will handle URL expiration internally
-                tile_data = await tile_manager.get_tile_np_data(dataset_id, timepoint, channel_name, z, x, y)
-                
-                # Ensure the tile data is properly shaped (check if empty/None)
-                if tile_data is None or tile_data.size == 0:
-                    # Create a blank tile if we couldn't get data
-                    tile_data = np.zeros((tile_manager.tile_size, tile_manager.tile_size), dtype=np.uint8)
-                
-                channel_tiles.append((tile_data, channel_key))
-            except Exception as e:
-                logger.error(f"Error getting tile for channel {channel_name}: {e}")
-                # Use blank tile on error
-                blank_tile = np.zeros((tile_manager.tile_size, tile_manager.tile_size), dtype=np.uint8)
-                channel_tiles.append((blank_tile, channel_key))
-        
-        # Create an RGB image to merge the channels
-        merged_image = np.zeros((tile_manager.tile_size, tile_manager.tile_size, 3), dtype=np.float32)
-        
-        # Check if brightfield channel is included
-        has_brightfield = 0 in [ch_key for _, ch_key in channel_tiles]
-        
-        # If using default settings and has brightfield, start with that
-        if not has_custom_settings and has_brightfield:
-            # Find the brightfield data
-            for tile_data, channel_key in channel_tiles:
-                if channel_key == 0:
-                    # Create RGB by copying the original grayscale data to all channels
-                    bf_data = tile_data.astype(np.float32) / 255.0  # Normalize to 0-1
-                    merged_image = np.stack([bf_data, bf_data, bf_data], axis=2)
+                contrast_dict = json.loads(contrast_settings) if contrast_settings else {}
+                brightness_dict = json.loads(brightness_settings) if brightness_settings else {}
+                threshold_dict = json.loads(threshold_settings) if threshold_settings else {}
+                color_dict = json.loads(color_settings) if color_settings else {}
+            except json.JSONDecodeError as e:
+                logger.error(f"Error parsing settings JSON: {e}")
+                contrast_dict = {}
+                brightness_dict = {}
+                threshold_dict = {}
+                color_dict = {}
             
-            # Add original fluorescence channels with default colors
-            for tile_data, channel_key in channel_tiles:
-                if channel_key != 0:  # Skip brightfield
-                    color = default_channel_colors.get(channel_key)
-                    if color:
-                        # Normalize the data
-                        normalized = tile_data.astype(np.float32) / 255.0
-                        
-                        # Create color overlay
-                        colored_channel = np.zeros_like(merged_image)
-                        colored_channel[..., 0] = normalized * (color[0] / 255.0)  # R
-                        colored_channel[..., 1] = normalized * (color[1] / 255.0)  # G
-                        colored_channel[..., 2] = normalized * (color[2] / 255.0)  # B
-                        
-                        # Screen blend mode for better visibility
-                        merged_image = 1.0 - (1.0 - merged_image) * (1.0 - colored_channel)
-            logger.info(f"Merged image: {merged_image.shape}, all channels: {channel_tiles}")
-            # Convert back to 8-bit for display
-            merged_image = util.img_as_ubyte(merged_image)
-        else:
-            # Apply custom settings to each channel
-            for tile_data, channel_key in channel_tiles:
-                # Apply image processing based on settings for this channel
+            # Check if any custom settings are provided
+            has_custom_settings = False
+            for channel_key in channel_keys:
                 channel_key_str = str(channel_key)
+                if channel_key_str in contrast_dict and contrast_dict[channel_key_str] != 0.03:
+                    has_custom_settings = True
+                if channel_key_str in brightness_dict and brightness_dict[channel_key_str] != 1.0:
+                    has_custom_settings = True
+                if channel_key_str in threshold_dict:
+                    has_custom_settings = True
+                # Color is expected for fluorescence channels, so only consider it non-default if changed
+                if channel_key != 0 and channel_key_str in color_dict and tuple(color_dict[channel_key_str]) != default_channel_colors.get(channel_key):
+                    has_custom_settings = True
+            
+            # Channel names mapping
+            channel_names = {
+                0: 'BF_LED_matrix_full',
+                11: 'Fluorescence_405_nm_Ex', 
+                12: 'Fluorescence_488_nm_Ex',
+                14: 'Fluorescence_561_nm_Ex',
+                13: 'Fluorescence_638_nm_Ex'
+            }
+            
+            # Get tiles for each channel using ZarrTileManager
+            channel_tiles = []
+            
+            # Use asyncio.gather to fetch all tiles concurrently
+            async def fetch_tile(channel_key):
+                channel_name = channel_names.get(channel_key, DEFAULT_CHANNEL)
+                try:
+                    # Queue the tile request with the specified priority
+                    await tile_manager.request_tile(dataset_id, timepoint, channel_name, z, x, y, priority)
+                    
+                    # Get tile from Zarr store - ZarrTileManager will handle URL expiration internally
+                    tile_data = await tile_manager.get_tile_np_data(dataset_id, timepoint, channel_name, z, x, y)
+                    
+                    # Ensure the tile data is properly shaped (check if empty/None)
+                    if tile_data is None or tile_data.size == 0:
+                        # Create a blank tile if we couldn't get data
+                        tile_data = np.zeros((tile_manager.tile_size, tile_manager.tile_size), dtype=np.uint8)
+                    
+                    return (tile_data, channel_key)
+                except Exception as e:
+                    logger.error(f"Error getting tile for channel {channel_name}: {e}")
+                    # Use blank tile on error
+                    blank_tile = np.zeros((tile_manager.tile_size, tile_manager.tile_size), dtype=np.uint8)
+                    return (blank_tile, channel_key)
+            
+            # Fetch all tiles concurrently
+            channel_tiles = await asyncio.gather(*[fetch_tile(channel_key) for channel_key in channel_keys])
+            
+            # Create an RGB image to merge the channels
+            merged_image = np.zeros((tile_manager.tile_size, tile_manager.tile_size, 3), dtype=np.float32)
+            
+            # Check if brightfield channel is included
+            has_brightfield = 0 in [ch_key for _, ch_key in channel_tiles]
+            
+            # If using default settings and has brightfield, start with that
+            if not has_custom_settings and has_brightfield:
+                # Find the brightfield data
+                for tile_data, channel_key in channel_tiles:
+                    if channel_key == 0:
+                        # Create RGB by copying the original grayscale data to all channels
+                        bf_data = tile_data.astype(np.float32) / 255.0  # Normalize to 0-1
+                        merged_image = np.stack([bf_data, bf_data, bf_data], axis=2)
                 
-                # Get channel-specific settings with defaults
-                contrast = float(contrast_dict.get(channel_key_str, 0.03))  # Default CLAHE clip limit
-                brightness = float(brightness_dict.get(channel_key_str, 1.0))  # Default brightness multiplier
-                
-                # Apply brightness adjustment first (to original values)
-                adjusted = tile_data.astype(np.float32) * brightness
-                adjusted = np.clip(adjusted, 0, 255).astype(np.uint8)
-                
-                # Threshold settings (percentiles by default)
-                threshold_min = float(threshold_dict.get(channel_key_str, {}).get("min", 2))
-                threshold_max = float(threshold_dict.get(channel_key_str, {}).get("max", 98))
-                
-                # Color settings (RGB tuple)
-                if channel_key_str in color_dict:
-                    color = tuple(color_dict[channel_key_str])
-                else:
-                    color = default_channel_colors.get(channel_key)
-                
-                if channel_key == 0:  # Brightfield
-                    # For brightfield, apply contrast stretching and use as base layer
-                    if len(tile_data.shape) == 2:
-                        # Apply contrast enhancement only if requested
-                        if contrast != 0.03:
-                            # If custom thresholds provided
-                            if channel_key_str in threshold_dict:
-                                p_min, p_max = np.percentile(adjusted, (threshold_min, threshold_max))
-                                enhanced = exposure.rescale_intensity(adjusted, in_range=(p_min, p_max))
-                            else:
-                                enhanced = adjusted
+                # Add original fluorescence channels with default colors
+                for tile_data, channel_key in channel_tiles:
+                    if channel_key != 0:  # Skip brightfield
+                        color = default_channel_colors.get(channel_key)
+                        if color:
+                            # Normalize the data
+                            normalized = tile_data.astype(np.float32) / 255.0
                             
-                            # Apply CLAHE
-                            bf_enhanced = exposure.equalize_adapthist(enhanced, clip_limit=contrast)
-                        else:
-                            # Just normalize to 0-1 for the RGB merge
-                            bf_enhanced = adjusted.astype(np.float32) / 255.0
-                        
-                        # Create RGB by copying the enhanced grayscale data to all channels
-                        if contrast != 0.03:
-                            # Convert to 0-1 if CLAHE was applied
-                            bf_enhanced = util.img_as_float(bf_enhanced)
-                        
-                        # Create an RGB version
-                        bf_rgb = np.stack([bf_enhanced, bf_enhanced, bf_enhanced], axis=2)
-                        merged_image = bf_rgb.copy()
-                else:
-                    # For fluorescence channels, apply color overlay with enhanced contrast
-                    if color and len(tile_data.shape) == 2:
-                        # Apply contrast enhancement only if requested
-                        if contrast != 0.03:
-                            # Apply thresholds using custom percentiles if provided
-                            if channel_key_str in threshold_dict:
-                                p_min, p_max = np.percentile(adjusted, (threshold_min, threshold_max))
-                                fluorescence_enhanced = exposure.rescale_intensity(adjusted, in_range=(p_min, p_max))
-                            else:
-                                fluorescence_enhanced = adjusted
+                            # Create color overlay
+                            colored_channel = np.zeros_like(merged_image)
+                            colored_channel[..., 0] = normalized * (color[0] / 255.0)  # R
+                            colored_channel[..., 1] = normalized * (color[1] / 255.0)  # G
+                            colored_channel[..., 2] = normalized * (color[2] / 255.0)  # B
                             
-                            # Apply CLAHE
-                            fluorescence_enhanced = exposure.equalize_adapthist(
-                                fluorescence_enhanced, 
-                                clip_limit=contrast
-                            )
-                            # Normalize to 0-1 range
-                            normalized = util.img_as_float(fluorescence_enhanced)
-                        else:
-                            # Just normalize to 0-1 for coloring
-                            normalized = adjusted.astype(np.float32) / 255.0
-                        
-                        # Create color overlay
-                        colored_channel = np.zeros_like(merged_image)
-                        colored_channel[..., 0] = normalized * (color[0] / 255.0)  # R
-                        colored_channel[..., 1] = normalized * (color[1] / 255.0)  # G
-                        colored_channel[..., 2] = normalized * (color[2] / 255.0)  # B
-                        
-                        # Add to the merged image using maximum projection for best visibility
-                        if has_brightfield:
-                            # For brightfield background, use screen blending mode for better visibility
-                            # Screen blend: 1 - (1-a)*(1-b)
+                            # Screen blend mode for better visibility
                             merged_image = 1.0 - (1.0 - merged_image) * (1.0 - colored_channel)
-                        else:
-                            # For fluorescence only, use max projection
-                            merged_image = np.maximum(merged_image, colored_channel)
-        
-            # Apply final dynamic range compression for better overall contrast
-            if np.max(merged_image) > 0:  # Avoid division by zero
-                # Convert to 8-bit for display
+                # Convert back to 8-bit for display
                 merged_image = util.img_as_ubyte(merged_image)
             else:
-                # Create blank image if all channels were empty
-                merged_image = np.zeros((tile_manager.tile_size, tile_manager.tile_size, 3), dtype=np.uint8)
-        
-        # Convert to PIL image and return as base64
-        pil_image = Image.fromarray(merged_image)
-        buffer = io.BytesIO()
-        pil_image.save(buffer, format="PNG")
-        return base64.b64encode(buffer.getvalue()).decode('utf-8')
+                # Apply custom settings to each channel
+                for tile_data, channel_key in channel_tiles:
+                    # Apply image processing based on settings for this channel
+                    channel_key_str = str(channel_key)
+                    
+                    # Get channel-specific settings with defaults
+                    contrast = float(contrast_dict.get(channel_key_str, 0.03))  # Default CLAHE clip limit
+                    brightness = float(brightness_dict.get(channel_key_str, 1.0))  # Default brightness multiplier
+                    
+                    # Apply brightness adjustment first (to original values)
+                    adjusted = tile_data.astype(np.float32) * brightness
+                    adjusted = np.clip(adjusted, 0, 255).astype(np.uint8)
+                    
+                    # Threshold settings (percentiles by default)
+                    threshold_min = float(threshold_dict.get(channel_key_str, {}).get("min", 2))
+                    threshold_max = float(threshold_dict.get(channel_key_str, {}).get("max", 98))
+                    
+                    # Color settings (RGB tuple)
+                    if channel_key_str in color_dict:
+                        color = tuple(color_dict[channel_key_str])
+                    else:
+                        color = default_channel_colors.get(channel_key)
+                    
+                    if channel_key == 0:  # Brightfield
+                        # For brightfield, apply contrast stretching and use as base layer
+                        if len(tile_data.shape) == 2:
+                            # Apply contrast enhancement only if requested
+                            if contrast != 0.03:
+                                # If custom thresholds provided
+                                if channel_key_str in threshold_dict:
+                                    p_min, p_max = np.percentile(adjusted, (threshold_min, threshold_max))
+                                    enhanced = exposure.rescale_intensity(adjusted, in_range=(p_min, p_max))
+                                else:
+                                    enhanced = adjusted
+                                
+                                # Apply CLAHE
+                                bf_enhanced = exposure.equalize_adapthist(enhanced, clip_limit=contrast)
+                            else:
+                                # Just normalize to 0-1 for the RGB merge
+                                bf_enhanced = adjusted.astype(np.float32) / 255.0
+                            
+                            # Create RGB by copying the enhanced grayscale data to all channels
+                            if contrast != 0.03:
+                                # Convert to 0-1 if CLAHE was applied
+                                bf_enhanced = util.img_as_float(bf_enhanced)
+                            
+                            # Create an RGB version
+                            bf_rgb = np.stack([bf_enhanced, bf_enhanced, bf_enhanced], axis=2)
+                            merged_image = bf_rgb.copy()
+                    else:
+                        # For fluorescence channels, apply color overlay with enhanced contrast
+                        if color and len(tile_data.shape) == 2:
+                            # Apply contrast enhancement only if requested
+                            if contrast != 0.03:
+                                # Apply thresholds using custom percentiles if provided
+                                if channel_key_str in threshold_dict:
+                                    p_min, p_max = np.percentile(adjusted, (threshold_min, threshold_max))
+                                    fluorescence_enhanced = exposure.rescale_intensity(adjusted, in_range=(p_min, p_max))
+                                else:
+                                    fluorescence_enhanced = adjusted
+                                
+                                # Apply CLAHE
+                                fluorescence_enhanced = exposure.equalize_adapthist(
+                                    fluorescence_enhanced, 
+                                    clip_limit=contrast
+                                )
+                                # Normalize to 0-1 range
+                                normalized = util.img_as_float(fluorescence_enhanced)
+                            else:
+                                # Just normalize to 0-1 for coloring
+                                normalized = adjusted.astype(np.float32) / 255.0
+                            
+                            # Create color overlay
+                            colored_channel = np.zeros_like(merged_image)
+                            colored_channel[..., 0] = normalized * (color[0] / 255.0)  # R
+                            colored_channel[..., 1] = normalized * (color[1] / 255.0)  # G
+                            colored_channel[..., 2] = normalized * (color[2] / 255.0)  # B
+                            
+                            # Add to the merged image using maximum projection for best visibility
+                            if has_brightfield:
+                                # For brightfield background, use screen blending mode for better visibility
+                                # Screen blend: 1 - (1-a)*(1-b)
+                                merged_image = 1.0 - (1.0 - merged_image) * (1.0 - colored_channel)
+                            else:
+                                # For fluorescence only, use max projection
+                                merged_image = np.maximum(merged_image, colored_channel)
+            
+                # Apply final dynamic range compression for better overall contrast
+                if np.max(merged_image) > 0:  # Avoid division by zero
+                    # Convert to 8-bit for display
+                    merged_image = util.img_as_ubyte(merged_image)
+                else:
+                    # Create blank image if all channels were empty
+                    merged_image = np.zeros((tile_manager.tile_size, tile_manager.tile_size, 3), dtype=np.uint8)
+            
+            # Convert to PIL image and return as base64
+            pil_image = Image.fromarray(merged_image)
+            buffer = io.BytesIO()
+            pil_image.save(buffer, format="PNG")
+            response = base64.b64encode(buffer.getvalue()).decode('utf-8')
+            
+            # Cache the response
+            tile_response_cache[cache_key] = response
+            cache_timestamps[cache_key] = time.time()
+            
+            return response
 
     # Updated helper function using ZarrTileManager
     async def get_timepoint_tile_data(dataset_id, timepoint, channel_name, z, x, y):

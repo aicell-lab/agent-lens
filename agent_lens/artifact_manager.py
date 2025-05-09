@@ -21,6 +21,7 @@ from collections import deque
 import zarr
 from zarr.storage import LRUStoreCache, FSStore
 import fsspec
+from fsspec.implementations.http import HTTPFileSystem
 import time
 from asyncio import Lock
 
@@ -400,6 +401,10 @@ class ZarrTileManager:
         self.url_expiry_buffer = 300  # seconds
         # Default URL expiration time (1 hour)
         self.default_url_expiry = 3600  # seconds
+        
+        # Create a global HTTP filesystem with connection pooling and caching
+        self.http_fs = self._create_http_filesystem()
+        
         # Function to open zarr store synchronously
         self._open_zarr_sync = self._create_open_zarr_sync_function()
         
@@ -409,19 +414,56 @@ class ZarrTileManager:
         self.in_progress_tiles = set()
         # Start the tile request processor
         self.tile_processor_task = None
+        
+        # Configure numcodecs for better performance
+        numcodecs.blosc.use_threads = True
+        self.chunk_cache = numcodecs.LRUCache(maxsize=2**28)  # 256 MB chunk cache
+        numcodecs.registry.register_codec(self.chunk_cache)
+
+    def _create_http_filesystem(self):
+        """Create a shared HTTP filesystem with connection pooling and caching"""
+        logger.info("Creating pooled HTTP filesystem for better connection reuse")
+        return HTTPFileSystem(
+            block_size=2**18,  # 256KB blocks - smaller than default for more granular access
+            cache_type="bytes",
+            cache_options={"max_size": 2**29},  # 512MB in-memory cache
+            client_kwargs={
+                "timeout": 30,  # 30 second timeout
+                "pool_connections": 50,  # Keep up to 50 connections in the pool
+                "pool_maxsize": 100,  # Allow up to 100 connections total
+                "max_retries": 3,  # Retry failed requests
+            }
+        )
 
     def _create_open_zarr_sync_function(self):
-        """Create a reusable function for opening zarr stores synchronously"""
+        """Create a reusable function for opening zarr stores synchronously with connection pooling"""
         def _open_zarr_sync(url, cache_size):
             logger.info(f"Opening Zarr store: {url}")
-            store = FSStore(url, mode="r")
+            
+            # Use our pooled HTTP client for remote URLs
+            if url.startswith("zip::http"):
+                # Use connection pooling for HTTP requests
+                fs = fsspec.filesystem(
+                    "zip", 
+                    target_protocol="http", 
+                    target_options={"fs": self.http_fs}
+                )
+                store = fs.get_mapper(url.replace("zip::", ""))
+                logger.info(f"Using connection-pooled HTTP access for Zarr")
+            else:
+                # For local files or other protocols
+                store = FSStore(url, mode="r")
+            
+            # Add LRU cache at the storage level
             if cache_size and cache_size > 0:
                 logger.info(f"Using LRU cache with size: {cache_size} bytes")
                 store = LRUStoreCache(store, max_size=cache_size)
-            # It's generally recommended to open the root group
+            
+            # Open the root group
             root_group = zarr.group(store=store)
             logger.info(f"Zarr group opened successfully.")
             return root_group
+        
         return _open_zarr_sync
 
     async def connect(self, workspace_token=None, server_url="https://hypha.aicell.io"):
@@ -440,14 +482,26 @@ class ZarrTileManager:
             self.artifact_manager = AgentLensArtifactManager()
             await self.artifact_manager.connect_server(self.artifact_manager_server)
             
-            # Initialize aiohttp session for any HTTP requests
-            self.session = aiohttp.ClientSession()
+            # Initialize aiohttp session with connection pooling for HTTP requests
+            connector = aiohttp.TCPConnector(
+                limit=100,             # Maximum number of connections
+                limit_per_host=50,     # Maximum number of connections per host
+                enable_cleanup_closed=True,
+                force_close=False,     # Keep connections alive
+                ttl_dns_cache=300,     # Cache DNS results for 5 minutes
+            )
+            
+            self.session = aiohttp.ClientSession(
+                connector=connector,
+                timeout=aiohttp.ClientTimeout(total=30),
+                raise_for_status=True
+            )
             
             # Start the tile request processor
             if self.tile_processor_task is None or self.tile_processor_task.done():
                 self.tile_processor_task = asyncio.create_task(self._process_tile_requests())
             
-            logger.info("ZarrTileManager connected successfully")
+            logger.info("ZarrTileManager connected successfully with improved connection pooling")
             return True
         except Exception as e:
             logger.info(f"Error connecting to artifact manager: {str(e)}")
@@ -513,11 +567,15 @@ class ZarrTileManager:
         # Check if we have a cached version and if it's still valid
         if cache_key in self.zarr_groups_cache:
             cached_data = self.zarr_groups_cache[cache_key]
-            # If URL is close to expiring, refresh it
+            # If URL is close to expiring, refresh it without creating a new Zarr group
             if cached_data['expiry'] - now < self.url_expiry_buffer:
                 logger.info(f"URL for {cache_key} is about to expire, refreshing")
-                # Remove from cache to force refresh
-                del self.zarr_groups_cache[cache_key]
+                # Try to refresh URL without recreating the Zarr group
+                if await self.refresh_zarr_url(cache_key):
+                    return cached_data['group']
+                else:
+                    # If refresh failed, remove from cache to force recreation
+                    del self.zarr_groups_cache[cache_key]
             else:
                 logger.info(f"Using cached Zarr group for {cache_key}, expires in {int(cached_data['expiry'] - now)} seconds")
                 return cached_data['group']
@@ -537,10 +595,6 @@ class ZarrTileManager:
                     return cached_data['group']
             
             try:
-                # We no longer need to parse the dataset_id into workspace and artifact_alias
-                # Just use the dataset_id directly since it's already the full path
-                logger.info(f"Accessing artifact at: {dataset_id}/{timestamp}/{channel}.zip")
-                
                 # Get the direct download URL for the zip file
                 zip_file_path = f"{timestamp}/{channel}.zip"
                 download_url = await self.artifact_manager._svc.get_file(dataset_id, zip_file_path)
@@ -553,7 +607,7 @@ class ZarrTileManager:
                 
                 # Run the synchronous Zarr operations in a thread pool
                 logger.info("Running Zarr open in thread executor...")
-                zarr_group = await asyncio.to_thread(self._open_zarr_sync, store_url, 2**28)  # Using default cache size
+                zarr_group = await asyncio.to_thread(self._open_zarr_sync, store_url, 2**28)
                 
                 # Cache the Zarr group for future use, along with expiration time
                 self.zarr_groups_cache[cache_key] = {
@@ -577,30 +631,30 @@ class ZarrTileManager:
                     to_keep = set(self.zarr_groups_cache.keys()) | {cache_key}
                     self.zarr_group_locks = {k: v for k, v in self.zarr_group_locks.items() if k in to_keep}
 
-    async def ensure_zarr_group(self, dataset_id, timestamp, channel):
-        """
-        Ensure a Zarr group is available in cache, but don't return it.
-        This is useful for preloading or refreshing the cache.
-        """
-        cache_key = f"{dataset_id}:{timestamp}:{channel}"
-        
-        now = time.time()
-        
-        # Check if we have a cached version and if it's still valid
+    async def refresh_zarr_url(self, cache_key):
+        """Refresh the URL without creating a new Zarr group"""
         if cache_key in self.zarr_groups_cache:
             cached_data = self.zarr_groups_cache[cache_key]
-            # If URL is close to expiring, refresh it
-            if cached_data['expiry'] - now < self.url_expiry_buffer:
-                logger.info(f"URL for {cache_key} is about to expire, refreshing")
-                # Remove from cache to force refresh
-                del self.zarr_groups_cache[cache_key]
-            else:
-                # Still valid, nothing to do
+            
+            # Parse the cache key
+            dataset_id, timestamp, channel = cache_key.split(":")
+            
+            try:
+                # Get new URL
+                zip_file_path = f"{timestamp}/{channel}.zip"
+                new_url = await self.artifact_manager._svc.get_file(dataset_id, zip_file_path)
+                expiry_time = self._extract_expiry_from_url(new_url)
+                
+                # Update URL and expiry without recreating Zarr group
+                cached_data['url'] = new_url
+                cached_data['expiry'] = expiry_time
+                
+                logger.info(f"URL for {cache_key} refreshed, new expiry: {int(expiry_time - time.time())} seconds")
                 return True
-        
-        # Load the Zarr group into cache
-        zarr_group = await self.get_zarr_group(dataset_id, timestamp, channel)
-        return zarr_group is not None
+            except Exception as e:
+                logger.info(f"Error refreshing URL for {cache_key}: {e}")
+                return False
+        return False
 
     async def _process_tile_requests(self):
         """Process tile requests from the priority queue"""
