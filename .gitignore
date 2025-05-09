@@ -19,3 +19,4 @@ html/
 .pylintrc
 bin/mc*
 bin/minio*
+*.log*

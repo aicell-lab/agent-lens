@@ -305,13 +305,7 @@ class AgentLensArtifactManager:
             logger.info(traceback.format_exc())
             return []
 
-    async def get_zarr_group(
-        self,
-        workspace: str,
-        artifact_alias: str,
-        timestamp: str,
-        channel: str,
-        cache_max_size=2**28 # 256 MB LRU cache
+    async def get_zarr_group(self, dataset_id, timestamp, channel, cache_max_size=2**26 # 64 MB LRU cache
     ):
         """
         Access a Zarr group stored within a zip file in an artifact.
@@ -321,7 +315,7 @@ class AgentLensArtifactManager:
             artifact_alias (str): The alias of the artifact (e.g., 'image-map-20250429-treatment-zip').
             timestamp (str): The timestamp folder name.
             channel (str): The channel name (used for the zip filename).
-            cache_max_size (int, optional): Max size for LRU cache in bytes. Defaults to 2**28.
+            cache_max_size (int, optional): Max size for LRU cache in bytes. Defaults to 2**26.
 
         Returns:
             zarr.Group: The root Zarr group object.
@@ -329,43 +323,147 @@ class AgentLensArtifactManager:
         if self._svc is None:
             raise ConnectionError("Artifact Manager service not connected. Call connect_server first.")
 
-        art_id = self._artifact_id(workspace, artifact_alias)
+        art_id = dataset_id
         zip_file_path = f"{timestamp}/{channel}.zip"
 
         try:
-            logger.info(f"Getting download URL for: {art_id}/{zip_file_path}")
-            # Get the direct download URL for the zip file
-            download_url = await self._svc.get_file(art_id, zip_file_path)
-            logger.info(f"Obtained download URL.")
-
-            # Construct the URL for FSStore using fsspec's zip chaining
-            store_url = f"zip::{download_url}"
-
-            # Define the synchronous function to open the Zarr store and group
-            def _open_zarr_sync(url, cache_size):
-                logger.info(f"Opening Zarr store: {url}")
-                store = FSStore(url, mode="r")
-                if cache_size and cache_size > 0:
-                    logger.info(f"Using LRU cache with size: {cache_size} bytes")
-                    store = LRUStoreCache(store, max_size=cache_size)
-                # It's generally recommended to open the root group
-                root_group = zarr.group(store=store)
-                logger.info(f"Zarr group opened successfully.")
-                return root_group
-
-            # Run the synchronous Zarr operations in a thread pool
-            logger.info("Running Zarr open in thread executor...")
-            zarr_group = await asyncio.to_thread(_open_zarr_sync, store_url, cache_max_size)
-            return zarr_group
-
-        except RemoteException as e:
-            logger.info(f"Error getting file URL from Artifact Manager: {e}")
-            raise FileNotFoundError(f"Could not find or access zip file {zip_file_path} in artifact {art_id}") from e
+            cache_key = f"{dataset_id}:{timestamp}:{channel}"
+            
+            now = time.time()
+            
+            # Check if we have a cached version and if it's still valid
+            if cache_key in self.zarr_groups_cache:
+                cached_data = self.zarr_groups_cache[cache_key]
+                # If URL is close to expiring, refresh it
+                if cached_data['expiry'] - now < self.url_expiry_buffer:
+                    logger.info(f"URL for {cache_key} is about to expire, refreshing")
+                    # Remove from cache to force refresh
+                    del self.zarr_groups_cache[cache_key]
+                else:
+                    logger.info(f"Using cached Zarr group for {cache_key}, expires in {int(cached_data['expiry'] - now)} seconds")
+                    return cached_data['group']
+            
+            # Get or create a lock for this cache key to prevent concurrent processing
+            if cache_key not in self.zarr_group_locks:
+                logger.info(f"Creating lock for {cache_key}")
+                self.zarr_group_locks[cache_key] = Lock()
+            
+            # Acquire the lock for this cache key
+            async with self.zarr_group_locks[cache_key]:
+                # Check cache again after acquiring the lock (another request might have completed)
+                if cache_key in self.zarr_groups_cache:
+                    cached_data = self.zarr_groups_cache[cache_key]
+                    if cached_data['expiry'] - now >= self.url_expiry_buffer:
+                        logger.info(f"Using cached Zarr group for {cache_key} after lock acquisition")
+                        return cached_data['group']
+                
+                try:
+                    logger.info(f"Accessing artifact at: {art_id}/{zip_file_path}")
+                    
+                    # Get the direct download URL for the zip file
+                    download_url = await self._svc.get_file(art_id, zip_file_path)
+                    
+                    # Extract expiration time from URL
+                    expiry_time = self._extract_expiry_from_url(download_url)
+                    
+                    # Create a more efficient HTTP connection pool for this URL domain
+                    transport = httpx.AsyncHTTPTransport(
+                        limits=httpx.Limits(
+                            max_keepalive_connections=20,
+                            max_connections=50,
+                            keepalive_expiry=60.0
+                        )
+                    )
+                    
+                    # First, try to download a few common chunks directly to pre-populate cache
+                    # This helps reduce multiple small requests
+                    common_chunks = [
+                        "0.0", "0.1", "1.0", "1.1", # Scale 0, top-left chunks
+                        # Add more commonly accessed chunks based on analysis
+                    ]
+                    
+                    # Construct the URL for FSStore using fsspec's zip chaining
+                    store_url = f"zip::{download_url}"
+                    
+                    # Run the synchronous Zarr operations in a thread pool with optimized settings
+                    logger.info("Running Zarr open in thread executor with optimized connection settings...")
+                    
+                    # Custom sync function that adds connection pooling for the underlying HTTP requests
+                    def _open_zarr_with_connection_pooling(url, cache_size):
+                        logger.info(f"Opening Zarr store with connection pooling: {url}")
+                        import fsspec
+                        from fsspec.implementations.http import HTTPFileSystem
+                        
+                        # Configure fsspec with better connection handling
+                        fs = fsspec.filesystem(
+                            "http", 
+                            block_size=2*1024*1024,  # 2MB blocks instead of default 5MB
+                            cache_type="readahead",  # Prefetch next blocks
+                            cache_size=20,           # Cache more blocks
+                            client_kwargs={
+                                "timeout": 30.0,
+                                "pool_connections": 10,
+                                "pool_maxsize": 20
+                            }
+                        )
+                        fsspec.config.conf["http"] = fs
+                        
+                        # Create optimized store
+                        store = FSStore(url, mode="r")
+                        if cache_size and cache_size > 0:
+                            logger.info(f"Using LRU cache with size: {cache_size} bytes")
+                            store = LRUStoreCache(store, max_size=cache_size)
+                            
+                        # Open root group
+                        root_group = zarr.group(store=store)
+                        logger.info(f"Zarr group opened successfully.")
+                        
+                        # Prefetch common chunks
+                        try:
+                            # Access scale0 array which is commonly used
+                            if 'scale0' in root_group:
+                                # This will trigger chunk loading for the initial visible area
+                                logger.info("Prefetching common scale0 chunks...")
+                                for i in range(2):
+                                    for j in range(2):
+                                        chunk = root_group['scale0'].get_orthogonal_selection(
+                                            (slice(i*256, (i+1)*256), slice(j*256, (j+1)*256))
+                                        )
+                                        logger.info(f"Prefetched chunk at {i},{j} with size {chunk.nbytes/1024:.1f}KB")
+                        except Exception as e:
+                            logger.info(f"Error during chunk prefetching (non-critical): {e}")
+                            
+                        return root_group
+                    
+                    # Use the optimized function
+                    zarr_group = await asyncio.to_thread(_open_zarr_with_connection_pooling, store_url, cache_max_size)
+                    
+                    # Cache the Zarr group for future use, along with expiration time
+                    self.zarr_groups_cache[cache_key] = {
+                        'group': zarr_group,
+                        'url': download_url,
+                        'expiry': expiry_time
+                    }
+                    
+                    logger.info(f"Cached Zarr group for {cache_key}, expires in {int(expiry_time - now)} seconds")
+                    return zarr_group
+                except Exception as e:
+                    logger.info(f"Error getting Zarr group: {e}")
+                    import traceback
+                    logger.info(traceback.format_exc())
+                    return None
+                finally:
+                    # Clean up old locks if they're no longer needed
+                    # This helps prevent memory leaks if many different cache keys are used
+                    if len(self.zarr_group_locks) > 100:  # Arbitrary limit
+                        # Keep only locks for cached items and the current request
+                        to_keep = set(self.zarr_groups_cache.keys()) | {cache_key}
+                        self.zarr_group_locks = {k: v for k, v in self.zarr_group_locks.items() if k in to_keep}
         except Exception as e:
-            logger.info(f"An error occurred while accessing the Zarr group: {e}")
+            logger.info(f"Error in get_zarr_group: {e}")
             import traceback
             logger.info(traceback.format_exc())
-            raise
+            return None
 
 # Constants
 SERVER_URL = "https://hypha.aicell.io"
@@ -393,11 +491,15 @@ class ZarrTileManager:
         self.zarr_groups_cache = {}  # format: {cache_key: {'group': zarr_group, 'url': url, 'expiry': timestamp}}
         # Add a dictionary to track pending requests with locks
         self.zarr_group_locks = {}  # format: {cache_key: asyncio.Lock()}
+        # Add a processed tile cache with TTL
+        self.processed_tile_cache = {}  # format: {cache_key: {'data': np_array, 'timestamp': timestamp}}
+        self.processed_tile_cache_size = 1000  # Maximum number of tiles to cache
+        self.processed_tile_ttl = 600  # Cache expiration in seconds (10 minutes)
         self.is_running = True
         self.session = None
         self.default_timestamp = "2025-04-29_16-38-27"  # Set a default timestamp
-        # Set URL expiration buffer - refresh URLs 5 minutes before they expire
-        self.url_expiry_buffer = 300  # seconds
+        # Set URL expiration buffer - refresh URLs 15 minutes before they expire (extended)
+        self.url_expiry_buffer = 900  # seconds (15 min instead of 5 min)
         # Default URL expiration time (1 hour)
         self.default_url_expiry = 3600  # seconds
         # Function to open zarr store synchronously
@@ -409,6 +511,9 @@ class ZarrTileManager:
         self.in_progress_tiles = set()
         # Start the tile request processor
         self.tile_processor_task = None
+        
+        # Add a cleanup task for the tile cache
+        self.cache_cleanup_task = None
 
     def _create_open_zarr_sync_function(self):
         """Create a reusable function for opening zarr stores synchronously"""
@@ -447,6 +552,10 @@ class ZarrTileManager:
             if self.tile_processor_task is None or self.tile_processor_task.done():
                 self.tile_processor_task = asyncio.create_task(self._process_tile_requests())
             
+            # Start the cache cleanup task
+            if self.cache_cleanup_task is None or self.cache_cleanup_task.done():
+                self.cache_cleanup_task = asyncio.create_task(self._cleanup_tile_cache())
+            
             logger.info("ZarrTileManager connected successfully")
             return True
         except Exception as e:
@@ -454,6 +563,51 @@ class ZarrTileManager:
             import traceback
             logger.info(traceback.format_exc())
             return False
+
+    async def _cleanup_tile_cache(self):
+        """Periodically clean up expired tiles from the cache"""
+        try:
+            while self.is_running:
+                now = time.time()
+                # Find keys to delete (expired items)
+                expired_keys = [
+                    key for key, value in self.processed_tile_cache.items() 
+                    if now - value['timestamp'] > self.processed_tile_ttl
+                ]
+                
+                # Remove expired items
+                for key in expired_keys:
+                    del self.processed_tile_cache[key]
+                
+                logger.info(f"Cleaned up {len(expired_keys)} expired tiles from cache. Current cache size: {len(self.processed_tile_cache)}")
+                
+                # If cache is too large, remove oldest items
+                if len(self.processed_tile_cache) > self.processed_tile_cache_size:
+                    # Sort by timestamp (oldest first)
+                    sorted_items = sorted(
+                        self.processed_tile_cache.items(),
+                        key=lambda x: x[1]['timestamp']
+                    )
+                    
+                    # Calculate how many to remove
+                    to_remove = len(self.processed_tile_cache) - self.processed_tile_cache_size
+                    
+                    # Remove oldest items
+                    for i in range(to_remove):
+                        if i < len(sorted_items):
+                            key = sorted_items[i][0]
+                            del self.processed_tile_cache[key]
+                    
+                    logger.info(f"Removed {to_remove} oldest tiles from cache due to size limit")
+                
+                # Sleep for a minute before checking again
+                await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            logger.info("Tile cache cleanup task cancelled")
+        except Exception as e:
+            logger.info(f"Error in tile cache cleanup: {e}")
+            import traceback
+            logger.info(traceback.format_exc())
 
     async def close(self):
         """Close the tile manager and cleanup resources"""
@@ -466,6 +620,17 @@ class ZarrTileManager:
                 await self.tile_processor_task
             except asyncio.CancelledError:
                 pass
+        
+        # Cancel the cache cleanup task
+        if self.cache_cleanup_task and not self.cache_cleanup_task.done():
+            self.cache_cleanup_task.cancel()
+            try:
+                await self.cache_cleanup_task
+            except asyncio.CancelledError:
+                pass
+        
+        # Clear the processed tile cache
+        self.processed_tile_cache.clear()
         
         # Close the cached Zarr groups
         self.zarr_groups_cache.clear()
@@ -553,7 +718,7 @@ class ZarrTileManager:
                 
                 # Run the synchronous Zarr operations in a thread pool
                 logger.info("Running Zarr open in thread executor...")
-                zarr_group = await asyncio.to_thread(self._open_zarr_sync, store_url, 2**28)  # Using default cache size
+                zarr_group = await asyncio.to_thread(self._open_zarr_sync, store_url, 2**26)  # Using 64MB cache instead of 256MB
                 
                 # Cache the Zarr group for future use, along with expiration time
                 self.zarr_groups_cache[cache_key] = {
@@ -680,89 +845,189 @@ class ZarrTileManager:
             y (int): Y coordinate (in tile/chunk units)
             
         Returns:
-            np.ndarray: Tile data as numpy array
+            np.ndarray or None: Tile data as numpy array, or None if tile not found/empty
         """
         try:
             # Use default timestamp if none provided
             timestamp = timestamp or self.default_timestamp
             
+            # Check if this tile is in the processed tile cache
+            cache_key = f"{dataset_id}:{timestamp}:{channel}:{scale}:{x}:{y}"
+            
+            # Return cached tile if available and not expired
+            if cache_key in self.processed_tile_cache:
+                cached_data = self.processed_tile_cache[cache_key]
+                # Check if the cached data is still valid (not expired)
+                if time.time() - cached_data['timestamp'] < self.processed_tile_ttl:
+                    logger.info(f"Using cached tile data for {cache_key}")
+                    return cached_data['data']
+                else:
+                    # Remove expired data from cache
+                    del self.processed_tile_cache[cache_key]
+            
+            # Check if we're already processing a group of tiles that includes this one
+            # Define the group region (2x2 grid of tiles around the requested one)
+            group_x_start = max(0, x - 1)
+            group_y_start = max(0, y - 1)
+            group_key = f"{dataset_id}:{timestamp}:{channel}:{scale}:{group_x_start},{group_y_start}_group"
+            
+            # If this tile is part of a group being processed, wait for it to complete
+            if group_key in self.in_progress_tiles:
+                for attempt in range(3):  # Try a few times with exponential backoff
+                    # Check if the tile is now in cache after a small delay
+                    await asyncio.sleep(0.1 * (2 ** attempt))
+                    if cache_key in self.processed_tile_cache:
+                        cached_data = self.processed_tile_cache[cache_key]
+                        if time.time() - cached_data['timestamp'] < self.processed_tile_ttl:
+                            logger.info(f"Using cached tile data for {cache_key} after waiting for group processing")
+                            return cached_data['data']
+            
             # Ensure the zarr group is in cache without returning it
-            cache_key = f"{dataset_id}:{timestamp}:{channel}"
-            await self.ensure_zarr_group(dataset_id, timestamp, channel)
-            
-            # Access the cached zarr group
-            if cache_key not in self.zarr_groups_cache:
-                return np.zeros((self.tile_size, self.tile_size), dtype=np.uint8)
-                
-            zarr_group = self.zarr_groups_cache[cache_key]['group']
-            
-            # Navigate to the right array in the Zarr hierarchy
+            zarr_cache_key = f"{dataset_id}:{timestamp}:{channel}"
             try:
-                # Get the scale array
-                scale_array = zarr_group[f'scale{scale}']
-                
-                # Since tile_size equals chunk_size, we can directly get the chunk
-                # This is more efficient than slicing
+                zarr_group = await self.get_zarr_group(dataset_id, timestamp, channel)
+                if zarr_group is None:
+                    # Return None instead of empty array if group can't be loaded
+                    # This allows frontend to handle it appropriately
+                    logger.info(f"Could not load Zarr group, returning None for {cache_key}")
+                    return None
+            except Exception as e:
+                logger.info(f"Error ensuring zarr group: {e}")
+                # Return None instead of zero array
+                return None
+            
+            # Mark this group as being processed
+            self.in_progress_tiles.add(group_key)
+            
+            try:
+                # Navigate to the right array in the Zarr hierarchy
                 try:
-                    # Get the chunk directly using zarr's chunk-based access
-                    # This avoids reading unnecessary data and is more efficient
-                    chunk_coords = (y, x)  # zarr uses (y, x) order for coordinates
-                    chunk_key = '.'.join(map(str, chunk_coords))
+                    # Get the scale array
+                    scale_array = zarr_group[f'scale{scale}']
                     
-                    # Try to get the chunk directly from the chunk store
-                    if hasattr(scale_array.store, 'get_partial_values'):
-                        # Some stores support direct chunk access
-                        chunk = scale_array.store.get_partial_values([chunk_key])[chunk_key]
-                        if chunk is not None:
-                            # Decompress the chunk
-                            chunk = scale_array._decode_chunk(chunk)
-                            return chunk
+                    # Calculate a larger region to fetch (2x2 tiles around the requested one)
+                    # This reduces the number of HTTP requests by fetching adjacent tiles in a single operation
+                    region_size = 2  # Number of tiles to fetch in each direction
+                    region_x_start = max(0, x - region_size // 2)
+                    region_y_start = max(0, y - region_size // 2)
                     
-                    # If direct chunk access failed or isn't supported, use the standard method
-                    # but access exactly one chunk
-                    chunk = scale_array.get_orthogonal_selection((slice(y * self.chunk_size, (y+1) * self.chunk_size), 
-                                                                 slice(x * self.chunk_size, (x+1) * self.chunk_size)))
+                    # Fetch the entire region at once
+                    logger.info(f"Fetching tile region at scale{scale}, starting at ({region_y_start},{region_x_start})")
+                    region_data = scale_array.get_orthogonal_selection(
+                        (
+                            slice(region_y_start * self.chunk_size, (region_y_start + region_size) * self.chunk_size),
+                            slice(region_x_start * self.chunk_size, (region_x_start + region_size) * self.chunk_size)
+                        )
+                    )
+                    logger.info(f'Fetched region with size in KB: {region_data.nbytes / 1024:.1f}')
                     
-                    # Make sure we have a properly shaped array
-                    if chunk.shape != (self.tile_size, self.tile_size):
-                        # Resize or pad if necessary
-                        result = np.zeros((self.tile_size, self.tile_size), dtype=np.uint8)
-                        h, w = chunk.shape
-                        result[:min(h, self.tile_size), :min(w, self.tile_size)] = chunk[:min(h, self.tile_size), :min(w, self.tile_size)]
-                        return result
+                    # Check if region data is valid (contains non-zero values)
+                    # If it's all zeros or mostly zeros, we consider it empty
+                    if np.count_nonzero(region_data) < 10:  # Arbitrary threshold
+                        logger.info(f"Region data is empty (all zeros), returning None")
+                        # Remove group from processing to allow future attempts
+                        self.in_progress_tiles.discard(group_key)
+                        return None
                     
-                    return chunk
+                    # Extract the specific tile data from the region
+                    tile_y_offset = (y - region_y_start) * self.chunk_size
+                    tile_x_offset = (x - region_x_start) * self.chunk_size
                     
-                except Exception as chunk_error:
-                    logger.info(f"Error accessing chunk directly: {chunk_error}, falling back to standard slicing")
-                    # Fall back to standard slicing if direct chunk access fails
-                    tile_data = scale_array[y*self.tile_size:(y+1)*self.tile_size, 
-                                           x*self.tile_size:(x+1)*self.tile_size]
-                    
-                    # Make sure we have a properly shaped array
-                    if tile_data.shape != (self.tile_size, self.tile_size):
-                        # Resize or pad if necessary
-                        result = np.zeros((self.tile_size, self.tile_size), dtype=np.uint8)
-                        h, w = tile_data.shape
-                        result[:min(h, self.tile_size), :min(w, self.tile_size)] = tile_data[:min(h, self.tile_size), :min(w, self.tile_size)]
-                        return result
-                    logger.info(f"Returning tile data for {dataset_id}:{timestamp}:{channel}:{scale}:{x}:{y}")
-                    return tile_data
+                    # Make sure we're within bounds (region might be smaller at edges)
+                    if (tile_y_offset >= 0 and 
+                        tile_x_offset >= 0 and 
+                        tile_y_offset + self.chunk_size <= region_data.shape[0] and
+                        tile_x_offset + self.chunk_size <= region_data.shape[1]):
+                        
+                        # Extract the requested tile from the larger region
+                        tile_data = region_data[
+                            tile_y_offset:tile_y_offset + self.chunk_size,
+                            tile_x_offset:tile_x_offset + self.chunk_size
+                        ]
+                        
+                        # Check if this specific tile is empty
+                        if np.count_nonzero(tile_data) < 10:  # Arbitrary threshold
+                            logger.info(f"Tile data is empty, returning None for {cache_key}")
+                            return None
+                        
+                        # Cache the requested tile
+                        self.processed_tile_cache[cache_key] = {
+                            'data': tile_data,
+                            'timestamp': time.time()
+                        }
+                        
+                        # Also cache the other tiles in the region
+                        now = time.time()
+                        for region_y in range(region_size):
+                            for region_x in range(region_size):
+                                # Skip the already cached requested tile
+                                if region_y * self.chunk_size == tile_y_offset and region_x * self.chunk_size == tile_x_offset:
+                                    continue
+                                
+                                # Calculate coordinates for this tile in the region
+                                region_tile_y = region_y_start + region_y
+                                region_tile_x = region_x_start + region_x
+                                
+                                # Only cache tiles that fall within the fetched region
+                                if (region_y * self.chunk_size < region_data.shape[0] and 
+                                    region_x * self.chunk_size < region_data.shape[1] and
+                                    (region_y + 1) * self.chunk_size <= region_data.shape[0] and
+                                    (region_x + 1) * self.chunk_size <= region_data.shape[1]):
+                                    
+                                    # Extract tile data
+                                    adjacent_tile_data = region_data[
+                                        region_y * self.chunk_size:(region_y + 1) * self.chunk_size,
+                                        region_x * self.chunk_size:(region_x + 1) * self.chunk_size
+                                    ]
+                                    
+                                    # Only cache non-empty tiles
+                                    if np.count_nonzero(adjacent_tile_data) >= 10:
+                                        # Cache this adjacent tile
+                                        adjacent_cache_key = f"{dataset_id}:{timestamp}:{channel}:{scale}:{region_tile_x}:{region_tile_y}"
+                                        self.processed_tile_cache[adjacent_cache_key] = {
+                                            'data': adjacent_tile_data,
+                                            'timestamp': now
+                                        }
+                        
+                        return tile_data
+                    else:
+                        # If for some reason the tile isn't within the region (should be rare)
+                        # Fall back to direct tile access
+                        logger.info("Tile coordinates outside fetched region, falling back to direct access")
+                        tile_data = scale_array[y*self.tile_size:(y+1)*self.tile_size, 
+                                            x*self.tile_size:(x+1)*self.tile_size]
+                        
+                        # Check if this specific tile is empty
+                        if np.count_nonzero(tile_data) < 10:  # Arbitrary threshold
+                            logger.info(f"Tile data is empty from direct access, returning None for {cache_key}")
+                            return None
+                        
+                        # Cache the tile
+                        self.processed_tile_cache[cache_key] = {
+                            'data': tile_data,
+                            'timestamp': time.time()
+                        }
+                        
+                        return tile_data
+                        
+                except KeyError as e:
+                    logger.info(f"KeyError accessing Zarr array path: {e}")
+                    # Return None instead of zero array
+                    return None
+                except Exception as inner_e:
+                    logger.info(f"Error processing tile data: {inner_e}")
+                    # Return None instead of zero array
+                    return None
+            finally:
+                # Remove the group key from in-progress set
+                self.in_progress_tiles.discard(group_key)
                 
-            except KeyError as e:
-                logger.info(f"KeyError accessing Zarr array path: {e}")
-                # Try an alternative path structure if needed
-                try:
-                    # Alternative path structure if your zarr is organized differently
-                    tile_data = zarr_group[y, x]  # Direct chunk access for alternative structure
-                    return tile_data
-                except Exception:
-                    return np.zeros((self.tile_size, self.tile_size), dtype=np.uint8)
         except Exception as e:
             logger.info(f"Error getting tile data: {e}")
             import traceback
             logger.info(traceback.format_exc())
-            return np.zeros((self.tile_size, self.tile_size), dtype=np.uint8)
+            # Return None instead of zero array
+            return None
 
     async def get_tile_bytes(self, dataset_id, timestamp, channel, scale, x, y):
         """Serve a tile as PNG bytes"""

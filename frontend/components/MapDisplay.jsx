@@ -257,21 +257,48 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
       url: createTileUrl('{z}', '{x}', '{y}'),
       crossOrigin: 'anonymous',
       tileSize: 256, // Update to match Zarr chunk size
-      maxZoom: 6, // Updated for 6 scale levels
+      maxZoom: 4, // Updated for 5 scale levels
       tileGrid: getTileGrid(),
       tileLoadFunction: function(tile, src) {
         const tileCoord = tile.getTileCoord(); // [z, x, y]
-        const transformedZ = 5 - tileCoord[0]; // Updated for 6 scale levels (0-5)
+        const transformedZ = 4 - tileCoord[0]; // Updated for 6 scale levels (0-5)
         const newSrc = createTileUrl(transformedZ, tileCoord[1], tileCoord[2], tileCoord);
+        
+        // Create a black canvas as a fallback
+        const setBlackTile = () => {
+          const tileCanvas = document.createElement('canvas');
+          tileCanvas.width = 256;
+          tileCanvas.height = 256;
+          const ctx = tileCanvas.getContext('2d');
+          ctx.fillStyle = 'black';
+          ctx.fillRect(0, 0, 256, 256);
+          tile.getImage().src = tileCanvas.toDataURL();
+        };
+        
         fetch(newSrc)
-          .then(response => response.text())
+          .then(response => {
+            if (!response.ok) {
+              // If the response is not OK, use black tile
+              throw new Error(`Failed to load timepoint tile: ${response.status}`);
+            }
+            return response.text();
+          })
           .then(data => {
+            // Check if the data is empty or contains only zeros
+            if (!data || data === '""' || data.length < 100) {
+              // Likely an empty tile, use black instead
+              setBlackTile();
+              return;
+            }
+            
             const trimmed = data.replace(/^"|"$/g, '');
             tile.getImage().src = `data:image/png;base64,${trimmed}`;
             console.log(`Loaded timepoint tile at: ${newSrc}`);
           })
           .catch(error => {
             console.log(`Failed to load timepoint tile: ${newSrc}`, error);
+            // Use black tile for errors
+            setBlackTile();
           });
       }
     });
@@ -311,7 +338,8 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
     
     const newTileLayer = new TileLayer({
       source: tileSource,
-      preload: 0 // Reduce preloading to focus on visible tiles
+      preload: 0, // Reduce preloading to focus on visible tiles
+      background: 'black' // Set the background color for areas with no tiles
     });
   
     map.addLayer(newTileLayer);
@@ -358,21 +386,48 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
       url: createTileUrl('{z}', '{x}', '{y}'),
       crossOrigin: 'anonymous',
       tileSize: 256, // Update to match Zarr chunk size
-      maxZoom: 6, // Updated for 6 scale levels
+      maxZoom: 4, // Updated for 5 scale levels
       tileGrid: getTileGrid(),
       tileLoadFunction: function(tile, src) {
         const tileCoord = tile.getTileCoord(); // [z, x, y]
-        const transformedZ = 5 - tileCoord[0]; // Updated for 6 scale levels (0-5)
+        const transformedZ = 4 - tileCoord[0]; // Updated for 5 scale levels (0-4)
         const newSrc = createTileUrl(transformedZ, tileCoord[1], tileCoord[2], tileCoord);
+        
+        // Create a black canvas as a fallback
+        const setBlackTile = () => {
+          const tileCanvas = document.createElement('canvas');
+          tileCanvas.width = 256;
+          tileCanvas.height = 256;
+          const ctx = tileCanvas.getContext('2d');
+          ctx.fillStyle = 'black';
+          ctx.fillRect(0, 0, 256, 256);
+          tile.getImage().src = tileCanvas.toDataURL();
+        };
+        
         fetch(newSrc)
-          .then(response => response.text())
+          .then(response => {
+            if (!response.ok) {
+              // If the response is not OK, use black tile
+              throw new Error(`Failed to load merged timepoint tile: ${response.status}`);
+            }
+            return response.text();
+          })
           .then(data => {
+            // Check if the data is empty or contains only zeros
+            if (!data || data === '""' || data.length < 100) {
+              // Likely an empty tile, use black instead
+              setBlackTile();
+              return;
+            }
+            
             const trimmed = data.replace(/^"|"$/g, '');
             tile.getImage().src = `data:image/png;base64,${trimmed}`;
             console.log(`Loaded merged timepoint tile at: ${newSrc}`);
           })
           .catch(error => {
             console.log(`Failed to load merged timepoint tile: ${newSrc}`, error);
+            // Use black tile for errors
+            setBlackTile();
           });
       }
     });
@@ -412,7 +467,8 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
     
     const newTileLayer = new TileLayer({
       source: tileSource,
-      preload: 0 // Reduce preloading to focus on visible tiles
+      preload: 0, // Reduce preloading to focus on visible tiles
+      background: 'black' // Set the background color for areas with no tiles
     });
   
     map.addLayer(newTileLayer);
@@ -457,21 +513,48 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
       url: createTileUrl('{z}', '{x}', '{y}'),
       crossOrigin: 'anonymous',
       tileSize: 256, // Update to match Zarr chunk size
-      maxZoom: 6, // Updated for 6 scale levels
+      maxZoom: 4, // Updated for 5 scale levels
       tileGrid: getTileGrid(),
       tileLoadFunction: function(tile, src) {
         const tileCoord = tile.getTileCoord(); // [z, x, y]
-        const transformedZ = 5 - tileCoord[0]; // Updated for 6 scale levels (0-5)
+        const transformedZ = 4 - tileCoord[0]; // Updated for 6 scale levels (0-5)
         const newSrc = createTileUrl(transformedZ, tileCoord[1], tileCoord[2], tileCoord);
+        
+        // Create a black canvas as a fallback
+        const setBlackTile = () => {
+          const tileCanvas = document.createElement('canvas');
+          tileCanvas.width = 256;
+          tileCanvas.height = 256;
+          const ctx = tileCanvas.getContext('2d');
+          ctx.fillStyle = 'black';
+          ctx.fillRect(0, 0, 256, 256);
+          tile.getImage().src = tileCanvas.toDataURL();
+        };
+        
         fetch(newSrc)
-          .then(response => response.text())
+          .then(response => {
+            if (!response.ok) {
+              // If the response is not OK, use black tile
+              throw new Error(`Failed to load merged tile: ${response.status}`);
+            }
+            return response.text();
+          })
           .then(data => {
+            // Check if the data is empty or contains only zeros
+            if (!data || data === '""' || data.length < 100) {
+              // Likely an empty tile, use black instead
+              setBlackTile();
+              return;
+            }
+            
             const trimmed = data.replace(/^"|"$/g, '');
             tile.getImage().src = `data:image/png;base64,${trimmed}`;
             console.log(`Loaded merged tile at location: ${newSrc}`);
           })
           .catch(error => {
             console.log(`Failed to load merged tile: ${newSrc}`, error);
+            // Use black tile for errors
+            setBlackTile();
           });
       }
     });
@@ -511,7 +594,8 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
     
     const tileLayer = new TileLayer({
       source: tileSource,
-      preload: 0 // Reduce preloading to focus on visible tiles
+      preload: 0, // Reduce preloading to focus on visible tiles
+      background: 'black' // Set the background color for areas with no tiles
     });
   
     map.addLayer(tileLayer);
@@ -564,21 +648,48 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
       url: createTileUrl('{z}', '{x}', '{y}'),
       crossOrigin: 'anonymous',
       tileSize: 256, // Update to match Zarr chunk size
-      maxZoom: 6, // Updated for 6 scale levels
+      maxZoom: 4, // Updated for 5 scale levels
       tileGrid: getTileGrid(),
       tileLoadFunction: function(tile, src) {
         const tileCoord = tile.getTileCoord(); // [z, x, y]
-        const transformedZ = 5 - tileCoord[0]; // Updated for 6 scale levels (0-5)
+        const transformedZ = 4 - tileCoord[0]; // Updated for 5 scale levels (0-4)
         const newSrc = createTileUrl(transformedZ, tileCoord[1], tileCoord[2], tileCoord);
+        
+        // Create a black canvas as a fallback
+        const setBlackTile = () => {
+          const tileCanvas = document.createElement('canvas');
+          tileCanvas.width = 256;
+          tileCanvas.height = 256;
+          const ctx = tileCanvas.getContext('2d');
+          ctx.fillStyle = 'black';
+          ctx.fillRect(0, 0, 256, 256);
+          tile.getImage().src = tileCanvas.toDataURL();
+        };
+        
         fetch(newSrc)
-          .then(response => response.text())
+          .then(response => {
+            if (!response.ok) {
+              // If the response is not OK, use black tile
+              throw new Error(`Failed to load tile: ${response.status}`);
+            }
+            return response.text();
+          })
           .then(data => {
+            // Check if the data is empty or contains only zeros
+            if (!data || data === '""' || data.length < 100) {
+              // Likely an empty tile, use black instead
+              setBlackTile();
+              return;
+            }
+            
             const trimmed = data.replace(/^"|"$/g, '');
             tile.getImage().src = `data:image/png;base64,${trimmed}`;
             console.log(`Loaded tile at location: ${newSrc}`);
           })
           .catch(error => {
             console.log(`Failed to load tile: ${newSrc}`, error);
+            // Use black tile for errors
+            setBlackTile();
           });
       }
     });
@@ -618,7 +729,8 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
 
     const tileLayer = new TileLayer({
       source: tileSource,
-      preload: 0 // Reduce preloading to focus on visible tiles
+      preload: 0, // Reduce preloading to focus on visible tiles
+      background: 'black' // Set the background color for areas with no tiles
     });
   
     map.addLayer(tileLayer);

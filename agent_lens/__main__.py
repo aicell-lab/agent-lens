@@ -45,13 +45,6 @@ def start_server(args):
         f"--host={args.host}",
         f"--port={args.port}",
         f"--public-base-url={args.public_base_url}",
-        "--enable-s3",
-        f"--access-key-id={os.getenv('MINIO_ROOT_USER')}",
-        f"--secret-access-key={os.getenv('MINIO_ROOT_PASSWORD')}",
-        f"--endpoint-url={os.getenv('MINIO_SERVER_URL')}",
-        f"--endpoint-url-public={os.getenv('MINIO_SERVER_URL')}",
-        "--s3-admin-type=minio",
-        "--redis-uri=redis://localhost:6379/0",
         "--startup-functions=agent_lens.__main__:start_services",
     ]
     subprocess.run(command, check=True)
