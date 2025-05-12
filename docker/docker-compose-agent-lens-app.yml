@@ -8,13 +8,15 @@ services:
       - CLIP_CACHE=/app/.cache
       - JWT_SECRET=${JWT_SECRET}
       - REEF_WORKSPACE_TOKEN=${REEF_WORKSPACE_TOKEN}
+      - SERVICE=agent-lens
     volumes:
       - agent-lens-cache:/app/.cache
+      - ./healthcheck.sh:/healthcheck.sh
     healthcheck:
-      test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/agent-lens/services/probes/liveness-agent-lens | jq -e '.status == \"ok\"'"]
+      test: ["CMD", "/bin/sh", "/healthcheck.sh"]
       interval: 300s
       timeout: 60s
-      retries: 3
+      retries: 1
       start_period: 120s
     restart: always
     user: "1000:1000"
@@ -30,11 +32,14 @@ services:
       - SQUID_WORKSPACE_TOKEN=${SQUID_WORKSPACE_TOKEN}
       - WORKSPACE_TOKEN_CHATBOT=${WORKSPACE_TOKEN_CHATBOT}
       - MICROSCOPE_SERVICE_ID=${MICROSCOPE_SERVICE_ID}
+      - SERVICE=squid-control
+    volumes:
+      - ./healthcheck.sh:/healthcheck.sh
     healthcheck:
-      test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/squid-control/services/probes/liveness-${MICROSCOPE_SERVICE_ID} | jq -e '.status == \"ok\"'"]
+      test: ["CMD", "/bin/sh", "/healthcheck.sh"]
       interval: 300s
       timeout: 60s
-      retries: 3
+      retries: 1
       start_period: 120s
     restart: always
     user: "1000:1000"
@@ -43,6 +48,5 @@ services:
     cap_drop:
       - ALL
 
-
 volumes:
-  agent-lens-cache: 
+  agent-lens-cache:
