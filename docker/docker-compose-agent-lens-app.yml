@@ -16,7 +16,7 @@ services:
       timeout: 60s
       retries: 3
       start_period: 120s
-    restart: always
+    restart: on-failure
     user: "1000:1000"
     security_opt:
       - no-new-privileges:true
@@ -36,7 +36,7 @@ services:
       timeout: 60s
       retries: 3
       start_period: 120s
-    restart: always
+    restart: on-failure
     user: "1000:1000"
     security_opt:
       - no-new-privileges:true
