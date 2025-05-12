@@ -14,7 +14,7 @@ services:
       test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/agent-lens/services/probes/liveness-agent-lens | jq -e '.status == \"ok\"'"]
       interval: 300s
       timeout: 60s
-      retries: 2
+      retries: 3
       start_period: 120s
     restart: always
     user: "1000:1000"
@@ -34,7 +34,7 @@ services:
       test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/squid-control/services/probes/liveness-${MICROSCOPE_SERVICE_ID} | jq -e '.status == \"ok\"'"]
       interval: 300s
       timeout: 60s
-      retries: 2
+      retries: 3
       start_period: 120s
     restart: always
     user: "1000:1000"
