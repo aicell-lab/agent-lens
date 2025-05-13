@@ -23,6 +23,7 @@ from zarr.storage import LRUStoreCache, FSStore
 import fsspec
 import time
 from asyncio import Lock
+import threading
 
 # Configure logging
 import logging
@@ -874,17 +875,78 @@ class ZarrTileManager:
             HTTPFileSystem.open = bandwidth_tracking_open
             
             try:
+                # Configure optimized HTTP settings
+                http_kwargs = {
+                    "block_size": 2*1024*1024,  # 2MB blocks instead of default 5MB
+                    "cache_type": "readahead",  # Prefetch next blocks
+                    "cache_size": 20,           # Cache more blocks
+                    "client_kwargs": {
+                        "timeout": 30.0,
+                        "pool_connections": 10,
+                        "pool_maxsize": 20
+                    }
+                }
+                
+                # Use httpx transport if available
+                try:
+                    import httpx
+                    http_kwargs["transport"] = httpx.HTTPTransport(
+                        limits=httpx.Limits(
+                            max_keepalive_connections=20,
+                            max_connections=50,
+                            keepalive_expiry=60.0
+                        )
+                    )
+                except (ImportError, AttributeError):
+                    logger.info("Enhanced HTTP transport not available")
+                
+                # Create optimized store with HTTP optimization but without custom filesystem
+                import fsspec
+                # Use the standard HTTPFileSystem but with optimized settings
+                fs = fsspec.filesystem("http", **http_kwargs)
+                
                 store = FSStore(url, mode="r")
                 if cache_size and cache_size > 0:
                     logger.info(f"Using LRU cache with size: {cache_size} bytes")
                     store = LRUStoreCache(store, max_size=cache_size)
-                # It's generally recommended to open the root group
+                    
+                # Open root group
                 root_group = zarr.group(store=store)
                 logger.info(f"Zarr group opened successfully.")
-                return root_group
-            finally:
+                
+                # Prefetch common chunks
+                try:
+                    # Access scale0 array which is commonly used
+                    if 'scale0' in root_group:
+                        # This will trigger chunk loading for the initial visible area
+                        logger.info("Prefetching common scale0 chunks...")
+                        
+                        # Prefetch a 2x2 grid of chunks at the center for scale0 (most commonly viewed)
+                        for i in range(2):
+                            for j in range(2):
+                                chunk = root_group['scale0'].get_orthogonal_selection(
+                                    (slice(i*256, (i+1)*256), slice(j*256, (j+1)*256))
+                                )
+                                logger.info(f"Prefetched scale0 chunk at {i},{j} with size {chunk.nbytes/1024:.1f}KB")
+                        
+                        # Also prefetch the first chunk of lower resolution scales for faster navigation
+                        for scale in range(1, min(3, len([k for k in root_group.keys() if k.startswith('scale')]))):
+                            if f'scale{scale}' in root_group:
+                                chunk = root_group[f'scale{scale}'].get_orthogonal_selection(
+                                    (slice(0, 256), slice(0, 256))
+                                )
+                                logger.info(f"Prefetched scale{scale} chunk with size {chunk.nbytes/1024:.1f}KB")
+                except Exception as e:
+                    logger.info(f"Error during chunk prefetching (non-critical): {e}")
+                
                 # Restore original open method
                 HTTPFileSystem.open = original_open
+                    
+                return root_group
+            finally:
+                # Restore original open method if not already done
+                if HTTPFileSystem.open != original_open:
+                    HTTPFileSystem.open = original_open
                 
         return _open_zarr_sync
 
@@ -1263,10 +1325,38 @@ class ZarrTileManager:
                     # Remove expired data from cache
                     del self.processed_tile_cache[cache_key]
             
+            # Dynamically adjust region size based on scale level
+            # - For high zoom levels (scale 0-1), use larger regions (2x2) since those are detail views where users likely explore nearby areas
+            # - For medium zoom levels (scale 2), use medium regions (1x2 or 2x1) based on X/Y coordinates (edge heuristic)
+            # - For low zoom levels (scale 3-4), use smaller regions (1x1) since those are overview tiles
+            
+            region_size = 1  # Default to 1x1 region (single tile)
+            
+            if scale <= 1:
+                # Higher zoom levels (more detail) - use 2x2 regions for dense viewing areas
+                region_size = 2
+            elif scale == 2:
+                # Medium zoom - use edge detection heuristic
+                # Check if this is likely to be a sparse area (edges of the image)
+                # Assuming image dimensions of 2048x2048 and tile size of 256, we have 8x8=64 tiles
+                # Consider tiles near center (2,2 to 5,5) as dense areas
+                
+                tile_count_per_dimension = 2048 // self.chunk_size  # Typically 8 for a 2048x2048 image
+                center_start = tile_count_per_dimension // 4  # ~ 2
+                center_end = center_start * 3  # ~ 6
+                
+                if (center_start <= x <= center_end and center_start <= y <= center_end):
+                    # This is a center/dense area
+                    region_size = 2
+                else:
+                    # This is an edge/sparse area
+                    region_size = 1
+            # else scale >= 3: Keep region_size = 1 for overview tiles
+            
             # Check if we're already processing a group of tiles that includes this one
-            # Define the group region (2x2 grid of tiles around the requested one)
-            group_x_start = max(0, x - 1)
-            group_y_start = max(0, y - 1)
+            # Define the group region based on the dynamic region size
+            group_x_start = max(0, x - region_size // 2)
+            group_y_start = max(0, y - region_size // 2)
             group_key = f"{dataset_id}:{timestamp}:{channel}:{scale}:{group_x_start},{group_y_start}_group"
             
             # If this tile is part of a group being processed, wait for it to complete
@@ -1310,11 +1400,25 @@ class ZarrTileManager:
                     # Get the scale array
                     scale_array = zarr_group[f'scale{scale}']
                     
-                    # Calculate a larger region to fetch (2x2 tiles around the requested one)
-                    # This reduces the number of HTTP requests by fetching adjacent tiles in a single operation
-                    region_size = 2  # Number of tiles to fetch in each direction
+                    # Calculate a region to fetch based on our dynamic region size
                     region_x_start = max(0, x - region_size // 2)
                     region_y_start = max(0, y - region_size // 2)
+                    
+                    # Add a quick check for empty regions at edges
+                    # If we're at high scales (3-4) and at the edges, we might be in empty space
+                    if scale >= 3:
+                        # Get the shape of the array to check boundaries
+                        array_shape = scale_array.shape
+                        max_x = array_shape[1] // self.chunk_size
+                        max_y = array_shape[0] // self.chunk_size
+                        
+                        # If we're close to the max boundaries, this might be empty space
+                        if x > max_x - 2 or y > max_y - 2:
+                            # Check if this specific coordinate is within bounds
+                            if x * self.chunk_size >= array_shape[1] or y * self.chunk_size >= array_shape[0]:
+                                logger.info(f"Tile coordinates outside array bounds, returning None")
+                                self.in_progress_tiles.discard(group_key)
+                                return None
                     
                     # Fetch the entire region at once
                     logger.info(f"Fetching tile region at scale{scale}, starting at ({region_y_start},{region_x_start})")
