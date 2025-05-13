@@ -805,6 +805,10 @@ class ZarrTileManager:
         self.processed_tile_cache = {}  # format: {cache_key: {'data': np_array, 'timestamp': timestamp}}
         self.processed_tile_cache_size = 1000  # Maximum number of tiles to cache
         self.processed_tile_ttl = 600  # Cache expiration in seconds (10 minutes)
+        # Add empty region cache to avoid redundantly fetching known empty regions
+        self.empty_regions_cache = {}  # format: {region_key: expiry_timestamp}
+        self.empty_regions_ttl = 3600  # Empty regions valid for 1 hour
+        self.empty_regions_cache_size = 2000  # Maximum number of empty regions to cache
         self.is_running = True
         self.session = None
         self.default_timestamp = "2025-04-29_16-38-27"  # Set a default timestamp
@@ -982,9 +986,83 @@ class ZarrTileManager:
                 self.bandwidth_report_task = asyncio.create_task(self._periodic_bandwidth_report())
             
             logger.info("ZarrTileManager connected successfully")
+            
+            # Pre-prime ZIP metadata for default dataset
+            default_dataset_id = 'agent-lens/image-map-20250429-treatment-zip'
+            default_timestamp = self.default_timestamp
+            default_channels = ['BF_LED_matrix_full']  # Most commonly used channel
+            
+            # Prime ZIP metadata in background
+            asyncio.create_task(self.prime_zip_metadata(default_dataset_id, default_timestamp, default_channels))
+            
             return True
         except Exception as e:
             logger.info(f"Error connecting to artifact manager: {str(e)}")
+            import traceback
+            logger.info(traceback.format_exc())
+            return False
+
+    async def prime_zip_metadata(self, dataset_id, timestamp, channels):
+        """
+        Pre-download ZIP file metadata to speed up subsequent accesses.
+        This helps avoid the initial overhead when first accessing a ZIP file.
+        
+        Args:
+            dataset_id (str): The dataset ID
+            timestamp (str): The timestamp folder
+            channels (list): List of channels to prime
+        """
+        logger.info(f"Priming ZIP metadata for {dataset_id}, timestamp {timestamp}")
+        
+        try:
+            for channel in channels:
+                # Get the file URL without actually downloading the content
+                zip_file_path = f"{timestamp}/{channel}.zip"
+                download_url = await self.artifact_manager._svc.get_file(dataset_id, zip_file_path)
+                
+                # Create a unique key for this metadata
+                metadata_key = f"{dataset_id}:{timestamp}:{channel}:metadata"
+                
+                # Fetch just the headers to prime the connection and possibly cache DNS
+                if self.session:
+                    logger.info(f"Prefetching headers for {channel}.zip")
+                    try:
+                        # First make a HEAD request to get headers without downloading content
+                        async with self.session.head(download_url, timeout=5) as response:
+                            if response.status == 200:
+                                # Record the metadata size
+                                content_length = response.headers.get('Content-Length', '0')
+                                logger.info(f"ZIP metadata prefetch successful for {channel}.zip: {content_length} bytes")
+                                
+                                # Record minimal bandwidth usage for metadata prefetch
+                                await self.network_monitor.record_bandwidth(
+                                    "zip_metadata_prefetch", 
+                                    f"{dataset_id}/{timestamp}/{channel}", 
+                                    int(content_length) * 0.05,  # Estimate 5% of file size for metadata
+                                    "download"
+                                )
+                                
+                                # Now make a small range request to get just the ZIP central directory
+                                # This is typically at the end of the file, so request the last 8KB
+                                if content_length and int(content_length) > 8192:
+                                    content_length_int = int(content_length)
+                                    start_byte = max(0, content_length_int - 8192)
+                                    headers = {'Range': f'bytes={start_byte}-{content_length_int-1}'}
+                                    
+                                    async with self.session.get(download_url, headers=headers, timeout=5) as range_resp:
+                                        if range_resp.status == 206:  # Partial content
+                                            # Just read and discard the content - the important part is priming the connection
+                                            _ = await range_resp.read()
+                                            logger.info(f"ZIP central directory prefetched for {channel}.zip")
+                    except Exception as e:
+                        logger.info(f"Non-critical error prefetching ZIP metadata for {channel}.zip: {e}")
+                        # Continue with other channels even if one fails
+                        continue
+                        
+            logger.info(f"ZIP metadata priming completed for {dataset_id}, timestamp {timestamp}")
+            return True
+        except Exception as e:
+            logger.info(f"Error priming ZIP metadata: {e}")
             import traceback
             logger.info(traceback.format_exc())
             return False
@@ -1353,11 +1431,28 @@ class ZarrTileManager:
                     region_size = 1
             # else scale >= 3: Keep region_size = 1 for overview tiles
             
-            # Check if we're already processing a group of tiles that includes this one
             # Define the group region based on the dynamic region size
             group_x_start = max(0, x - region_size // 2)
             group_y_start = max(0, y - region_size // 2)
             group_key = f"{dataset_id}:{timestamp}:{channel}:{scale}:{group_x_start},{group_y_start}_group"
+            
+            # Check empty regions cache to avoid fetching known empty regions
+            empty_region_key = f"{dataset_id}:{timestamp}:{channel}:{scale}:{group_x_start}:{group_y_start}"
+            if empty_region_key in self.empty_regions_cache:
+                expiry_time = self.empty_regions_cache[empty_region_key]
+                if time.time() < expiry_time:
+                    logger.info(f"Skipping known empty region at {scale}:{group_x_start}:{group_y_start}")
+                    # Record cache hit for empty region (no bandwidth used)
+                    await self.network_monitor.record_bandwidth(
+                        "empty_region_cache_hit", 
+                        f"{dataset_id}/{timestamp}/{channel}", 
+                        0, 
+                        "cache"
+                    )
+                    return None
+                else:
+                    # Remove expired entry
+                    del self.empty_regions_cache[empty_region_key]
             
             # If this tile is part of a group being processed, wait for it to complete
             if group_key in self.in_progress_tiles:
@@ -1418,6 +1513,10 @@ class ZarrTileManager:
                             if x * self.chunk_size >= array_shape[1] or y * self.chunk_size >= array_shape[0]:
                                 logger.info(f"Tile coordinates outside array bounds, returning None")
                                 self.in_progress_tiles.discard(group_key)
+                                
+                                # Add to empty regions cache
+                                self._add_to_empty_regions_cache(empty_region_key)
+                                
                                 return None
                     
                     # Fetch the entire region at once
@@ -1453,6 +1552,10 @@ class ZarrTileManager:
                         logger.info(f"Region data is empty (all zeros), returning None")
                         # Remove group from processing to allow future attempts
                         self.in_progress_tiles.discard(group_key)
+                        
+                        # Add to empty regions cache
+                        self._add_to_empty_regions_cache(empty_region_key)
+                        
                         return None
                     
                     # Extract the specific tile data from the region
@@ -1474,6 +1577,9 @@ class ZarrTileManager:
                         # Check if this specific tile is empty
                         if np.count_nonzero(tile_data) < 10:  # Arbitrary threshold
                             logger.info(f"Tile data is empty, returning None for {cache_key}")
+                            # Add specific tile to empty regions cache
+                            specific_empty_key = f"{dataset_id}:{timestamp}:{channel}:{scale}:{x}:{y}"
+                            self._add_to_empty_regions_cache(specific_empty_key)
                             return None
                         
                         # Cache the requested tile
@@ -1506,9 +1612,13 @@ class ZarrTileManager:
                                         region_x * self.chunk_size:(region_x + 1) * self.chunk_size
                                     ]
                                     
-                                    # Only cache non-empty tiles
-                                    if np.count_nonzero(adjacent_tile_data) >= 10:
-                                        # Cache this adjacent tile
+                                    # Check if this adjacent tile is empty
+                                    if np.count_nonzero(adjacent_tile_data) < 10:
+                                        # Add to empty regions cache
+                                        adjacent_empty_key = f"{dataset_id}:{timestamp}:{channel}:{scale}:{region_tile_x}:{region_tile_y}"
+                                        self._add_to_empty_regions_cache(adjacent_empty_key)
+                                    else:
+                                        # Only cache non-empty tiles
                                         adjacent_cache_key = f"{dataset_id}:{timestamp}:{channel}:{scale}:{region_tile_x}:{region_tile_y}"
                                         self.processed_tile_cache[adjacent_cache_key] = {
                                             'data': adjacent_tile_data,
@@ -1547,6 +1657,8 @@ class ZarrTileManager:
                         # Check if this specific tile is empty
                         if np.count_nonzero(tile_data) < 10:  # Arbitrary threshold
                             logger.info(f"Tile data is empty from direct access, returning None for {cache_key}")
+                            # Add to empty regions cache
+                            self._add_to_empty_regions_cache(cache_key)
                             return None
                         
                         # Cache the tile
@@ -1579,6 +1691,30 @@ class ZarrTileManager:
             logger.info(traceback.format_exc())
             # Return None instead of zero array
             return None
+
+    def _add_to_empty_regions_cache(self, key):
+        """Add a region key to the empty regions cache with expiration"""
+        # Set expiration time
+        expiry_time = time.time() + self.empty_regions_ttl
+        
+        # Add to cache
+        self.empty_regions_cache[key] = expiry_time
+        
+        # Clean up if cache is too large
+        if len(self.empty_regions_cache) > self.empty_regions_cache_size:
+            # Get the entries sorted by expiry time (oldest first)
+            sorted_entries = sorted(
+                self.empty_regions_cache.items(),
+                key=lambda item: item[1]
+            )
+            
+            # Remove oldest 25% of entries
+            entries_to_remove = len(self.empty_regions_cache) // 4
+            for i in range(entries_to_remove):
+                if i < len(sorted_entries):
+                    del self.empty_regions_cache[sorted_entries[i][0]]
+            
+            logger.info(f"Cleaned up {entries_to_remove} oldest entries from empty regions cache")
 
     async def get_tile_bytes(self, dataset_id, timestamp, channel, scale, x, y):
         """Serve a tile as PNG bytes"""

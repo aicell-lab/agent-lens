@@ -146,7 +146,9 @@ def get_frontend_api():
         brightness_settings: str = None,
         threshold_settings: str = None,
         color_settings: str = None,
-        priority: int = 10  # Default priority (lower is higher priority)
+        priority: int = 10,  # Default priority (lower is higher priority)
+        # Add compression quality control
+        compression_quality: int = None  # Default compression quality will be used if not specified
     ):
         """
         Endpoint to serve tiles with customizable image processing settings.
@@ -164,6 +166,7 @@ def get_frontend_api():
             threshold_settings (str, optional): JSON string with min/max threshold settings
             color_settings (str, optional): JSON string with color settings
             priority (int, optional): Priority level for tile loading (lower is higher priority)
+            compression_quality (int, optional): WebP/PNG compression quality (1-100, lower=smaller)
         
         Returns:
             str: Base64 encoded tile image
@@ -300,12 +303,28 @@ def get_frontend_api():
             # Generate ETag based on multiple factors
             etag = hashlib.md5(cache_tag.encode()).hexdigest()
             
+            # Determine compression quality
+            # Lower zoom levels (overviews) can use lower quality
+            # Higher zoom levels (details) need higher quality
+            if compression_quality is None:
+                if z <= 1:  # More detailed zoom levels
+                    quality = 80
+                elif z == 2:  # Medium zoom
+                    quality = 70
+                else:  # Overview zoom levels
+                    quality = 60
+            else:
+                # Clamp user-specified quality between 30-100
+                quality = max(30, min(100, compression_quality))
+            
             # Convert to base64
             buffer = io.BytesIO()
             if WEBP_SUPPORT:
-                pil_image.save(buffer, format="WEBP", quality=85)
+                # Use lower quality for WebP to reduce size
+                pil_image.save(buffer, format="WEBP", quality=quality, method=5)
             else:
-                pil_image.save(buffer, format="PNG", optimize=True)
+                # For PNG, use highest compression (9) and more aggressive filtering
+                pil_image.save(buffer, format="PNG", compress_level=9, optimize=True)
             img_bytes = buffer.getvalue()
             
             # Calculate compression ratio for logging
@@ -331,6 +350,8 @@ def get_frontend_api():
             response.headers["X-Image-Format"] = "webp" if WEBP_SUPPORT else "png"
             response.headers["X-Request-ID"] = request_id
             response.headers["X-Processing-Time"] = f"{processing_time:.4f}"
+            # Add quality information for client-side awareness
+            response.headers["X-Image-Quality"] = f"{quality}"
             return response
             
         except Exception as e:
@@ -367,7 +388,9 @@ def get_frontend_api():
         brightness_settings: str = None,
         threshold_settings: str = None,
         color_settings: str = None,
-        priority: int = 10  # Default priority (lower is higher priority)
+        priority: int = 10,  # Default priority (lower is higher priority)
+        # Add compression quality control
+        compression_quality: int = None  # Default compression quality will be used if not specified
     ):
         """
         Endpoint to merge tiles from multiple channels with customizable image processing settings.
@@ -385,6 +408,7 @@ def get_frontend_api():
             threshold_settings (str, optional): JSON string with min/max threshold settings for each channel
             color_settings (str, optional): JSON string with color settings for each channel
             priority (int, optional): Priority level for tile loading (lower is higher priority)
+            compression_quality (int, optional): WebP/PNG compression quality (1-100, lower=smaller)
         
         Returns:
             str: Base64 encoded merged tile image
@@ -616,17 +640,52 @@ def get_frontend_api():
                 # Create blank image if all channels were empty
                 merged_image = np.zeros((tile_manager.tile_size, tile_manager.tile_size, 3), dtype=np.uint8)
         
+        # Determine compression quality based on zoom level
+        # Lower zoom levels (overviews) can use lower quality
+        # Higher zoom levels (details) need higher quality
+        if compression_quality is None:
+            if z <= 1:  # More detailed zoom levels 
+                quality = 80
+            elif z == 2:  # Medium zoom
+                quality = 70
+            else:  # Overview zoom levels
+                quality = 60
+        else:
+            # Clamp user-specified quality between 30-100
+            quality = max(30, min(100, compression_quality))
+
+        # Create cache key for ETag
+        cache_tag = f"{dataset_id}:{timepoint}:{channels}:{z}:{x}:{y}"
+        if contrast_settings:
+            cache_tag += f":{hashlib.md5(contrast_settings.encode()).hexdigest()[:6]}"
+        if brightness_settings:
+            cache_tag += f":{hashlib.md5(brightness_settings.encode()).hexdigest()[:6]}"
+        
+        # Generate ETag
+        etag = hashlib.md5(cache_tag.encode()).hexdigest()
+        
         # Convert to PIL image and return as base64
         pil_image = Image.fromarray(merged_image)
         buffer = io.BytesIO()
         if WEBP_SUPPORT:
-            pil_image.save(buffer, format="WEBP", quality=85)
+            # Use lower quality for WebP to reduce size
+            pil_image.save(buffer, format="WEBP", quality=quality, method=5)
         else:
-            pil_image.save(buffer, format="PNG", optimize=True)
+            # For PNG, use highest compression (9) and more aggressive filtering
+            pil_image.save(buffer, format="PNG", compress_level=9, optimize=True)
         img_bytes = buffer.getvalue()
         
+        # Calculate compression ratio
+        raw_size = pil_image.width * pil_image.height * 3  # Always RGB for merged
+        compression_ratio = len(img_bytes) / raw_size if raw_size > 0 else 0
+        
+        # Log processing stats
+        logger.info(
+            f"MERGED[{channels}]: z={z} x={x} y={y} size={len(img_bytes)/1024:.1f}KB " 
+            f"ratio={compression_ratio:.2f} quality={quality}"
+        )
+        
         # Generate cache key and ETag
-        etag = hashlib.md5(img_bytes).hexdigest()
         base64_data = base64.b64encode(img_bytes).decode('utf-8')
         
         # Create response with caching headers
@@ -635,6 +694,8 @@ def get_frontend_api():
         response.headers["ETag"] = etag
         # Add image format header to help client know how to decode
         response.headers["X-Image-Format"] = "webp" if WEBP_SUPPORT else "png"
+        # Add quality information for client-side awareness
+        response.headers["X-Image-Quality"] = f"{quality}"
         return response
 
     # Updated helper function using ZarrTileManager
