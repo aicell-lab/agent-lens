@@ -4,8 +4,8 @@ that serves the frontend application.
 """
 
 import os
-from fastapi import FastAPI
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from agent_lens.artifact_manager import ZarrTileManager, AgentLensArtifactManager
 from hypha_rpc import connect_to_server
@@ -18,6 +18,18 @@ from PIL import Image
 from skimage import exposure, util, color
 import sys
 import asyncio
+from fastapi.middleware.gzip import GZipMiddleware
+import hashlib
+import time
+# See if we have WebP support in PIL
+WEBP_SUPPORT = True
+try:
+    test_img = Image.new('RGB', (16, 16))
+    test_buffer = io.BytesIO()
+    test_img.save(test_buffer, format="WEBP")
+except Exception:
+    WEBP_SUPPORT = False
+    print("WebP support not available in PIL, falling back to PNG")
 
 # Configure logging
 import logging
@@ -70,10 +82,51 @@ def get_frontend_api():
         function: The FastAPI application.
     """
     app = FastAPI()
+    # Add compression middleware to reduce bandwidth
+    app.add_middleware(GZipMiddleware, minimum_size=500)
+    
     frontend_dir = os.path.join(os.path.dirname(__file__), "../frontend")
     dist_dir = os.path.join(frontend_dir, "dist")
     assets_dir = os.path.join(dist_dir, "assets")
     app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+    # Add middleware for monitoring server-side bandwidth usage
+    @app.middleware("http")
+    async def monitoring_middleware(request: Request, call_next):
+        # Record start time and initial metrics
+        start_time = time.time()
+        
+        # Track the approximate request size
+        request_size = 0
+        body = await request.body()
+        request_size = len(body)
+        
+        # Execute the request handler
+        response = await call_next(request)
+        
+        # Calculate processing time
+        process_time = time.time() - start_time
+        
+        # Add processing time header to help with debugging
+        response.headers["X-Process-Time"] = f"{process_time:.4f}"
+        
+        # Add standard cache control headers to all responses
+        if not response.headers.get("Cache-Control") and request.url.path.startswith(("/assets", "/public")):
+            response.headers["Cache-Control"] = "public, max-age=86400"  # 24 hours for static assets
+        
+        # For specific API endpoints, add metrics logging
+        if request.url.path.startswith(("/tile", "/merged-tiles", "/tile-for-timepoint")):
+            path_parts = request.url.path.split("?")[0].split("/")
+            endpoint = path_parts[-1] if path_parts else "unknown"
+            
+            # Log metrics for monitoring
+            logger.info(
+                f"METRICS: endpoint={endpoint} method={request.method} "
+                f"path={request.url.path} processing_time={process_time:.4f}s "
+                f"request_size={request_size} response_status={response.status_code}"
+            )
+        
+        return response
 
     @app.get("/", response_class=HTMLResponse)
     async def root():
@@ -118,6 +171,9 @@ def get_frontend_api():
         import json
         
         try:
+            start_time = time.time()
+            request_id = hashlib.md5(f"{time.time()}-{channel_name}-{x}-{y}".encode()).hexdigest()[:8]
+            
             # Queue the tile request with the specified priority
             # This allows the frontend to prioritize visible tiles
             await tile_manager.request_tile(dataset_id, timestamp, channel_name, z, x, y, priority)
@@ -125,6 +181,14 @@ def get_frontend_api():
             # Get the raw tile data as numpy array using ZarrTileManager
             # ZarrTileManager will handle URL expiration internally
             tile_data = await tile_manager.get_tile_np_data(dataset_id, timestamp, channel_name, z, x, y)
+            
+            # If tile_data is None, return an empty response to let the client handle it
+            if tile_data is None:
+                logger.info(f"No tile data available for {dataset_id}:{timestamp}:{channel_name}:{z}:{x}:{y}")
+                # Create an empty response with status 204 (No Content)
+                response = Response(status_code=204)
+                response.headers["X-Empty-Tile"] = "true"
+                return response
             
             # Parse settings from JSON strings if provided
             try:
@@ -220,17 +284,68 @@ def get_frontend_api():
                 # If no processing applied, convert directly to PIL image
                 pil_image = Image.fromarray(tile_data)
             
+            # Cache key for ETag (use multiple criteria to avoid conflicts)
+            cache_tag = f"{dataset_id}:{timestamp}:{channel_name}:{z}:{x}:{y}"
+            if contrast_settings:
+                cache_tag += f":{hashlib.md5(contrast_settings.encode()).hexdigest()[:6]}"
+            if brightness_settings:
+                cache_tag += f":{hashlib.md5(brightness_settings.encode()).hexdigest()[:6]}"
+            
+            # Generate ETag based on multiple factors
+            etag = hashlib.md5(cache_tag.encode()).hexdigest()
+            
             # Convert to base64
             buffer = io.BytesIO()
-            pil_image.save(buffer, format="PNG")
-            return base64.b64encode(buffer.getvalue()).decode('utf-8')
+            if WEBP_SUPPORT:
+                pil_image.save(buffer, format="WEBP", quality=85)
+            else:
+                pil_image.save(buffer, format="PNG", optimize=True)
+            img_bytes = buffer.getvalue()
+            
+            # Calculate compression ratio for logging
+            raw_size = pil_image.width * pil_image.height * (3 if len(pil_image.getbands()) >= 3 else 1)
+            compression_ratio = len(img_bytes) / raw_size if raw_size > 0 else 0
+            
+            # Log request processing stats
+            processing_time = time.time() - start_time
+            logger.info(
+                f"TILE[{request_id}]: dataset={dataset_id} channel={channel_name} z={z} x={x} y={y} "
+                f"size={len(img_bytes)/1024:.1f}KB raw_size={raw_size/1024:.1f}KB "
+                f"ratio={compression_ratio:.2f} time={processing_time:.4f}s"
+            )
+            
+            # Generate cache key and ETag
+            base64_data = base64.b64encode(img_bytes).decode('utf-8')
+            
+            # Create response with caching headers
+            response = Response(content=base64_data)
+            response.headers["Cache-Control"] = "public, max-age=3600"
+            response.headers["ETag"] = etag
+            # Add image format header to help client know how to decode
+            response.headers["X-Image-Format"] = "webp" if WEBP_SUPPORT else "png"
+            response.headers["X-Request-ID"] = request_id
+            response.headers["X-Processing-Time"] = f"{processing_time:.4f}"
+            return response
             
         except Exception as e:
             logger.error(f"Error in tile_endpoint: {e}")
             blank_image = Image.new("L", (tile_manager.tile_size, tile_manager.tile_size), color=0)
             buffer = io.BytesIO()
             blank_image.save(buffer, format="PNG")
-            return base64.b64encode(buffer.getvalue()).decode('utf-8')
+            img_bytes = buffer.getvalue()
+            
+            # Generate cache key and ETag
+            etag = hashlib.md5(img_bytes).hexdigest()
+            base64_data = base64.b64encode(img_bytes).decode('utf-8')
+            
+            # Create response with caching headers
+            response = Response(content=base64_data)
+            response.headers["Cache-Control"] = "public, max-age=60"  # Short cache for error responses
+            response.headers["ETag"] = etag
+            # Add image format header to help client know how to decode
+            response.headers["X-Image-Format"] = "png"
+            response.headers["X-Error"] = str(e)[:100]  # Include truncated error message
+            return response
 
     # Updated endpoint to serve merged tiles
     @app.get("/merged-tiles")
@@ -273,11 +388,10 @@ def get_frontend_api():
         channel_keys = [int(key) for key in channels.split(',') if key]
         
         if not channel_keys:
-            # Return a blank tile if no channels are specified
-            blank_image = Image.new("RGB", (tile_manager.tile_size, tile_manager.tile_size), color=(0, 0, 0))
-            buffer = io.BytesIO()
-            blank_image.save(buffer, format="PNG")
-            return base64.b64encode(buffer.getvalue()).decode('utf-8')
+            # Return an empty response if no channels are specified
+            response = Response(status_code=204)
+            response.headers["X-Empty-Tile"] = "true"
+            return response
         
         # Default channel colors (RGB format)
         default_channel_colors = {
@@ -326,6 +440,8 @@ def get_frontend_api():
         
         # Get tiles for each channel using ZarrTileManager
         channel_tiles = []
+        missing_tiles = 0
+        
         for channel_key in channel_keys:
             channel_name = channel_names.get(channel_key, DEFAULT_CHANNEL)
             
@@ -337,17 +453,28 @@ def get_frontend_api():
                 # Get tile from Zarr store - ZarrTileManager will handle URL expiration internally
                 tile_data = await tile_manager.get_tile_np_data(dataset_id, timepoint, channel_name, z, x, y)
                 
+                # Skip tile if it's None (not available)
+                if tile_data is None:
+                    missing_tiles += 1
+                    continue
+                
                 # Ensure the tile data is properly shaped (check if empty/None)
-                if tile_data is None or tile_data.size == 0:
-                    # Create a blank tile if we couldn't get data
-                    tile_data = np.zeros((tile_manager.tile_size, tile_manager.tile_size), dtype=np.uint8)
+                if tile_data.size == 0:
+                    # Skip this channel if we couldn't get data
+                    missing_tiles += 1
+                    continue
                 
                 channel_tiles.append((tile_data, channel_key))
             except Exception as e:
                 logger.error(f"Error getting tile for channel {channel_name}: {e}")
-                # Use blank tile on error
-                blank_tile = np.zeros((tile_manager.tile_size, tile_manager.tile_size), dtype=np.uint8)
-                channel_tiles.append((blank_tile, channel_key))
+                missing_tiles += 1
+        
+        # If all tiles are missing, return empty response
+        if missing_tiles == len(channel_keys) or not channel_tiles:
+            logger.info(f"No tiles available for any channels at {dataset_id}:{timepoint}:{channels}:{z}:{x}:{y}")
+            response = Response(status_code=204)
+            response.headers["X-Empty-Tile"] = "true"
+            return response
         
         # Create an RGB image to merge the channels
         merged_image = np.zeros((tile_manager.tile_size, tile_manager.tile_size, 3), dtype=np.float32)
@@ -482,8 +609,23 @@ def get_frontend_api():
         # Convert to PIL image and return as base64
         pil_image = Image.fromarray(merged_image)
         buffer = io.BytesIO()
-        pil_image.save(buffer, format="PNG")
-        return base64.b64encode(buffer.getvalue()).decode('utf-8')
+        if WEBP_SUPPORT:
+            pil_image.save(buffer, format="WEBP", quality=85)
+        else:
+            pil_image.save(buffer, format="PNG", optimize=True)
+        img_bytes = buffer.getvalue()
+        
+        # Generate cache key and ETag
+        etag = hashlib.md5(img_bytes).hexdigest()
+        base64_data = base64.b64encode(img_bytes).decode('utf-8')
+        
+        # Create response with caching headers
+        response = Response(content=base64_data)
+        response.headers["Cache-Control"] = "public, max-age=3600"
+        response.headers["ETag"] = etag
+        # Add image format header to help client know how to decode
+        response.headers["X-Image-Format"] = "webp" if WEBP_SUPPORT else "png"
+        return response
 
     # Updated helper function using ZarrTileManager
     async def get_timepoint_tile_data(dataset_id, timepoint, channel_name, z, x, y):
@@ -781,6 +923,13 @@ def get_frontend_api():
             # Get the tile data using ZarrTileManager - URL expiration handled internally
             tile_data = await tile_manager.get_tile_np_data(dataset_id, timepoint, channel_name, z, x, y)
             
+            # If no tile data is available, return an empty response
+            if tile_data is None:
+                logger.info(f"No tile data available for {dataset_id}:{timepoint}:{channel_name}:{z}:{x}:{y}")
+                response = Response(status_code=204)
+                response.headers["X-Empty-Tile"] = "true"
+                return response
+            
             # Parse settings from JSON strings if provided
             try:
                 contrast_dict = json.loads(contrast_settings) if contrast_settings else {}
@@ -877,8 +1026,23 @@ def get_frontend_api():
             
             # Convert to base64
             buffer = io.BytesIO()
-            pil_image.save(buffer, format="PNG")
-            return base64.b64encode(buffer.getvalue()).decode('utf-8')
+            if WEBP_SUPPORT:
+                pil_image.save(buffer, format="WEBP", quality=85)
+            else:
+                pil_image.save(buffer, format="PNG", optimize=True)
+            img_bytes = buffer.getvalue()
+            
+            # Generate cache key and ETag
+            etag = hashlib.md5(img_bytes).hexdigest()
+            base64_data = base64.b64encode(img_bytes).decode('utf-8')
+            
+            # Create response with caching headers
+            response = Response(content=base64_data)
+            response.headers["Cache-Control"] = "public, max-age=3600"
+            response.headers["ETag"] = etag
+            # Add image format header to help client know how to decode
+            response.headers["X-Image-Format"] = "webp" if WEBP_SUPPORT else "png"
+            return response
                 
         except Exception as e:
             logger.error(f"Error fetching tile for timepoint: {e}")
@@ -887,7 +1051,19 @@ def get_frontend_api():
             blank_image = Image.new("L", (tile_manager.tile_size, tile_manager.tile_size), color=0)
             buffer = io.BytesIO()
             blank_image.save(buffer, format="PNG")
-            return base64.b64encode(buffer.getvalue()).decode('utf-8')
+            img_bytes = buffer.getvalue()
+            
+            # Generate cache key and ETag
+            etag = hashlib.md5(img_bytes).hexdigest()
+            base64_data = base64.b64encode(img_bytes).decode('utf-8')
+            
+            # Create response with caching headers
+            response = Response(content=base64_data)
+            response.headers["Cache-Control"] = "public, max-age=3600"
+            response.headers["ETag"] = etag
+            # Add image format header to help client know how to decode
+            response.headers["X-Image-Format"] = "webp" if WEBP_SUPPORT else "png"
+            return response
 
     async def serve_fastapi(args):
         await app(args["scope"], args["receive"], args["send"])
