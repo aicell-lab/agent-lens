@@ -221,9 +221,9 @@ def get_frontend_api():
                 # Check if any non-default settings are provided
                 has_custom_settings = False
                 
-                if channel_key in contrast_dict and contrast_dict[channel_key] != 0.03:
+                if channel_key in contrast_dict and float(contrast_dict[channel_key]) != 0:
                     has_custom_settings = True
-                if channel_key in brightness_dict and brightness_dict[channel_key] != 1.0:
+                if channel_key in brightness_dict and float(brightness_dict[channel_key]) != 1.0:
                     has_custom_settings = True
                 if channel_key in threshold_dict:
                     has_custom_settings = True
@@ -236,16 +236,19 @@ def get_frontend_api():
                     pil_image = Image.fromarray(tile_data)
                 else:
                     # Get channel-specific settings with defaults
-                    contrast = float(contrast_dict.get(channel_key, 0.03))  # Default CLAHE clip limit
+                    contrast = float(contrast_dict.get(channel_key, 0))  # Default CLAHE clip limit
                     brightness = float(brightness_dict.get(channel_key, 1.0))  # Default brightness multiplier
+                    
+                    # Ensure brightness is within safe range (0.5-2.0)
+                    safe_brightness = max(0.5, min(2.0, brightness))
                     
                     # Apply brightness adjustment to original data first (simple scaling)
                     # This preserves original image characteristics
-                    adjusted = tile_data.astype(np.float32) * brightness
+                    adjusted = tile_data.astype(np.float32) * safe_brightness
                     adjusted = np.clip(adjusted, 0, 255).astype(np.uint8)
                     
                     # Apply contrast enhancement only if specifically requested
-                    if contrast != 0.03:  # If not default
+                    if contrast > 0:  # Only apply when contrast value is positive
                         # Threshold settings (percentiles by default)
                         threshold_min = float(threshold_dict.get(channel_key, {}).get("min", 2))
                         threshold_max = float(threshold_dict.get(channel_key, {}).get("max", 98))
@@ -257,8 +260,11 @@ def get_frontend_api():
                         else:
                             enhanced = adjusted
                         
+                        # Ensure contrast is within safe range (0-0.1)
+                        safe_contrast = min(0.1, contrast)
+                        
                         # Apply contrast adjustment using CLAHE
-                        enhanced = exposure.equalize_adapthist(enhanced, clip_limit=contrast)
+                        enhanced = exposure.equalize_adapthist(enhanced, clip_limit=safe_contrast)
                         enhanced = util.img_as_ubyte(enhanced)
                     else:
                         enhanced = adjusted
@@ -419,7 +425,7 @@ def get_frontend_api():
         has_custom_settings = False
         for channel_key in channel_keys:
             channel_key_str = str(channel_key)
-            if channel_key_str in contrast_dict and contrast_dict[channel_key_str] != 0.03:
+            if channel_key_str in contrast_dict and float(contrast_dict[channel_key_str]) != 0:
                 has_custom_settings = True
             if channel_key_str in brightness_dict and brightness_dict[channel_key_str] != 1.0:
                 has_custom_settings = True
@@ -507,7 +513,7 @@ def get_frontend_api():
                         
                         # Screen blend mode for better visibility
                         merged_image = 1.0 - (1.0 - merged_image) * (1.0 - colored_channel)
-            logger.info(f"Merged image: {merged_image.shape}, all channels: {channel_tiles}")
+            logger.info(f"Merged image, all channels: {channel_tiles}")
             # Convert back to 8-bit for display
             merged_image = util.img_as_ubyte(merged_image)
         else:
@@ -517,11 +523,15 @@ def get_frontend_api():
                 channel_key_str = str(channel_key)
                 
                 # Get channel-specific settings with defaults
-                contrast = float(contrast_dict.get(channel_key_str, 0.03))  # Default CLAHE clip limit
+                contrast = float(contrast_dict.get(channel_key_str, 0))  # Default CLAHE clip limit
                 brightness = float(brightness_dict.get(channel_key_str, 1.0))  # Default brightness multiplier
                 
+                # Ensure values are within safe ranges
+                safe_contrast = max(0.01, min(0.06, contrast))
+                safe_brightness = max(0.5, min(2.0, brightness))
+                
                 # Apply brightness adjustment first (to original values)
-                adjusted = tile_data.astype(np.float32) * brightness
+                adjusted = tile_data.astype(np.float32) * safe_brightness
                 adjusted = np.clip(adjusted, 0, 255).astype(np.uint8)
                 
                 # Threshold settings (percentiles by default)
@@ -538,7 +548,7 @@ def get_frontend_api():
                     # For brightfield, apply contrast stretching and use as base layer
                     if len(tile_data.shape) == 2:
                         # Apply contrast enhancement only if requested
-                        if contrast != 0.03:
+                        if float(contrast) > 0:  # Only apply when contrast value is positive
                             # If custom thresholds provided
                             if channel_key_str in threshold_dict:
                                 p_min, p_max = np.percentile(adjusted, (threshold_min, threshold_max))
@@ -547,13 +557,15 @@ def get_frontend_api():
                                 enhanced = adjusted
                             
                             # Apply CLAHE
-                            bf_enhanced = exposure.equalize_adapthist(enhanced, clip_limit=contrast)
+                            # Ensure contrast is within safe range (0-0.1)
+                            safe_contrast = min(0.1, float(contrast))
+                            bf_enhanced = exposure.equalize_adapthist(enhanced, clip_limit=safe_contrast)
                         else:
                             # Just normalize to 0-1 for the RGB merge
                             bf_enhanced = adjusted.astype(np.float32) / 255.0
                         
                         # Create RGB by copying the enhanced grayscale data to all channels
-                        if contrast != 0.03:
+                        if float(contrast) > 0:  # Only apply when contrast value is positive
                             # Convert to 0-1 if CLAHE was applied
                             bf_enhanced = util.img_as_float(bf_enhanced)
                         
@@ -564,7 +576,7 @@ def get_frontend_api():
                     # For fluorescence channels, apply color overlay with enhanced contrast
                     if color and len(tile_data.shape) == 2:
                         # Apply contrast enhancement only if requested
-                        if contrast != 0.03:
+                        if float(contrast) > 0:  # Only apply when contrast value is positive
                             # Apply thresholds using custom percentiles if provided
                             if channel_key_str in threshold_dict:
                                 p_min, p_max = np.percentile(adjusted, (threshold_min, threshold_max))
@@ -573,12 +585,10 @@ def get_frontend_api():
                                 fluorescence_enhanced = adjusted
                             
                             # Apply CLAHE
-                            fluorescence_enhanced = exposure.equalize_adapthist(
-                                fluorescence_enhanced, 
-                                clip_limit=contrast
-                            )
-                            # Normalize to 0-1 range
-                            normalized = util.img_as_float(fluorescence_enhanced)
+                            # Ensure contrast is within safe range (0-0.1)
+                            safe_contrast = min(0.1, float(contrast))
+                            enhanced = exposure.equalize_adapthist(fluorescence_enhanced, clip_limit=safe_contrast)
+                            enhanced = util.img_as_ubyte(enhanced)
                         else:
                             # Just normalize to 0-1 for coloring
                             normalized = adjusted.astype(np.float32) / 255.0
@@ -961,9 +971,9 @@ def get_frontend_api():
                 # Check if any non-default settings are provided
                 has_custom_settings = False
                 
-                if channel_key in contrast_dict and contrast_dict[channel_key] != 0.03:
+                if channel_key in contrast_dict and float(contrast_dict[channel_key]) != 0:
                     has_custom_settings = True
-                if channel_key in brightness_dict and brightness_dict[channel_key] != 1.0:
+                if channel_key in brightness_dict and float(brightness_dict[channel_key]) != 1.0:
                     has_custom_settings = True
                 if channel_key in threshold_dict:
                     has_custom_settings = True
@@ -976,16 +986,19 @@ def get_frontend_api():
                     pil_image = Image.fromarray(tile_data)
                 else:
                     # Get channel-specific settings with defaults
-                    contrast = float(contrast_dict.get(channel_key, 0.03))  # Default CLAHE clip limit
+                    contrast = float(contrast_dict.get(channel_key, 0))  # Default CLAHE clip limit
                     brightness = float(brightness_dict.get(channel_key, 1.0))  # Default brightness multiplier
+                    
+                    # Ensure brightness is within safe range (0.5-2.0)
+                    safe_brightness = max(0.5, min(2.0, brightness))
                     
                     # Apply brightness adjustment to original data first (simple scaling)
                     # This preserves original image characteristics
-                    adjusted = tile_data.astype(np.float32) * brightness
+                    adjusted = tile_data.astype(np.float32) * safe_brightness
                     adjusted = np.clip(adjusted, 0, 255).astype(np.uint8)
                     
                     # Apply contrast enhancement only if specifically requested
-                    if contrast != 0.03:  # If not default
+                    if contrast > 0:  # Only apply when contrast value is positive
                         # Threshold settings (percentiles by default)
                         threshold_min = float(threshold_dict.get(channel_key, {}).get("min", 2))
                         threshold_max = float(threshold_dict.get(channel_key, {}).get("max", 98))
@@ -997,8 +1010,11 @@ def get_frontend_api():
                         else:
                             enhanced = adjusted
                         
+                        # Ensure contrast is within safe range (0-0.1)
+                        safe_contrast = min(0.1, contrast)
+                        
                         # Apply contrast adjustment using CLAHE
-                        enhanced = exposure.equalize_adapthist(enhanced, clip_limit=contrast)
+                        enhanced = exposure.equalize_adapthist(enhanced, clip_limit=safe_contrast)
                         enhanced = util.img_as_ubyte(enhanced)
                     else:
                         enhanced = adjusted
