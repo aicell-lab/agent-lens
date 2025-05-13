@@ -9,7 +9,7 @@ import 'ol/ol.css';
 // Define custom image dimensions and resolutions (from the sample HTML)
 const imageWidth = 2048;      // Width of the full image
 const imageHeight = 1280;     // Height of the full image
-const resolutions = [1, 1/4, 1/16, 1/64, 1/256, 1/1024]; // Updated to support 5 scales
+const resolutions = [1, 1/4, 1/16, 1/64, 1/256]; // Updated to support 5 scales
 
 export const makeMap = (mapRef, extent) => {
   // Use provided extent or default to our custom extent based on image dimensions

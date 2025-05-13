@@ -46,6 +46,122 @@ def setup_logging(log_file="artifact_manager.log", max_bytes=100000, backup_coun
 
 logger = setup_logging()
 
+# Add NetworkMonitor class for tracking bandwidth usage
+class NetworkMonitor:
+    """Monitors network bandwidth usage for HTTP requests"""
+    
+    def __init__(self):
+        self.bandwidth_stats = {}
+        self.lock = asyncio.Lock()
+        
+    async def record_bandwidth(self, operation, url, bytes_transferred, direction="download"):
+        """
+        Record bandwidth usage for a specific operation
+        
+        Args:
+            operation (str): Name of the operation (e.g., "get_zarr_group", "get_file")
+            url (str): URL being accessed (will be truncated for storage efficiency)
+            bytes_transferred (int): Number of bytes transferred
+            direction (str): "download" or "upload"
+        """
+        async with self.lock:
+            # Truncate URL to keep only domain and first part of path
+            truncated_url = self._truncate_url(url)
+            
+            # Create key for this operation
+            key = f"{operation}:{truncated_url}:{direction}"
+            
+            if key not in self.bandwidth_stats:
+                self.bandwidth_stats[key] = {
+                    "total_bytes": 0,
+                    "request_count": 0,
+                    "last_access": time.time()
+                }
+            
+            # Update stats
+            self.bandwidth_stats[key]["total_bytes"] += bytes_transferred
+            self.bandwidth_stats[key]["request_count"] += 1
+            self.bandwidth_stats[key]["last_access"] = time.time()
+    
+    def _truncate_url(self, url):
+        """Truncate URL to keep only domain and first part of path"""
+        if not url:
+            return "unknown"
+        
+        # Extract domain and first part of path
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            domain = parsed.netloc
+            path = parsed.path.split("/")[1] if len(parsed.path.split("/")) > 1 else ""
+            return f"{domain}/{path}"
+        except:
+            # If parsing fails, return a shortened version
+            return url[:50] + "..." if len(url) > 50 else url
+    
+    async def get_bandwidth_report(self):
+        """Get a report of bandwidth usage"""
+        async with self.lock:
+            # Convert bytes to more readable format
+            report = []
+            for key, stats in self.bandwidth_stats.items():
+                operation, url, direction = key.split(":", 2)
+                report.append({
+                    "operation": operation,
+                    "url": url,
+                    "direction": direction,
+                    "total_mb": round(stats["total_bytes"] / (1024 * 1024), 2),
+                    "request_count": stats["request_count"],
+                    "avg_kb_per_request": round(stats["total_bytes"] / stats["request_count"] / 1024, 2) if stats["request_count"] > 0 else 0,
+                    "last_access": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stats["last_access"]))
+                })
+            
+            # Sort by total bandwidth usage
+            report.sort(key=lambda x: x["total_mb"], reverse=True)
+            return report
+    
+    async def log_bandwidth_report(self):
+        """Log the current bandwidth report"""
+        report = await self.get_bandwidth_report()
+        logger.info("=== Bandwidth Usage Report ===")
+        for item in report:
+            logger.info(f"{item['operation']} ({item['url']}, {item['direction']}): {item['total_mb']} MB, {item['request_count']} requests, {item['avg_kb_per_request']} KB/request")
+        logger.info("==============================")
+        
+    def print_bandwidth_report(self):
+        """Print the bandwidth report to standard output"""
+        import asyncio
+        
+        async def _get_and_print():
+            report = await self.get_bandwidth_report()
+            print("\n=== Bandwidth Usage Report ===")
+            print(f"{'OPERATION':<25} {'URL':<30} {'DIRECTION':<10} {'TOTAL MB':>10} {'REQUESTS':>10} {'AVG KB/REQ':>12}")
+            print("-" * 100)
+            
+            for item in report:
+                print(f"{item['operation'][:25]:<25} {item['url'][:30]:<30} {item['direction']:<10} {item['total_mb']:>10.2f} {item['request_count']:>10} {item['avg_kb_per_request']:>12.2f}")
+            
+            # Calculate totals
+            total_mb = sum(item["total_mb"] for item in report)
+            total_requests = sum(item["request_count"] for item in report)
+            
+            print("-" * 100)
+            print(f"{'TOTAL':<25} {'':30} {'':10} {total_mb:>10.2f} {total_requests:>10}")
+            print("==============================\n")
+        
+        # Run the async function in the current event loop if possible
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # Create a future to store the result
+            future = asyncio.run_coroutine_threadsafe(_get_and_print(), loop)
+            future.result()  # Wait for completion
+        else:
+            # If no event loop is running, create one
+            loop.run_until_complete(_get_and_print())
+
+# Create a global instance
+network_monitor = NetworkMonitor()
+
 dotenv.load_dotenv()  
 ENV_FILE = dotenv.find_dotenv()  
 if ENV_FILE:  
@@ -59,6 +175,7 @@ class AgentLensArtifactManager:
     def __init__(self):
         self._svc = None
         self.server = None
+        self.network_monitor = network_monitor  # Add reference to network monitor
 
     async def connect_server(self, server):
         """
@@ -165,7 +282,10 @@ class AgentLensArtifactManager:
         await self._svc.edit(artifact_id=art_id, version="stage")
         put_url = await self._svc.put_file(art_id, file_path, download_weight=1.0)
         async with httpx.AsyncClient() as client:
+            # Track upload bandwidth
+            content_size = len(file_content)
             response = await client.put(put_url, data=file_content, timeout=500)
+            await self.network_monitor.record_bandwidth("add_file", put_url, content_size, "upload")
         response.raise_for_status()
         await self._svc.commit(art_id)
 
@@ -186,7 +306,9 @@ class AgentLensArtifactManager:
 
         async with httpx.AsyncClient() as client:
             response = await client.get(get_url, timeout=500)
-        response.raise_for_status()
+            response.raise_for_status()
+            # Track download bandwidth
+            await self.network_monitor.record_bandwidth("get_file", get_url, len(response.content), "download")
 
         return response.content
 
@@ -385,14 +507,68 @@ class AgentLensArtifactManager:
                     # Construct the URL for FSStore using fsspec's zip chaining
                     store_url = f"zip::{download_url}"
                     
+                    # Create a bandwidth-tracking HTTP client for fsspec
+                    class BandwidthTrackingHTTPFile:
+                        def __init__(self, url, network_monitor):
+                            self.url = url
+                            self.network_monitor = network_monitor
+                            self.bytes_downloaded = 0
+                            
+                        async def record_download(self, content_length):
+                            if content_length > 0:
+                                self.bytes_downloaded += content_length
+                                await self.network_monitor.record_bandwidth(
+                                    "zarr_chunk_download", 
+                                    self.url, 
+                                    content_length, 
+                                    "download"
+                                )
+                    
                     # Run the synchronous Zarr operations in a thread pool with optimized settings
                     logger.info("Running Zarr open in thread executor with optimized connection settings...")
                     
-                    # Custom sync function that adds connection pooling for the underlying HTTP requests
-                    def _open_zarr_with_connection_pooling(url, cache_size):
-                        logger.info(f"Opening Zarr store with connection pooling: {url}")
+                    # Custom sync function that adds connection pooling and bandwidth tracking
+                    def _open_zarr_with_bandwidth_tracking(url, cache_size, network_monitor_ref):
+                        logger.info(f"Opening Zarr store with bandwidth tracking: {url}")
                         import fsspec
                         from fsspec.implementations.http import HTTPFileSystem
+                        
+                        # Original HTTP open function
+                        original_open = HTTPFileSystem.open
+                        
+                        # Override to track bandwidth
+                        def bandwidth_tracking_open(self, url, **kwargs):
+                            file = original_open(self, url, **kwargs)
+                            
+                            # Monkey patch the file's read method to track bandwidth
+                            original_read = file.read
+                            
+                            def tracked_read(size=-1):
+                                content = original_read(size)
+                                if content:
+                                    # Use asyncio.run in a new thread since we're in sync code
+                                    import threading
+                                    def record_bandwidth():
+                                        loop = asyncio.new_event_loop()
+                                        asyncio.set_event_loop(loop)
+                                        loop.run_until_complete(
+                                            network_monitor_ref.record_bandwidth(
+                                                "zarr_chunk_read", url, len(content), "download"
+                                            )
+                                        )
+                                        loop.close()
+                                    
+                                    # Run in a separate thread to avoid blocking
+                                    t = threading.Thread(target=record_bandwidth)
+                                    t.daemon = True
+                                    t.start()
+                                return content
+                            
+                            file.read = tracked_read
+                            return file
+                        
+                        # Apply the monkey patch
+                        HTTPFileSystem.open = bandwidth_tracking_open
                         
                         # Configure fsspec with better connection handling
                         fs = fsspec.filesystem(
@@ -432,11 +608,14 @@ class AgentLensArtifactManager:
                                         logger.info(f"Prefetched chunk at {i},{j} with size {chunk.nbytes/1024:.1f}KB")
                         except Exception as e:
                             logger.info(f"Error during chunk prefetching (non-critical): {e}")
+                        
+                        # Restore original open method
+                        HTTPFileSystem.open = original_open
                             
                         return root_group
                     
-                    # Use the optimized function
-                    zarr_group = await asyncio.to_thread(_open_zarr_with_connection_pooling, store_url, cache_max_size)
+                    # Use the optimized function with bandwidth tracking
+                    zarr_group = await asyncio.to_thread(_open_zarr_with_bandwidth_tracking, store_url, cache_max_size, network_monitor)
                     
                     # Cache the Zarr group for future use, along with expiration time
                     self.zarr_groups_cache[cache_key] = {
@@ -446,6 +625,10 @@ class AgentLensArtifactManager:
                     }
                     
                     logger.info(f"Cached Zarr group for {cache_key}, expires in {int(expiry_time - now)} seconds")
+                    
+                    # Log bandwidth report after loading
+                    await network_monitor.log_bandwidth_report()
+                    
                     return zarr_group
                 except Exception as e:
                     logger.info(f"Error getting Zarr group: {e}")
@@ -464,6 +647,132 @@ class AgentLensArtifactManager:
             import traceback
             logger.info(traceback.format_exc())
             return None
+
+    async def get_bandwidth_stats(self):
+        """
+        Get bandwidth usage statistics for API access
+        
+        Returns:
+            dict: Bandwidth usage statistics
+        """
+        # Get the bandwidth report from the network monitor
+        report = await self.network_monitor.get_bandwidth_report()
+        
+        # Calculate totals by operation type
+        operation_totals = {}
+        for item in report:
+            op = item["operation"]
+            if op not in operation_totals:
+                operation_totals[op] = {
+                    "total_mb": 0,
+                    "request_count": 0
+                }
+            operation_totals[op]["total_mb"] += item["total_mb"]
+            operation_totals[op]["request_count"] += item["request_count"]
+        
+        # Calculate overall totals
+        total_mb = sum(item["total_mb"] for item in report)
+        total_requests = sum(item["request_count"] for item in report)
+        
+        # Return formatted report
+        return {
+            "detailed_report": report,
+            "operation_totals": operation_totals,
+            "total_mb": total_mb,
+            "total_requests": total_requests,
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+        }
+
+    async def reset_bandwidth_stats(self):
+        """Reset bandwidth statistics"""
+        async with self.network_monitor.lock:
+            self.network_monitor.bandwidth_stats = {}
+        return {"status": "ok", "message": "Bandwidth statistics reset successfully"}
+
+    def print_bandwidth_report(self):
+        """Print bandwidth usage report to standard output"""
+        self.network_monitor.print_bandwidth_report()
+        
+    async def test_bandwidth_monitoring(self, dataset_id=None, timestamp=None, channel=None, scale=0, x=0, y=0):
+        """
+        Test function to demonstrate bandwidth monitoring.
+        Performs a series of operations to generate bandwidth usage data.
+        
+        Args:
+            dataset_id (str, optional): The dataset ID to test
+            timestamp (str, optional): The timestamp to use
+            channel (str, optional): The channel to test
+            scale (int): Scale level to test
+            x, y (int): Tile coordinates to test
+            
+        Returns:
+            dict: Test results and bandwidth report
+        """
+        # Use default values if not provided
+        dataset_id = dataset_id or "agent-lens/image-map-20250429-treatment-zip"
+        timestamp = timestamp or self.default_timestamp
+        channel = channel or "BF_LED_matrix_full"
+        
+        print(f"Starting bandwidth monitoring test with dataset: {dataset_id}")
+        print(f"Timestamp: {timestamp}, Channel: {channel}, Scale: {scale}, Coordinates: ({x},{y})")
+        
+        # Reset bandwidth stats to start fresh
+        await self.reset_bandwidth_stats()
+        
+        # Step 1: Access the Zarr group
+        print("\nStep 1: Accessing Zarr group...")
+        zarr_group = await self.get_zarr_group(dataset_id, timestamp, channel)
+        print("Zarr group accessed.")
+        
+        # Print bandwidth after step 1
+        print("\nBandwidth usage after accessing Zarr group:")
+        self.print_bandwidth_report()
+        
+        # Step 2: Get a tile
+        print("\nStep 2: Fetching a tile...")
+        tile_data = await self.get_tile_np_data(dataset_id, timestamp, channel, scale, x, y)
+        if tile_data is not None:
+            print(f"Tile fetched successfully. Shape: {tile_data.shape}, Size: {tile_data.nbytes / 1024:.2f} KB")
+        else:
+            print("Failed to fetch tile.")
+        
+        # Print bandwidth after step 2
+        print("\nBandwidth usage after fetching tile:")
+        self.print_bandwidth_report()
+        
+        # Step 3: Get the same tile again (should use cache)
+        print("\nStep 3: Fetching the same tile again (should use cache)...")
+        tile_data = await self.get_tile_np_data(dataset_id, timestamp, channel, scale, x, y)
+        if tile_data is not None:
+            print(f"Tile fetched from cache. Shape: {tile_data.shape}")
+        else:
+            print("Failed to fetch tile from cache.")
+        
+        # Print bandwidth after step 3
+        print("\nBandwidth usage after fetching from cache:")
+        self.print_bandwidth_report()
+        
+        # Step 4: Get adjacent tiles (some might be in cache from region fetching)
+        print("\nStep 4: Fetching adjacent tiles...")
+        for dx, dy in [(0, 1), (1, 0), (1, 1)]:
+            tile_data = await self.get_tile_np_data(dataset_id, timestamp, channel, scale, x + dx, y + dy)
+            if tile_data is not None:
+                print(f"Adjacent tile ({x + dx},{y + dy}) fetched. Shape: {tile_data.shape}")
+            else:
+                print(f"Failed to fetch adjacent tile ({x + dx},{y + dy}).")
+        
+        # Final bandwidth report
+        print("\nFinal bandwidth usage report:")
+        self.print_bandwidth_report()
+        
+        # Get stats for return
+        stats = await self.get_bandwidth_stats()
+        
+        return {
+            "status": "success",
+            "message": "Bandwidth monitoring test completed",
+            "bandwidth_stats": stats
+        }
 
 # Constants
 SERVER_URL = "https://hypha.aicell.io"
@@ -514,19 +823,69 @@ class ZarrTileManager:
         
         # Add a cleanup task for the tile cache
         self.cache_cleanup_task = None
+        
+        # Add network monitor reference
+        self.network_monitor = network_monitor
+        
+        # Add bandwidth report task
+        self.bandwidth_report_task = None
+        self.bandwidth_report_interval = 300  # Log bandwidth report every 5 minutes
 
     def _create_open_zarr_sync_function(self):
         """Create a reusable function for opening zarr stores synchronously"""
         def _open_zarr_sync(url, cache_size):
             logger.info(f"Opening Zarr store: {url}")
-            store = FSStore(url, mode="r")
-            if cache_size and cache_size > 0:
-                logger.info(f"Using LRU cache with size: {cache_size} bytes")
-                store = LRUStoreCache(store, max_size=cache_size)
-            # It's generally recommended to open the root group
-            root_group = zarr.group(store=store)
-            logger.info(f"Zarr group opened successfully.")
-            return root_group
+            
+            # Create a function to track HTTP reads
+            from fsspec.implementations.http import HTTPFileSystem
+            original_open = HTTPFileSystem.open
+            
+            def bandwidth_tracking_open(self, url, **kwargs):
+                file = original_open(self, url, **kwargs)
+                
+                # Monkey patch the file's read method to track bandwidth
+                original_read = file.read
+                
+                def tracked_read(size=-1):
+                    content = original_read(size)
+                    if content:
+                        # Record this read in a thread-safe way
+                        import threading
+                        def record_bandwidth():
+                            loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(loop)
+                            loop.run_until_complete(
+                                network_monitor.record_bandwidth(
+                                    "zarr_chunk_read", url, len(content), "download"
+                                )
+                            )
+                            loop.close()
+                        
+                        # Run in a separate thread to avoid blocking
+                        t = threading.Thread(target=record_bandwidth)
+                        t.daemon = True
+                        t.start()
+                    return content
+                
+                file.read = tracked_read
+                return file
+            
+            # Apply the monkey patch
+            HTTPFileSystem.open = bandwidth_tracking_open
+            
+            try:
+                store = FSStore(url, mode="r")
+                if cache_size and cache_size > 0:
+                    logger.info(f"Using LRU cache with size: {cache_size} bytes")
+                    store = LRUStoreCache(store, max_size=cache_size)
+                # It's generally recommended to open the root group
+                root_group = zarr.group(store=store)
+                logger.info(f"Zarr group opened successfully.")
+                return root_group
+            finally:
+                # Restore original open method
+                HTTPFileSystem.open = original_open
+                
         return _open_zarr_sync
 
     async def connect(self, workspace_token=None, server_url="https://hypha.aicell.io"):
@@ -556,6 +915,10 @@ class ZarrTileManager:
             if self.cache_cleanup_task is None or self.cache_cleanup_task.done():
                 self.cache_cleanup_task = asyncio.create_task(self._cleanup_tile_cache())
             
+            # Start the bandwidth report task
+            if self.bandwidth_report_task is None or self.bandwidth_report_task.done():
+                self.bandwidth_report_task = asyncio.create_task(self._periodic_bandwidth_report())
+            
             logger.info("ZarrTileManager connected successfully")
             return True
         except Exception as e:
@@ -563,6 +926,22 @@ class ZarrTileManager:
             import traceback
             logger.info(traceback.format_exc())
             return False
+
+    async def _periodic_bandwidth_report(self):
+        """Periodically log bandwidth usage reports"""
+        try:
+            while self.is_running:
+                # Wait for the specified interval
+                await asyncio.sleep(self.bandwidth_report_interval)
+                
+                # Log bandwidth report
+                await self.network_monitor.log_bandwidth_report()
+        except asyncio.CancelledError:
+            logger.info("Bandwidth report task cancelled")
+        except Exception as e:
+            logger.info(f"Error in bandwidth report task: {e}")
+            import traceback
+            logger.info(traceback.format_exc())
 
     async def _cleanup_tile_cache(self):
         """Periodically clean up expired tiles from the cache"""
@@ -628,6 +1007,17 @@ class ZarrTileManager:
                 await self.cache_cleanup_task
             except asyncio.CancelledError:
                 pass
+        
+        # Cancel the bandwidth report task
+        if self.bandwidth_report_task and not self.bandwidth_report_task.done():
+            self.bandwidth_report_task.cancel()
+            try:
+                await self.bandwidth_report_task
+            except asyncio.CancelledError:
+                pass
+        
+        # Log final bandwidth report
+        await self.network_monitor.log_bandwidth_report()
         
         # Clear the processed tile cache
         self.processed_tile_cache.clear()
@@ -847,6 +1237,7 @@ class ZarrTileManager:
         Returns:
             np.ndarray or None: Tile data as numpy array, or None if tile not found/empty
         """
+        start_time = time.time()
         try:
             # Use default timestamp if none provided
             timestamp = timestamp or self.default_timestamp
@@ -860,6 +1251,13 @@ class ZarrTileManager:
                 # Check if the cached data is still valid (not expired)
                 if time.time() - cached_data['timestamp'] < self.processed_tile_ttl:
                     logger.info(f"Using cached tile data for {cache_key}")
+                    # Record cache hit (no bandwidth used)
+                    await self.network_monitor.record_bandwidth(
+                        "tile_cache_hit", 
+                        f"{dataset_id}/{timestamp}/{channel}", 
+                        0, 
+                        "cache"
+                    )
                     return cached_data['data']
                 else:
                     # Remove expired data from cache
@@ -880,6 +1278,13 @@ class ZarrTileManager:
                         cached_data = self.processed_tile_cache[cache_key]
                         if time.time() - cached_data['timestamp'] < self.processed_tile_ttl:
                             logger.info(f"Using cached tile data for {cache_key} after waiting for group processing")
+                            # Record waiting for group processing (no bandwidth used)
+                            await self.network_monitor.record_bandwidth(
+                                "tile_wait_group", 
+                                f"{dataset_id}/{timestamp}/{channel}", 
+                                0, 
+                                "cache"
+                            )
                             return cached_data['data']
             
             # Ensure the zarr group is in cache without returning it
@@ -913,13 +1318,30 @@ class ZarrTileManager:
                     
                     # Fetch the entire region at once
                     logger.info(f"Fetching tile region at scale{scale}, starting at ({region_y_start},{region_x_start})")
+                    
+                    # Track time before fetching region
+                    region_fetch_start = time.time()
+                    
                     region_data = scale_array.get_orthogonal_selection(
                         (
                             slice(region_y_start * self.chunk_size, (region_y_start + region_size) * self.chunk_size),
                             slice(region_x_start * self.chunk_size, (region_x_start + region_size) * self.chunk_size)
                         )
                     )
-                    logger.info(f'Fetched region with size in KB: {region_data.nbytes / 1024:.1f}')
+                    
+                    # Calculate time taken and data size for fetching region
+                    region_fetch_time = time.time() - region_fetch_start
+                    region_size_kb = region_data.nbytes / 1024
+                    logger.info(f'Fetched region with size: {region_size_kb:.1f} KB in {region_fetch_time:.3f}s')
+                    
+                    # Record bandwidth usage for region fetch
+                    # This is an estimate since we can't directly measure HTTP traffic from zarr
+                    await self.network_monitor.record_bandwidth(
+                        f"tile_region_fetch_scale{scale}", 
+                        f"{dataset_id}/{timestamp}/{channel}", 
+                        region_data.nbytes, 
+                        "download"
+                    )
                     
                     # Check if region data is valid (contains non-zero values)
                     # If it's all zeros or mostly zeros, we consider it empty
@@ -989,13 +1411,34 @@ class ZarrTileManager:
                                             'timestamp': now
                                         }
                         
+                        # Record total processing time
+                        total_time = time.time() - start_time
+                        logger.info(f"Total tile processing time: {total_time:.3f}s")
+                        
                         return tile_data
                     else:
                         # If for some reason the tile isn't within the region (should be rare)
                         # Fall back to direct tile access
                         logger.info("Tile coordinates outside fetched region, falling back to direct access")
+                        
+                        # Track time for direct tile access
+                        direct_fetch_start = time.time()
+                        
                         tile_data = scale_array[y*self.tile_size:(y+1)*self.tile_size, 
                                             x*self.tile_size:(x+1)*self.tile_size]
+                        
+                        # Calculate time and size for direct tile access
+                        direct_fetch_time = time.time() - direct_fetch_start
+                        tile_size_kb = tile_data.nbytes / 1024
+                        logger.info(f'Direct tile fetch: {tile_size_kb:.1f} KB in {direct_fetch_time:.3f}s')
+                        
+                        # Record bandwidth usage for direct tile fetch
+                        await self.network_monitor.record_bandwidth(
+                            f"direct_tile_fetch_scale{scale}", 
+                            f"{dataset_id}/{timestamp}/{channel}", 
+                            tile_data.nbytes, 
+                            "download"
+                        )
                         
                         # Check if this specific tile is empty
                         if np.count_nonzero(tile_data) < 10:  # Arbitrary threshold
@@ -1007,6 +1450,10 @@ class ZarrTileManager:
                             'data': tile_data,
                             'timestamp': time.time()
                         }
+                        
+                        # Record total processing time
+                        total_time = time.time() - start_time
+                        logger.info(f"Total tile processing time (direct): {total_time:.3f}s")
                         
                         return tile_data
                         
