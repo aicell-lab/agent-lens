@@ -256,19 +256,42 @@ def get_frontend_api():
                         threshold_min = float(threshold_dict.get(channel_key, {}).get("min", 2))
                         threshold_max = float(threshold_dict.get(channel_key, {}).get("max", 98))
                         
-                        # Apply thresholds using custom percentiles, but only if thresholds are set
+                        # FIXED: Use fixed intensity values instead of per-tile percentiles
+                        # This ensures consistent contrast across tiles
                         if channel_key in threshold_dict:
-                            p_min, p_max = np.percentile(adjusted, (threshold_min, threshold_max))
-                            enhanced = exposure.rescale_intensity(adjusted, in_range=(p_min, p_max))
+                            # Calculate fixed intensity values across the range based on contrast
+                            # Reduced from 3.0 to 1.5 to make contrast effect more subtle
+                            contrast_scale = float(contrast) * 1.5
+                            
+                            # Calculate fixed intensity range for consistency
+                            # Make the range more conservative
+                            input_range_min = max(0, 96 - (96 * contrast_scale))
+                            input_range_max = min(255, 160 + (96 * contrast_scale))
+                            
+                            # Apply linear contrast stretch with fixed values to ensure consistency
+                            enhanced = exposure.rescale_intensity(
+                                adjusted, 
+                                in_range=(input_range_min, input_range_max),
+                                out_range=(0, 255)
+                            )
                         else:
                             enhanced = adjusted
                         
-                        # Ensure contrast is within safe range (0-0.1)
-                        safe_contrast = min(0.1, contrast)
-                        
-                        # Apply contrast adjustment using CLAHE
-                        enhanced = exposure.equalize_adapthist(enhanced, clip_limit=safe_contrast)
-                        enhanced = util.img_as_ubyte(enhanced)
+                        # Only apply CLAHE for non-brightfield channels or if specifically requested
+                        # CLAHE works on local regions and can cause inconsistency between tiles
+                        # So we limit its use and impact
+                        if channel_key != '0' or float(contrast_dict.get(channel_key, 0)) > 0.05:
+                            # Reduce the CLAHE clip limit to minimize tile boundary issues
+                            # Smaller clip limit means more subtle enhancement
+                            safe_contrast = min(0.03, contrast)
+                            
+                            # Apply CLAHE with conservative settings
+                            enhanced = exposure.equalize_adapthist(
+                                enhanced, 
+                                clip_limit=safe_contrast,
+                                kernel_size=128  # Larger kernel helps with consistency
+                            )
+                            enhanced = util.img_as_ubyte(enhanced)
                     else:
                         enhanced = adjusted
                     
@@ -573,49 +596,148 @@ def get_frontend_api():
                     if len(tile_data.shape) == 2:
                         # Apply contrast enhancement only if requested
                         if float(contrast) > 0:  # Only apply when contrast value is positive
-                            # If custom thresholds provided
+                            # FIXED: Use fixed intensity values instead of per-tile percentiles
+                            # This ensures consistent contrast across tiles
                             if channel_key_str in threshold_dict:
-                                p_min, p_max = np.percentile(adjusted, (threshold_min, threshold_max))
-                                enhanced = exposure.rescale_intensity(adjusted, in_range=(p_min, p_max))
+                                # Calculate fixed intensity values across the range based on contrast
+                                # Reduced from 3.0 to 1.5 to make contrast effect more subtle
+                                contrast_scale = float(contrast) * 1.5
+                                
+                                # Calculate fixed intensity range for consistency
+                                # Make the range more conservative
+                                input_range_min = max(0, 96 - (96 * contrast_scale))
+                                input_range_max = min(255, 160 + (96 * contrast_scale))
+                                
+                                # Apply linear contrast stretch with fixed values to ensure consistency
+                                enhanced = exposure.rescale_intensity(
+                                    adjusted, 
+                                    in_range=(input_range_min, input_range_max),
+                                    out_range=(0, 255)
+                                )
                             else:
                                 enhanced = adjusted
                             
-                            # Apply CLAHE
-                            # Ensure contrast is within safe range (0-0.1)
-                            safe_contrast = min(0.1, float(contrast))
-                            bf_enhanced = exposure.equalize_adapthist(enhanced, clip_limit=safe_contrast)
+                            # Only apply CLAHE if specifically requested with higher values
+                            if float(contrast) > 0.05:
+                                # Reduce the CLAHE clip limit to minimize tile boundary issues
+                                safe_contrast = min(0.03, float(contrast))
+                                
+                                # Apply CLAHE with conservative settings
+                                bf_enhanced = exposure.equalize_adapthist(
+                                    enhanced, 
+                                    clip_limit=safe_contrast,
+                                    kernel_size=128  # Larger kernel helps with consistency
+                                )
+                            else:
+                                # Just normalize to 0-1 for the RGB merge
+                                bf_enhanced = adjusted.astype(np.float32) / 255.0
+                            
+                            # Create RGB by copying the enhanced grayscale data to all channels
+                            if float(contrast) > 0 and float(contrast) > 0.05:  # Only apply when CLAHE was used
+                                # Convert to 0-1 if CLAHE was applied
+                                bf_enhanced = util.img_as_float(bf_enhanced)
+                            
+                            # Create an RGB version
+                            bf_rgb = np.stack([bf_enhanced, bf_enhanced, bf_enhanced], axis=2)
+                            merged_image = bf_rgb.copy()
                         else:
                             # Just normalize to 0-1 for the RGB merge
                             bf_enhanced = adjusted.astype(np.float32) / 255.0
-                        
-                        # Create RGB by copying the enhanced grayscale data to all channels
-                        if float(contrast) > 0:  # Only apply when contrast value is positive
-                            # Convert to 0-1 if CLAHE was applied
-                            bf_enhanced = util.img_as_float(bf_enhanced)
-                        
-                        # Create an RGB version
-                        bf_rgb = np.stack([bf_enhanced, bf_enhanced, bf_enhanced], axis=2)
-                        merged_image = bf_rgb.copy()
+                            
+                            # Create an RGB version
+                            bf_rgb = np.stack([bf_enhanced, bf_enhanced, bf_enhanced], axis=2)
+                            merged_image = bf_rgb.copy()
+                    else:
+                        # For fluorescence channels, apply color overlay with enhanced contrast
+                        if color and len(tile_data.shape) == 2:
+                            # Apply contrast enhancement only if requested
+                            if float(contrast) > 0:  # Only apply when contrast value is positive
+                                # FIXED: Use fixed intensity values instead of per-tile percentiles
+                                # This ensures consistent contrast across tiles
+                                if channel_key_str in threshold_dict:
+                                    # Calculate fixed intensity values across the range based on contrast
+                                    # Reduced from 3.0 to 1.5 to make contrast effect more subtle
+                                    contrast_scale = float(contrast) * 1.5
+                                    
+                                    # Calculate fixed intensity range for consistency
+                                    # Make the range more conservative
+                                    input_range_min = max(0, 96 - (96 * contrast_scale))
+                                    input_range_max = min(255, 160 + (96 * contrast_scale))
+                                    
+                                    # Apply linear contrast stretch with fixed values
+                                    fluorescence_enhanced = exposure.rescale_intensity(
+                                        adjusted, 
+                                        in_range=(input_range_min, input_range_max),
+                                        out_range=(0, 255)
+                                    )
+                                else:
+                                    fluorescence_enhanced = adjusted
+                                
+                                # Only apply CLAHE if specifically requested with higher values
+                                if float(contrast) > 0.05:
+                                    # Reduce the CLAHE clip limit to minimize tile boundary issues
+                                    safe_contrast = min(0.03, float(contrast))
+                                    
+                                    # Apply CLAHE with conservative settings
+                                    enhanced = exposure.equalize_adapthist(
+                                        fluorescence_enhanced, 
+                                        clip_limit=safe_contrast,
+                                        kernel_size=128  # Larger kernel helps with consistency
+                                    )
+                                    enhanced = util.img_as_ubyte(enhanced)
+                                else:
+                                    # Just use the rescale_intensity result
+                                    enhanced = fluorescence_enhanced
+                                
+                                # Normalize for coloring
+                                normalized = enhanced.astype(np.float32) / 255.0
+                            else:
+                                # Just normalize to 0-1 for coloring
+                                normalized = adjusted.astype(np.float32) / 255.0
                 else:
                     # For fluorescence channels, apply color overlay with enhanced contrast
                     if color and len(tile_data.shape) == 2:
                         # Apply contrast enhancement only if requested
                         if float(contrast) > 0:  # Only apply when contrast value is positive
-                            # Apply thresholds using custom percentiles if provided
+                            # FIXED: Use fixed intensity values instead of per-tile percentiles
+                            # This ensures consistent contrast across tiles
                             if channel_key_str in threshold_dict:
-                                p_min, p_max = np.percentile(adjusted, (threshold_min, threshold_max))
-                                fluorescence_enhanced = exposure.rescale_intensity(adjusted, in_range=(p_min, p_max))
+                                # Calculate fixed intensity values across the range based on contrast
+                                # Reduced from 3.0 to 1.5 to make contrast effect more subtle
+                                contrast_scale = float(contrast) * 1.5
+                                
+                                # Calculate fixed intensity range for consistency
+                                # Make the range more conservative
+                                input_range_min = max(0, 96 - (96 * contrast_scale))
+                                input_range_max = min(255, 160 + (96 * contrast_scale))
+                                
+                                # Apply linear contrast stretch with fixed values
+                                fluorescence_enhanced = exposure.rescale_intensity(
+                                    adjusted, 
+                                    in_range=(input_range_min, input_range_max),
+                                    out_range=(0, 255)
+                                )
                             else:
                                 fluorescence_enhanced = adjusted
                             
-                            # Apply CLAHE
-                            # Ensure contrast is within safe range (0-0.1)
-                            safe_contrast = min(0.1, float(contrast))
-                            enhanced = exposure.equalize_adapthist(fluorescence_enhanced, clip_limit=safe_contrast)
-                            enhanced = util.img_as_ubyte(enhanced)
-                        else:
-                            # Just normalize to 0-1 for coloring
-                            normalized = adjusted.astype(np.float32) / 255.0
+                            # Only apply CLAHE if specifically requested with higher values
+                            if float(contrast) > 0.05:
+                                # Reduce the CLAHE clip limit to minimize tile boundary issues
+                                safe_contrast = min(0.03, float(contrast))
+                                
+                                # Apply CLAHE with conservative settings
+                                enhanced = exposure.equalize_adapthist(
+                                    fluorescence_enhanced, 
+                                    clip_limit=safe_contrast,
+                                    kernel_size=128  # Larger kernel helps with consistency
+                                )
+                                enhanced = util.img_as_ubyte(enhanced)
+                            else:
+                                # Just use the rescale_intensity result
+                                enhanced = fluorescence_enhanced
+                            
+                            # Normalize for coloring
+                            normalized = enhanced.astype(np.float32) / 255.0
                         
                         # Create color overlay
                         colored_channel = np.zeros_like(merged_image)
@@ -1064,19 +1186,42 @@ def get_frontend_api():
                         threshold_min = float(threshold_dict.get(channel_key, {}).get("min", 2))
                         threshold_max = float(threshold_dict.get(channel_key, {}).get("max", 98))
                         
-                        # Apply thresholds using custom percentiles, but only if thresholds are set
+                        # FIXED: Use fixed intensity values instead of per-tile percentiles
+                        # This ensures consistent contrast across tiles
                         if channel_key in threshold_dict:
-                            p_min, p_max = np.percentile(adjusted, (threshold_min, threshold_max))
-                            enhanced = exposure.rescale_intensity(adjusted, in_range=(p_min, p_max))
+                            # Calculate fixed intensity values across the range based on contrast
+                            # Reduced from 3.0 to 1.5 to make contrast effect more subtle
+                            contrast_scale = float(contrast) * 1.5
+                            
+                            # Calculate fixed intensity range for consistency
+                            # Make the range more conservative
+                            input_range_min = max(0, 96 - (96 * contrast_scale))
+                            input_range_max = min(255, 160 + (96 * contrast_scale))
+                            
+                            # Apply linear contrast stretch with fixed values to ensure consistency
+                            enhanced = exposure.rescale_intensity(
+                                adjusted, 
+                                in_range=(input_range_min, input_range_max),
+                                out_range=(0, 255)
+                            )
                         else:
                             enhanced = adjusted
                         
-                        # Ensure contrast is within safe range (0-0.1)
-                        safe_contrast = min(0.1, contrast)
-                        
-                        # Apply contrast adjustment using CLAHE
-                        enhanced = exposure.equalize_adapthist(enhanced, clip_limit=safe_contrast)
-                        enhanced = util.img_as_ubyte(enhanced)
+                        # Only apply CLAHE for non-brightfield channels or if specifically requested
+                        # CLAHE works on local regions and can cause inconsistency between tiles
+                        # So we limit its use and impact
+                        if channel_key != '0' or float(contrast_dict.get(channel_key, 0)) > 0.05:
+                            # Reduce the CLAHE clip limit to minimize tile boundary issues
+                            # Smaller clip limit means more subtle enhancement
+                            safe_contrast = min(0.03, contrast)
+                            
+                            # Apply CLAHE with conservative settings
+                            enhanced = exposure.equalize_adapthist(
+                                enhanced, 
+                                clip_limit=safe_contrast,
+                                kernel_size=128  # Larger kernel helps with consistency
+                            )
+                            enhanced = util.img_as_ubyte(enhanced)
                     else:
                         enhanced = adjusted
                     
