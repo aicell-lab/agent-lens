@@ -1403,45 +1403,17 @@ class ZarrTileManager:
                     # Remove expired data from cache
                     del self.processed_tile_cache[cache_key]
             
-            # Dynamically adjust region size based on scale level
-            # - For high zoom levels (scale 0-1), use larger regions (2x2) since those are detail views where users likely explore nearby areas
-            # - For medium zoom levels (scale 2), use medium regions (1x2 or 2x1) based on X/Y coordinates (edge heuristic)
-            # - For low zoom levels (scale 3-4), use smaller regions (1x1) since those are overview tiles
-            
-            region_size = 1  # Default to 1x1 region (single tile)
-            
-            if scale <= 1:
-                # Higher zoom levels (more detail) - use 2x2 regions for dense viewing areas
-                region_size = 2
-            elif scale == 2:
-                # Medium zoom - use edge detection heuristic
-                # Check if this is likely to be a sparse area (edges of the image)
-                # Assuming image dimensions of 2048x2048 and tile size of 256, we have 8x8=64 tiles
-                # Consider tiles near center (2,2 to 5,5) as dense areas
-                
-                tile_count_per_dimension = 2048 // self.chunk_size  # Typically 8 for a 2048x2048 image
-                center_start = tile_count_per_dimension // 4  # ~ 2
-                center_end = center_start * 3  # ~ 6
-                
-                if (center_start <= x <= center_end and center_start <= y <= center_end):
-                    # This is a center/dense area
-                    region_size = 2
-                else:
-                    # This is an edge/sparse area
-                    region_size = 1
-            # else scale >= 3: Keep region_size = 1 for overview tiles
-            
-            # Define the group region based on the dynamic region size
-            group_x_start = max(0, x - region_size // 2)
-            group_y_start = max(0, y - region_size // 2)
-            group_key = f"{dataset_id}:{timestamp}:{channel}:{scale}:{group_x_start},{group_y_start}_group"
+            # Simplified: region_size is always 1 (fetching a single tile's chunk)
+            # The group_key and empty_region_key will now effectively refer to the single tile
+            group_key = f"{dataset_id}:{timestamp}:{channel}:{scale}:{x}:{y}_tile" # Simplified group_key
             
             # Check empty regions cache to avoid fetching known empty regions
-            empty_region_key = f"{dataset_id}:{timestamp}:{channel}:{scale}:{group_x_start}:{group_y_start}"
+            # empty_region_key is now effectively the same as cache_key for a single tile
+            empty_region_key = cache_key 
             if empty_region_key in self.empty_regions_cache:
                 expiry_time = self.empty_regions_cache[empty_region_key]
                 if time.time() < expiry_time:
-                    logger.info(f"Skipping known empty region at {scale}:{group_x_start}:{group_y_start}")
+                    logger.info(f"Skipping known empty tile at {scale}:{x}:{y}")
                     # Record cache hit for empty region (no bandwidth used)
                     await self.network_monitor.record_bandwidth(
                         "empty_region_cache_hit", 
@@ -1454,7 +1426,7 @@ class ZarrTileManager:
                     # Remove expired entry
                     del self.empty_regions_cache[empty_region_key]
             
-            # If this tile is part of a group being processed, wait for it to complete
+            # If this tile is being processed, wait for it to complete
             if group_key in self.in_progress_tiles:
                 for attempt in range(3):  # Try a few times with exponential backoff
                     # Check if the tile is now in cache after a small delay
@@ -1462,10 +1434,10 @@ class ZarrTileManager:
                     if cache_key in self.processed_tile_cache:
                         cached_data = self.processed_tile_cache[cache_key]
                         if time.time() - cached_data['timestamp'] < self.processed_tile_ttl:
-                            logger.info(f"Using cached tile data for {cache_key} after waiting for group processing")
+                            logger.info(f"Using cached tile data for {cache_key} after waiting for processing")
                             # Record waiting for group processing (no bandwidth used)
                             await self.network_monitor.record_bandwidth(
-                                "tile_wait_group", 
+                                "tile_wait_group", # Should be tile_wait_single now
                                 f"{dataset_id}/{timestamp}/{channel}", 
                                 0, 
                                 "cache"
@@ -1486,7 +1458,7 @@ class ZarrTileManager:
                 # Return None instead of zero array
                 return None
             
-            # Mark this group as being processed
+            # Mark this tile as being processed
             self.in_progress_tiles.add(group_key)
             
             try:
@@ -1495,187 +1467,75 @@ class ZarrTileManager:
                     # Get the scale array
                     scale_array = zarr_group[f'scale{scale}']
                     
-                    # Calculate a region to fetch based on our dynamic region size
-                    region_x_start = max(0, x - region_size // 2)
-                    region_y_start = max(0, y - region_size // 2)
-                    
                     # Add a quick check for empty regions at edges
                     # If we're at high scales (3-4) and at the edges, we might be in empty space
-                    if scale >= 3:
+                    if scale >= 3: # This logic might still be useful even for single tile fetches
                         # Get the shape of the array to check boundaries
                         array_shape = scale_array.shape
-                        max_x = array_shape[1] // self.chunk_size
-                        max_y = array_shape[0] // self.chunk_size
+                        max_x_tiles = array_shape[1] // self.chunk_size
+                        max_y_tiles = array_shape[0] // self.chunk_size
                         
-                        # If we're close to the max boundaries, this might be empty space
-                        if x > max_x - 2 or y > max_y - 2:
-                            # Check if this specific coordinate is within bounds
-                            if x * self.chunk_size >= array_shape[1] or y * self.chunk_size >= array_shape[0]:
-                                logger.info(f"Tile coordinates outside array bounds, returning None")
-                                self.in_progress_tiles.discard(group_key)
-                                
-                                # Add to empty regions cache
-                                self._add_to_empty_regions_cache(empty_region_key)
-                                
-                                return None
+                        # If we're outside the bounds, this is empty space
+                        if x >= max_x_tiles or y >= max_y_tiles:
+                            logger.info(f"Tile coordinates {x},{y} outside array bounds ({max_x_tiles},{max_y_tiles}), returning None")
+                            self.in_progress_tiles.discard(group_key)
+                            self._add_to_empty_regions_cache(empty_region_key)
+                            return None
                     
-                    # Fetch the entire region at once
-                    logger.info(f"Fetching tile region at scale{scale}, starting at ({region_y_start},{region_x_start})")
+                    # Fetch only the single requested tile's chunk
+                    logger.info(f"Fetching single tile chunk at scale{scale}, coords ({y},{x})")
                     
                     # Track time before fetching region
-                    region_fetch_start = time.time()
+                    tile_fetch_start = time.time()
                     
-                    region_data = scale_array.get_orthogonal_selection(
+                    tile_data = scale_array.get_orthogonal_selection(
                         (
-                            slice(region_y_start * self.chunk_size, (region_y_start + region_size) * self.chunk_size),
-                            slice(region_x_start * self.chunk_size, (region_x_start + region_size) * self.chunk_size)
+                            slice(y * self.chunk_size, (y + 1) * self.chunk_size),
+                            slice(x * self.chunk_size, (x + 1) * self.chunk_size)
                         )
                     )
                     
                     # Calculate time taken and data size for fetching region
-                    region_fetch_time = time.time() - region_fetch_start
-                    region_size_kb = region_data.nbytes / 1024
-                    logger.info(f'Fetched region with size: {region_size_kb:.1f} KB in {region_fetch_time:.3f}s')
+                    tile_fetch_time = time.time() - tile_fetch_start
+                    tile_size_kb = tile_data.nbytes / 1024
+                    logger.info(f'Fetched single tile chunk: {tile_size_kb:.1f} KB in {tile_fetch_time:.3f}s')
                     
-                    # Record bandwidth usage for region fetch
-                    # This is an estimate since we can't directly measure HTTP traffic from zarr
+                    # Record bandwidth usage for tile fetch
                     await self.network_monitor.record_bandwidth(
-                        f"tile_region_fetch_scale{scale}", 
+                        f"tile_fetch_scale{scale}", 
                         f"{dataset_id}/{timestamp}/{channel}", 
-                        region_data.nbytes, 
+                        tile_data.nbytes, 
                         "download"
                     )
                     
-                    # Check if region data is valid (contains non-zero values)
-                    # If it's all zeros or mostly zeros, we consider it empty
-                    if np.count_nonzero(region_data) < 10:  # Arbitrary threshold
-                        logger.info(f"Region data is empty (all zeros), returning None")
-                        # Remove group from processing to allow future attempts
+                    # Check if tile data is valid (contains non-zero values)
+                    if np.count_nonzero(tile_data) < 10:  # Arbitrary threshold
+                        logger.info(f"Tile data is empty (all zeros), returning None for {cache_key}")
                         self.in_progress_tiles.discard(group_key)
-                        
-                        # Add to empty regions cache
                         self._add_to_empty_regions_cache(empty_region_key)
-                        
                         return None
                     
-                    # Extract the specific tile data from the region
-                    tile_y_offset = (y - region_y_start) * self.chunk_size
-                    tile_x_offset = (x - region_x_start) * self.chunk_size
+                    # Cache the requested tile
+                    self.processed_tile_cache[cache_key] = {
+                        'data': tile_data,
+                        'timestamp': time.time()
+                    }
                     
-                    # Make sure we're within bounds (region might be smaller at edges)
-                    if (tile_y_offset >= 0 and 
-                        tile_x_offset >= 0 and 
-                        tile_y_offset + self.chunk_size <= region_data.shape[0] and
-                        tile_x_offset + self.chunk_size <= region_data.shape[1]):
+                    # No adjacent tiles to cache as we fetched only one tile's chunk.
                         
-                        # Extract the requested tile from the larger region
-                        tile_data = region_data[
-                            tile_y_offset:tile_y_offset + self.chunk_size,
-                            tile_x_offset:tile_x_offset + self.chunk_size
-                        ]
-                        
-                        # Check if this specific tile is empty
-                        if np.count_nonzero(tile_data) < 10:  # Arbitrary threshold
-                            logger.info(f"Tile data is empty, returning None for {cache_key}")
-                            # Add specific tile to empty regions cache
-                            specific_empty_key = f"{dataset_id}:{timestamp}:{channel}:{scale}:{x}:{y}"
-                            self._add_to_empty_regions_cache(specific_empty_key)
-                            return None
-                        
-                        # Cache the requested tile
-                        self.processed_tile_cache[cache_key] = {
-                            'data': tile_data,
-                            'timestamp': time.time()
-                        }
-                        
-                        # Also cache the other tiles in the region
-                        now = time.time()
-                        for region_y in range(region_size):
-                            for region_x in range(region_size):
-                                # Skip the already cached requested tile
-                                if region_y * self.chunk_size == tile_y_offset and region_x * self.chunk_size == tile_x_offset:
-                                    continue
-                                
-                                # Calculate coordinates for this tile in the region
-                                region_tile_y = region_y_start + region_y
-                                region_tile_x = region_x_start + region_x
-                                
-                                # Only cache tiles that fall within the fetched region
-                                if (region_y * self.chunk_size < region_data.shape[0] and 
-                                    region_x * self.chunk_size < region_data.shape[1] and
-                                    (region_y + 1) * self.chunk_size <= region_data.shape[0] and
-                                    (region_x + 1) * self.chunk_size <= region_data.shape[1]):
-                                    
-                                    # Extract tile data
-                                    adjacent_tile_data = region_data[
-                                        region_y * self.chunk_size:(region_y + 1) * self.chunk_size,
-                                        region_x * self.chunk_size:(region_x + 1) * self.chunk_size
-                                    ]
-                                    
-                                    # Check if this adjacent tile is empty
-                                    if np.count_nonzero(adjacent_tile_data) < 10:
-                                        # Add to empty regions cache
-                                        adjacent_empty_key = f"{dataset_id}:{timestamp}:{channel}:{scale}:{region_tile_x}:{region_tile_y}"
-                                        self._add_to_empty_regions_cache(adjacent_empty_key)
-                                    else:
-                                        # Only cache non-empty tiles
-                                        adjacent_cache_key = f"{dataset_id}:{timestamp}:{channel}:{scale}:{region_tile_x}:{region_tile_y}"
-                                        self.processed_tile_cache[adjacent_cache_key] = {
-                                            'data': adjacent_tile_data,
-                                            'timestamp': now
-                                        }
-                        
-                        # Record total processing time
-                        total_time = time.time() - start_time
-                        logger.info(f"Total tile processing time: {total_time:.3f}s")
-                        
-                        return tile_data
-                    else:
-                        # If for some reason the tile isn't within the region (should be rare)
-                        # Fall back to direct tile access
-                        logger.info("Tile coordinates outside fetched region, falling back to direct access")
-                        
-                        # Track time for direct tile access
-                        direct_fetch_start = time.time()
-                        
-                        tile_data = scale_array[y*self.tile_size:(y+1)*self.tile_size, 
-                                            x*self.tile_size:(x+1)*self.tile_size]
-                        
-                        # Calculate time and size for direct tile access
-                        direct_fetch_time = time.time() - direct_fetch_start
-                        tile_size_kb = tile_data.nbytes / 1024
-                        logger.info(f'Direct tile fetch: {tile_size_kb:.1f} KB in {direct_fetch_time:.3f}s')
-                        
-                        # Record bandwidth usage for direct tile fetch
-                        await self.network_monitor.record_bandwidth(
-                            f"direct_tile_fetch_scale{scale}", 
-                            f"{dataset_id}/{timestamp}/{channel}", 
-                            tile_data.nbytes, 
-                            "download"
-                        )
-                        
-                        # Check if this specific tile is empty
-                        if np.count_nonzero(tile_data) < 10:  # Arbitrary threshold
-                            logger.info(f"Tile data is empty from direct access, returning None for {cache_key}")
-                            # Add to empty regions cache
-                            self._add_to_empty_regions_cache(cache_key)
-                            return None
-                        
-                        # Cache the tile
-                        self.processed_tile_cache[cache_key] = {
-                            'data': tile_data,
-                            'timestamp': time.time()
-                        }
-                        
-                        # Record total processing time
-                        total_time = time.time() - start_time
-                        logger.info(f"Total tile processing time (direct): {total_time:.3f}s")
-                        
-                        return tile_data
+                    # Record total processing time
+                    total_time = time.time() - start_time
+                    logger.info(f"Total tile processing time: {total_time:.3f}s")
+                    
+                    return tile_data
                         
                 except KeyError as e:
-                    logger.info(f"KeyError accessing Zarr array path: {e}")
+                    logger.info(f"KeyError accessing Zarr array path: {e} for scale{scale}")
                     # Return None instead of zero array
+                    return None
+                except IndexError as e: # Could happen if x,y are out of bounds for the Zarr array
+                    logger.info(f"IndexError accessing Zarr array for tile {scale}:{x}:{y} - likely out of bounds: {e}")
+                    self._add_to_empty_regions_cache(empty_region_key)
                     return None
                 except Exception as inner_e:
                     logger.info(f"Error processing tile data: {inner_e}")
