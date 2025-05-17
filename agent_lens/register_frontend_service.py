@@ -21,15 +21,8 @@ import asyncio
 from fastapi.middleware.gzip import GZipMiddleware
 import hashlib
 import time
-# See if we have WebP support in PIL
-WEBP_SUPPORT = True
-try:
-    test_img = Image.new('RGB', (16, 16))
-    test_buffer = io.BytesIO()
-    test_img.save(test_buffer, format="WEBP")
-except Exception:
-    WEBP_SUPPORT = False
-    print("WebP support not available in PIL, falling back to PNG")
+from starlette.requests import ClientDisconnect  # Import at the top of the function or module
+from starlette.responses import Response as StarletteResponse # Import for 499 response
 
 # Configure logging
 import logging
@@ -93,40 +86,40 @@ def get_frontend_api():
     # Add middleware for monitoring server-side bandwidth usage
     @app.middleware("http")
     async def monitoring_middleware(request: Request, call_next):
-        # Record start time and initial metrics
+        from starlette.requests import ClientDisconnect
+        from starlette.responses import Response as StarletteResponse # Import for 499 response
+
         start_time = time.time()
-        
-        # Track the approximate request size
         request_size = 0
-        body = await request.body()
-        request_size = len(body)
-        
-        # Execute the request handler
-        response = await call_next(request)
-        
-        # Calculate processing time
-        process_time = time.time() - start_time
-        
-        # Add processing time header to help with debugging
-        response.headers["X-Process-Time"] = f"{process_time:.4f}"
-        
-        # Add standard cache control headers to all responses
-        if not response.headers.get("Cache-Control") and request.url.path.startswith(("/assets", "/public")):
-            response.headers["Cache-Control"] = "public, max-age=86400"  # 24 hours for static assets
-        
-        # For specific API endpoints, add metrics logging
-        if request.url.path.startswith(("/tile", "/merged-tiles", "/tile-for-timepoint")):
-            path_parts = request.url.path.split("?")[0].split("/")
-            endpoint = path_parts[-1] if path_parts else "unknown"
-            
-            # Log metrics for monitoring
-            logger.info(
-                f"METRICS: endpoint={endpoint} method={request.method} "
-                f"path={request.url.path} processing_time={process_time:.4f}s "
-                f"request_size={request_size} response_status={response.status_code}"
-            )
-        
-        return response
+        response = None
+        try:
+            body = await request.body()
+            request_size = len(body)
+            response = await call_next(request)
+            process_time = time.time() - start_time
+            response.headers["X-Process-Time"] = f"{process_time:.4f}"
+            if not response.headers.get("Cache-Control") and request.url.path.startswith(("/assets", "/public")):
+                response.headers["Cache-Control"] = "public, max-age=86400"
+            if request.url.path.startswith(("/tile", "/merged-tiles", "/tile-for-timepoint")):
+                path_parts = request.url.path.split("?")[0].split("/")
+                endpoint = path_parts[-1] if path_parts else "unknown"
+                logger.info(
+                    f"METRICS: endpoint={endpoint} method={request.method} "
+                    f"path={request.url.path} processing_time={process_time:.4f}s "
+                    f"request_size={request_size} response_status={response.status_code}"
+                )
+            return response
+        except ClientDisconnect:
+            logger.warning(f"Client disconnected for {request.url.path}.")
+            if response is None: # Disconnect happened before call_next() completed or even started
+                # Return a 499 Client Closed Request response
+                return StarletteResponse(status_code=499)
+            # If response was already formed (e.g. disconnect during sending), return it.
+            # Starlette will handle the inability to send if the client is gone.
+            return response 
+        except Exception as e:
+            logger.error(f"Error in monitoring_middleware: {e}", exc_info=True)
+            raise
 
     @app.get("/", response_class=HTMLResponse)
     async def root():
@@ -146,7 +139,9 @@ def get_frontend_api():
         brightness_settings: str = None,
         threshold_settings: str = None,
         color_settings: str = None,
-        priority: int = 10  # Default priority (lower is higher priority)
+        priority: int = 10,  # Default priority (lower is higher priority)
+        # Add compression quality control
+        compression_quality: int = None  # Default compression quality will be used if not specified
     ):
         """
         Endpoint to serve tiles with customizable image processing settings.
@@ -164,6 +159,7 @@ def get_frontend_api():
             threshold_settings (str, optional): JSON string with min/max threshold settings
             color_settings (str, optional): JSON string with color settings
             priority (int, optional): Priority level for tile loading (lower is higher priority)
+            compression_quality (int, optional): WebP/PNG compression quality (1-100, lower=smaller)
         
         Returns:
             str: Base64 encoded tile image
@@ -221,9 +217,9 @@ def get_frontend_api():
                 # Check if any non-default settings are provided
                 has_custom_settings = False
                 
-                if channel_key in contrast_dict and contrast_dict[channel_key] != 0.03:
+                if channel_key in contrast_dict and float(contrast_dict[channel_key]) != 0:
                     has_custom_settings = True
-                if channel_key in brightness_dict and brightness_dict[channel_key] != 1.0:
+                if channel_key in brightness_dict and float(brightness_dict[channel_key]) != 1.0:
                     has_custom_settings = True
                 if channel_key in threshold_dict:
                     has_custom_settings = True
@@ -236,49 +232,92 @@ def get_frontend_api():
                     pil_image = Image.fromarray(tile_data)
                 else:
                     # Get channel-specific settings with defaults
-                    contrast = float(contrast_dict.get(channel_key, 0.03))  # Default CLAHE clip limit
+                    contrast = float(contrast_dict.get(channel_key, 0))  # Default CLAHE clip limit
                     brightness = float(brightness_dict.get(channel_key, 1.0))  # Default brightness multiplier
+                    
+                    # Ensure brightness is within safe range (0.5-2.0)
+                    safe_brightness = max(0.5, min(2.0, brightness))
                     
                     # Apply brightness adjustment to original data first (simple scaling)
                     # This preserves original image characteristics
-                    adjusted = tile_data.astype(np.float32) * brightness
+                    adjusted = tile_data.astype(np.float32) * safe_brightness
                     adjusted = np.clip(adjusted, 0, 255).astype(np.uint8)
                     
                     # Apply contrast enhancement only if specifically requested
-                    if contrast != 0.03:  # If not default
+                    if contrast > 0:  # Only apply when contrast value is positive
                         # Threshold settings (percentiles by default)
                         threshold_min = float(threshold_dict.get(channel_key, {}).get("min", 2))
                         threshold_max = float(threshold_dict.get(channel_key, {}).get("max", 98))
                         
-                        # Apply thresholds using custom percentiles, but only if thresholds are set
+                        # FIXED: Use fixed intensity values instead of per-tile percentiles
+                        # This ensures consistent contrast across tiles
                         if channel_key in threshold_dict:
-                            p_min, p_max = np.percentile(adjusted, (threshold_min, threshold_max))
-                            enhanced = exposure.rescale_intensity(adjusted, in_range=(p_min, p_max))
+                            # Calculate fixed intensity values across the range based on contrast
+                            # Reduced from 3.0 to 1.5 to make contrast effect more subtle
+                            contrast_scale = float(contrast) * 1.5
+                            
+                            # Calculate fixed intensity range for consistency
+                            # Make the range more conservative
+                            input_range_min = max(0, 96 - (96 * contrast_scale))
+                            input_range_max = min(255, 160 + (96 * contrast_scale))
+                            
+                            # Apply linear contrast stretch with fixed values to ensure consistency
+                            enhanced = exposure.rescale_intensity(
+                                adjusted, 
+                                in_range=(input_range_min, input_range_max),
+                                out_range=(0, 255)
+                            )
                         else:
                             enhanced = adjusted
                         
-                        # Apply contrast adjustment using CLAHE
-                        enhanced = exposure.equalize_adapthist(enhanced, clip_limit=contrast)
-                        enhanced = util.img_as_ubyte(enhanced)
+                        # Only apply CLAHE if specifically requested with higher values
+                        if float(contrast) > 0.05:
+                            # Reduce the CLAHE clip limit to minimize tile boundary issues
+                            safe_contrast = min(0.03, float(contrast))
+                            
+                            # Apply CLAHE with conservative settings
+                            enhanced = exposure.equalize_adapthist(
+                                enhanced, 
+                                clip_limit=safe_contrast,
+                                kernel_size=128  # Larger kernel helps with consistency
+                            )
+                            # Ensure proper uint8 conversion after CLAHE
+                            enhanced = util.img_as_ubyte(enhanced)
+                        else:
+                            # Make sure enhanced is uint8 when not using CLAHE
+                            if not isinstance(enhanced, np.ndarray) or enhanced.dtype != np.uint8:
+                                enhanced = np.clip(enhanced, 0, 255).astype(np.uint8)
                     else:
                         enhanced = adjusted
                     
                     # If a color is specified for fluorescence channels
                     if channel_key != '0' and channel_key in color_dict:
-                        color = tuple(color_dict[channel_key])
+                        color_tuple = tuple(color_dict[channel_key])
                         
-                        # Create an RGB image
-                        rgb_image = np.zeros((tile_manager.tile_size, tile_manager.tile_size, 3), dtype=np.uint8)
+                        # Create an RGB image using float32 for calculations
+                        rgb_image_float = np.zeros((tile_manager.tile_size, tile_manager.tile_size, 3), dtype=np.float32)
                         
-                        # Apply the color to each channel - using the enhanced image
-                        rgb_image[..., 0] = enhanced * (color[0] / 255.0)  # R
-                        rgb_image[..., 1] = enhanced * (color[1] / 255.0)  # G
-                        rgb_image[..., 2] = enhanced * (color[2] / 255.0)  # B
+                        # Make sure enhanced is uint8 for consistent processing
+                        if enhanced.dtype != np.uint8:
+                            enhanced = np.clip(enhanced, 0, 255).astype(np.uint8)
+                        
+                        # Convert to float for color multiplication
+                        enhanced_float = enhanced.astype(np.float32) / 255.0
+                        
+                        # Apply the color to each channel - using the enhanced_float image
+                        rgb_image_float[..., 0] = enhanced_float * (color_tuple[0] / 255.0)  # R
+                        rgb_image_float[..., 1] = enhanced_float * (color_tuple[1] / 255.0)  # G
+                        rgb_image_float[..., 2] = enhanced_float * (color_tuple[2] / 255.0)  # B
+                        
+                        # Scale back to 0-255 range, clip to ensure valid values, then cast to uint8
+                        rgb_image = np.clip(rgb_image_float * 255.0, 0, 255).astype(np.uint8)
                         
                         # Convert to PIL image
                         pil_image = Image.fromarray(rgb_image)
                     else:
-                        # For grayscale, just use the enhanced image
+                        # For grayscale, just use the enhanced image (ensuring it's uint8)
+                        if enhanced.dtype != np.uint8:
+                            enhanced = np.clip(enhanced, 0, 255).astype(np.uint8)
                         pil_image = Image.fromarray(enhanced)
             else:
                 # If no processing applied, convert directly to PIL image
@@ -294,12 +333,23 @@ def get_frontend_api():
             # Generate ETag based on multiple factors
             etag = hashlib.md5(cache_tag.encode()).hexdigest()
             
+            # Determine compression quality
+            # Lower zoom levels (overviews) can use lower quality
+            # Higher zoom levels (details) need higher quality
+            if compression_quality is None:
+                if z <= 1:  # More detailed zoom levels
+                    quality = 80
+                elif z == 2:  # Medium zoom
+                    quality = 70
+                else:  # Overview zoom levels
+                    quality = 60
+            else:
+                # Clamp user-specified quality between 30-100
+                quality = max(30, min(100, compression_quality))
+            
             # Convert to base64
             buffer = io.BytesIO()
-            if WEBP_SUPPORT:
-                pil_image.save(buffer, format="WEBP", quality=85)
-            else:
-                pil_image.save(buffer, format="PNG", optimize=True)
+            pil_image.save(buffer, format="PNG", compress_level=3, optimize=True)
             img_bytes = buffer.getvalue()
             
             # Calculate compression ratio for logging
@@ -322,16 +372,18 @@ def get_frontend_api():
             response.headers["Cache-Control"] = "public, max-age=3600"
             response.headers["ETag"] = etag
             # Add image format header to help client know how to decode
-            response.headers["X-Image-Format"] = "webp" if WEBP_SUPPORT else "png"
+            response.headers["X-Image-Format"] = "png"
             response.headers["X-Request-ID"] = request_id
             response.headers["X-Processing-Time"] = f"{processing_time:.4f}"
+            # Add quality information for client-side awareness
+            response.headers["X-Image-Quality"] = f"{quality}"
             return response
             
         except Exception as e:
             logger.error(f"Error in tile_endpoint: {e}")
             blank_image = Image.new("L", (tile_manager.tile_size, tile_manager.tile_size), color=0)
             buffer = io.BytesIO()
-            blank_image.save(buffer, format="PNG")
+            blank_image.save(buffer, format="PNG", compress_level=3)
             img_bytes = buffer.getvalue()
             
             # Generate cache key and ETag
@@ -361,7 +413,9 @@ def get_frontend_api():
         brightness_settings: str = None,
         threshold_settings: str = None,
         color_settings: str = None,
-        priority: int = 10  # Default priority (lower is higher priority)
+        priority: int = 10,  # Default priority (lower is higher priority)
+        # Add compression quality control
+        compression_quality: int = None  # Default compression quality will be used if not specified
     ):
         """
         Endpoint to merge tiles from multiple channels with customizable image processing settings.
@@ -379,6 +433,7 @@ def get_frontend_api():
             threshold_settings (str, optional): JSON string with min/max threshold settings for each channel
             color_settings (str, optional): JSON string with color settings for each channel
             priority (int, optional): Priority level for tile loading (lower is higher priority)
+            compression_quality (int, optional): WebP/PNG compression quality (1-100, lower=smaller)
         
         Returns:
             str: Base64 encoded merged tile image
@@ -419,7 +474,7 @@ def get_frontend_api():
         has_custom_settings = False
         for channel_key in channel_keys:
             channel_key_str = str(channel_key)
-            if channel_key_str in contrast_dict and contrast_dict[channel_key_str] != 0.03:
+            if channel_key_str in contrast_dict and float(contrast_dict[channel_key_str]) != 0:
                 has_custom_settings = True
             if channel_key_str in brightness_dict and brightness_dict[channel_key_str] != 1.0:
                 has_custom_settings = True
@@ -476,147 +531,172 @@ def get_frontend_api():
             response.headers["X-Empty-Tile"] = "true"
             return response
         
-        # Create an RGB image to merge the channels
-        merged_image = np.zeros((tile_manager.tile_size, tile_manager.tile_size, 3), dtype=np.float32)
+        # Custom settings path:
+        final_merged_image_float = np.zeros((tile_manager.tile_size, tile_manager.tile_size, 3), dtype=np.float32)
+        base_is_set = False
+
+        # Pass 1: Process Brightfield (if selected)
+        bf_tile_data_tuple = None
+        for tile_data_loop, key_in_loop in channel_tiles:
+            if key_in_loop == 0: # Brightfield channel key
+                bf_tile_data_tuple = (tile_data_loop, key_in_loop)
+                break
         
-        # Check if brightfield channel is included
-        has_brightfield = 0 in [ch_key for _, ch_key in channel_tiles]
-        
-        # If using default settings and has brightfield, start with that
-        if not has_custom_settings and has_brightfield:
-            # Find the brightfield data
-            for tile_data, channel_key in channel_tiles:
-                if channel_key == 0:
-                    # Create RGB by copying the original grayscale data to all channels
-                    bf_data = tile_data.astype(np.float32) / 255.0  # Normalize to 0-1
-                    merged_image = np.stack([bf_data, bf_data, bf_data], axis=2)
+        if bf_tile_data_tuple:
+            tile_data, channel_key = bf_tile_data_tuple # Should be 0
+            channel_key_str = str(channel_key)
             
-            # Add original fluorescence channels with default colors
-            for tile_data, channel_key in channel_tiles:
-                if channel_key != 0:  # Skip brightfield
-                    color = default_channel_colors.get(channel_key)
-                    if color:
-                        # Normalize the data
-                        normalized = tile_data.astype(np.float32) / 255.0
-                        
-                        # Create color overlay
-                        colored_channel = np.zeros_like(merged_image)
-                        colored_channel[..., 0] = normalized * (color[0] / 255.0)  # R
-                        colored_channel[..., 1] = normalized * (color[1] / 255.0)  # G
-                        colored_channel[..., 2] = normalized * (color[2] / 255.0)  # B
-                        
-                        # Screen blend mode for better visibility
-                        merged_image = 1.0 - (1.0 - merged_image) * (1.0 - colored_channel)
-            logger.info(f"Merged image: {merged_image.shape}, all channels: {channel_tiles}")
-            # Convert back to 8-bit for display
-            merged_image = util.img_as_ubyte(merged_image)
-        else:
-            # Apply custom settings to each channel
-            for tile_data, channel_key in channel_tiles:
-                # Apply image processing based on settings for this channel
-                channel_key_str = str(channel_key)
+            # Get BF settings
+            contrast_bf = float(contrast_dict.get(channel_key_str, 0))
+            brightness_bf = float(brightness_dict.get(channel_key_str, 1.0))
+            safe_brightness_bf = max(0.5, min(2.0, brightness_bf))
+
+            # Apply brightness to BF
+            adjusted_bf = tile_data.astype(np.float32) * safe_brightness_bf
+            adjusted_bf_uint8 = np.clip(adjusted_bf, 0, 255).astype(np.uint8)
+            
+            processed_bf_uint8 = adjusted_bf_uint8 # Start with brightness-adjusted
+
+            if float(contrast_bf) > 0:
+                threshold_min_bf = float(threshold_dict.get(channel_key_str, {}).get("min", 2))
+                threshold_max_bf = float(threshold_dict.get(channel_key_str, {}).get("max", 98))
                 
-                # Get channel-specific settings with defaults
-                contrast = float(contrast_dict.get(channel_key_str, 0.03))  # Default CLAHE clip limit
-                brightness = float(brightness_dict.get(channel_key_str, 1.0))  # Default brightness multiplier
+                rescaled_bf_uint8 = adjusted_bf_uint8
+                if channel_key_str in threshold_dict: # Apply rescale only if threshold settings are present for the channel
+                    contrast_scale_val = float(contrast_bf) * 1.5
+                    input_min_val = max(0, 96 - (96 * contrast_scale_val))
+                    input_max_val = min(255, 160 + (96 * contrast_scale_val))
+                    rescaled_bf_uint8 = exposure.rescale_intensity(
+                        adjusted_bf_uint8, 
+                        in_range=(input_min_val, input_max_val),
+                        out_range=(0, 255)
+                    ).astype(np.uint8)
                 
-                # Apply brightness adjustment first (to original values)
-                adjusted = tile_data.astype(np.float32) * brightness
-                adjusted = np.clip(adjusted, 0, 255).astype(np.uint8)
+                processed_bf_uint8 = rescaled_bf_uint8
+                if float(contrast_bf) > 0.05: # Apply CLAHE only if contrast is high enough
+                    safe_clahe_contrast_bf = min(0.03, float(contrast_bf))
+                    clahe_output_bf = exposure.equalize_adapthist(
+                        rescaled_bf_uint8, 
+                        clip_limit=safe_clahe_contrast_bf,
+                        kernel_size=128 
+                    )
+                    processed_bf_uint8 = util.img_as_ubyte(clahe_output_bf)
+
+            # Convert final processed BF to float [0,1] and make it RGB
+            processed_bf_float = processed_bf_uint8.astype(np.float32) / 255.0
+            final_merged_image_float = np.stack([processed_bf_float] * 3, axis=-1)
+            base_is_set = True
+
+        # Pass 2: Process and blend/add Fluorescence channels
+        for tile_data, channel_key in channel_tiles:
+            if channel_key == 0: # Skip brightfield, already processed
+                continue
+
+            channel_key_str = str(channel_key)
+            
+            # Get fluorescence settings
+            contrast_fluoro = float(contrast_dict.get(channel_key_str, 0))
+            brightness_fluoro = float(brightness_dict.get(channel_key_str, 1.0))
+            safe_brightness_fluoro = max(0.5, min(2.0, brightness_fluoro))
+            
+            # Color settings (RGB tuple)
+            color_fluoro = tuple(color_dict.get(channel_key_str, default_channel_colors.get(channel_key)))
+            if not color_fluoro: continue 
+
+            # Apply brightness to fluorescence
+            adjusted_fluoro = tile_data.astype(np.float32) * safe_brightness_fluoro
+            adjusted_fluoro_uint8 = np.clip(adjusted_fluoro, 0, 255).astype(np.uint8)
+
+            processed_fluoro_uint8 = adjusted_fluoro_uint8
+
+            if float(contrast_fluoro) > 0:
+                threshold_min_fluoro = float(threshold_dict.get(channel_key_str, {}).get("min", 2))
+                threshold_max_fluoro = float(threshold_dict.get(channel_key_str, {}).get("max", 98))
+
+                rescaled_fluoro_uint8 = adjusted_fluoro_uint8
+                if channel_key_str in threshold_dict:
+                    contrast_scale_val_f = float(contrast_fluoro) * 1.5
+                    input_min_val_f = max(0, 96 - (96 * contrast_scale_val_f))
+                    input_max_val_f = min(255, 160 + (96 * contrast_scale_val_f))
+                    rescaled_fluoro_uint8 = exposure.rescale_intensity(
+                        adjusted_fluoro_uint8,
+                        in_range=(input_min_val_f, input_max_val_f),
+                        out_range=(0, 255)
+                    ).astype(np.uint8)
                 
-                # Threshold settings (percentiles by default)
-                threshold_min = float(threshold_dict.get(channel_key_str, {}).get("min", 2))
-                threshold_max = float(threshold_dict.get(channel_key_str, {}).get("max", 98))
-                
-                # Color settings (RGB tuple)
-                if channel_key_str in color_dict:
-                    color = tuple(color_dict[channel_key_str])
-                else:
-                    color = default_channel_colors.get(channel_key)
-                
-                if channel_key == 0:  # Brightfield
-                    # For brightfield, apply contrast stretching and use as base layer
-                    if len(tile_data.shape) == 2:
-                        # Apply contrast enhancement only if requested
-                        if contrast != 0.03:
-                            # If custom thresholds provided
-                            if channel_key_str in threshold_dict:
-                                p_min, p_max = np.percentile(adjusted, (threshold_min, threshold_max))
-                                enhanced = exposure.rescale_intensity(adjusted, in_range=(p_min, p_max))
-                            else:
-                                enhanced = adjusted
-                            
-                            # Apply CLAHE
-                            bf_enhanced = exposure.equalize_adapthist(enhanced, clip_limit=contrast)
-                        else:
-                            # Just normalize to 0-1 for the RGB merge
-                            bf_enhanced = adjusted.astype(np.float32) / 255.0
-                        
-                        # Create RGB by copying the enhanced grayscale data to all channels
-                        if contrast != 0.03:
-                            # Convert to 0-1 if CLAHE was applied
-                            bf_enhanced = util.img_as_float(bf_enhanced)
-                        
-                        # Create an RGB version
-                        bf_rgb = np.stack([bf_enhanced, bf_enhanced, bf_enhanced], axis=2)
-                        merged_image = bf_rgb.copy()
-                else:
-                    # For fluorescence channels, apply color overlay with enhanced contrast
-                    if color and len(tile_data.shape) == 2:
-                        # Apply contrast enhancement only if requested
-                        if contrast != 0.03:
-                            # Apply thresholds using custom percentiles if provided
-                            if channel_key_str in threshold_dict:
-                                p_min, p_max = np.percentile(adjusted, (threshold_min, threshold_max))
-                                fluorescence_enhanced = exposure.rescale_intensity(adjusted, in_range=(p_min, p_max))
-                            else:
-                                fluorescence_enhanced = adjusted
-                            
-                            # Apply CLAHE
-                            fluorescence_enhanced = exposure.equalize_adapthist(
-                                fluorescence_enhanced, 
-                                clip_limit=contrast
-                            )
-                            # Normalize to 0-1 range
-                            normalized = util.img_as_float(fluorescence_enhanced)
-                        else:
-                            # Just normalize to 0-1 for coloring
-                            normalized = adjusted.astype(np.float32) / 255.0
-                        
-                        # Create color overlay
-                        colored_channel = np.zeros_like(merged_image)
-                        colored_channel[..., 0] = normalized * (color[0] / 255.0)  # R
-                        colored_channel[..., 1] = normalized * (color[1] / 255.0)  # G
-                        colored_channel[..., 2] = normalized * (color[2] / 255.0)  # B
-                        
-                        # Add to the merged image using maximum projection for best visibility
-                        if has_brightfield:
-                            # For brightfield background, use screen blending mode for better visibility
-                            # Screen blend: 1 - (1-a)*(1-b)
-                            merged_image = 1.0 - (1.0 - merged_image) * (1.0 - colored_channel)
-                        else:
-                            # For fluorescence only, use max projection
-                            merged_image = np.maximum(merged_image, colored_channel)
+                processed_fluoro_uint8 = rescaled_fluoro_uint8
+                if float(contrast_fluoro) > 0.05:
+                    safe_clahe_contrast_fluoro = min(0.03, float(contrast_fluoro))
+                    clahe_output_fluoro = exposure.equalize_adapthist(
+                        rescaled_fluoro_uint8,
+                        clip_limit=safe_clahe_contrast_fluoro,
+                        kernel_size=128
+                    )
+                    processed_fluoro_uint8 = util.img_as_ubyte(clahe_output_fluoro)
+            
+            # Create colored layer (float 0-1)
+            processed_fluoro_float_norm = processed_fluoro_uint8.astype(np.float32) / 255.0
+            current_colored_layer_float = np.zeros_like(final_merged_image_float)
+            current_colored_layer_float[..., 0] = processed_fluoro_float_norm * (color_fluoro[0] / 255.0)
+            current_colored_layer_float[..., 1] = processed_fluoro_float_norm * (color_fluoro[1] / 255.0)
+            current_colored_layer_float[..., 2] = processed_fluoro_float_norm * (color_fluoro[2] / 255.0)
+
+            if base_is_set: # Blend with existing base (BF or prior fluorescence)
+                # Screen blend: 1 - (1-a)*(1-b)
+                final_merged_image_float = 1.0 - (1.0 - final_merged_image_float) * (1.0 - current_colored_layer_float)
+            else: # This is the first layer, and it's a fluorescence channel
+                # Max projection (or direct assignment if final_merged_image_float is black)
+                final_merged_image_float = np.maximum(final_merged_image_float, current_colored_layer_float) 
+                base_is_set = True 
         
-            # Apply final dynamic range compression for better overall contrast
-            if np.max(merged_image) > 0:  # Avoid division by zero
-                # Convert to 8-bit for display
-                merged_image = util.img_as_ubyte(merged_image)
-            else:
-                # Create blank image if all channels were empty
-                merged_image = np.zeros((tile_manager.tile_size, tile_manager.tile_size, 3), dtype=np.uint8)
+        # Convert final floating point image to uint8
+        if np.max(final_merged_image_float) > 0:
+            final_merged_image_float = np.clip(final_merged_image_float, 0, 1.0) # Ensure 0-1 range before scaling
+            merged_image = (final_merged_image_float * 255).astype(np.uint8)
+        else:
+            merged_image = np.zeros((tile_manager.tile_size, tile_manager.tile_size, 3), dtype=np.uint8)
+        
+        # Determine compression quality based on zoom level
+        # Lower zoom levels (overviews) can use lower quality
+        # Higher zoom levels (details) need higher quality
+        if compression_quality is None:
+            if z <= 1:  # More detailed zoom levels 
+                quality = 80
+            elif z == 2:  # Medium zoom
+                quality = 70
+            else:  # Overview zoom levels
+                quality = 60
+        else:
+            # Clamp user-specified quality between 30-100
+            quality = max(30, min(100, compression_quality))
+
+        # Create cache key for ETag
+        cache_tag = f"{dataset_id}:{timepoint}:{channels}:{z}:{x}:{y}"
+        if contrast_settings:
+            cache_tag += f":{hashlib.md5(contrast_settings.encode()).hexdigest()[:6]}"
+        if brightness_settings:
+            cache_tag += f":{hashlib.md5(brightness_settings.encode()).hexdigest()[:6]}"
+        
+        # Generate ETag
+        etag = hashlib.md5(cache_tag.encode()).hexdigest()
         
         # Convert to PIL image and return as base64
         pil_image = Image.fromarray(merged_image)
         buffer = io.BytesIO()
-        if WEBP_SUPPORT:
-            pil_image.save(buffer, format="WEBP", quality=85)
-        else:
-            pil_image.save(buffer, format="PNG", optimize=True)
+        pil_image.save(buffer, format="PNG", compress_level=3, optimize=True)
         img_bytes = buffer.getvalue()
         
+        # Calculate compression ratio
+        raw_size = pil_image.width * pil_image.height * 3  # Always RGB for merged
+        compression_ratio = len(img_bytes) / raw_size if raw_size > 0 else 0
+        
+        # Log processing stats
+        logger.info(
+            f"MERGED[{channels}]: z={z} x={x} y={y} size={len(img_bytes)/1024:.1f}KB " 
+            f"ratio={compression_ratio:.2f} quality={quality}"
+        )
+        
         # Generate cache key and ETag
-        etag = hashlib.md5(img_bytes).hexdigest()
         base64_data = base64.b64encode(img_bytes).decode('utf-8')
         
         # Create response with caching headers
@@ -624,7 +704,9 @@ def get_frontend_api():
         response.headers["Cache-Control"] = "public, max-age=3600"
         response.headers["ETag"] = etag
         # Add image format header to help client know how to decode
-        response.headers["X-Image-Format"] = "webp" if WEBP_SUPPORT else "png"
+        response.headers["X-Image-Format"] = "png"
+        # Add quality information for client-side awareness
+        response.headers["X-Image-Quality"] = f"{quality}"
         return response
 
     # Updated helper function using ZarrTileManager
@@ -961,9 +1043,9 @@ def get_frontend_api():
                 # Check if any non-default settings are provided
                 has_custom_settings = False
                 
-                if channel_key in contrast_dict and contrast_dict[channel_key] != 0.03:
+                if channel_key in contrast_dict and float(contrast_dict[channel_key]) != 0:
                     has_custom_settings = True
-                if channel_key in brightness_dict and brightness_dict[channel_key] != 1.0:
+                if channel_key in brightness_dict and float(brightness_dict[channel_key]) != 1.0:
                     has_custom_settings = True
                 if channel_key in threshold_dict:
                     has_custom_settings = True
@@ -976,49 +1058,92 @@ def get_frontend_api():
                     pil_image = Image.fromarray(tile_data)
                 else:
                     # Get channel-specific settings with defaults
-                    contrast = float(contrast_dict.get(channel_key, 0.03))  # Default CLAHE clip limit
+                    contrast = float(contrast_dict.get(channel_key, 0))  # Default CLAHE clip limit
                     brightness = float(brightness_dict.get(channel_key, 1.0))  # Default brightness multiplier
+                    
+                    # Ensure brightness is within safe range (0.5-2.0)
+                    safe_brightness = max(0.5, min(2.0, brightness))
                     
                     # Apply brightness adjustment to original data first (simple scaling)
                     # This preserves original image characteristics
-                    adjusted = tile_data.astype(np.float32) * brightness
+                    adjusted = tile_data.astype(np.float32) * safe_brightness
                     adjusted = np.clip(adjusted, 0, 255).astype(np.uint8)
                     
                     # Apply contrast enhancement only if specifically requested
-                    if contrast != 0.03:  # If not default
+                    if contrast > 0:  # Only apply when contrast value is positive
                         # Threshold settings (percentiles by default)
                         threshold_min = float(threshold_dict.get(channel_key, {}).get("min", 2))
                         threshold_max = float(threshold_dict.get(channel_key, {}).get("max", 98))
                         
-                        # Apply thresholds using custom percentiles, but only if thresholds are set
+                        # FIXED: Use fixed intensity values instead of per-tile percentiles
+                        # This ensures consistent contrast across tiles
                         if channel_key in threshold_dict:
-                            p_min, p_max = np.percentile(adjusted, (threshold_min, threshold_max))
-                            enhanced = exposure.rescale_intensity(adjusted, in_range=(p_min, p_max))
+                            # Calculate fixed intensity values across the range based on contrast
+                            # Reduced from 3.0 to 1.5 to make contrast effect more subtle
+                            contrast_scale = float(contrast) * 1.5
+                            
+                            # Calculate fixed intensity range for consistency
+                            # Make the range more conservative
+                            input_range_min = max(0, 96 - (96 * contrast_scale))
+                            input_range_max = min(255, 160 + (96 * contrast_scale))
+                            
+                            # Apply linear contrast stretch with fixed values to ensure consistency
+                            enhanced = exposure.rescale_intensity(
+                                adjusted, 
+                                in_range=(input_range_min, input_range_max),
+                                out_range=(0, 255)
+                            )
                         else:
                             enhanced = adjusted
                         
-                        # Apply contrast adjustment using CLAHE
-                        enhanced = exposure.equalize_adapthist(enhanced, clip_limit=contrast)
-                        enhanced = util.img_as_ubyte(enhanced)
+                        # Only apply CLAHE if specifically requested with higher values
+                        if float(contrast) > 0.05:
+                            # Reduce the CLAHE clip limit to minimize tile boundary issues
+                            safe_contrast = min(0.03, float(contrast))
+                            
+                            # Apply CLAHE with conservative settings
+                            enhanced = exposure.equalize_adapthist(
+                                enhanced, 
+                                clip_limit=safe_contrast,
+                                kernel_size=128  # Larger kernel helps with consistency
+                            )
+                            # Ensure proper uint8 conversion after CLAHE
+                            enhanced = util.img_as_ubyte(enhanced)
+                        else:
+                            # Make sure enhanced is uint8 when not using CLAHE
+                            if not isinstance(enhanced, np.ndarray) or enhanced.dtype != np.uint8:
+                                enhanced = np.clip(enhanced, 0, 255).astype(np.uint8)
                     else:
                         enhanced = adjusted
                     
                     # If a color is specified for fluorescence channels
                     if channel_key != '0' and channel_key in color_dict:
-                        color = tuple(color_dict[channel_key])
+                        color_tuple = tuple(color_dict[channel_key])
                         
-                        # Create an RGB image
-                        rgb_image = np.zeros((tile_manager.tile_size, tile_manager.tile_size, 3), dtype=np.uint8)
+                        # Create an RGB image using float32 for calculations
+                        rgb_image_float = np.zeros((tile_manager.tile_size, tile_manager.tile_size, 3), dtype=np.float32)
                         
-                        # Apply the color to each channel - using the enhanced image
-                        rgb_image[..., 0] = enhanced * (color[0] / 255.0)  # R
-                        rgb_image[..., 1] = enhanced * (color[1] / 255.0)  # G
-                        rgb_image[..., 2] = enhanced * (color[2] / 255.0)  # B
+                        # Make sure enhanced is uint8 for consistent processing
+                        if enhanced.dtype != np.uint8:
+                            enhanced = np.clip(enhanced, 0, 255).astype(np.uint8)
+                        
+                        # Convert to float for color multiplication
+                        enhanced_float = enhanced.astype(np.float32) / 255.0
+                        
+                        # Apply the color to each channel - using the enhanced_float image
+                        rgb_image_float[..., 0] = enhanced_float * (color_tuple[0] / 255.0)  # R
+                        rgb_image_float[..., 1] = enhanced_float * (color_tuple[1] / 255.0)  # G
+                        rgb_image_float[..., 2] = enhanced_float * (color_tuple[2] / 255.0)  # B
+                        
+                        # Scale back to 0-255 range, clip to ensure valid values, then cast to uint8
+                        rgb_image = np.clip(rgb_image_float * 255.0, 0, 255).astype(np.uint8)
                         
                         # Convert to PIL image
                         pil_image = Image.fromarray(rgb_image)
                     else:
-                        # For grayscale, just use the enhanced image
+                        # For grayscale, just use the enhanced image (ensuring it's uint8)
+                        if enhanced.dtype != np.uint8:
+                            enhanced = np.clip(enhanced, 0, 255).astype(np.uint8)
                         pil_image = Image.fromarray(enhanced)
             else:
                 # If no processing applied, convert directly to PIL image
@@ -1026,10 +1151,7 @@ def get_frontend_api():
             
             # Convert to base64
             buffer = io.BytesIO()
-            if WEBP_SUPPORT:
-                pil_image.save(buffer, format="WEBP", quality=85)
-            else:
-                pil_image.save(buffer, format="PNG", optimize=True)
+            pil_image.save(buffer, format="PNG", compress_level=3, optimize=True)
             img_bytes = buffer.getvalue()
             
             # Generate cache key and ETag
@@ -1041,7 +1163,7 @@ def get_frontend_api():
             response.headers["Cache-Control"] = "public, max-age=3600"
             response.headers["ETag"] = etag
             # Add image format header to help client know how to decode
-            response.headers["X-Image-Format"] = "webp" if WEBP_SUPPORT else "png"
+            response.headers["X-Image-Format"] = "png"
             return response
                 
         except Exception as e:
@@ -1050,7 +1172,7 @@ def get_frontend_api():
             logger.error(traceback.format_exc())
             blank_image = Image.new("L", (tile_manager.tile_size, tile_manager.tile_size), color=0)
             buffer = io.BytesIO()
-            blank_image.save(buffer, format="PNG")
+            blank_image.save(buffer, format="PNG", compress_level=3)
             img_bytes = buffer.getvalue()
             
             # Generate cache key and ETag
@@ -1062,7 +1184,7 @@ def get_frontend_api():
             response.headers["Cache-Control"] = "public, max-age=3600"
             response.headers["ETag"] = etag
             # Add image format header to help client know how to decode
-            response.headers["X-Image-Format"] = "webp" if WEBP_SUPPORT else "png"
+            response.headers["X-Image-Format"] = "png"
             return response
 
     async def serve_fastapi(args):

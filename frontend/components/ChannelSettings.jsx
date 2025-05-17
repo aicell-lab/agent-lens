@@ -47,7 +47,7 @@ const ChannelSettings = ({
                                      initialSettings.threshold && 
                                      initialSettings.color 
                                      ? {
-                                         contrast: initialSettings.contrast[channelKeyStr] || 0.03,
+                                         contrast: initialSettings.contrast[channelKeyStr] || 0,
                                          brightness: initialSettings.brightness[channelKeyStr] || 1.0,
                                          threshold: {
                                            min: initialSettings.threshold[channelKeyStr]?.min || 2,
@@ -58,7 +58,7 @@ const ChannelSettings = ({
                                            : rgbToHex(channelColors[channelKey] || [255, 255, 255])
                                        }
                                      : {
-                                         contrast: 0.03,
+                                         contrast: 0,
                                          brightness: 1.0,
                                          threshold: {
                                            min: 2,
@@ -148,7 +148,7 @@ const ChannelSettings = ({
 
   const resetChannelSettings = (channelKey) => {
     const defaultSettings = {
-      contrast: 0.03,
+      contrast: 0,
       brightness: 1.0,
       threshold: {
         min: 2,
@@ -216,13 +216,17 @@ const ChannelSettings = ({
             </label>
             <input
               type="range"
-              min="0.1"
-              max="3"
+              min="0.5"
+              max="2.0"
               step="0.1"
               value={settings[activeTab].brightness}
               onChange={(e) => handleSettingChange(activeTab, 'brightness', parseFloat(e.target.value))}
               className="w-full"
             />
+            <div className="flex justify-between text-xs text-gray-500 mt-1">
+              <span>0.5</span>
+              <span>2.0</span>
+            </div>
           </div>
           
           {/* Contrast */}
@@ -232,13 +236,17 @@ const ChannelSettings = ({
             </label>
             <input
               type="range"
-              min="0.01"
+              min="0"
               max="0.1"
               step="0.01"
               value={settings[activeTab].contrast}
               onChange={(e) => handleSettingChange(activeTab, 'contrast', parseFloat(e.target.value))}
               className="w-full"
             />
+            <div className="flex justify-between text-xs text-gray-500 mt-1">
+              <span>None (0)</span>
+              <span>(0.1) More</span>
+            </div>
           </div>
           
           {/* Threshold */}

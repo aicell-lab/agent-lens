@@ -34,7 +34,7 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
     color: {}
   });
 
-  const imageWidth = 2048;
+  const imageWidth = 2560;
   const imageHeight = 2048;
   const extent = [0, 0, imageWidth, imageHeight];
 
@@ -504,7 +504,7 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
       
       // Use the gallery default dataset ID if mapDatasetId isn't available
       const datasetId = mapDatasetId || 'agent-lens/image-map-20250429-treatment-zip';
-      const baseUrl = `merged-tiles?dataset_id=${datasetId}&channels=${channelKeysStr}&z=${z}&x=${x}&y=${y}&priority=${priority}`;
+      const baseUrl = `merged-tiles?dataset_id=${datasetId}&channels=${channelKeys.join(',')}&z=${z}&x=${x}&y=${y}&priority=${priority}`;
       const params = new URLSearchParams(processingParams).toString();
       return params ? `${baseUrl}&${params}` : baseUrl;
     };
