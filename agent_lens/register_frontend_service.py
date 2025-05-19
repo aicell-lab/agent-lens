@@ -66,7 +66,7 @@ WORKSPACE_TOKEN = os.getenv("WORKSPACE_TOKEN")
 async def get_artifact_manager():
     """Get a new connection to the artifact manager."""
     api = await connect_to_server(
-        {"name": "test-client", "server_url": SERVER_URL, "token": WORKSPACE_TOKEN}
+        {"name": "test-client", "server_url": SERVER_URL}
     )
     artifact_manager = await api.get_service("public/artifact-manager")
     return api, artifact_manager
