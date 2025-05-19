@@ -738,10 +738,14 @@ def get_frontend_api():
             return np.zeros((tile_manager.tile_size, tile_manager.tile_size), dtype=np.uint8)
 
     @app.get("/datasets")
-    async def get_datasets():
+    async def get_datasets(gallery_id: str = None):
         """
         Endpoint to fetch a list of available time-lapse datasets (scan datasets).
         These are children of a main "gallery" or "project" collection.
+
+        Args:
+            gallery_id (str, optional): The ID of the gallery to fetch datasets from.
+                If not provided, returns an empty list.
 
         Returns:
             list: A list of datasets (each representing a time-lapse scan).
@@ -753,12 +757,10 @@ def get_frontend_api():
             await artifact_manager_instance.connect_server(server_for_am)
         
         try:
-            # This ID should point to a collection/gallery that CONTAINS time-lapse datasets as children
-            # Example: "agent-lens/microscopy-scans-gallery"
-            # The user prompt for ArtifactManager mentioned "agent-lens/image-map-of-u2os-fucci-drug-treatment-zip"
-            # as a gallery. Let's use a more generic placeholder or make it configurable.
-            # For now, using the one from the previous code.
-            gallery_id = "agent-lens/image-map-of-u2os-fucci-drug-treatment-zip" # This should be the parent collection
+            if not gallery_id:
+                logger.warning("No gallery_id provided to /datasets endpoint")
+                return []
+                
             logger.info(f"Fetching time-lapse datasets from gallery: {gallery_id}")
             
             # List children of this gallery_id. Each child is a time-lapse dataset.
@@ -769,13 +771,6 @@ def get_frontend_api():
             formatted_datasets = []
             if time_lapse_datasets:
                 for dataset_item in time_lapse_datasets:
-                    # The 'alias' or 'id' of the dataset_item is what we need for dataset_id param in tile fetching
-                    # name = dataset_item.get("manifest", {}).get("name", dataset_item.get("alias", "Unknown TimeLapse"))
-                    # The actual ID to use for fetching tiles is dataset_item.get("id") which looks like "workspace/alias"
-                    # Or, if the 'alias' field already contains 'workspace/alias', then that's it.
-                    # Let's assume dataset_item.get("id") is the full "workspace/actual_dataset_alias_for_timelapse"
-                    # The ZarrTileManager expects just the "actual_dataset_alias_for_timelapse" part.
-                    
                     full_id = dataset_item.get("id") # e.g., "agent-lens/20250506-scan-..."
                     display_name = dataset_item.get("manifest", {}).get("name", dataset_item.get("alias", full_id))
                     
@@ -785,13 +780,7 @@ def get_frontend_api():
                         if full_id.startswith(f"{artifact_manager_instance.server.config.workspace}/"):
                              alias_part = full_id.split('/', 1)[1]
                         
-                        # It seems the full ID ("workspace/alias") is what might be expected by some hypha calls.
-                        # However, our ZarrTileManager's _fetch_zarr_metadata and get_tile_np_data now take `dataset_alias`.
-                        # So we should provide the alias part for `id` field used by frontend to pass to tile endpoints.
-                        # The display name can be more descriptive.
-                        
                         logger.info(f"Time-lapse dataset found: {display_name} (alias for API: {alias_part}, full_id: {full_id})")
-                        # The frontend will use 'id' (alias_part) to call tile endpoints.
                         formatted_datasets.append({"id": alias_part, "name": display_name, "full_hypha_id": full_id})
             return formatted_datasets
         except Exception as e:
@@ -1230,6 +1219,56 @@ def get_frontend_api():
             response.headers["X-Image-Format"] = "png"
             return response
 
+    @app.get("/setup-gallery-map")
+    async def setup_gallery_map(gallery_id: str):
+        """
+        Endpoint to "select" a specific gallery of time-lapse datasets for map viewing.
+        This verifies the gallery (identified by its ID) is accessible and contains datasets.
+        
+        Args:
+            gallery_id (str): The ID of the gallery containing time-lapse datasets.
+            
+        Returns:
+            dict: A dictionary containing success status and message.
+        """
+        logger.info(f"Setting up image map gallery: {gallery_id}")
+        if artifact_manager_instance.server is None:
+            server_for_am, svc_for_am = await get_artifact_manager()
+            await artifact_manager_instance.connect_server(server_for_am)
+        
+        try:
+            # Fetch datasets from the gallery to verify it exists and contains datasets
+            logger.info(f"Verifying gallery and fetching datasets: {gallery_id}")
+            
+            time_lapse_datasets = await artifact_manager_instance._svc.list(parent_id=gallery_id)
+            
+            if not time_lapse_datasets or len(time_lapse_datasets) == 0:
+                logger.warning(f"Gallery {gallery_id} contains no datasets.")
+                return {
+                    "success": False,
+                    "message": f"Gallery {gallery_id} exists but contains no time-lapse datasets."
+                }
+            
+            # Gallery exists and contains datasets
+            dataset_count = len(time_lapse_datasets)
+            logger.info(f"Gallery {gallery_id} successfully verified with {dataset_count} datasets.")
+            
+            return {
+                "success": True,
+                "message": f"Gallery contains {dataset_count} time-lapse datasets ready for map viewing",
+                "gallery_id": gallery_id,
+                "dataset_count": dataset_count
+            }
+            
+        except Exception as e:
+            logger.error(f"Error setting up gallery map: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return {
+                "success": False,
+                "message": f"Error setting up gallery map: {str(e)}"
+            }
+
     async def serve_fastapi(args):
         await app(args["scope"], args["receive"], args["send"])
 
@@ -1268,21 +1307,6 @@ async def _register_probes(server, probe_service_id):
             if not tile_manager.artifact_manager:
                 raise RuntimeError("ZarrTileManager failed to connect to artifact manager service.")
 
-            # Optional: Perform a quick test access if a known small/test dataset exists
-            # test_dataset_alias = "your-test-timelapse-dataset-alias"
-            # if test_dataset_alias:
-            #     logger.info(f"Performing Zarr access test on {test_dataset_alias} for health check.")
-            #     test_result = await asyncio.wait_for(
-            #         tile_manager.test_zarr_access(dataset_alias=test_dataset_alias),
-            #         timeout=20 # Shorter timeout for health check
-            #     )
-            #     if not test_result.get("success", False):
-            #         error_msg = test_result.get("message", "Unknown Zarr test error")
-            #         logger.error(f"Health check: Zarr access test failed: {error_msg}")
-            #         raise RuntimeError(f"Health check: Zarr access test failed: {error_msg}")
-            #     logger.info("Health check: Zarr access test successful.")
-            # else:
-            #     logger.info("Health check: Skipping Zarr access test as no test dataset is configured.")
 
             logger.info("Service appears healthy (TileManager connection established).")
             return {"status": "ok", "message": "Service healthy"}

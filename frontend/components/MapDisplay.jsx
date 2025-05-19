@@ -17,6 +17,7 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
   const [imageLayer, setImageLayer] = useState(null);
   const [isMapViewEnabled, setIsMapViewEnabled] = useState(false);
   const [mapDatasetId, setMapDatasetId] = useState(null);
+  const [mapGalleryId, setMapGalleryId] = useState(null);
   const [timepoints, setTimepoints] = useState([]);
   const [selectedTimepoint, setSelectedTimepoint] = useState(null);
   const [isLoadingTimepoints, setIsLoadingTimepoints] = useState(false);
@@ -67,17 +68,27 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
         }
       });
       
-      // Check if an image map dataset has been set up in this session
+      // Check if a gallery has been set up in this session
+      const imageMapGallery = localStorage.getItem('imageMapGallery');
       const imageMapDataset = localStorage.getItem('imageMapDataset');
       const wasExplicitlySetup = sessionStorage.getItem('mapSetupExplicit') === 'true';
       
-      if (imageMapDataset && wasExplicitlySetup) {
+      if (imageMapGallery && wasExplicitlySetup) {
+        // If a gallery is set, prioritize that
+        setMapGalleryId(imageMapGallery);
+        setIsMapViewEnabled(true);
+        setShouldShowMap(true);
+        setShowTimepointSelector(true); // Show timepoint selector immediately
+        appendLog(`Image map gallery selected: ${imageMapGallery}`);
+        // Load timepoints from this gallery
+        loadTimepointsList(imageMapGallery);
+      } else if (imageMapDataset && wasExplicitlySetup) {
+        // Fallback to previous dataset-only mode
         setMapDatasetId(imageMapDataset);
         setSelectedTimepoint(imageMapDataset);
         setIsMapViewEnabled(true);
         setShouldShowMap(true);
         appendLog(`Image map dataset selected: ${imageMapDataset}`);
-        // Timepoints (list of datasets) will be loaded on demand by loadTimepointsList
       } else {
         // Add default tile layer only if map exists
         addTileLayer(newMap, currentChannel);
@@ -102,10 +113,10 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
 
   // Load timepoints only when we should show the map and user has requested it
   useEffect(() => {
-    if (shouldShowMap && mapDatasetId && showTimepointSelector && timepoints.length === 0) {
-      loadTimepointsList();
+    if (shouldShowMap && mapGalleryId && showTimepointSelector && timepoints.length === 0) {
+      loadTimepointsList(mapGalleryId);
     }
-  }, [shouldShowMap, mapDatasetId, showTimepointSelector]);
+  }, [shouldShowMap, mapGalleryId, showTimepointSelector]);
 
   // Cleanup for snapshot image URL
   useEffect(() => {
@@ -129,73 +140,80 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
     }
   }, [channelSettings]);
 
-  // Renamed from loadTimepoints to loadTimepointsList to better reflect its new role
-  const loadTimepointsList = async () => {
-    // This function now loads the list of all available time-lapse datasets
+  // Load timepoints list from gallery ID
+  const loadTimepointsList = async (galleryId = null) => {
+    // This function loads the list of all available time-lapse datasets from a gallery
     setIsLoadingTimepoints(true);
     appendLog(`Loading available time-lapse datasets...`);
     
     try {
-      // Calls the /datasets endpoint which lists all child datasets of a gallery
-      const response = await fetch(`/public/apps/agent-lens/datasets`);
+      // Use provided gallery ID or fall back to the one in state
+      const activeGalleryId = galleryId || mapGalleryId;
+      
+      if (!activeGalleryId) {
+        appendLog("No gallery ID provided or set. Cannot load datasets.");
+        setIsLoadingTimepoints(false);
+        return;
+      }
+      
+      // Call the datasets endpoint with the gallery ID
+      const response = await fetch(`/public/apps/agent-lens/datasets?gallery_id=${encodeURIComponent(activeGalleryId)}`);
       const data = await response.json(); // Expects array like [{id: "alias", name: "display_name"}]
       
       if (response.ok && data && data.length > 0) {
         setTimepoints(data); // Store the list of dataset objects
-        appendLog(`Loaded ${data.length} available time-lapse datasets.`);
+        appendLog(`Loaded ${data.length} available time-lapse datasets from gallery: ${activeGalleryId}`);
         
         // If no specific dataset is selected yet, and we have a list, 
-        // and a mapDatasetId was perhaps loaded from localStorage but not yet fully processed.
-        // Or, if `mapDatasetId` is the current selection, ensure it's valid against the fetched list.
+        // select the first dataset from the loaded list
         if (!selectedTimepoint && data.length > 0) {
-            // If there was a mapDatasetId from local storage, try to find it in the list
-            const preSelected = mapDatasetId ? data.find(d => d.id === mapDatasetId) : null;
-            if (preSelected) {
-                // If found, ensure selectedTimepoint is set to this dataset's alias ('id')
-                setSelectedTimepoint(preSelected.id);
-                if (isMergeMode) {
-                    loadTimepointMapMerged(preSelected.id, selectedChannels);
-                } else {
-                    loadTimepointMap(preSelected.id, currentChannel);
-                }
+          // If there was a mapDatasetId from local storage, try to find it in the list
+          const preSelected = mapDatasetId ? data.find(d => d.id === mapDatasetId) : null;
+          if (preSelected) {
+            // If found, ensure selectedTimepoint is set to this dataset's alias ('id')
+            setSelectedTimepoint(preSelected.id);
+            if (isMergeMode) {
+              loadTimepointMapMerged(preSelected.id, selectedChannels);
             } else {
-                // Otherwise, select the first dataset from the loaded list
-                const firstDatasetAlias = data[0].id;
-                setMapDatasetId(firstDatasetAlias); // Update the general mapDatasetId as well
-                setSelectedTimepoint(firstDatasetAlias);
-                if (isMergeMode) {
-                    loadTimepointMapMerged(firstDatasetAlias, selectedChannels);
-                } else {
-                    loadTimepointMap(firstDatasetAlias, currentChannel);
-                }
+              loadTimepointMap(preSelected.id, currentChannel);
             }
+          } else {
+            // Otherwise, select the first dataset from the loaded list
+            const firstDatasetAlias = data[0].id;
+            setMapDatasetId(firstDatasetAlias); // Update the general mapDatasetId as well
+            setSelectedTimepoint(firstDatasetAlias);
+            if (isMergeMode) {
+              loadTimepointMapMerged(firstDatasetAlias, selectedChannels);
+            } else {
+              loadTimepointMap(firstDatasetAlias, currentChannel);
+            }
+          }
         } else if (selectedTimepoint) {
-            // If a timepoint (dataset alias) is already selected, ensure it's still valid
-            const currentSelectionStillValid = data.some(d => d.id === selectedTimepoint);
-            if (!currentSelectionStillValid && data.length > 0) {
-                // If current selection is no longer valid (e.g. removed from server), select the first available
-                const firstDatasetAlias = data[0].id;
-                setMapDatasetId(firstDatasetAlias);
-                setSelectedTimepoint(firstDatasetAlias);
-                appendLog(`Previously selected dataset ${selectedTimepoint} not found. Switched to ${firstDatasetAlias}.`);
-                if (isMergeMode) {
-                    loadTimepointMapMerged(firstDatasetAlias, selectedChannels);
-                } else {
-                    loadTimepointMap(firstDatasetAlias, currentChannel);
-                }
-            } else if (!currentSelectionStillValid && data.length === 0) {
-                 // No datasets available at all
-                 appendLog('No time-lapse datasets available from server.');
-                 setTimepoints([]);
-                 setSelectedTimepoint(null);
-                 setMapDatasetId(null);
+          // If a timepoint (dataset alias) is already selected, ensure it's still valid
+          const currentSelectionStillValid = data.some(d => d.id === selectedTimepoint);
+          if (!currentSelectionStillValid && data.length > 0) {
+            // If current selection is no longer valid (e.g. removed from server), select the first available
+            const firstDatasetAlias = data[0].id;
+            setMapDatasetId(firstDatasetAlias);
+            setSelectedTimepoint(firstDatasetAlias);
+            appendLog(`Previously selected dataset ${selectedTimepoint} not found. Switched to ${firstDatasetAlias}.`);
+            if (isMergeMode) {
+              loadTimepointMapMerged(firstDatasetAlias, selectedChannels);
+            } else {
+              loadTimepointMap(firstDatasetAlias, currentChannel);
             }
+          } else if (!currentSelectionStillValid && data.length === 0) {
+            // No datasets available at all
+            appendLog('No time-lapse datasets available from server.');
+            setTimepoints([]);
+            setSelectedTimepoint(null);
+            setMapDatasetId(null);
+          }
         }
       } else {
-        appendLog(`No time-lapse datasets found or error fetching: ${data.message || 'Unknown error'}`);
+        appendLog(`No time-lapse datasets found in gallery or error fetching: ${data.message || 'Unknown error'}`);
         setTimepoints([]); // Clear timepoints if fetch fails or empty
         setSelectedTimepoint(null); // Clear selection if no datasets
-        // Do not clear mapDatasetId here, as it might be the only reference to a previous state
       }
     } catch (error) {
       appendLog(`Error loading time-lapse datasets: ${error.message}`);
@@ -208,10 +226,10 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
   // useEffect to load timepoints list when map view is enabled for the first time
   // or when showTimepointSelector is triggered and list is empty.
   useEffect(() => {
-    if (isMapViewEnabled && showTimepointSelector && timepoints.length === 0) {
-      loadTimepointsList();
+    if (isMapViewEnabled && showTimepointSelector && timepoints.length === 0 && mapGalleryId) {
+      loadTimepointsList(mapGalleryId);
     }
-  }, [isMapViewEnabled, showTimepointSelector]);
+  }, [isMapViewEnabled, showTimepointSelector, mapGalleryId]);
 
   // useEffect to handle initial load when a mapDatasetId is set (e.g. from localStorage)
   useEffect(() => {
@@ -826,7 +844,11 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
   const toggleTimepointSelector = () => {
     // If this is the first time showing the selector and we haven't loaded timepoints yet
     if (!showTimepointSelector && timepoints.length === 0) {
-      loadTimepointsList(); // Call the renamed function
+      if (mapGalleryId) {
+        loadTimepointsList(mapGalleryId); // Load from gallery
+      } else {
+        appendLog("No gallery selected. Please set up gallery view from the data management page.");
+      }
     }
     
     setShowTimepointSelector(!showTimepointSelector);
