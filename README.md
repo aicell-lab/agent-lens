@@ -4,7 +4,7 @@
 
 **Agent-Lens** is a web application designed for controlling a microscope and performing advanced image analysis tasks such as segmentation and similarity search. Developed using React, OpenLayers, and Bootstrap, this project provides an intuitive and efficient user interface for microscopy image capture, control, and analysis.
 
-You can try Agent Lens webapp on: [https://hypha.aicell.io/agent-lens/apps/agent-lens/](https://hypha.aicell.io/agent-lens/apps/agent-lens/)
+You can try Agent Lens webapp on: [https://hypha.aicell.io/public/apps/agent-lens/](https://hypha.aicell.io/public/apps/agent-lens/)
 
 ## Features
 
