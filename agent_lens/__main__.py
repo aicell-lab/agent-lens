@@ -109,6 +109,9 @@ def main():
     parser_connect_server.add_argument(
         "--workspace_name", type=str, default=None, required=False
     )
+    parser_connect_server.add_argument(
+        "--docker", action="store_true", help="Flag to indicate running in Docker mode"
+    )
     parser_connect_server.set_defaults(func=start_connect_server)
 
     args = parser.parse_args()
