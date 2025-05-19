@@ -151,7 +151,7 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
       const activeGalleryId = galleryId || mapGalleryId || DEFAULT_GALLERY_ID;
       
       // Call the datasets endpoint with the gallery ID
-      const response = await fetch(`/public/apps/agent-lens/datasets?gallery_id=${encodeURIComponent(activeGalleryId)}`);
+      const response = await fetch(`/agent-lens/apps/agent-lens/datasets?gallery_id=${encodeURIComponent(activeGalleryId)}`);
       const data = await response.json(); // Expects array like [{id: "alias", name: "display_name"}]
       
       if (response.ok && data && data.length > 0) {
