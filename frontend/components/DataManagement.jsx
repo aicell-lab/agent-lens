@@ -1,6 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import PropTypes from 'prop-types';
 
+// Utility function to get the correct service ID
+const getServiceId = () => {
+  // Check if we're in test mode by looking at the URL
+  const url = window.location.href;
+  return url.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
+};
+
 const DataManagement = ({ appendLog }) => {
   const [datasets, setDatasets] = useState([]);
   const [subfolders, setSubfolders] = useState([]);
@@ -33,7 +40,8 @@ const DataManagement = ({ appendLog }) => {
       console.log('Fetching datasets from gallery:', galleryId);
       // Properly encode the gallery ID for the URL
       const encodedGalleryId = encodeURIComponent(galleryId.trim());
-      const response = await fetch(`/agent-lens/apps/agent-lens/datasets?gallery_id=${encodedGalleryId}`);
+      const serviceId = getServiceId();
+      const response = await fetch(`/agent-lens/apps/${serviceId}/datasets?gallery_id=${encodedGalleryId}`);
       if (!response.ok) {
         const errorText = await response.text();
         console.error(`Failed to fetch datasets: ${response.status} ${response.statusText}`, errorText);
@@ -63,7 +71,8 @@ const DataManagement = ({ appendLog }) => {
       try {
         const pathParam = currentPath ? `&dir_path=${currentPath}` : '';
         const paginationParams = `&offset=${offset}&limit=${limit}`;
-        const response = await fetch(`/agent-lens/apps/agent-lens/subfolders?dataset_id=${selectedDataset}${pathParam}${paginationParams}`);
+        const serviceId = getServiceId();
+        const response = await fetch(`/agent-lens/apps/${serviceId}/subfolders?dataset_id=${selectedDataset}${pathParam}${paginationParams}`);
         if (!response.ok) {
           throw new Error('Failed to fetch subfolders');
         }
@@ -168,7 +177,8 @@ const DataManagement = ({ appendLog }) => {
     // For certain file types, we can generate a preview URL
     if (file.name.match(/\.(jpg|jpeg|png|gif|bmp)$/i)) {
       try {
-        const response = await fetch(`/agent-lens/apps/agent-lens/file?dataset_id=${selectedDataset}&file_path=${currentPath ? `${currentPath}/` : ''}${file.name}`);
+        const serviceId = getServiceId();
+        const response = await fetch(`/agent-lens/apps/${serviceId}/file?dataset_id=${selectedDataset}&file_path=${currentPath ? `${currentPath}/` : ''}${file.name}`);
         if (response.ok) {
           const data = await response.json();
           if (data.url) {
@@ -221,7 +231,8 @@ const DataManagement = ({ appendLog }) => {
     
     try {
       // Call the backend endpoint to setup the image map with gallery ID
-      const response = await fetch(`/agent-lens/apps/agent-lens/setup-gallery-map?gallery_id=${encodeURIComponent(galleryId.trim())}`);
+      const serviceId = getServiceId();
+      const response = await fetch(`/agent-lens/apps/${serviceId}/setup-gallery-map?gallery_id=${encodeURIComponent(galleryId.trim())}`);
       const data = await response.json();
       
       if (data.success) {
@@ -516,7 +527,10 @@ const DataManagement = ({ appendLog }) => {
             <div className="mt-4">
               <button 
                 className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm"
-                onClick={() => window.open(`/agent-lens/apps/agent-lens/download?dataset_id=${selectedDataset}&file_path=${currentPath ? `${currentPath}/` : ''}${selectedFile.name}`, '_blank')}
+                onClick={() => {
+                  const serviceId = getServiceId();
+                  window.open(`/agent-lens/apps/${serviceId}/download?dataset_id=${selectedDataset}&file_path=${currentPath ? `${currentPath}/` : ''}${selectedFile.name}`, '_blank')
+                }}
               >
                 <i className="fas fa-download mr-1"></i> Download
               </button>
