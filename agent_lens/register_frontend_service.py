@@ -1298,7 +1298,6 @@ async def _register_probes(server, probe_service_id):
         logger.info("Checking service health")
         # Minimal check: ensure tile_manager can attempt a connection
         # and that its artifact_manager is not None after connection attempt.
-        # A deeper check would involve test_zarr_access on a known small dataset.
         try:
             if not tile_manager.artifact_manager:
                 logger.info("Tile manager not connected, attempting connection for health check...")
@@ -1307,8 +1306,29 @@ async def _register_probes(server, probe_service_id):
             if not tile_manager.artifact_manager:
                 raise RuntimeError("ZarrTileManager failed to connect to artifact manager service.")
 
+            # Try to list the default gallery to ensure it's accessible
+            default_gallery_id = "agent-lens/20250506-scan-time-lapse-gallery"
+            logger.info(f"Health check: Attempting to list default gallery: {default_gallery_id}")
+            
+            try:
+                # Use the artifact_manager to list the gallery contents
+                if not artifact_manager_instance.server:
+                    logger.info("Artifact manager not connected, connecting for health check...")
+                    server_for_am, svc_for_am = await get_artifact_manager()
+                    await artifact_manager_instance.connect_server(server_for_am)
+                
+                gallery_contents = await artifact_manager_instance._svc.list(parent_id=default_gallery_id)
+                
+                if not gallery_contents:
+                    logger.warning(f"Health check: Default gallery '{default_gallery_id}' exists but is empty.")
+                    # This is not a critical error if the gallery exists but is empty
+                else:
+                    logger.info(f"Health check: Successfully listed default gallery with {len(gallery_contents)} items.")
+            except Exception as gallery_error:
+                logger.error(f"Health check: Failed to list gallery '{default_gallery_id}': {gallery_error}")
+                raise RuntimeError(f"Failed to list default gallery: {gallery_error}")
 
-            logger.info("Service appears healthy (TileManager connection established).")
+            logger.info("Service appears healthy (TileManager connection established and gallery accessible).")
             return {"status": "ok", "message": "Service healthy"}
 
         except Exception as e:
