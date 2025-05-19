@@ -8,6 +8,9 @@ import MicroscopeControlPanel from './MicroscopeControlPanel';
 import ChannelSettings from './ChannelSettings';
 import { unByKey } from 'ol/Observable';
 
+// Default gallery ID to use when none is specified
+const DEFAULT_GALLERY_ID = "agent-lens/20250506-scan-time-lapse-gallery";
+
 const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incubatorControlService, setCurrentMap }) => {
   const [map, setMap] = useState(null);
   const mapRef = useRef(null);
@@ -73,26 +76,23 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
       const imageMapDataset = localStorage.getItem('imageMapDataset');
       const wasExplicitlySetup = sessionStorage.getItem('mapSetupExplicit') === 'true';
       
-      if (imageMapGallery && wasExplicitlySetup) {
-        // If a gallery is set, prioritize that
-        setMapGalleryId(imageMapGallery);
-        setIsMapViewEnabled(true);
-        setShouldShowMap(true);
-        setShowTimepointSelector(true); // Show timepoint selector immediately
+      // Use the gallery ID from localStorage, or default if none exists
+      const galleryToUse = imageMapGallery || DEFAULT_GALLERY_ID;
+      
+      // Always set a gallery ID (either from localStorage or default)
+      setMapGalleryId(galleryToUse);
+      setIsMapViewEnabled(true);
+      setShouldShowMap(true);
+      setShowTimepointSelector(true); // Show timepoint selector immediately
+      
+      if (imageMapGallery) {
         appendLog(`Image map gallery selected: ${imageMapGallery}`);
-        // Load timepoints from this gallery
-        loadTimepointsList(imageMapGallery);
-      } else if (imageMapDataset && wasExplicitlySetup) {
-        // Fallback to previous dataset-only mode
-        setMapDatasetId(imageMapDataset);
-        setSelectedTimepoint(imageMapDataset);
-        setIsMapViewEnabled(true);
-        setShouldShowMap(true);
-        appendLog(`Image map dataset selected: ${imageMapDataset}`);
       } else {
-        // Add default tile layer only if map exists
-        addTileLayer(newMap, currentChannel);
+        appendLog(`Using default gallery: ${DEFAULT_GALLERY_ID}`);
       }
+      
+      // Load timepoints from this gallery
+      loadTimepointsList(galleryToUse);
       
       // Store the listener key for cleanup
       return () => {
@@ -147,14 +147,8 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
     appendLog(`Loading available time-lapse datasets...`);
     
     try {
-      // Use provided gallery ID or fall back to the one in state
-      const activeGalleryId = galleryId || mapGalleryId;
-      
-      if (!activeGalleryId) {
-        appendLog("No gallery ID provided or set. Cannot load datasets.");
-        setIsLoadingTimepoints(false);
-        return;
-      }
+      // Use provided gallery ID or fall back to the one in state or the default
+      const activeGalleryId = galleryId || mapGalleryId || DEFAULT_GALLERY_ID;
       
       // Call the datasets endpoint with the gallery ID
       const response = await fetch(`/public/apps/agent-lens/datasets?gallery_id=${encodeURIComponent(activeGalleryId)}`);
@@ -226,10 +220,17 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
   // useEffect to load timepoints list when map view is enabled for the first time
   // or when showTimepointSelector is triggered and list is empty.
   useEffect(() => {
-    if (isMapViewEnabled && showTimepointSelector && timepoints.length === 0 && mapGalleryId) {
-      loadTimepointsList(mapGalleryId);
+    if (isMapViewEnabled && showTimepointSelector && timepoints.length === 0) {
+      // Use mapGalleryId if available, otherwise use the default
+      const galleryToUse = mapGalleryId || DEFAULT_GALLERY_ID;
+      loadTimepointsList(galleryToUse);
+      
+      // If we're using the default, update the state
+      if (!mapGalleryId) {
+        setMapGalleryId(DEFAULT_GALLERY_ID);
+      }
     }
-  }, [isMapViewEnabled, showTimepointSelector, mapGalleryId]);
+  }, [isMapViewEnabled, showTimepointSelector]);
 
   // useEffect to handle initial load when a mapDatasetId is set (e.g. from localStorage)
   useEffect(() => {
@@ -844,10 +845,14 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
   const toggleTimepointSelector = () => {
     // If this is the first time showing the selector and we haven't loaded timepoints yet
     if (!showTimepointSelector && timepoints.length === 0) {
-      if (mapGalleryId) {
-        loadTimepointsList(mapGalleryId); // Load from gallery
-      } else {
-        appendLog("No gallery selected. Please set up gallery view from the data management page.");
+      // Use mapGalleryId if set, otherwise fall back to the default gallery
+      const galleryToUse = mapGalleryId || DEFAULT_GALLERY_ID;
+      loadTimepointsList(galleryToUse);
+      
+      if (!mapGalleryId) {
+        // If no gallery was set, update the state with the default
+        setMapGalleryId(DEFAULT_GALLERY_ID);
+        appendLog(`Using default gallery: ${DEFAULT_GALLERY_ID}`);
       }
     }
     
@@ -997,7 +1002,7 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
                     }}
                   >
                     <i className={`fas fa-film mr-2 ${selectedTimepoint === timepointDataset.id ? 'text-blue-500' : 'text-gray-500'}`}></i>
-                    {timepointDataset.name} (Alias: {timepointDataset.id})
+                    {timepointDataset.name}
                   </li>
                 ))}
               </ul>
