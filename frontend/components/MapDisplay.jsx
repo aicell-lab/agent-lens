@@ -8,6 +8,13 @@ import MicroscopeControlPanel from './MicroscopeControlPanel';
 import ChannelSettings from './ChannelSettings';
 import { unByKey } from 'ol/Observable';
 
+// Utility function to get the correct service ID
+const getServiceId = () => {
+  // Check if we're in test mode by looking at the URL
+  const url = window.location.href;
+  return url.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
+};
+
 // Default gallery ID to use when none is specified
 const DEFAULT_GALLERY_ID = "agent-lens/20250506-scan-time-lapse-gallery";
 
@@ -151,7 +158,12 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
       const activeGalleryId = galleryId || mapGalleryId || DEFAULT_GALLERY_ID;
       
       // Call the datasets endpoint with the gallery ID
-      const response = await fetch(`/agent-lens/apps/agent-lens/datasets?gallery_id=${encodeURIComponent(activeGalleryId)}`);
+      // Determine which service ID to use
+      const serviceId = (() => {
+        const url = window.location.href;
+        return url.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
+      })();
+      const response = await fetch(`/agent-lens/apps/${serviceId}/datasets?gallery_id=${encodeURIComponent(activeGalleryId)}`);
       const data = await response.json(); // Expects array like [{id: "alias", name: "display_name"}]
       
       if (response.ok && data && data.length > 0) {
@@ -346,7 +358,8 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
       // Calculate priority based on viewport
       const priority = calculateTilePriority(tileCoord, viewExtent);
       
-      const baseUrl = `tile-for-timepoint?dataset_id=${timepoint}&channel_name=${channelName}&z=${z}&x=${x}&y=${y}&priority=${priority}`;
+      const serviceId = getServiceId();
+      const baseUrl = `/agent-lens/apps/${serviceId}/tile-for-timepoint?dataset_id=${timepoint}&channel_name=${channelName}&z=${z}&x=${x}&y=${y}&priority=${priority}`;
       const params = new URLSearchParams(processingParams).toString();
       return params ? `${baseUrl}&${params}` : baseUrl;
     };
@@ -476,7 +489,8 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
       // Calculate priority based on viewport
       const priority = calculateTilePriority(tileCoord, viewExtent);
       
-      const baseUrl = `merged-tiles?dataset_id=${timepoint}&channels=${channelKeys.join(',')}&z=${z}&x=${x}&y=${y}&priority=${priority}`;
+      const serviceId = getServiceId();
+      const baseUrl = `/agent-lens/apps/${serviceId}/merged-tiles?dataset_id=${timepoint}&channels=${channelKeys.join(',')}&z=${z}&x=${x}&y=${y}&priority=${priority}`;
       const params = new URLSearchParams(processingParams).toString();
       return params ? `${baseUrl}&${params}` : baseUrl;
     };
@@ -603,7 +617,8 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
       
       // Use the gallery default dataset ID if mapDatasetId isn't available
       const datasetId = mapDatasetId || 'agent-lens/20250506-scan-time-lapse-2025-05-06_16-56-52';
-      const baseUrl = `merged-tiles?dataset_id=${datasetId}&channels=${channelKeys.join(',')}&z=${z}&x=${x}&y=${y}&priority=${priority}`;
+      const serviceId = getServiceId();
+      const baseUrl = `/agent-lens/apps/${serviceId}/merged-tiles?dataset_id=${datasetId}&channels=${channelKeys.join(',')}&z=${z}&x=${x}&y=${y}&priority=${priority}`;
       const params = new URLSearchParams(processingParams).toString();
       return params ? `${baseUrl}&${params}` : baseUrl;
     };
@@ -738,7 +753,8 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
       
       // Use the gallery default dataset ID if mapDatasetId isn't available
       const datasetId = mapDatasetId || 'agent-lens/20250506-scan-time-lapse-2025-05-06_16-56-52';
-      const baseUrl = `tile?dataset_id=${datasetId}&timestamp=2025-04-29_16-38-27&channel_name=${channelName}&z=${z}&x=${x}&y=${y}&priority=${priority}`;
+      const serviceId = getServiceId();
+      const baseUrl = `/agent-lens/apps/${serviceId}/tile?dataset_id=${datasetId}&timestamp=2025-04-29_16-38-27&channel_name=${channelName}&z=${z}&x=${x}&y=${y}&priority=${priority}`;
       const params = new URLSearchParams(processingParams).toString();
       return params ? `${baseUrl}&${params}` : baseUrl;
     };
