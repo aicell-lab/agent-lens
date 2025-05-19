@@ -24,6 +24,7 @@ import fsspec
 import time
 from asyncio import Lock
 import threading
+import json
 
 # Configure logging
 import logging
@@ -47,122 +48,6 @@ def setup_logging(log_file="artifact_manager.log", max_bytes=100000, backup_coun
 
 logger = setup_logging()
 
-# Add NetworkMonitor class for tracking bandwidth usage
-class NetworkMonitor:
-    """Monitors network bandwidth usage for HTTP requests"""
-    
-    def __init__(self):
-        self.bandwidth_stats = {}
-        self.lock = asyncio.Lock()
-        
-    async def record_bandwidth(self, operation, url, bytes_transferred, direction="download"):
-        """
-        Record bandwidth usage for a specific operation
-        
-        Args:
-            operation (str): Name of the operation (e.g., "get_zarr_group", "get_file")
-            url (str): URL being accessed (will be truncated for storage efficiency)
-            bytes_transferred (int): Number of bytes transferred
-            direction (str): "download" or "upload"
-        """
-        async with self.lock:
-            # Truncate URL to keep only domain and first part of path
-            truncated_url = self._truncate_url(url)
-            
-            # Create key for this operation
-            key = f"{operation}:{truncated_url}:{direction}"
-            
-            if key not in self.bandwidth_stats:
-                self.bandwidth_stats[key] = {
-                    "total_bytes": 0,
-                    "request_count": 0,
-                    "last_access": time.time()
-                }
-            
-            # Update stats
-            self.bandwidth_stats[key]["total_bytes"] += bytes_transferred
-            self.bandwidth_stats[key]["request_count"] += 1
-            self.bandwidth_stats[key]["last_access"] = time.time()
-    
-    def _truncate_url(self, url):
-        """Truncate URL to keep only domain and first part of path"""
-        if not url:
-            return "unknown"
-        
-        # Extract domain and first part of path
-        try:
-            from urllib.parse import urlparse
-            parsed = urlparse(url)
-            domain = parsed.netloc
-            path = parsed.path.split("/")[1] if len(parsed.path.split("/")) > 1 else ""
-            return f"{domain}/{path}"
-        except:
-            # If parsing fails, return a shortened version
-            return url[:50] + "..." if len(url) > 50 else url
-    
-    async def get_bandwidth_report(self):
-        """Get a report of bandwidth usage"""
-        async with self.lock:
-            # Convert bytes to more readable format
-            report = []
-            for key, stats in self.bandwidth_stats.items():
-                operation, url, direction = key.split(":", 2)
-                report.append({
-                    "operation": operation,
-                    "url": url,
-                    "direction": direction,
-                    "total_mb": round(stats["total_bytes"] / (1024 * 1024), 2),
-                    "request_count": stats["request_count"],
-                    "avg_kb_per_request": round(stats["total_bytes"] / stats["request_count"] / 1024, 2) if stats["request_count"] > 0 else 0,
-                    "last_access": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stats["last_access"]))
-                })
-            
-            # Sort by total bandwidth usage
-            report.sort(key=lambda x: x["total_mb"], reverse=True)
-            return report
-    
-    async def log_bandwidth_report(self):
-        """Log the current bandwidth report"""
-        report = await self.get_bandwidth_report()
-        logger.info("=== Bandwidth Usage Report ===")
-        for item in report:
-            logger.info(f"{item['operation']} ({item['url']}, {item['direction']}): {item['total_mb']} MB, {item['request_count']} requests, {item['avg_kb_per_request']} KB/request")
-        logger.info("==============================")
-        
-    def print_bandwidth_report(self):
-        """Print the bandwidth report to standard output"""
-        import asyncio
-        
-        async def _get_and_print():
-            report = await self.get_bandwidth_report()
-            print("\n=== Bandwidth Usage Report ===")
-            print(f"{'OPERATION':<25} {'URL':<30} {'DIRECTION':<10} {'TOTAL MB':>10} {'REQUESTS':>10} {'AVG KB/REQ':>12}")
-            print("-" * 100)
-            
-            for item in report:
-                print(f"{item['operation'][:25]:<25} {item['url'][:30]:<30} {item['direction']:<10} {item['total_mb']:>10.2f} {item['request_count']:>10} {item['avg_kb_per_request']:>12.2f}")
-            
-            # Calculate totals
-            total_mb = sum(item["total_mb"] for item in report)
-            total_requests = sum(item["request_count"] for item in report)
-            
-            print("-" * 100)
-            print(f"{'TOTAL':<25} {'':30} {'':10} {total_mb:>10.2f} {total_requests:>10}")
-            print("==============================\n")
-        
-        # Run the async function in the current event loop if possible
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # Create a future to store the result
-            future = asyncio.run_coroutine_threadsafe(_get_and_print(), loop)
-            future.result()  # Wait for completion
-        else:
-            # If no event loop is running, create one
-            loop.run_until_complete(_get_and_print())
-
-# Create a global instance
-network_monitor = NetworkMonitor()
-
 dotenv.load_dotenv()  
 ENV_FILE = dotenv.find_dotenv()  
 if ENV_FILE:  
@@ -176,7 +61,6 @@ class AgentLensArtifactManager:
     def __init__(self):
         self._svc = None
         self.server = None
-        self.network_monitor = network_monitor  # Add reference to network monitor
 
     async def connect_server(self, server):
         """
@@ -187,18 +71,6 @@ class AgentLensArtifactManager:
         """
         self.server = server
         self._svc = await server.get_service("public/artifact-manager")
-
-    def _artifact_alias(self, name):
-        """
-        Generate an alias for the artifact.
-
-        Args:
-            name (str): The artifact name.
-
-        Returns:
-            str: The artifact alias.
-        """
-        return f"agent-lens-{name}"
 
     def _artifact_id(self, workspace, name):
         """
@@ -211,7 +83,7 @@ class AgentLensArtifactManager:
         Returns:
             str: The artifact ID.
         """
-        return f"{workspace}/{self._artifact_alias(name)}"
+        return f"{workspace}/{name}"
 
     async def create_vector_collection(
         self, workspace, name, manifest, config, overwrite=False, exists_ok=False
@@ -283,10 +155,8 @@ class AgentLensArtifactManager:
         await self._svc.edit(artifact_id=art_id, version="stage")
         put_url = await self._svc.put_file(art_id, file_path, download_weight=1.0)
         async with httpx.AsyncClient() as client:
-            # Track upload bandwidth
             content_size = len(file_content)
             response = await client.put(put_url, data=file_content, timeout=500)
-            await self.network_monitor.record_bandwidth("add_file", put_url, content_size, "upload")
         response.raise_for_status()
         await self._svc.commit(art_id)
 
@@ -308,8 +178,6 @@ class AgentLensArtifactManager:
         async with httpx.AsyncClient() as client:
             response = await client.get(get_url, timeout=500)
             response.raise_for_status()
-            # Track download bandwidth
-            await self.network_monitor.record_bandwidth("get_file", get_url, len(response.content), "download")
 
         return response.content
 
@@ -428,357 +296,10 @@ class AgentLensArtifactManager:
             logger.info(traceback.format_exc())
             return []
 
-    async def get_zarr_group(self, dataset_id, timestamp, channel, cache_max_size=2**26 # 64 MB LRU cache
-    ):
-        """
-        Access a Zarr group stored within a zip file in an artifact.
-
-        Args:
-            workspace (str): The workspace containing the artifact.
-            artifact_alias (str): The alias of the artifact (e.g., 'image-map-20250429-treatment-zip').
-            timestamp (str): The timestamp folder name.
-            channel (str): The channel name (used for the zip filename).
-            cache_max_size (int, optional): Max size for LRU cache in bytes. Defaults to 2**26.
-
-        Returns:
-            zarr.Group: The root Zarr group object.
-        """
-        if self._svc is None:
-            raise ConnectionError("Artifact Manager service not connected. Call connect_server first.")
-
-        art_id = dataset_id
-        zip_file_path = f"{timestamp}/{channel}.zip"
-
-        try:
-            cache_key = f"{dataset_id}:{timestamp}:{channel}"
-            
-            now = time.time()
-            
-            # Check if we have a cached version and if it's still valid
-            if cache_key in self.zarr_groups_cache:
-                cached_data = self.zarr_groups_cache[cache_key]
-                # If URL is close to expiring, refresh it
-                if cached_data['expiry'] - now < self.url_expiry_buffer:
-                    logger.info(f"URL for {cache_key} is about to expire, refreshing")
-                    # Remove from cache to force refresh
-                    del self.zarr_groups_cache[cache_key]
-                else:
-                    logger.info(f"Using cached Zarr group for {cache_key}, expires in {int(cached_data['expiry'] - now)} seconds")
-                    return cached_data['group']
-            
-            # Get or create a lock for this cache key to prevent concurrent processing
-            if cache_key not in self.zarr_group_locks:
-                logger.info(f"Creating lock for {cache_key}")
-                self.zarr_group_locks[cache_key] = Lock()
-            
-            # Acquire the lock for this cache key
-            async with self.zarr_group_locks[cache_key]:
-                # Check cache again after acquiring the lock (another request might have completed)
-                if cache_key in self.zarr_groups_cache:
-                    cached_data = self.zarr_groups_cache[cache_key]
-                    if cached_data['expiry'] - now >= self.url_expiry_buffer:
-                        logger.info(f"Using cached Zarr group for {cache_key} after lock acquisition")
-                        return cached_data['group']
-                
-                try:
-                    logger.info(f"Accessing artifact at: {art_id}/{zip_file_path}")
-                    
-                    # Get the direct download URL for the zip file
-                    download_url = await self._svc.get_file(art_id, zip_file_path)
-                    
-                    # Extract expiration time from URL
-                    expiry_time = self._extract_expiry_from_url(download_url)
-                    
-                    # Create a more efficient HTTP connection pool for this URL domain
-                    transport = httpx.AsyncHTTPTransport(
-                        limits=httpx.Limits(
-                            max_keepalive_connections=20,
-                            max_connections=50,
-                            keepalive_expiry=60.0
-                        )
-                    )
-                    
-                    # First, try to download a few common chunks directly to pre-populate cache
-                    # This helps reduce multiple small requests
-                    common_chunks = [
-                        "0.0", "0.1", "1.0", "1.1", # Scale 0, top-left chunks
-                        # Add more commonly accessed chunks based on analysis
-                    ]
-                    
-                    # Construct the URL for FSStore using fsspec's zip chaining
-                    store_url = f"zip::{download_url}"
-                    
-                    # Create a bandwidth-tracking HTTP client for fsspec
-                    class BandwidthTrackingHTTPFile:
-                        def __init__(self, url, network_monitor):
-                            self.url = url
-                            self.network_monitor = network_monitor
-                            self.bytes_downloaded = 0
-                            
-                        async def record_download(self, content_length):
-                            if content_length > 0:
-                                self.bytes_downloaded += content_length
-                                await self.network_monitor.record_bandwidth(
-                                    "zarr_chunk_download", 
-                                    self.url, 
-                                    content_length, 
-                                    "download"
-                                )
-                    
-                    # Run the synchronous Zarr operations in a thread pool with optimized settings
-                    logger.info("Running Zarr open in thread executor with optimized connection settings...")
-                    
-                    # Custom sync function that adds connection pooling and bandwidth tracking
-                    def _open_zarr_with_bandwidth_tracking(url, cache_size, network_monitor_ref):
-                        logger.info(f"Opening Zarr store with bandwidth tracking: {url}")
-                        import fsspec
-                        from fsspec.implementations.http import HTTPFileSystem
-                        
-                        # Original HTTP open function
-                        original_open = HTTPFileSystem.open
-                        
-                        # Override to track bandwidth
-                        def bandwidth_tracking_open(self, url, **kwargs):
-                            file = original_open(self, url, **kwargs)
-                            
-                            # Monkey patch the file's read method to track bandwidth
-                            original_read = file.read
-                            
-                            def tracked_read(size=-1):
-                                content = original_read(size)
-                                if content:
-                                    # Use asyncio.run in a new thread since we're in sync code
-                                    import threading
-                                    def record_bandwidth():
-                                        loop = asyncio.new_event_loop()
-                                        asyncio.set_event_loop(loop)
-                                        loop.run_until_complete(
-                                            network_monitor_ref.record_bandwidth(
-                                                "zarr_chunk_read", url, len(content), "download"
-                                            )
-                                        )
-                                        loop.close()
-                                    
-                                    # Run in a separate thread to avoid blocking
-                                    t = threading.Thread(target=record_bandwidth)
-                                    t.daemon = True
-                                    t.start()
-                                return content
-                            
-                            file.read = tracked_read
-                            return file
-                        
-                        # Apply the monkey patch
-                        HTTPFileSystem.open = bandwidth_tracking_open
-                        
-                        # Configure fsspec with better connection handling
-                        fs = fsspec.filesystem(
-                            "http", 
-                            block_size=2*1024*1024,  # 2MB blocks instead of default 5MB
-                            cache_type="readahead",  # Prefetch next blocks
-                            cache_size=20,           # Cache more blocks
-                            client_kwargs={
-                                "timeout": 30.0,
-                                "pool_connections": 10,
-                                "pool_maxsize": 20
-                            }
-                        )
-                        fsspec.config.conf["http"] = fs
-                        
-                        # Create optimized store
-                        store = FSStore(url, mode="r")
-                        if cache_size and cache_size > 0:
-                            logger.info(f"Using LRU cache with size: {cache_size} bytes")
-                            store = LRUStoreCache(store, max_size=cache_size)
-                            
-                        # Open root group
-                        root_group = zarr.group(store=store)
-                        logger.info(f"Zarr group opened successfully.")
-                        
-                        # Prefetch common chunks
-                        try:
-                            # Access scale0 array which is commonly used
-                            if 'scale0' in root_group:
-                                # This will trigger chunk loading for the initial visible area
-                                logger.info("Prefetching common scale0 chunks...")
-                                for i in range(2):
-                                    for j in range(2):
-                                        chunk = root_group['scale0'].get_orthogonal_selection(
-                                            (slice(i*256, (i+1)*256), slice(j*256, (j+1)*256))
-                                        )
-                                        logger.info(f"Prefetched chunk at {i},{j} with size {chunk.nbytes/1024:.1f}KB")
-                        except Exception as e:
-                            logger.info(f"Error during chunk prefetching (non-critical): {e}")
-                        
-                        # Restore original open method
-                        HTTPFileSystem.open = original_open
-                            
-                        return root_group
-                    
-                    # Use the optimized function with bandwidth tracking
-                    zarr_group = await asyncio.to_thread(_open_zarr_with_bandwidth_tracking, store_url, cache_max_size, network_monitor)
-                    
-                    # Cache the Zarr group for future use, along with expiration time
-                    self.zarr_groups_cache[cache_key] = {
-                        'group': zarr_group,
-                        'url': download_url,
-                        'expiry': expiry_time
-                    }
-                    
-                    logger.info(f"Cached Zarr group for {cache_key}, expires in {int(expiry_time - now)} seconds")
-                    
-                    # Log bandwidth report after loading
-                    await network_monitor.log_bandwidth_report()
-                    
-                    return zarr_group
-                except Exception as e:
-                    logger.info(f"Error getting Zarr group: {e}")
-                    import traceback
-                    logger.info(traceback.format_exc())
-                    return None
-                finally:
-                    # Clean up old locks if they're no longer needed
-                    # This helps prevent memory leaks if many different cache keys are used
-                    if len(self.zarr_group_locks) > 100:  # Arbitrary limit
-                        # Keep only locks for cached items and the current request
-                        to_keep = set(self.zarr_groups_cache.keys()) | {cache_key}
-                        self.zarr_group_locks = {k: v for k, v in self.zarr_group_locks.items() if k in to_keep}
-        except Exception as e:
-            logger.info(f"Error in get_zarr_group: {e}")
-            import traceback
-            logger.info(traceback.format_exc())
-            return None
-
-    async def get_bandwidth_stats(self):
-        """
-        Get bandwidth usage statistics for API access
-        
-        Returns:
-            dict: Bandwidth usage statistics
-        """
-        # Get the bandwidth report from the network monitor
-        report = await self.network_monitor.get_bandwidth_report()
-        
-        # Calculate totals by operation type
-        operation_totals = {}
-        for item in report:
-            op = item["operation"]
-            if op not in operation_totals:
-                operation_totals[op] = {
-                    "total_mb": 0,
-                    "request_count": 0
-                }
-            operation_totals[op]["total_mb"] += item["total_mb"]
-            operation_totals[op]["request_count"] += item["request_count"]
-        
-        # Calculate overall totals
-        total_mb = sum(item["total_mb"] for item in report)
-        total_requests = sum(item["request_count"] for item in report)
-        
-        # Return formatted report
-        return {
-            "detailed_report": report,
-            "operation_totals": operation_totals,
-            "total_mb": total_mb,
-            "total_requests": total_requests,
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-        }
-
-    async def reset_bandwidth_stats(self):
-        """Reset bandwidth statistics"""
-        async with self.network_monitor.lock:
-            self.network_monitor.bandwidth_stats = {}
-        return {"status": "ok", "message": "Bandwidth statistics reset successfully"}
-
-    def print_bandwidth_report(self):
-        """Print bandwidth usage report to standard output"""
-        self.network_monitor.print_bandwidth_report()
-        
-    async def test_bandwidth_monitoring(self, dataset_id=None, timestamp=None, channel=None, scale=0, x=0, y=0):
-        """
-        Test function to demonstrate bandwidth monitoring.
-        Performs a series of operations to generate bandwidth usage data.
-        
-        Args:
-            dataset_id (str, optional): The dataset ID to test
-            timestamp (str, optional): The timestamp to use
-            channel (str, optional): The channel to test
-            scale (int): Scale level to test
-            x, y (int): Tile coordinates to test
-            
-        Returns:
-            dict: Test results and bandwidth report
-        """
-        # Use default values if not provided
-        dataset_id = dataset_id or "agent-lens/image-map-20250429-treatment-zip"
-        timestamp = timestamp or self.default_timestamp
-        channel = channel or "BF_LED_matrix_full"
-        
-        print(f"Starting bandwidth monitoring test with dataset: {dataset_id}")
-        print(f"Timestamp: {timestamp}, Channel: {channel}, Scale: {scale}, Coordinates: ({x},{y})")
-        
-        # Reset bandwidth stats to start fresh
-        await self.reset_bandwidth_stats()
-        
-        # Step 1: Access the Zarr group
-        print("\nStep 1: Accessing Zarr group...")
-        zarr_group = await self.get_zarr_group(dataset_id, timestamp, channel)
-        print("Zarr group accessed.")
-        
-        # Print bandwidth after step 1
-        print("\nBandwidth usage after accessing Zarr group:")
-        self.print_bandwidth_report()
-        
-        # Step 2: Get a tile
-        print("\nStep 2: Fetching a tile...")
-        tile_data = await self.get_tile_np_data(dataset_id, timestamp, channel, scale, x, y)
-        if tile_data is not None:
-            print(f"Tile fetched successfully. Shape: {tile_data.shape}, Size: {tile_data.nbytes / 1024:.2f} KB")
-        else:
-            print("Failed to fetch tile.")
-        
-        # Print bandwidth after step 2
-        print("\nBandwidth usage after fetching tile:")
-        self.print_bandwidth_report()
-        
-        # Step 3: Get the same tile again (should use cache)
-        print("\nStep 3: Fetching the same tile again (should use cache)...")
-        tile_data = await self.get_tile_np_data(dataset_id, timestamp, channel, scale, x, y)
-        if tile_data is not None:
-            print(f"Tile fetched from cache. Shape: {tile_data.shape}")
-        else:
-            print("Failed to fetch tile from cache.")
-        
-        # Print bandwidth after step 3
-        print("\nBandwidth usage after fetching from cache:")
-        self.print_bandwidth_report()
-        
-        # Step 4: Get adjacent tiles (some might be in cache from region fetching)
-        print("\nStep 4: Fetching adjacent tiles...")
-        for dx, dy in [(0, 1), (1, 0), (1, 1)]:
-            tile_data = await self.get_tile_np_data(dataset_id, timestamp, channel, scale, x + dx, y + dy)
-            if tile_data is not None:
-                print(f"Adjacent tile ({x + dx},{y + dy}) fetched. Shape: {tile_data.shape}")
-            else:
-                print(f"Failed to fetch adjacent tile ({x + dx},{y + dy}).")
-        
-        # Final bandwidth report
-        print("\nFinal bandwidth usage report:")
-        self.print_bandwidth_report()
-        
-        # Get stats for return
-        stats = await self.get_bandwidth_stats()
-        
-        return {
-            "status": "success",
-            "message": "Bandwidth monitoring test completed",
-            "bandwidth_stats": stats
-        }
-
 # Constants
 SERVER_URL = "https://hypha.aicell.io"
 WORKSPACE_TOKEN = os.environ.get("WORKSPACE_TOKEN")
-ARTIFACT_ALIAS = "image-map-20250429-treatment-zip"
+ARTIFACT_ALIAS = "20250506-scan-time-lapse-2025-05-06_16-56-52"
 DEFAULT_CHANNEL = "BF_LED_matrix_full"
 
 # New class to replace TileManager using Zarr for efficient access
@@ -787,9 +308,7 @@ class ZarrTileManager:
         self.artifact_manager = None
         self.artifact_manager_server = None
         self.workspace = "agent-lens"  # Default workspace
-        self.tile_size = 256  # Default chunk size for Zarr
-        # Define the chunk size for test access
-        self.chunk_size = 256  # Assuming chunk size is the same as tile size
+        self.tile_size = 256  # Default chunk size for Zarr, should match .zarray chunks dimension
         self.channels = [
             "BF_LED_matrix_full",
             "Fluorescence_405_nm_Ex",
@@ -797,169 +316,94 @@ class ZarrTileManager:
             "Fluorescence_561_nm_Ex",
             "Fluorescence_638_nm_Ex"
         ]
-        # Enhanced zarr cache to include URL expiration times
-        self.zarr_groups_cache = {}  # format: {cache_key: {'group': zarr_group, 'url': url, 'expiry': timestamp}}
-        # Add a dictionary to track pending requests with locks
-        self.zarr_group_locks = {}  # format: {cache_key: asyncio.Lock()}
-        # Add a processed tile cache with TTL
+        # Cache for .zarray or .zgroup metadata: {(dataset_id, metadata_path): metadata_dict}
+        self.metadata_cache = {} 
+        self.metadata_cache_lock = Lock()
+        
+        # Processed tile cache (final numpy arrays)
         self.processed_tile_cache = {}  # format: {cache_key: {'data': np_array, 'timestamp': timestamp}}
-        self.processed_tile_cache_size = 1000  # Maximum number of tiles to cache
-        self.processed_tile_ttl = 600  # Cache expiration in seconds (10 minutes)
-        # Add empty region cache to avoid redundantly fetching known empty regions
-        self.empty_regions_cache = {}  # format: {region_key: expiry_timestamp}
-        self.empty_regions_ttl = 3600  # Empty regions valid for 1 hour
-        self.empty_regions_cache_size = 2000  # Maximum number of empty regions to cache
-        self.is_running = True
-        self.session = None
-        self.default_timestamp = "2025-04-29_16-38-27"  # Set a default timestamp
-        # Set URL expiration buffer - refresh URLs 15 minutes before they expire (extended)
-        self.url_expiry_buffer = 900  # seconds (15 min instead of 5 min)
-        # Default URL expiration time (1 hour)
-        self.default_url_expiry = 3600  # seconds
-        # Function to open zarr store synchronously
-        self._open_zarr_sync = self._create_open_zarr_sync_function()
-        
-        # Add a priority queue for tile requests
-        self.tile_request_queue = asyncio.PriorityQueue()
-        # Track in-progress tile requests to avoid duplicates
-        self.in_progress_tiles = set()
-        # Start the tile request processor
-        self.tile_processor_task = None
-        
-        # Add a cleanup task for the tile cache
-        self.cache_cleanup_task = None
-        
-        # Add network monitor reference
-        self.network_monitor = network_monitor
-        
-        # Add bandwidth report task
-        self.bandwidth_report_task = None
-        self.bandwidth_report_interval = 300  # Log bandwidth report every 5 minutes
+        self.processed_tile_cache_size = 1000
+        self.processed_tile_ttl = 600  # 10 minutes
 
-    def _create_open_zarr_sync_function(self):
-        """Create a reusable function for opening zarr stores synchronously"""
-        def _open_zarr_sync(url, cache_size):
-            logger.info(f"Opening Zarr store: {url}")
+        # Empty regions cache
+        self.empty_regions_cache = {}
+        self.empty_regions_ttl = 3600
+        self.empty_regions_cache_size = 2000
+
+        self.is_running = True
+        self.session = None # aiohttp.ClientSession
+        self.http_session_lock = Lock()
+
+        self.default_dataset_alias = "20250506-scan-time-lapse-2025-05-06_16-56-52" # Example, will be overridden by frontend
+
+        self.tile_request_queue = asyncio.PriorityQueue()
+        self.in_progress_tiles = set() # For individual tile processing locks, distinct from metadata locks
+        self.tile_processor_task = None
+        self.cache_cleanup_task = None
+
+    async def _get_http_session(self):
+        """Get or create an aiohttp.ClientSession with increased connection pool."""
+        async with self.http_session_lock:
+            if self.session is None or self.session.closed:
+                connector = aiohttp.TCPConnector(
+                    limit_per_host=50,  # Max connections per host
+                    limit=100,          # Total max connections
+                    ssl=False           # Assuming HTTP for local/internal Hypha, adjust if HTTPS
+                )
+                self.session = aiohttp.ClientSession(connector=connector)
+            return self.session
+
+    async def _fetch_zarr_metadata(self, dataset_alias, metadata_path_in_dataset):
+        """
+        Fetch and cache Zarr metadata (.zgroup or .zarray) for a given dataset alias.
+        Args:
+            dataset_alias (str): The alias of the time-lapse dataset (e.g., "20250506-scan-timelapse-...")
+            metadata_path_in_dataset (str): Path within the dataset (e.g., "Channel/scaleN/.zarray")
+        """
+        cache_key = (dataset_alias, metadata_path_in_dataset)
+        async with self.metadata_cache_lock:
+            if cache_key in self.metadata_cache:
+                logger.info(f"Using cached metadata for {cache_key}")
+                return self.metadata_cache[cache_key]
+
+        if not self.artifact_manager:
+            logger.error("Artifact manager not available in ZarrTileManager for metadata fetch.")
+            # Attempt to connect if not already
+            await self.connect()
+            if not self.artifact_manager:
+                 raise ConnectionError("Artifact manager connection failed.")
+
+        try:
+            logger.info(f"Fetching metadata: dataset_alias='{dataset_alias}', path='{metadata_path_in_dataset}'")
             
-            # Create a function to track HTTP reads
-            from fsspec.implementations.http import HTTPFileSystem
-            original_open = HTTPFileSystem.open
+            metadata_content_bytes = await self.artifact_manager.get_file(
+                self.workspace,  # "agent-lens"
+                dataset_alias,
+                metadata_path_in_dataset
+            )
+            metadata_str = metadata_content_bytes.decode('utf-8')
+            metadata = json.loads(metadata_str)
             
-            def bandwidth_tracking_open(self, url, **kwargs):
-                file = original_open(self, url, **kwargs)
-                
-                # Monkey patch the file's read method to track bandwidth
-                original_read = file.read
-                
-                def tracked_read(size=-1):
-                    content = original_read(size)
-                    if content:
-                        # Record this read in a thread-safe way
-                        import threading
-                        def record_bandwidth():
-                            loop = asyncio.new_event_loop()
-                            asyncio.set_event_loop(loop)
-                            loop.run_until_complete(
-                                network_monitor.record_bandwidth(
-                                    "zarr_chunk_read", url, len(content), "download"
-                                )
-                            )
-                            loop.close()
-                        
-                        # Run in a separate thread to avoid blocking
-                        t = threading.Thread(target=record_bandwidth)
-                        t.daemon = True
-                        t.start()
-                    return content
-                
-                file.read = tracked_read
-                return file
-            
-            # Apply the monkey patch
-            HTTPFileSystem.open = bandwidth_tracking_open
-            
-            try:
-                # Configure optimized HTTP settings
-                http_kwargs = {
-                    "block_size": 2*1024*1024,  # 2MB blocks instead of default 5MB
-                    "cache_type": "readahead",  # Prefetch next blocks
-                    "cache_size": 20,           # Cache more blocks
-                    "client_kwargs": {
-                        "timeout": 30.0,
-                        "pool_connections": 10,
-                        "pool_maxsize": 20
-                    }
-                }
-                
-                # Use httpx transport if available
-                try:
-                    import httpx
-                    http_kwargs["transport"] = httpx.HTTPTransport(
-                        limits=httpx.Limits(
-                            max_keepalive_connections=20,
-                            max_connections=50,
-                            keepalive_expiry=60.0
-                        )
-                    )
-                except (ImportError, AttributeError):
-                    logger.info("Enhanced HTTP transport not available")
-                
-                # Create optimized store with HTTP optimization but without custom filesystem
-                import fsspec
-                # Use the standard HTTPFileSystem but with optimized settings
-                fs = fsspec.filesystem("http", **http_kwargs)
-                
-                store = FSStore(url, mode="r")
-                if cache_size and cache_size > 0:
-                    logger.info(f"Using LRU cache with size: {cache_size} bytes")
-                    store = LRUStoreCache(store, max_size=cache_size)
-                    
-                # Open root group
-                root_group = zarr.group(store=store)
-                logger.info(f"Zarr group opened successfully.")
-                
-                # Prefetch common chunks
-                try:
-                    # Access scale0 array which is commonly used
-                    if 'scale0' in root_group:
-                        # This will trigger chunk loading for the initial visible area
-                        logger.info("Prefetching common scale0 chunks...")
-                        
-                        # Prefetch a 2x2 grid of chunks at the center for scale0 (most commonly viewed)
-                        for i in range(2):
-                            for j in range(2):
-                                chunk = root_group['scale0'].get_orthogonal_selection(
-                                    (slice(i*256, (i+1)*256), slice(j*256, (j+1)*256))
-                                )
-                                logger.info(f"Prefetched scale0 chunk at {i},{j} with size {chunk.nbytes/1024:.1f}KB")
-                        
-                        # Also prefetch the first chunk of lower resolution scales for faster navigation
-                        for scale in range(1, min(3, len([k for k in root_group.keys() if k.startswith('scale')]))):
-                            if f'scale{scale}' in root_group:
-                                chunk = root_group[f'scale{scale}'].get_orthogonal_selection(
-                                    (slice(0, 256), slice(0, 256))
-                                )
-                                logger.info(f"Prefetched scale{scale} chunk with size {chunk.nbytes/1024:.1f}KB")
-                except Exception as e:
-                    logger.info(f"Error during chunk prefetching (non-critical): {e}")
-                
-                # Restore original open method
-                HTTPFileSystem.open = original_open
-                    
-                return root_group
-            finally:
-                # Restore original open method if not already done
-                if HTTPFileSystem.open != original_open:
-                    HTTPFileSystem.open = original_open
-                
-        return _open_zarr_sync
+            async with self.metadata_cache_lock:
+                self.metadata_cache[cache_key] = metadata
+            logger.info(f"Fetched and cached metadata for {cache_key}")
+            return metadata
+        except Exception as e:
+            logger.error(f"Error fetching metadata for {dataset_alias} / {metadata_path_in_dataset}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return None
 
     async def connect(self, workspace_token=None, server_url="https://hypha.aicell.io"):
-        """Connect to the Artifact Manager service"""
+        """Connect to the Artifact Manager service and initialize http session."""
         try:
             token = workspace_token or os.environ.get("WORKSPACE_TOKEN")
             if not token:
-                raise ValueError("Workspace token not provided")
+                # Try to load from .env if not in environment
+                dotenv.load_dotenv()
+                token = os.environ.get("WORKSPACE_TOKEN")
+                if not token:
+                    raise ValueError("Workspace token not provided and not found in .env")
             
             self.artifact_manager_server = await connect_to_server({
                 "name": "zarr-tile-client",
@@ -970,118 +414,46 @@ class ZarrTileManager:
             self.artifact_manager = AgentLensArtifactManager()
             await self.artifact_manager.connect_server(self.artifact_manager_server)
             
-            # Initialize aiohttp session for any HTTP requests
-            self.session = aiohttp.ClientSession()
+            # Initialize aiohttp session
+            await self._get_http_session() # Ensures session is created
             
-            # Start the tile request processor
             if self.tile_processor_task is None or self.tile_processor_task.done():
                 self.tile_processor_task = asyncio.create_task(self._process_tile_requests())
             
-            # Start the cache cleanup task
             if self.cache_cleanup_task is None or self.cache_cleanup_task.done():
                 self.cache_cleanup_task = asyncio.create_task(self._cleanup_tile_cache())
             
-            # Start the bandwidth report task
-            if self.bandwidth_report_task is None or self.bandwidth_report_task.done():
-                self.bandwidth_report_task = asyncio.create_task(self._periodic_bandwidth_report())
-            
             logger.info("ZarrTileManager connected successfully")
             
-            # Pre-prime ZIP metadata for default dataset
-            default_dataset_id = 'agent-lens/image-map-20250429-treatment-zip'
-            default_timestamp = self.default_timestamp
-            default_channels = ['BF_LED_matrix_full']  # Most commonly used channel
-            
-            # Prime ZIP metadata in background
-            asyncio.create_task(self.prime_zip_metadata(default_dataset_id, default_timestamp, default_channels))
+            # Example: Prime metadata for a default dataset if needed, or remove if priming is dynamic
+            # await self.prime_metadata(self.default_dataset_alias, self.channels[0], scale=0)
             
             return True
         except Exception as e:
-            logger.info(f"Error connecting to artifact manager: {str(e)}")
+            logger.error(f"Error connecting ZarrTileManager: {str(e)}")
             import traceback
-            logger.info(traceback.format_exc())
+            logger.error(traceback.format_exc())
+            self.artifact_manager = None # Ensure it's None on failure
+            self.artifact_manager_server = None
             return False
 
-    async def prime_zip_metadata(self, dataset_id, timestamp, channels):
-        """
-        Pre-download ZIP file metadata to speed up subsequent accesses.
-        This helps avoid the initial overhead when first accessing a ZIP file.
-        
-        Args:
-            dataset_id (str): The dataset ID
-            timestamp (str): The timestamp folder
-            channels (list): List of channels to prime
-        """
-        logger.info(f"Priming ZIP metadata for {dataset_id}, timestamp {timestamp}")
-        
+    async def prime_metadata(self, dataset_alias, channel_name, scale):
+        """Pre-fetch .zarray metadata for a given dataset, channel, and scale."""
+        logger.info(f"Priming metadata for {dataset_alias}/{channel_name}/scale{scale}")
         try:
-            for channel in channels:
-                # Get the file URL without actually downloading the content
-                zip_file_path = f"{timestamp}/{channel}.zip"
-                download_url = await self.artifact_manager._svc.get_file(dataset_id, zip_file_path)
-                
-                # Create a unique key for this metadata
-                metadata_key = f"{dataset_id}:{timestamp}:{channel}:metadata"
-                
-                # Fetch just the headers to prime the connection and possibly cache DNS
-                if self.session:
-                    logger.info(f"Prefetching headers for {channel}.zip")
-                    try:
-                        # First make a HEAD request to get headers without downloading content
-                        async with self.session.head(download_url, timeout=5) as response:
-                            if response.status == 200:
-                                # Record the metadata size
-                                content_length = response.headers.get('Content-Length', '0')
-                                logger.info(f"ZIP metadata prefetch successful for {channel}.zip: {content_length} bytes")
-                                
-                                # Record minimal bandwidth usage for metadata prefetch
-                                await self.network_monitor.record_bandwidth(
-                                    "zip_metadata_prefetch", 
-                                    f"{dataset_id}/{timestamp}/{channel}", 
-                                    int(content_length) * 0.05,  # Estimate 5% of file size for metadata
-                                    "download"
-                                )
-                                
-                                # Now make a small range request to get just the ZIP central directory
-                                # This is typically at the end of the file, so request the last 8KB
-                                if content_length and int(content_length) > 8192:
-                                    content_length_int = int(content_length)
-                                    start_byte = max(0, content_length_int - 8192)
-                                    headers = {'Range': f'bytes={start_byte}-{content_length_int-1}'}
-                                    
-                                    async with self.session.get(download_url, headers=headers, timeout=5) as range_resp:
-                                        if range_resp.status == 206:  # Partial content
-                                            # Just read and discard the content - the important part is priming the connection
-                                            _ = await range_resp.read()
-                                            logger.info(f"ZIP central directory prefetched for {channel}.zip")
-                    except Exception as e:
-                        logger.info(f"Non-critical error prefetching ZIP metadata for {channel}.zip: {e}")
-                        # Continue with other channels even if one fails
-                        continue
-                        
-            logger.info(f"ZIP metadata priming completed for {dataset_id}, timestamp {timestamp}")
+            zarray_path = f"{channel_name}/scale{scale}/.zarray"
+            await self._fetch_zarr_metadata(dataset_alias, zarray_path)
+            
+            zgroup_channel_path = f"{channel_name}/.zgroup"
+            await self._fetch_zarr_metadata(dataset_alias, zgroup_channel_path)
+
+            zgroup_root_path = ".zgroup"
+            await self._fetch_zarr_metadata(dataset_alias, zgroup_root_path)
+            logger.info(f"Metadata priming complete for {dataset_alias}/{channel_name}/scale{scale}")
             return True
         except Exception as e:
-            logger.info(f"Error priming ZIP metadata: {e}")
-            import traceback
-            logger.info(traceback.format_exc())
+            logger.error(f"Error priming metadata: {e}")
             return False
-
-    async def _periodic_bandwidth_report(self):
-        """Periodically log bandwidth usage reports"""
-        try:
-            while self.is_running:
-                # Wait for the specified interval
-                await asyncio.sleep(self.bandwidth_report_interval)
-                
-                # Log bandwidth report
-                await self.network_monitor.log_bandwidth_report()
-        except asyncio.CancelledError:
-            logger.info("Bandwidth report task cancelled")
-        except Exception as e:
-            logger.info(f"Error in bandwidth report task: {e}")
-            import traceback
-            logger.info(traceback.format_exc())
 
     async def _cleanup_tile_cache(self):
         """Periodically clean up expired tiles from the cache"""
@@ -1132,170 +504,34 @@ class ZarrTileManager:
         """Close the tile manager and cleanup resources"""
         self.is_running = False
         
-        # Cancel the tile processor task
         if self.tile_processor_task and not self.tile_processor_task.done():
             self.tile_processor_task.cancel()
-            try:
-                await self.tile_processor_task
-            except asyncio.CancelledError:
-                pass
+            try: await self.tile_processor_task
+            except asyncio.CancelledError: pass
         
-        # Cancel the cache cleanup task
         if self.cache_cleanup_task and not self.cache_cleanup_task.done():
             self.cache_cleanup_task.cancel()
-            try:
-                await self.cache_cleanup_task
-            except asyncio.CancelledError:
-                pass
+            try: await self.cache_cleanup_task
+            except asyncio.CancelledError: pass
         
-        # Cancel the bandwidth report task
-        if self.bandwidth_report_task and not self.bandwidth_report_task.done():
-            self.bandwidth_report_task.cancel()
-            try:
-                await self.bandwidth_report_task
-            except asyncio.CancelledError:
-                pass
-        
-        # Log final bandwidth report
-        await self.network_monitor.log_bandwidth_report()
-        
-        # Clear the processed tile cache
         self.processed_tile_cache.clear()
+        async with self.metadata_cache_lock: # Protect access during clear
+            self.metadata_cache.clear()
+        self.empty_regions_cache.clear() # Clear this too
         
-        # Close the cached Zarr groups
-        self.zarr_groups_cache.clear()
+        async with self.http_session_lock: # Protect session access during close
+            if self.session and not self.session.closed:
+                await self.session.close()
+                self.session = None
         
-        # Close the aiohttp session
-        if self.session:
-            await self.session.close()
-            self.session = None
-        
-        # Disconnect from the server
         if self.artifact_manager_server:
-            await self.artifact_manager_server.disconnect()
+            try:
+                await self.artifact_manager_server.disconnect()
+            except Exception as e:
+                logger.error(f"Error disconnecting artifact manager server: {e}")
             self.artifact_manager_server = None
             self.artifact_manager = None
-
-    def _extract_expiry_from_url(self, url):
-        """Extract expiration time from pre-signed URL"""
-        try:
-            # Try to find X-Amz-Expires parameter
-            if "X-Amz-Expires=" in url:
-                parts = url.split("X-Amz-Expires=")[1].split("&")[0]
-                expires_seconds = int(parts)
-                
-                # Find the date from X-Amz-Date
-                if "X-Amz-Date=" in url:
-                    date_str = url.split("X-Amz-Date=")[1].split("&")[0]
-                    # Date format is typically 'YYYYMMDDTHHMMSSZ'
-                    # This is a simplified approach - in production, properly parse this
-                    # For now, we'll just use current time + expires_seconds
-                    return time.time() + expires_seconds
-            
-            # If we can't extract, use default expiry
-            return time.time() + self.default_url_expiry
-        except Exception as e:
-            logger.info(f"Error extracting URL expiry: {e}")
-            # Default to current time + 1 hour
-            return time.time() + self.default_url_expiry
-
-    async def get_zarr_group(self, dataset_id, timestamp, channel):
-        """Get (or reuse from cache) a Zarr group for a specific dataset, with URL expiration handling"""
-        cache_key = f"{dataset_id}:{timestamp}:{channel}"
-        
-        now = time.time()
-        
-        # Check if we have a cached version and if it's still valid
-        if cache_key in self.zarr_groups_cache:
-            cached_data = self.zarr_groups_cache[cache_key]
-            # If URL is close to expiring, refresh it
-            if cached_data['expiry'] - now < self.url_expiry_buffer:
-                logger.info(f"URL for {cache_key} is about to expire, refreshing")
-                # Remove from cache to force refresh
-                del self.zarr_groups_cache[cache_key]
-            else:
-                logger.info(f"Using cached Zarr group for {cache_key}, expires in {int(cached_data['expiry'] - now)} seconds")
-                return cached_data['group']
-        
-        # Get or create a lock for this cache key to prevent concurrent processing
-        if cache_key not in self.zarr_group_locks:
-            logger.info(f"Creating lock for {cache_key}")
-            self.zarr_group_locks[cache_key] = Lock()
-        
-        # Acquire the lock for this cache key
-        async with self.zarr_group_locks[cache_key]:
-            # Check cache again after acquiring the lock (another request might have completed)
-            if cache_key in self.zarr_groups_cache:
-                cached_data = self.zarr_groups_cache[cache_key]
-                if cached_data['expiry'] - now >= self.url_expiry_buffer:
-                    logger.info(f"Using cached Zarr group for {cache_key} after lock acquisition")
-                    return cached_data['group']
-            
-            try:
-                # We no longer need to parse the dataset_id into workspace and artifact_alias
-                # Just use the dataset_id directly since it's already the full path
-                logger.info(f"Accessing artifact at: {dataset_id}/{timestamp}/{channel}.zip")
-                
-                # Get the direct download URL for the zip file
-                zip_file_path = f"{timestamp}/{channel}.zip"
-                download_url = await self.artifact_manager._svc.get_file(dataset_id, zip_file_path)
-                
-                # Extract expiration time from URL
-                expiry_time = self._extract_expiry_from_url(download_url)
-                
-                # Construct the URL for FSStore using fsspec's zip chaining
-                store_url = f"zip::{download_url}"
-                
-                # Run the synchronous Zarr operations in a thread pool
-                logger.info("Running Zarr open in thread executor...")
-                zarr_group = await asyncio.to_thread(self._open_zarr_sync, store_url, 2**26)  # Using 64MB cache instead of 256MB
-                
-                # Cache the Zarr group for future use, along with expiration time
-                self.zarr_groups_cache[cache_key] = {
-                    'group': zarr_group,
-                    'url': download_url,
-                    'expiry': expiry_time
-                }
-                
-                logger.info(f"Cached Zarr group for {cache_key}, expires in {int(expiry_time - now)} seconds")
-                return zarr_group
-            except Exception as e:
-                logger.info(f"Error getting Zarr group: {e}")
-                import traceback
-                logger.info(traceback.format_exc())
-                return None
-            finally:
-                # Clean up old locks if they're no longer needed
-                # This helps prevent memory leaks if many different cache keys are used
-                if len(self.zarr_group_locks) > 100:  # Arbitrary limit
-                    # Keep only locks for cached items and the current request
-                    to_keep = set(self.zarr_groups_cache.keys()) | {cache_key}
-                    self.zarr_group_locks = {k: v for k, v in self.zarr_group_locks.items() if k in to_keep}
-
-    async def ensure_zarr_group(self, dataset_id, timestamp, channel):
-        """
-        Ensure a Zarr group is available in cache, but don't return it.
-        This is useful for preloading or refreshing the cache.
-        """
-        cache_key = f"{dataset_id}:{timestamp}:{channel}"
-        
-        now = time.time()
-        
-        # Check if we have a cached version and if it's still valid
-        if cache_key in self.zarr_groups_cache:
-            cached_data = self.zarr_groups_cache[cache_key]
-            # If URL is close to expiring, refresh it
-            if cached_data['expiry'] - now < self.url_expiry_buffer:
-                logger.info(f"URL for {cache_key} is about to expire, refreshing")
-                # Remove from cache to force refresh
-                del self.zarr_groups_cache[cache_key]
-            else:
-                # Still valid, nothing to do
-                return True
-        
-        # Load the Zarr group into cache
-        zarr_group = await self.get_zarr_group(dataset_id, timestamp, channel)
-        return zarr_group is not None
+        logger.info("ZarrTileManager closed.")
 
     async def _process_tile_requests(self):
         """Process tile requests from the priority queue"""
@@ -1303,10 +539,10 @@ class ZarrTileManager:
             while self.is_running:
                 try:
                     # Get the next tile request with highest priority (lowest number)
-                    priority, (dataset_id, timestamp, channel, scale, x, y) = await self.tile_request_queue.get()
+                    priority, (dataset_id, channel, scale, x, y) = await self.tile_request_queue.get()
                     
                     # Create a unique key for this tile
-                    tile_key = f"{dataset_id}:{timestamp}:{channel}:{scale}:{x}:{y}"
+                    tile_key = f"{dataset_id}:{channel}:{scale}:{x}:{y}" # Timestamp removed from key
                     
                     # Skip if this tile is already being processed
                     if tile_key in self.in_progress_tiles:
@@ -1318,7 +554,7 @@ class ZarrTileManager:
                     
                     try:
                         # Process the tile request
-                        await self.get_tile_np_data(dataset_id, timestamp, channel, scale, x, y)
+                        await self.get_tile_np_data(dataset_id, channel, scale, x, y)
                     except Exception as e:
                         logger.info(f"Error processing tile request: {e}")
                     finally:
@@ -1341,216 +577,185 @@ class ZarrTileManager:
 
     async def request_tile(self, dataset_id, timestamp, channel, scale, x, y, priority=10):
         """
-        Queue a tile request with a specific priority.
-        Lower priority numbers are processed first.
-        
-        Args:
-            dataset_id (str): The dataset ID
-            timestamp (str): The timestamp folder
-            channel (str): Channel name
-            scale (int): Scale level
-            x (int): X coordinate
-            y (int): Y coordinate
-            priority (int): Priority level (lower is higher priority, default is 10)
+        Queue a tile request. Timestamp is now mostly for context/logging, dataset_id is key.
         """
-        tile_key = f"{dataset_id}:{timestamp}:{channel}:{scale}:{x}:{y}"
+        # dataset_id is the time-lapse dataset alias
+        tile_key = f"{dataset_id}:{channel}:{scale}:{x}:{y}" # Timestamp removed from key
         
-        # Skip if already in progress
         if tile_key in self.in_progress_tiles:
             return
         
-        # Add to the priority queue
-        await self.tile_request_queue.put((priority, (dataset_id, timestamp, channel, scale, x, y)))
+        # The tuple in queue now omits timestamp from path-critical parts
+        await self.tile_request_queue.put((priority, (dataset_id, channel, scale, x, y)))
 
-    async def get_tile_np_data(self, dataset_id, timestamp, channel, scale, x, y):
+    async def get_tile_np_data(self, dataset_id, channel, scale, x, y):
         """
-        Get a tile as numpy array using Zarr for efficient access
-        
+        Get a tile as numpy array using new Hypha HTTP chunk access.
         Args:
-            dataset_id (str): The dataset ID (workspace/artifact_alias)
-            timestamp (str): The timestamp folder 
+            dataset_id (str): The alias of the time-lapse specific dataset.
             channel (str): Channel name
             scale (int): Scale level
-            x (int): X coordinate (in tile/chunk units)
-            y (int): Y coordinate (in tile/chunk units)
-            
+            x (int): X coordinate of the chunk/tile for this scale.
+            y (int): Y coordinate of the chunk/tile for this scale.
         Returns:
-            np.ndarray or None: Tile data as numpy array, or None if tile not found/empty
+            np.ndarray or None: Tile data as numpy array, or None if not found/empty/error.
         """
         start_time = time.time()
-        try:
-            # Use default timestamp if none provided
-            timestamp = timestamp or self.default_timestamp
-            
-            # Check if this tile is in the processed tile cache
-            cache_key = f"{dataset_id}:{timestamp}:{channel}:{scale}:{x}:{y}"
-            
-            # Return cached tile if available and not expired
-            if cache_key in self.processed_tile_cache:
-                cached_data = self.processed_tile_cache[cache_key]
-                # Check if the cached data is still valid (not expired)
-                if time.time() - cached_data['timestamp'] < self.processed_tile_ttl:
-                    logger.info(f"Using cached tile data for {cache_key}")
-                    # Record cache hit (no bandwidth used)
-                    await self.network_monitor.record_bandwidth(
-                        "tile_cache_hit", 
-                        f"{dataset_id}/{timestamp}/{channel}", 
-                        0, 
-                        "cache"
-                    )
-                    return cached_data['data']
-                else:
-                    # Remove expired data from cache
-                    del self.processed_tile_cache[cache_key]
-            
-            # Simplified: region_size is always 1 (fetching a single tile's chunk)
-            # The group_key and empty_region_key will now effectively refer to the single tile
-            group_key = f"{dataset_id}:{timestamp}:{channel}:{scale}:{x}:{y}_tile" # Simplified group_key
-            
-            # Check empty regions cache to avoid fetching known empty regions
-            # empty_region_key is now effectively the same as cache_key for a single tile
-            empty_region_key = cache_key 
-            if empty_region_key in self.empty_regions_cache:
-                expiry_time = self.empty_regions_cache[empty_region_key]
-                if time.time() < expiry_time:
-                    logger.info(f"Skipping known empty tile at {scale}:{x}:{y}")
-                    # Record cache hit for empty region (no bandwidth used)
-                    await self.network_monitor.record_bandwidth(
-                        "empty_region_cache_hit", 
-                        f"{dataset_id}/{timestamp}/{channel}", 
-                        0, 
-                        "cache"
-                    )
-                    return None
-                else:
-                    # Remove expired entry
-                    del self.empty_regions_cache[empty_region_key]
-            
-            # If this tile is being processed, wait for it to complete
-            if group_key in self.in_progress_tiles:
-                for attempt in range(3):  # Try a few times with exponential backoff
-                    # Check if the tile is now in cache after a small delay
-                    await asyncio.sleep(0.1 * (2 ** attempt))
-                    if cache_key in self.processed_tile_cache:
-                        cached_data = self.processed_tile_cache[cache_key]
-                        if time.time() - cached_data['timestamp'] < self.processed_tile_ttl:
-                            logger.info(f"Using cached tile data for {cache_key} after waiting for processing")
-                            # Record waiting for group processing (no bandwidth used)
-                            await self.network_monitor.record_bandwidth(
-                                "tile_wait_group", # Should be tile_wait_single now
-                                f"{dataset_id}/{timestamp}/{channel}", 
-                                0, 
-                                "cache"
-                            )
-                            return cached_data['data']
-            
-            # Ensure the zarr group is in cache without returning it
-            zarr_cache_key = f"{dataset_id}:{timestamp}:{channel}"
-            try:
-                zarr_group = await self.get_zarr_group(dataset_id, timestamp, channel)
-                if zarr_group is None:
-                    # Return None instead of empty array if group can't be loaded
-                    # This allows frontend to handle it appropriately
-                    logger.info(f"Could not load Zarr group, returning None for {cache_key}")
-                    return None
-            except Exception as e:
-                logger.info(f"Error ensuring zarr group: {e}")
-                # Return None instead of zero array
+        # Key for processed_tile_cache and empty_regions_cache
+        # Timestamp is removed as dataset_alias is now specific to a time-lapse
+        tile_cache_key = f"{dataset_id}:{channel}:{scale}:{x}:{y}"
+
+        # 1. Check processed tile cache
+        if tile_cache_key in self.processed_tile_cache:
+            cached_data = self.processed_tile_cache[tile_cache_key]
+            if time.time() - cached_data['timestamp'] < self.processed_tile_ttl:
+                logger.info(f"Using cached processed tile data for {tile_cache_key}")
+                return cached_data['data']
+            else:
+                del self.processed_tile_cache[tile_cache_key]
+
+        # 2. Check empty regions cache
+        if tile_cache_key in self.empty_regions_cache:
+            expiry_time = self.empty_regions_cache[tile_cache_key]
+            if time.time() < expiry_time:
+                logger.info(f"Skipping known empty tile: {tile_cache_key}")
                 return None
-            
-            # Mark this tile as being processed
-            self.in_progress_tiles.add(group_key)
-            
-            try:
-                # Navigate to the right array in the Zarr hierarchy
-                try:
-                    # Get the scale array
-                    scale_array = zarr_group[f'scale{scale}']
-                    
-                    # Add a quick check for empty regions at edges
-                    # If we're at high scales (3-4) and at the edges, we might be in empty space
-                    if scale >= 3: # This logic might still be useful even for single tile fetches
-                        # Get the shape of the array to check boundaries
-                        array_shape = scale_array.shape
-                        max_x_tiles = array_shape[1] // self.chunk_size
-                        max_y_tiles = array_shape[0] // self.chunk_size
-                        
-                        # If we're outside the bounds, this is empty space
-                        if x >= max_x_tiles or y >= max_y_tiles:
-                            logger.info(f"Tile coordinates {x},{y} outside array bounds ({max_x_tiles},{max_y_tiles}), returning None")
-                            self.in_progress_tiles.discard(group_key)
-                            self._add_to_empty_regions_cache(empty_region_key)
-                            return None
-                    
-                    # Fetch only the single requested tile's chunk
-                    logger.info(f"Fetching single tile chunk at scale{scale}, coords ({y},{x})")
-                    
-                    # Track time before fetching region
-                    tile_fetch_start = time.time()
-                    
-                    tile_data = scale_array.get_orthogonal_selection(
-                        (
-                            slice(y * self.chunk_size, (y + 1) * self.chunk_size),
-                            slice(x * self.chunk_size, (x + 1) * self.chunk_size)
-                        )
-                    )
-                    
-                    # Calculate time taken and data size for fetching region
-                    tile_fetch_time = time.time() - tile_fetch_start
-                    tile_size_kb = tile_data.nbytes / 1024
-                    logger.info(f'Fetched single tile chunk: {tile_size_kb:.1f} KB in {tile_fetch_time:.3f}s')
-                    
-                    # Record bandwidth usage for tile fetch
-                    await self.network_monitor.record_bandwidth(
-                        f"tile_fetch_scale{scale}", 
-                        f"{dataset_id}/{timestamp}/{channel}", 
-                        tile_data.nbytes, 
-                        "download"
-                    )
-                    
-                    # Check if tile data is valid (contains non-zero values)
-                    if np.count_nonzero(tile_data) < 10:  # Arbitrary threshold
-                        logger.info(f"Tile data is empty (all zeros), returning None for {cache_key}")
-                        self.in_progress_tiles.discard(group_key)
-                        self._add_to_empty_regions_cache(empty_region_key)
-                        return None
-                    
-                    # Cache the requested tile
-                    self.processed_tile_cache[cache_key] = {
-                        'data': tile_data,
-                        'timestamp': time.time()
-                    }
-                    
-                    # No adjacent tiles to cache as we fetched only one tile's chunk.
-                        
-                    # Record total processing time
-                    total_time = time.time() - start_time
-                    logger.info(f"Total tile processing time: {total_time:.3f}s")
-                    
-                    return tile_data
-                        
-                except KeyError as e:
-                    logger.info(f"KeyError accessing Zarr array path: {e} for scale{scale}")
-                    # Return None instead of zero array
-                    return None
-                except IndexError as e: # Could happen if x,y are out of bounds for the Zarr array
-                    logger.info(f"IndexError accessing Zarr array for tile {scale}:{x}:{y} - likely out of bounds: {e}")
-                    self._add_to_empty_regions_cache(empty_region_key)
-                    return None
-                except Exception as inner_e:
-                    logger.info(f"Error processing tile data: {inner_e}")
-                    # Return None instead of zero array
-                    return None
-            finally:
-                # Remove the group key from in-progress set
-                self.in_progress_tiles.discard(group_key)
-                
-        except Exception as e:
-            logger.info(f"Error getting tile data: {e}")
-            import traceback
-            logger.info(traceback.format_exc())
-            # Return None instead of zero array
+            else:
+                del self.empty_regions_cache[tile_cache_key]
+        
+        # Construct path to .zarray metadata
+        # Assuming scale_level is integer 0, 1, 2... corresponding to "scale0", "scale1"...
+        zarray_path_in_dataset = f"{channel}/scale{scale}/.zarray"
+        zarray_metadata = await self._fetch_zarr_metadata(dataset_id, zarray_path_in_dataset)
+
+        if not zarray_metadata:
+            logger.error(f"Failed to get .zarray metadata for {dataset_id}/{zarray_path_in_dataset}")
+            self._add_to_empty_regions_cache(tile_cache_key) # Assume missing metadata means empty
             return None
+
+        try:
+            z_shape = zarray_metadata["shape"]         # [total_height, total_width]
+            z_chunks = zarray_metadata["chunks"]       # [chunk_height, chunk_width]
+            z_dtype_str = zarray_metadata["dtype"]
+            z_dtype = np.dtype(z_dtype_str)
+            z_compressor_meta = zarray_metadata["compressor"] # Can be null
+            # z_filters_meta = zarray_metadata.get("filters") # numcodecs handles filters if part of codec
+            z_fill_value = zarray_metadata.get("fill_value") # Important for empty/partial chunks
+
+        except KeyError as e:
+            logger.error(f"Incomplete .zarray metadata for {dataset_id}/{zarray_path_in_dataset}: Missing key {e}")
+            return None
+
+        # Check chunk coordinates are within bounds of the scale array
+        num_chunks_y_total = (z_shape[0] + z_chunks[0] - 1) // z_chunks[0]
+        num_chunks_x_total = (z_shape[1] + z_chunks[1] - 1) // z_chunks[1]
+
+        if not (0 <= y < num_chunks_y_total and 0 <= x < num_chunks_x_total):
+            logger.info(f"Chunk coordinates ({x}, {y}) out of bounds for {dataset_id}/{channel}/scale{scale} (max: {num_chunks_x_total-1}, {num_chunks_y_total-1})")
+            self._add_to_empty_regions_cache(tile_cache_key)
+            return None
+            
+        # Determine path to the zip file and the chunk name within that zip
+        # Interpretation: {y}.zip contains a row of chunks, chunk file is named {x}
+        zip_file_path_in_dataset = f"{channel}/scale{scale}/{y}.zip"
+        chunk_name_in_zip = str(x)
+
+        # Construct the full chunk download URL
+        # SERVER_URL defined globally in the module, self.workspace="agent-lens"
+        chunk_download_url = f"{SERVER_URL}/{self.workspace}/artifacts/{dataset_id}/zip-files/{zip_file_path_in_dataset}?path={chunk_name_in_zip}"
+        
+        logger.info(f"Attempting to fetch chunk: {chunk_download_url}")
+        
+        http_session = await self._get_http_session()
+        raw_chunk_bytes = None
+        try:
+            async with http_session.get(chunk_download_url, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                if response.status == 200:
+                    raw_chunk_bytes = await response.read()
+                elif response.status == 404:
+                    logger.warning(f"Chunk not found (404) at {chunk_download_url}. Treating as empty.")
+                    self._add_to_empty_regions_cache(tile_cache_key)
+                    # Create an empty tile using fill_value if available
+                    empty_tile_data = np.full(z_chunks, z_fill_value if z_fill_value is not None else 0, dtype=z_dtype)
+                    return empty_tile_data[:self.tile_size, :self.tile_size] # Ensure correct output size
+                else:
+                    error_text = await response.text()
+                    logger.error(f"Error fetching chunk {chunk_download_url}: HTTP {response.status} - {error_text}")
+                    return None # Indicate error
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout fetching chunk: {chunk_download_url}")
+            return None
+        except aiohttp.ClientError as e: # More specific aiohttp errors
+            logger.error(f"ClientError fetching chunk {chunk_download_url}: {e}")
+            return None
+        except Exception as e: # Catch-all for other unexpected errors during fetch
+            logger.error(f"Unexpected error fetching chunk {chunk_download_url}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return None
+
+        if not raw_chunk_bytes: # Should be caught by 404 or other errors, but as a safeguard
+            logger.warning(f"No data received for chunk: {chunk_download_url}, though HTTP status was not an error.")
+            self._add_to_empty_regions_cache(tile_cache_key)
+            empty_tile_data = np.full(z_chunks, z_fill_value if z_fill_value is not None else 0, dtype=z_dtype)
+            return empty_tile_data[:self.tile_size, :self.tile_size]
+
+
+        # 4. Decompress and decode chunk data
+        try:
+            if z_compressor_meta is None: # Raw, uncompressed data
+                decompressed_data = raw_chunk_bytes
+            else:
+                codec = numcodecs.get_codec(z_compressor_meta) # Handles filters too if defined in compressor object
+                decompressed_data = codec.decode(raw_chunk_bytes)
+            
+            # Convert to NumPy array and reshape. Chunk shape from .zarray is [height, width]
+            chunk_data = np.frombuffer(decompressed_data, dtype=z_dtype).reshape(z_chunks)
+            
+            # The Zarr chunk might be smaller than self.tile_size if it's a partial edge chunk.
+            # Or it could be larger if .zarray chunks are not self.tile_size.
+            # We need to return a tile of self.tile_size.
+            
+            final_tile_data = np.full((self.tile_size, self.tile_size), 
+                                       z_fill_value if z_fill_value is not None else 0, 
+                                       dtype=z_dtype)
+            
+            # Determine the slice to copy from chunk_data and where to place it in final_tile_data
+            copy_height = min(chunk_data.shape[0], self.tile_size)
+            copy_width = min(chunk_data.shape[1], self.tile_size)
+            
+            final_tile_data[:copy_height, :copy_width] = chunk_data[:copy_height, :copy_width]
+
+        except Exception as e:
+            logger.error(f"Error decompressing/decoding chunk from {chunk_download_url}: {e}")
+            logger.error(f"Metadata: dtype={z_dtype_str}, compressor={z_compressor_meta}, chunk_shape={z_chunks}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return None # Indicate error
+
+        # 5. Check if tile is effectively empty (e.g., all fill_value or zeros)
+        # Use a small threshold for non-zero values if fill_value is 0 or not defined
+        is_empty_threshold = 10 
+        if z_fill_value is not None:
+            if np.all(final_tile_data == z_fill_value):
+                logger.info(f"Tile data is all fill_value ({z_fill_value}), treating as empty: {tile_cache_key}")
+                self._add_to_empty_regions_cache(tile_cache_key)
+                return None # Return None for empty tiles based on fill_value
+        elif np.count_nonzero(final_tile_data) < is_empty_threshold:
+            logger.info(f"Tile data is effectively empty (few non-zeros), treating as empty: {tile_cache_key}")
+            self._add_to_empty_regions_cache(tile_cache_key)
+            return None
+
+        # 6. Cache the processed tile
+        self.processed_tile_cache[tile_cache_key] = {
+            'data': final_tile_data,
+            'timestamp': time.time()
+        }
+        
+        total_time = time.time() - start_time
+        logger.info(f"Total tile processing time for {tile_cache_key}: {total_time:.3f}s, size: {final_tile_data.nbytes/1024:.1f}KB")
+        
+        return final_tile_data
 
     def _add_to_empty_regions_cache(self, key):
         """Add a region key to the empty regions cache with expiration"""
@@ -1576,86 +781,120 @@ class ZarrTileManager:
             
             logger.info(f"Cleaned up {entries_to_remove} oldest entries from empty regions cache")
 
-    async def get_tile_bytes(self, dataset_id, timestamp, channel, scale, x, y):
-        """Serve a tile as PNG bytes"""
-        try:
-            # Use default timestamp if none provided
-            timestamp = timestamp or self.default_timestamp
-            
-            # Get tile data as numpy array
-            tile_data = await self.get_tile_np_data(dataset_id, timestamp, channel, scale, x, y)
-            
-            # Convert to PNG bytes
-            image = Image.fromarray(tile_data)
-            buffer = io.BytesIO()
-            image.save(buffer, format="PNG")
-            return buffer.getvalue()
-        except Exception as e:
-            logger.info(f"Error in get_tile_bytes: {str(e)}")
-            blank_image = Image.new("L", (self.tile_size, self.tile_size), color=0)
-            buffer = io.BytesIO()
-            blank_image.save(buffer, format="PNG")
-            return buffer.getvalue()
-
-    async def get_tile_base64(self, dataset_id, timestamp, channel, scale, x, y):
-        """Serve a tile as base64 string"""
-        # Use default timestamp if none provided
-        timestamp = timestamp or self.default_timestamp
+    async def get_tile_bytes(self, dataset_alias, timestamp, channel_name, scale, x, y):
+        """Serve a tile as PNG bytes. Timestamp is for context if needed, not path."""
+        # dataset_alias is the time-lapse specific dataset
+        tile_data_np = await self.get_tile_np_data(dataset_alias, channel_name, scale, x, y) # Pass dataset_alias
         
-        tile_bytes = await self.get_tile_bytes(dataset_id, timestamp, channel, scale, x, y)
+        if tile_data_np is None: # Handle case where tile is empty or error occurred
+            logger.info(f"No numpy data for tile {dataset_alias}/{channel_name}/{scale}/{x}/{y}, returning blank image.")
+            # Create a blank image (e.g., black or based on fill_value if smart)
+            # For simplicity, black for now.
+            pil_image = Image.new("L", (self.tile_size, self.tile_size), color=0) 
+        else:
+            try:
+                # Ensure data is in a suitable range for image conversion if necessary
+                # For example, if data is float, it might need scaling. Assuming uint8 or uint16 for typical bioimages.
+                if tile_data_np.dtype == np.uint16:
+                    # Basic windowing for uint16: scale to uint8. This is a simple approach.
+                    # More sophisticated windowing/LUT would be applied in frontend or FastAPI layer.
+                    scaled_data = (tile_data_np / 256).astype(np.uint8)
+                    pil_image = Image.fromarray(scaled_data)
+                elif tile_data_np.dtype == np.float32 or tile_data_np.dtype == np.float64:
+                    # Handle float data: normalize to 0-255 for PNG. This is a basic normalization.
+                    min_val, max_val = np.min(tile_data_np), np.max(tile_data_np)
+                    if max_val > min_val:
+                        normalized_data = ((tile_data_np - min_val) / (max_val - min_val) * 255).astype(np.uint8)
+                    else: # Flat data
+                        normalized_data = np.zeros_like(tile_data_np, dtype=np.uint8)
+                    pil_image = Image.fromarray(normalized_data)
+                else: # Assume uint8 or other directly compatible types
+                    pil_image = Image.fromarray(tile_data_np)
+            except Exception as e:
+                logger.error(f"Error converting numpy tile to PIL Image: {e}. Data type: {tile_data_np.dtype}, shape: {tile_data_np.shape}")
+                pil_image = Image.new("L", (self.tile_size, self.tile_size), color=0) # Fallback to blank
+
+        buffer = io.BytesIO()
+        pil_image.save(buffer, format="PNG") # Default PNG compression
+        return buffer.getvalue()
+
+    async def get_tile_base64(self, dataset_alias, timestamp, channel, scale, x, y):
+        """Serve a tile as base64 string. Timestamp for context."""
+        tile_bytes = await self.get_tile_bytes(dataset_alias, timestamp, channel, scale, x, y)
         return base64.b64encode(tile_bytes).decode('utf-8')
 
-    async def test_zarr_access(self, dataset_id=None, timestamp=None, channel=None):
+    async def test_zarr_access(self, dataset_alias=None, channel=None, scale=0, x=0, y=0):
         """
-        Test function to verify Zarr file access is working correctly.
-        Attempts to access a known chunk at coordinates (335, 384) in scale0.
-        
+        Test function to verify new Zarr chunk access via HTTP.
         Args:
-            dataset_id (str, optional): The dataset ID to test. Defaults to agent-lens/image-map-20250429-treatment-zip.
-            timestamp (str, optional): The timestamp to use. Defaults to the default timestamp.
-            channel (str, optional): The channel to test. Defaults to BF_LED_matrix_full.
-            
+            dataset_alias (str, optional): The dataset alias to test.
+            channel (str, optional): The channel to test.
+            scale (int): Scale level.
+            x,y (int): Chunk coordinates.
         Returns:
-            dict: A dictionary with status, success flag, and additional info about the chunk.
+            dict: Status and info.
         """
-        try:
-            # Use default values if not provided
-            dataset_id = dataset_id or "agent-lens/image-map-20250429-treatment-zip"
-            timestamp = timestamp or self.default_timestamp
-            channel = channel or "BF_LED_matrix_full"
-            
-            logger.info(f"Testing Zarr access for dataset: {dataset_id}, timestamp: {timestamp}, channel: {channel}")
-            
-            # Ensure the zarr group is in cache
-            cache_key = f"{dataset_id}:{timestamp}:{channel}"
-            await self.ensure_zarr_group(dataset_id, timestamp, channel)
-            
-            if cache_key not in self.zarr_groups_cache:
-                return {
-                    "status": "error", 
-                    "success": False, 
-                    "message": "Failed to get Zarr group"
-                }
-            
-            zarr_group = self.zarr_groups_cache[cache_key]['group']
-            success = zarr_group is not None
-            
+        dataset_alias = dataset_alias or self.default_dataset_alias # Use a default if none provided
+        channel = channel or self.channels[0] # Default to first channel
+        
+        logger.info(f"Testing Zarr access for: {dataset_alias}/{channel}/scale{scale}/chunk({x},{y})")
+        
+        if not self.artifact_manager:
+            await self.connect()
+            if not self.artifact_manager:
+                return {"status": "error", "success": False, "message": "Artifact manager not connected."}
+
+        # 1. Test metadata fetching
+        zarray_path = f"{channel}/scale{scale}/.zarray"
+        metadata = await self._fetch_zarr_metadata(dataset_alias, zarray_path)
+        if not metadata:
             return {
-                "status": "ok" if success else "error",
-                "success": success,
-                "message": "Successfully accessed test chunk" if success else "Chunk contained no data",
+                "status": "error", 
+                "success": False, 
+                "message": f"Failed to fetch .zarray metadata from {dataset_alias}/{zarray_path}"
             }
-            
-        except Exception as e:
-            import traceback
-            error_traceback = traceback.format_exc()
-            logger.info(f"Error in test_zarr_access: {str(e)}")
-            logger.info(error_traceback)
-            
+        logger.info(f"Successfully fetched .zarray metadata: {metadata}")
+
+        # 2. Test tile data fetching
+        tile_data = await self.get_tile_np_data(dataset_alias, channel, scale, x, y)
+        
+        if tile_data is None:
             return {
                 "status": "error",
                 "success": False,
-                "message": f"Error accessing Zarr: {str(e)}",
-                "error": str(e),
-                "traceback": error_traceback
+                "message": f"Failed to get tile data for {dataset_alias}/{channel}/scale{scale}/({x},{y}). Might be empty or error."
             }
+
+        logger.info(f"Successfully fetched tile data. Shape: {tile_data.shape}, dtype: {tile_data.dtype}")
+        
+        non_zero_count = np.count_nonzero(tile_data)
+        fill_value = metadata.get("fill_value")
+        
+        # Check if it's all fill_value (if fill_value is defined)
+        is_all_fill = False
+        if fill_value is not None and np.all(tile_data == fill_value):
+            is_all_fill = True
+            
+        return {
+            "status": "ok",
+            "success": True,
+            "message": "Successfully accessed test chunk and metadata.",
+            "metadata_sample": dict(list(metadata.items())[:3]), # First 3 items of metadata
+            "tile_shape": tile_data.shape,
+            "tile_dtype": str(tile_data.dtype),
+            "tile_non_zero_count": non_zero_count,
+            "tile_is_all_fill_value": is_all_fill,
+            "fill_value_in_metadata": fill_value
+        }
+
+# Constants
+SERVER_URL = "https://hypha.aicell.io"
+# WORKSPACE_TOKEN is loaded from .env by ZarrTileManager.connect or passed
+# ARTIFACT_ALIAS is dataset specific, so it's passed as dataset_alias
+DEFAULT_CHANNEL = "BF_LED_matrix_full" # Remains useful default
+
+# The AgentLensArtifactManager class definition follows and remains largely unchanged by this specific ZarrTileManager refactor,
+# as its get_file method is now used by ZarrTileManager for metadata.
+# The `test_bandwidth_monitoring` in AgentLensArtifactManager would need an update if it relies on old Zarr access.
+# And ensure `default_timestamp` in AgentLensArtifactManager is handled if used by test_bandwidth_monitoring.
+# The old get_zarr_group in AgentLensArtifactManager should have been removed.

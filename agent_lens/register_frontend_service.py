@@ -48,8 +48,12 @@ logger = setup_logging()
 
 
 # Fixed the ARTIFACT_ALIAS to prevent duplication of 'agent-lens'
-ARTIFACT_ALIAS = "agent-lens/image-map-20250429-treatment-zip"  # Removed duplicate prefix
+# ARTIFACT_ALIAS = "agent-lens/20250506-scan-time-lapse-2025-05-06_16-56-52"  // This was the OLD default image map.
+# Now, dataset_id will be the specific time-lapse dataset alias, e.g., "20250506-scan-time-lapse-YYYY-MM-DD_HH-MM-SS"
+# For local/fallback testing, we might need a default time-lapse dataset alias if the frontend doesn't provide one.
+DEFAULT_TIMELAPSE_DATASET_ALIAS = "20250506-scan-time-lapse-2025-05-06_16-56-52" # Placeholder: JUST the alias
 DEFAULT_CHANNEL = "BF_LED_matrix_full"
+
 # Create a global ZarrTileManager instance
 tile_manager = ZarrTileManager()
 
@@ -132,8 +136,8 @@ def get_frontend_api():
         z: int = 0, 
         x: int = 0, 
         y: int = 0,
-        dataset_id: str = ARTIFACT_ALIAS,
-        timestamp: str = "2025-04-29_16-38-27",  # Default timestamp folder
+        dataset_id: str = DEFAULT_TIMELAPSE_DATASET_ALIAS, # Now expects specific time-lapse dataset alias
+        # timestamp: str = "2025-04-29_16-38-27", # Timestamp no longer used to find data, dataset_id is specific
         # New parameters for image processing settings
         contrast_settings: str = None,
         brightness_settings: str = None,
@@ -149,11 +153,11 @@ def get_frontend_api():
         
         Args:
             channel_name (str): The channel name to retrieve
-            z (int): Zoom level
+            z (int): Zoom level (maps to scale, e.g., Zarr scaleN)
             x (int): X coordinate
             y (int): Y coordinate
-            dataset_id (str): The dataset ID (defaults to global ARTIFACT_ALIAS)
-            timestamp (str): The timestamp folder name (defaults to "2025-04-29_16-38-27")
+            dataset_id (str): The specific time-lapse dataset alias.
+            # timestamp (str) parameter removed as dataset_id is now specific.
             contrast_settings (str, optional): JSON string with contrast settings
             brightness_settings (str, optional): JSON string with brightness settings
             threshold_settings (str, optional): JSON string with min/max threshold settings
@@ -170,17 +174,20 @@ def get_frontend_api():
             start_time = time.time()
             request_id = hashlib.md5(f"{time.time()}-{channel_name}-{x}-{y}".encode()).hexdigest()[:8]
             
+            # Ensure dataset_id is just the alias
+            processed_dataset_alias = dataset_id.split('/')[-1]
+
             # Queue the tile request with the specified priority
-            # This allows the frontend to prioritize visible tiles
-            await tile_manager.request_tile(dataset_id, timestamp, channel_name, z, x, y, priority)
+            # The `timestamp` argument for `request_tile` is now for context/logging, not path.
+            await tile_manager.request_tile(processed_dataset_alias, None, channel_name, z, x, y, priority)
             
             # Get the raw tile data as numpy array using ZarrTileManager
-            # ZarrTileManager will handle URL expiration internally
-            tile_data = await tile_manager.get_tile_np_data(dataset_id, timestamp, channel_name, z, x, y)
+            # The `timestamp` argument for `get_tile_np_data` is also for context/logging.
+            tile_data = await tile_manager.get_tile_np_data(processed_dataset_alias, channel_name, z, x, y)
             
             # If tile_data is None, return an empty response to let the client handle it
             if tile_data is None:
-                logger.info(f"No tile data available for {dataset_id}:{timestamp}:{channel_name}:{z}:{x}:{y}")
+                logger.info(f"No tile data available for {dataset_id}:{channel_name}:{z}:{x}:{y}")
                 # Create an empty response with status 204 (No Content)
                 response = Response(status_code=204)
                 response.headers["X-Empty-Tile"] = "true"
@@ -324,7 +331,7 @@ def get_frontend_api():
                 pil_image = Image.fromarray(tile_data)
             
             # Cache key for ETag (use multiple criteria to avoid conflicts)
-            cache_tag = f"{dataset_id}:{timestamp}:{channel_name}:{z}:{x}:{y}"
+            cache_tag = f"{dataset_id}:{channel_name}:{z}:{x}:{y}"
             if contrast_settings:
                 cache_tag += f":{hashlib.md5(contrast_settings.encode()).hexdigest()[:6]}"
             if brightness_settings:
@@ -406,8 +413,8 @@ def get_frontend_api():
         z: int = 0, 
         x: int = 0, 
         y: int = 0, 
-        dataset_id: str = ARTIFACT_ALIAS, 
-        timepoint: str = "2025-04-29_16-38-27",
+        dataset_id: str = DEFAULT_TIMELAPSE_DATASET_ALIAS, # Expects specific time-lapse dataset alias
+        # timepoint: str = "2025-04-29_16-38-27", # timepoint (old timestamp) now covered by dataset_id
         # New parameters for image processing settings
         contrast_settings: str = None,
         brightness_settings: str = None,
@@ -426,8 +433,8 @@ def get_frontend_api():
             z (int): Zoom level
             x (int): X coordinate
             y (int): Y coordinate
-            dataset_id (str, optional): Dataset ID
-            timepoint (str, optional): Timepoint/timestamp folder name
+            dataset_id (str, optional): Specific time-lapse Dataset ID (alias)
+            # timepoint (str, optional) parameter removed.
             contrast_settings (str, optional): JSON string with contrast settings for each channel
             brightness_settings (str, optional): JSON string with brightness settings for each channel
             threshold_settings (str, optional): JSON string with min/max threshold settings for each channel
@@ -493,6 +500,9 @@ def get_frontend_api():
             13: 'Fluorescence_638_nm_Ex'
         }
         
+        # Ensure dataset_id is just the alias
+        processed_dataset_alias = dataset_id.split('/')[-1]
+
         # Get tiles for each channel using ZarrTileManager
         channel_tiles = []
         missing_tiles = 0
@@ -502,11 +512,12 @@ def get_frontend_api():
             
             try:
                 # Queue the tile request with the specified priority
-                # This allows the frontend to prioritize visible tiles
-                await tile_manager.request_tile(dataset_id, timepoint, channel_name, z, x, y, priority)
+                # The `timestamp` argument for `request_tile` is for context/logging.
+                await tile_manager.request_tile(processed_dataset_alias, None, channel_name, z, x, y, priority)
                 
                 # Get tile from Zarr store - ZarrTileManager will handle URL expiration internally
-                tile_data = await tile_manager.get_tile_np_data(dataset_id, timepoint, channel_name, z, x, y)
+                # The `timestamp` argument for `get_tile_np_data` is for context/logging.
+                tile_data = await tile_manager.get_tile_np_data(processed_dataset_alias, channel_name, z, x, y)
                 
                 # Skip tile if it's None (not available)
                 if tile_data is None:
@@ -526,7 +537,7 @@ def get_frontend_api():
         
         # If all tiles are missing, return empty response
         if missing_tiles == len(channel_keys) or not channel_tiles:
-            logger.info(f"No tiles available for any channels at {dataset_id}:{timepoint}:{channels}:{z}:{x}:{y}")
+            logger.info(f"No tiles available for any channels at {dataset_id}:{channels}:{z}:{x}:{y}")
             response = Response(status_code=204)
             response.headers["X-Empty-Tile"] = "true"
             return response
@@ -671,7 +682,7 @@ def get_frontend_api():
             quality = max(30, min(100, compression_quality))
 
         # Create cache key for ETag
-        cache_tag = f"{dataset_id}:{timepoint}:{channels}:{z}:{x}:{y}"
+        cache_tag = f"{dataset_id}:{channels}:{z}:{x}:{y}"
         if contrast_settings:
             cache_tag += f":{hashlib.md5(contrast_settings.encode()).hexdigest()[:6]}"
         if brightness_settings:
@@ -711,9 +722,15 @@ def get_frontend_api():
 
     # Updated helper function using ZarrTileManager
     async def get_timepoint_tile_data(dataset_id, timepoint, channel_name, z, x, y):
-        """Helper function to get tile data for a specific timepoint using Zarr"""
+        """Helper function to get tile data for a specific timepoint using Zarr.
+           'timepoint' here is effectively the dataset_id for the specific time-lapse.
+        """
+        # Ensure timepoint (which is dataset_alias) is just the alias
+        processed_timepoint_alias = timepoint.split('/')[-1]
         try:
-            return await tile_manager.get_tile_np_data(dataset_id, timepoint, channel_name, z, x, y)
+            # The `timestamp` arg to get_tile_np_data is for context, dataset_id is the key.
+            # Here, `timepoint` (which is a dataset_alias) is passed as `dataset_id`
+            return await tile_manager.get_tile_np_data(processed_timepoint_alias, channel_name, z, x, y)
         except Exception as e:
             logger.error(f"Error fetching timepoint tile data: {e}")
             import traceback
@@ -721,32 +738,50 @@ def get_frontend_api():
             return np.zeros((tile_manager.tile_size, tile_manager.tile_size), dtype=np.uint8)
 
     @app.get("/datasets")
-    async def get_datasets():
+    async def get_datasets(gallery_id: str = None):
         """
-        Endpoint to fetch datasets from the artifact manager using the correct collection ID.
+        Endpoint to fetch a list of available time-lapse datasets (scan datasets).
+        These are children of a main "gallery" or "project" collection.
+
+        Args:
+            gallery_id (str, optional): The ID of the gallery to fetch datasets from.
+                If not provided, returns an empty list.
 
         Returns:
-            list: A list of datasets (child artifacts).
+            list: A list of datasets (each representing a time-lapse scan).
         """
         # Ensure the artifact manager is connected
         if artifact_manager_instance.server is None:
-            _, artifact_manager_instance._svc = await get_artifact_manager()
+            # Ensure a connection with token if not already established
+            server_for_am, svc_for_am = await get_artifact_manager()
+            await artifact_manager_instance.connect_server(server_for_am)
+        
         try:
-            # Use the list method to get children of the specified artifact_id
-            gallery_id = "agent-lens/image-map-of-u2os-fucci-drug-treatment-zip"
-            logger.info(f"Fetching datasets from gallery: {gallery_id}")
-            datasets = await artifact_manager_instance._svc.list(parent_id=gallery_id)
+            if not gallery_id:
+                logger.warning("No gallery_id provided to /datasets endpoint")
+                return []
+                
+            logger.info(f"Fetching time-lapse datasets from gallery: {gallery_id}")
             
-            # Log the response for debugging
-            logger.info(f"Gallery response received, datasets found: {len(datasets) if datasets else 0}")
+            # List children of this gallery_id. Each child is a time-lapse dataset.
+            time_lapse_datasets = await artifact_manager_instance._svc.list(parent_id=gallery_id)
             
-            # Format the response to match the expected keys in the frontend
+            logger.info(f"Gallery response received, datasets found: {len(time_lapse_datasets) if time_lapse_datasets else 0}")
+            
             formatted_datasets = []
-            for dataset in datasets:
-                name = dataset.get("manifest", {}).get("name", dataset.get("alias", "Unknown"))
-                dataset_id = dataset.get("id")
-                logger.info(f"Dataset found: {name} ({dataset_id})")
-                formatted_datasets.append({"id": dataset_id, "name": name})
+            if time_lapse_datasets:
+                for dataset_item in time_lapse_datasets:
+                    full_id = dataset_item.get("id") # e.g., "agent-lens/20250506-scan-..."
+                    display_name = dataset_item.get("manifest", {}).get("name", dataset_item.get("alias", full_id))
+                    
+                    if full_id:
+                         # Extract the alias part if workspace is prefixed
+                        alias_part = full_id
+                        if full_id.startswith(f"{artifact_manager_instance.server.config.workspace}/"):
+                             alias_part = full_id.split('/', 1)[1]
+                        
+                        logger.info(f"Time-lapse dataset found: {display_name} (alias for API: {alias_part}, full_id: {full_id})")
+                        formatted_datasets.append({"id": alias_part, "name": display_name, "full_hypha_id": full_id})
             return formatted_datasets
         except Exception as e:
             logger.error(f"Error fetching datasets: {e}")
@@ -757,25 +792,22 @@ def get_frontend_api():
     @app.get("/subfolders")
     async def get_subfolders(dataset_id: str, dir_path: str = None, offset: int = 0, limit: int = 20):
         """
-        Endpoint to fetch contents (files and subfolders) from a specified directory within a dataset,
-        with pagination support.
-
-        Args:
-            dataset_id (str): The ID of the dataset.
-            dir_path (str, optional): The directory path within the dataset to list contents. Defaults to None for the root directory.
-            offset (int, optional): Number of items to skip. Defaults to 0.
-            limit (int, optional): Maximum number of items to return. Defaults to 20.
-
-        Returns:
-            dict: A dictionary containing paginated items and total count.
+        Endpoint to fetch contents (files and subfolders) from a specified directory within a time-lapse dataset.
+        The dataset_id is the ALIAS of the time-lapse dataset.
+        This is mainly for browsing raw data if needed, not directly for Zarr tile rendering.
         """
-        logger.info(f"Fetching contents for dataset: {dataset_id}, dir_path: {dir_path}, offset: {offset}, limit: {limit}")
+        logger.info(f"Fetching contents for dataset (alias): {dataset_id}, dir_path: {dir_path}, offset: {offset}, limit: {limit}")
         # Ensure the artifact manager is connected
         if artifact_manager_instance.server is None:
-            _, artifact_manager_instance._svc = await get_artifact_manager()
+            server_for_am, svc_for_am = await get_artifact_manager()
+            await artifact_manager_instance.connect_server(server_for_am) # Connect artifact_manager_instance
         try:
-            # Get all files and directories in the current path
-            all_items = await artifact_manager_instance._svc.list_files(dataset_id, dir_path=dir_path)
+            # Construct the full hypha artifact ID using the workspace and the dataset_id (alias)
+            workspace = artifact_manager_instance.server.config.workspace # Should be "agent-lens"
+            full_hypha_dataset_id = f"{workspace}/{dataset_id}"
+            
+            logger.info(f"Listing files for full Hypha ID: {full_hypha_dataset_id}, dir_path: {dir_path}")
+            all_items = await artifact_manager_instance._svc.list_files(full_hypha_dataset_id, dir_path=dir_path)
             logger.info(f"All items, length: {len(all_items)}")
             
             # Sort: directories first, then files, both alphabetically
@@ -811,21 +843,17 @@ def get_frontend_api():
     async def get_file_url(dataset_id: str, file_path: str):
         """
         Endpoint to get a pre-signed URL for a file in a dataset.
-
-        Args:
-            dataset_id (str): The ID of the dataset.
-            file_path (str): The path to the file within the dataset.
-
-        Returns:
-            dict: A dictionary containing the pre-signed URL for the file.
+        dataset_id is the ALIAS of the time-lapse dataset.
         """
-        logger.info(f"Getting file URL for dataset: {dataset_id}, file_path: {file_path}")
-        # Ensure the artifact manager is connected
+        logger.info(f"Getting file URL for dataset (alias): {dataset_id}, file_path: {file_path}")
         if artifact_manager_instance.server is None:
-            _, artifact_manager_instance._svc = await get_artifact_manager()
+            server_for_am, svc_for_am = await get_artifact_manager()
+            await artifact_manager_instance.connect_server(server_for_am)
         try:
-            # Get the pre-signed URL for the file
-            url = await artifact_manager_instance._svc.get_file(dataset_id, file_path)
+            workspace = artifact_manager_instance.server.config.workspace
+            full_hypha_dataset_id = f"{workspace}/{dataset_id}"
+            logger.info(f"Getting file URL for full Hypha ID: {full_hypha_dataset_id}, file_path: {file_path}")
+            url = await artifact_manager_instance._svc.get_file(full_hypha_dataset_id, file_path)
             return {"url": url}
         except Exception as e:
             logger.error(f"Error getting file URL: {e}")
@@ -837,21 +865,17 @@ def get_frontend_api():
     async def download_file(dataset_id: str, file_path: str):
         """
         Endpoint to download a file from a dataset.
-
-        Args:
-            dataset_id (str): The ID of the dataset.
-            file_path (str): The path to the file within the dataset.
-
-        Returns:
-            Response: A redirect to the pre-signed URL for downloading the file.
+        dataset_id is the ALIAS of the time-lapse dataset.
         """
-        logger.info(f"Downloading file from dataset: {dataset_id}, file_path: {file_path}")
-        # Ensure the artifact manager is connected
+        logger.info(f"Downloading file from dataset (alias): {dataset_id}, file_path: {file_path}")
         if artifact_manager_instance.server is None:
-            _, artifact_manager_instance._svc = await get_artifact_manager()
+            server_for_am, svc_for_am = await get_artifact_manager()
+            await artifact_manager_instance.connect_server(server_for_am)
         try:
-            # Get the pre-signed URL for the file
-            url = await artifact_manager_instance._svc.get_file(dataset_id, file_path)
+            workspace = artifact_manager_instance.server.config.workspace
+            full_hypha_dataset_id = f"{workspace}/{dataset_id}"
+            logger.info(f"Downloading file from full Hypha ID: {full_hypha_dataset_id}, file_path: {file_path}")
+            url = await artifact_manager_instance._svc.get_file(full_hypha_dataset_id, file_path)
             from fastapi.responses import RedirectResponse
             return RedirectResponse(url=url)
         except Exception as e:
@@ -864,50 +888,51 @@ def get_frontend_api():
     @app.get("/setup-image-map")
     async def setup_image_map(dataset_id: str):
         """
-        Endpoint to setup the image map access for a specific dataset.
-        The dataset is already an image map dataset, so we just need to verify it exists.
-
+        Endpoint to "select" a specific time-lapse dataset for viewing.
+        The dataset_id is the ALIAS of the time-lapse dataset.
+        It verifies the dataset (identified by its alias) is accessible and appears to be a Zarr-like structure.
         Args:
-            dataset_id (str): The ID of the dataset to use as an image map.
-
+            dataset_id (str): The ALIAS of the time-lapse dataset to use.
         Returns:
             dict: A dictionary containing success status and message.
         """
-        logger.info(f"Setting up image map for dataset: {dataset_id}")
-        # Ensure the artifact manager is connected
+        logger.info(f"Setting up image map for time-lapse dataset (alias): {dataset_id}")
         if artifact_manager_instance.server is None:
-            _, artifact_manager_instance._svc = await get_artifact_manager()
+            server_for_am, svc_for_am = await get_artifact_manager()
+            await artifact_manager_instance.connect_server(server_for_am)
         
         try:
-            # Check if the dataset exists
+            workspace = artifact_manager_instance.server.config.workspace
+            full_hypha_dataset_id = f"{workspace}/{dataset_id}"
+            logger.info(f"Verifying dataset access for full Hypha ID: {full_hypha_dataset_id}")
+
+            # Check for the presence of a root .zgroup file to confirm it's Zarr-like
+            root_zgroup_path = ".zgroup"
             try:
-                # List files to verify the dataset exists and is accessible
-                logger.info(f"Verifying dataset access: {dataset_id}")
-                files = await artifact_manager_instance._svc.list_files(dataset_id)
-                
-                if files is not None:
-                    logger.info(f"Image map dataset found: {dataset_id} with {len(files)} files")
-                    # Also check for timestamp folders which should exist in the dataset
-                    timepoints = [file for file in files if file.get('type') == 'directory']
-                    if timepoints:
-                        logger.info(f"Found {len(timepoints)} timepoints in dataset: {[tp.get('name') for tp in timepoints]}")
-                    else:
-                        logger.info(f"Warning: No timepoints (directories) found in dataset: {dataset_id}")
+                # Use the artifact_manager's get_file, which is now used by ZarrTileManager too
+                # Note: This get_file uses workspace and alias.
+                zgroup_content = await artifact_manager_instance.get_file(workspace, dataset_id, root_zgroup_path)
+                if zgroup_content:
+                    logger.info(f"Root .zgroup found for {dataset_id}. Looks like a valid Zarr dataset.")
+                    # Further check: list a few files/folders (e.g., channel names)
+                    # This list_files uses the full Hypha ID.
+                    contents = await artifact_manager_instance._svc.list_files(full_hypha_dataset_id, dir_path=None)
+                    num_channels_or_scales = len([item for item in contents if item.get('type') == 'directory'])
                     
                     return {
                         "success": True, 
-                        "message": f"Image map setup successful for {dataset_id}",
-                        "dataset_id": dataset_id,
-                        "timepoints": len(timepoints) if timepoints else 0
+                        "message": f"Time-lapse dataset {dataset_id} verified for image map viewing.",
+                        "dataset_id": dataset_id, # Return the alias
+                        "top_level_dirs_count": num_channels_or_scales
                     }
                 else:
-                    logger.info(f"Image map dataset not found: {dataset_id}")
-                    return {"success": False, "message": f"Image map dataset not found: {dataset_id}"}
-            except Exception as e:
-                logger.error(f"Error checking dataset: {e}")
+                    logger.warning(f"Root .zgroup not found or empty for {dataset_id}.")
+                    return {"success": False, "message": f"Dataset {dataset_id} does not appear to be a valid Zarr dataset (missing .zgroup)."}
+            except Exception as e_check:
+                logger.error(f"Error verifying dataset {dataset_id}: {e_check}")
                 import traceback
                 logger.error(traceback.format_exc())
-                return {"success": False, "message": f"Error checking image map dataset: {str(e)}"}
+                return {"success": False, "message": f"Error verifying dataset {dataset_id}: {str(e_check)}"}
         except Exception as e:
             logger.error(f"Error setting up image map: {e}")
             import traceback
@@ -917,36 +942,40 @@ def get_frontend_api():
     @app.get("/list-timepoints")
     async def list_timepoints(dataset_id: str):
         """
-        Endpoint to list timepoints (subfolders) in an image map dataset.
-        These timepoints are typically folders named by datetime.
+        DEPRECATED in favor of /datasets if each timepoint is a dataset.
+        If a single dataset_id (alias) can still contain multiple internal "timepoints" (e.g. as top-level folders
+        that are NOT channels), this MIGHT still be relevant.
+        For now, assuming dataset_id refers to a single time-lapse, so this might list sub-structures if any.
+        Given the new structure, this endpoint might be repurposed to list channels within a selected time-lapse dataset.
+        Or, it's truly deprecated if /datasets lists all time-lapse datasets.
 
+        Let's assume for now it lists top-level directories (channels) within the given time-lapse dataset_alias.
         Args:
-            dataset_id (str): The ID of the image map dataset.
-
+            dataset_id (str): The ALIAS of the time-lapse dataset.
         Returns:
-            dict: A dictionary containing timepoints (subfolders) in the dataset.
+            dict: A dictionary containing top-level directories (expected to be channels).
         """
-        logger.info(f"Listing timepoints for dataset: {dataset_id}")
-        # Ensure the artifact manager is connected
+        logger.info(f"Listing top-level structures (expected channels) for dataset (alias): {dataset_id}")
         if artifact_manager_instance.server is None:
-            _, artifact_manager_instance._svc = await get_artifact_manager()
+            server_for_am, svc_for_am = await get_artifact_manager()
+            await artifact_manager_instance.connect_server(server_for_am)
         
         try:
-            # List all files at the root level of the dataset (should be timepoint folders)
-            files = await artifact_manager_instance._svc.list_files(dataset_id)
+            workspace = artifact_manager_instance.server.config.workspace
+            full_hypha_dataset_id = f"{workspace}/{dataset_id}"
             
-            # Filter for directories only and sort them (they should be in timestamp format)
-            timepoints = [
+            files = await artifact_manager_instance._svc.list_files(full_hypha_dataset_id)
+            
+            top_level_dirs = [
                 item for item in files 
                 if item.get('type') == 'directory'
             ]
+            top_level_dirs.sort(key=lambda x: x.get('name', '')) # Sort by name
             
-            # Sort timepoints chronologically (assuming they're in YYYY-MM-DD_HH-MM-SS format)
-            timepoints.sort(key=lambda x: x.get('name', ''))
-            
+            logger.info(f"Found {len(top_level_dirs)} top-level directories (channels?) in {dataset_id}")
             return {
                 "success": True,
-                "timepoints": timepoints
+                "directories": top_level_dirs # Renamed from "timepoints"
             }
         except Exception as e:
             logger.error(f"Error listing timepoints: {e}")
@@ -961,7 +990,7 @@ def get_frontend_api():
     @app.get("/tile-for-timepoint")
     async def tile_for_timepoint(
         dataset_id: str, 
-        timepoint: str, 
+        # timepoint: str, # This is now represented by dataset_id itself
         channel_name: str = DEFAULT_CHANNEL, 
         z: int = 0, 
         x: int = 0, 
@@ -974,12 +1003,12 @@ def get_frontend_api():
         priority: int = 10  # Default priority (lower is higher priority)
     ):
         """
-        Endpoint to serve tiles for a specific timepoint from an image map dataset with customizable processing.
-        Now uses Zarr-based tile access for better performance.
+        Endpoint to serve tiles for a specific time-lapse dataset.
+        The 'timepoint' concept is now embedded in `dataset_id`.
 
         Args:
-            dataset_id (str): The ID of the image map dataset.
-            timepoint (str): The timepoint folder name (e.g., "2025-04-29_16-38-27").
+            dataset_id (str): The ALIAS of the image map dataset (which is a specific time-lapse).
+            # timepoint (str) parameter removed.
             channel_name (str): The channel name.
             z (int): The zoom level.
             x (int): The x coordinate.
@@ -995,19 +1024,22 @@ def get_frontend_api():
         """
         import json
         
-        logger.info(f"Fetching tile for timepoint: {timepoint}, z={z}, x={x}, y={y}")
+        logger.info(f"Fetching tile for dataset: {dataset_id}, channel: {channel_name}, z={z}, x={x}, y={y}")
         
         try:
-            # Queue the tile request with the specified priority
-            # This allows the frontend to prioritize visible tiles
-            await tile_manager.request_tile(dataset_id, timepoint, channel_name, z, x, y, priority)
+            # Ensure dataset_id is just the alias
+            processed_dataset_alias = dataset_id.split('/')[-1]
+
+            # Queue the tile request. The 'timestamp' field in request_tile is for context.
+            # dataset_id here is the time-lapse dataset alias.
+            await tile_manager.request_tile(processed_dataset_alias, None, channel_name, z, x, y, priority)
             
-            # Get the tile data using ZarrTileManager - URL expiration handled internally
-            tile_data = await tile_manager.get_tile_np_data(dataset_id, timepoint, channel_name, z, x, y)
+            # Get the tile data. 'timestamp' field in get_tile_np_data is for context.
+            tile_data = await tile_manager.get_tile_np_data(processed_dataset_alias, channel_name, z, x, y)
             
             # If no tile data is available, return an empty response
             if tile_data is None:
-                logger.info(f"No tile data available for {dataset_id}:{timepoint}:{channel_name}:{z}:{x}:{y}")
+                logger.info(f"No tile data available for {dataset_id}:{channel_name}:{z}:{x}:{y}")
                 response = Response(status_code=204)
                 response.headers["X-Empty-Tile"] = "true"
                 return response
@@ -1187,6 +1219,56 @@ def get_frontend_api():
             response.headers["X-Image-Format"] = "png"
             return response
 
+    @app.get("/setup-gallery-map")
+    async def setup_gallery_map(gallery_id: str):
+        """
+        Endpoint to "select" a specific gallery of time-lapse datasets for map viewing.
+        This verifies the gallery (identified by its ID) is accessible and contains datasets.
+        
+        Args:
+            gallery_id (str): The ID of the gallery containing time-lapse datasets.
+            
+        Returns:
+            dict: A dictionary containing success status and message.
+        """
+        logger.info(f"Setting up image map gallery: {gallery_id}")
+        if artifact_manager_instance.server is None:
+            server_for_am, svc_for_am = await get_artifact_manager()
+            await artifact_manager_instance.connect_server(server_for_am)
+        
+        try:
+            # Fetch datasets from the gallery to verify it exists and contains datasets
+            logger.info(f"Verifying gallery and fetching datasets: {gallery_id}")
+            
+            time_lapse_datasets = await artifact_manager_instance._svc.list(parent_id=gallery_id)
+            
+            if not time_lapse_datasets or len(time_lapse_datasets) == 0:
+                logger.warning(f"Gallery {gallery_id} contains no datasets.")
+                return {
+                    "success": False,
+                    "message": f"Gallery {gallery_id} exists but contains no time-lapse datasets."
+                }
+            
+            # Gallery exists and contains datasets
+            dataset_count = len(time_lapse_datasets)
+            logger.info(f"Gallery {gallery_id} successfully verified with {dataset_count} datasets.")
+            
+            return {
+                "success": True,
+                "message": f"Gallery contains {dataset_count} time-lapse datasets ready for map viewing",
+                "gallery_id": gallery_id,
+                "dataset_count": dataset_count
+            }
+            
+        except Exception as e:
+            logger.error(f"Error setting up gallery map: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return {
+                "success": False,
+                "message": f"Error setting up gallery map: {str(e)}"
+            }
+
     async def serve_fastapi(args):
         await app(args["scope"], args["receive"], args["send"])
 
@@ -1214,56 +1296,21 @@ async def _register_probes(server, probe_service_id):
     """
     async def is_service_healthy():
         logger.info("Checking service health")
+        # Minimal check: ensure tile_manager can attempt a connection
+        # and that its artifact_manager is not None after connection attempt.
+        # A deeper check would involve test_zarr_access on a known small dataset.
         try:
-            # Check artifact manager connection
-            if artifact_manager_instance.server is None:
-                api_server, artifact_manager = await get_artifact_manager()
-                await artifact_manager_instance.connect_server(api_server)
-                logger.info("Connected to artifact manager for health check")
+            if not tile_manager.artifact_manager:
+                logger.info("Tile manager not connected, attempting connection for health check...")
+                await tile_manager.connect(workspace_token=WORKSPACE_TOKEN, server_url=SERVER_URL)
             
-            # Test artifact manager functionality by listing a gallery
-            # Using a known gallery ID from the application
-            gallery_id = "agent-lens/microscopy-data"
-            datasets = await artifact_manager_instance._svc.list(parent_id=gallery_id)
-            
-            if datasets is None:
-                raise RuntimeError(f"Failed to list datasets from gallery {gallery_id}")
-            
-            # Check if we got any datasets back (should be a list, even if empty)
-            if not isinstance(datasets, list):
-                raise RuntimeError(f"Unexpected response format from artifact manager: {type(datasets)}")
-            
-            # Also check ZarrTileManager connection status
-            if not tile_manager.artifact_manager or not tile_manager.artifact_manager_server:
-                raise RuntimeError("ZarrTileManager is not properly connected")
-            
-            # Use the new test_zarr_access method to verify Zarr file access
-            try:
-                # Set a timeout for the test to prevent the health check from hanging
-                test_result = await asyncio.wait_for(
-                    tile_manager.test_zarr_access(), 
-                    timeout=50  # 50 second timeout
-                )
-                
-                if not test_result.get("success", False):
-                    error_msg = test_result.get("message", "Unknown error")
-                    logger.error(f"Zarr access test failed: {error_msg}")
-                    raise RuntimeError(f"Zarr access test failed: {error_msg}")
-                else:
-                    # Log successful test with some stats
-                    stats = test_result.get("chunk_stats", {})
-                    non_zero = stats.get("non_zero_count", 0)
-                    total = stats.get("total_size", 1)
-                    logger.info(f"Zarr access test succeeded. Non-zero values: {non_zero}/{total} ({(non_zero/total)*100:.1f}%)")
-            except asyncio.TimeoutError:
-                logger.error("Zarr access test timed out after 30 seconds")
-                raise RuntimeError("Zarr access test timed out")
-            except Exception as zarr_error:
-                logger.error(f"Zarr access test failed: {zarr_error}")
-                raise RuntimeError(f"Zarr access test failed: {str(zarr_error)}")
-            
-            logger.info("All services are healthy")
-            return {"status": "ok", "message": "All services are healthy"}
+            if not tile_manager.artifact_manager:
+                raise RuntimeError("ZarrTileManager failed to connect to artifact manager service.")
+
+
+            logger.info("Service appears healthy (TileManager connection established).")
+            return {"status": "ok", "message": "Service healthy"}
+
         except Exception as e:
             logger.error(f"Health check failed: {str(e)}")
             import traceback

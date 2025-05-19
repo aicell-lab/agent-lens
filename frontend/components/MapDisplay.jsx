@@ -8,6 +8,9 @@ import MicroscopeControlPanel from './MicroscopeControlPanel';
 import ChannelSettings from './ChannelSettings';
 import { unByKey } from 'ol/Observable';
 
+// Default gallery ID to use when none is specified
+const DEFAULT_GALLERY_ID = "agent-lens/20250506-scan-time-lapse-gallery";
+
 const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incubatorControlService, setCurrentMap }) => {
   const [map, setMap] = useState(null);
   const mapRef = useRef(null);
@@ -17,6 +20,7 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
   const [imageLayer, setImageLayer] = useState(null);
   const [isMapViewEnabled, setIsMapViewEnabled] = useState(false);
   const [mapDatasetId, setMapDatasetId] = useState(null);
+  const [mapGalleryId, setMapGalleryId] = useState(null);
   const [timepoints, setTimepoints] = useState([]);
   const [selectedTimepoint, setSelectedTimepoint] = useState(null);
   const [isLoadingTimepoints, setIsLoadingTimepoints] = useState(false);
@@ -34,8 +38,8 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
     color: {}
   });
 
-  const imageWidth = 2560;
-  const imageHeight = 2048;
+  const imageWidth = 1024;
+  const imageHeight = 1024;
   const extent = [0, 0, imageWidth, imageHeight];
 
   // Initialize the map when the component mounts
@@ -67,20 +71,28 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
         }
       });
       
-      // Check if an image map dataset has been set up in this session
+      // Check if a gallery has been set up in this session
+      const imageMapGallery = localStorage.getItem('imageMapGallery');
       const imageMapDataset = localStorage.getItem('imageMapDataset');
       const wasExplicitlySetup = sessionStorage.getItem('mapSetupExplicit') === 'true';
       
-      if (imageMapDataset && wasExplicitlySetup) {
-        setMapDatasetId(imageMapDataset);
-        setIsMapViewEnabled(true);
-        setShouldShowMap(true);
-        appendLog(`Image map dataset found: ${imageMapDataset}`);
-        // Load timepoints on demand when needed
+      // Use the gallery ID from localStorage, or default if none exists
+      const galleryToUse = imageMapGallery || DEFAULT_GALLERY_ID;
+      
+      // Always set a gallery ID (either from localStorage or default)
+      setMapGalleryId(galleryToUse);
+      setIsMapViewEnabled(true);
+      setShouldShowMap(true);
+      setShowTimepointSelector(true); // Show timepoint selector immediately
+      
+      if (imageMapGallery) {
+        appendLog(`Image map gallery selected: ${imageMapGallery}`);
       } else {
-        // Add default tile layer only if map exists
-        addTileLayer(newMap, currentChannel);
+        appendLog(`Using default gallery: ${DEFAULT_GALLERY_ID}`);
       }
+      
+      // Load timepoints from this gallery
+      loadTimepointsList(galleryToUse);
       
       // Store the listener key for cleanup
       return () => {
@@ -101,10 +113,10 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
 
   // Load timepoints only when we should show the map and user has requested it
   useEffect(() => {
-    if (shouldShowMap && mapDatasetId && showTimepointSelector && timepoints.length === 0) {
-      loadTimepoints(mapDatasetId);
+    if (shouldShowMap && mapGalleryId && showTimepointSelector && timepoints.length === 0) {
+      loadTimepointsList(mapGalleryId);
     }
-  }, [shouldShowMap, mapDatasetId, showTimepointSelector]);
+  }, [shouldShowMap, mapGalleryId, showTimepointSelector]);
 
   // Cleanup for snapshot image URL
   useEffect(() => {
@@ -128,38 +140,123 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
     }
   }, [channelSettings]);
 
-  const loadTimepoints = async (datasetId) => {
-    if (!datasetId) return;
-    
+  // Load timepoints list from gallery ID
+  const loadTimepointsList = async (galleryId = null) => {
+    // This function loads the list of all available time-lapse datasets from a gallery
     setIsLoadingTimepoints(true);
-    appendLog(`Loading timepoints for dataset ${datasetId}`);
+    appendLog(`Loading available time-lapse datasets...`);
     
     try {
-      const response = await fetch(`/public/apps/agent-lens/list-timepoints?dataset_id=${datasetId}`);
-      const data = await response.json();
+      // Use provided gallery ID or fall back to the one in state or the default
+      const activeGalleryId = galleryId || mapGalleryId || DEFAULT_GALLERY_ID;
       
-      if (data.success && data.timepoints.length > 0) {
-        setTimepoints(data.timepoints);
-        appendLog(`Loaded ${data.timepoints.length} timepoints for dataset ${datasetId}`);
+      // Call the datasets endpoint with the gallery ID
+      const response = await fetch(`/public/apps/agent-lens/datasets?gallery_id=${encodeURIComponent(activeGalleryId)}`);
+      const data = await response.json(); // Expects array like [{id: "alias", name: "display_name"}]
+      
+      if (response.ok && data && data.length > 0) {
+        setTimepoints(data); // Store the list of dataset objects
+        appendLog(`Loaded ${data.length} available time-lapse datasets from gallery: ${activeGalleryId}`);
         
-        // If we have timepoints and none is selected, select the first one
-        if (!selectedTimepoint) {
-          const firstTimepoint = data.timepoints[0].name;
-          if (isMergeMode) {
-            loadTimepointMapMerged(firstTimepoint, selectedChannels);
+        // If no specific dataset is selected yet, and we have a list, 
+        // select the first dataset from the loaded list
+        if (!selectedTimepoint && data.length > 0) {
+          // If there was a mapDatasetId from local storage, try to find it in the list
+          const preSelected = mapDatasetId ? data.find(d => d.id === mapDatasetId) : null;
+          if (preSelected) {
+            // If found, ensure selectedTimepoint is set to this dataset's alias ('id')
+            setSelectedTimepoint(preSelected.id);
+            if (isMergeMode) {
+              loadTimepointMapMerged(preSelected.id, selectedChannels);
+            } else {
+              loadTimepointMap(preSelected.id, currentChannel);
+            }
           } else {
-            loadTimepointMap(firstTimepoint, currentChannel);
+            // Otherwise, select the first dataset from the loaded list
+            const firstDatasetAlias = data[0].id;
+            setMapDatasetId(firstDatasetAlias); // Update the general mapDatasetId as well
+            setSelectedTimepoint(firstDatasetAlias);
+            if (isMergeMode) {
+              loadTimepointMapMerged(firstDatasetAlias, selectedChannels);
+            } else {
+              loadTimepointMap(firstDatasetAlias, currentChannel);
+            }
+          }
+        } else if (selectedTimepoint) {
+          // If a timepoint (dataset alias) is already selected, ensure it's still valid
+          const currentSelectionStillValid = data.some(d => d.id === selectedTimepoint);
+          if (!currentSelectionStillValid && data.length > 0) {
+            // If current selection is no longer valid (e.g. removed from server), select the first available
+            const firstDatasetAlias = data[0].id;
+            setMapDatasetId(firstDatasetAlias);
+            setSelectedTimepoint(firstDatasetAlias);
+            appendLog(`Previously selected dataset ${selectedTimepoint} not found. Switched to ${firstDatasetAlias}.`);
+            if (isMergeMode) {
+              loadTimepointMapMerged(firstDatasetAlias, selectedChannels);
+            } else {
+              loadTimepointMap(firstDatasetAlias, currentChannel);
+            }
+          } else if (!currentSelectionStillValid && data.length === 0) {
+            // No datasets available at all
+            appendLog('No time-lapse datasets available from server.');
+            setTimepoints([]);
+            setSelectedTimepoint(null);
+            setMapDatasetId(null);
           }
         }
       } else {
-        appendLog(`No timepoints found for dataset ${datasetId}`);
+        appendLog(`No time-lapse datasets found in gallery or error fetching: ${data.message || 'Unknown error'}`);
+        setTimepoints([]); // Clear timepoints if fetch fails or empty
+        setSelectedTimepoint(null); // Clear selection if no datasets
       }
     } catch (error) {
-      appendLog(`Error loading timepoints: ${error.message}`);
+      appendLog(`Error loading time-lapse datasets: ${error.message}`);
+      setTimepoints([]);
     } finally {
       setIsLoadingTimepoints(false);
     }
   };
+
+  // useEffect to load timepoints list when map view is enabled for the first time
+  // or when showTimepointSelector is triggered and list is empty.
+  useEffect(() => {
+    if (isMapViewEnabled && showTimepointSelector && timepoints.length === 0) {
+      // Use mapGalleryId if available, otherwise use the default
+      const galleryToUse = mapGalleryId || DEFAULT_GALLERY_ID;
+      loadTimepointsList(galleryToUse);
+      
+      // If we're using the default, update the state
+      if (!mapGalleryId) {
+        setMapGalleryId(DEFAULT_GALLERY_ID);
+      }
+    }
+  }, [isMapViewEnabled, showTimepointSelector]);
+
+  // useEffect to handle initial load when a mapDatasetId is set (e.g. from localStorage)
+  useEffect(() => {
+    if (mapDatasetId && !selectedTimepoint && timepoints.length > 0) {
+        // If mapDatasetId is set but no selectedTimepoint, try to select it from loaded timepoints
+        const datasetExists = timepoints.find(tp => tp.id === mapDatasetId);
+        if (datasetExists) {
+            setSelectedTimepoint(mapDatasetId);
+            if (isMergeMode) {
+                loadTimepointMapMerged(mapDatasetId, selectedChannels);
+            } else {
+                loadTimepointMap(mapDatasetId, currentChannel);
+            }
+        } else if (timepoints.length > 0) {
+            // If the stored mapDatasetId doesn't exist in the list, pick the first from the list
+            const firstId = timepoints[0].id;
+            setSelectedTimepoint(firstId);
+            setMapDatasetId(firstId); // Also update mapDatasetId to a valid one
+            if (isMergeMode) {
+                loadTimepointMapMerged(firstId, selectedChannels);
+            } else {
+                loadTimepointMap(firstId, currentChannel);
+            }
+        }
+    }
+  }, [mapDatasetId, selectedTimepoint, timepoints, isMergeMode, currentChannel, selectedChannels]);
 
   // Helper to serialize settings for URL params
   const getProcessingSettingsParams = () => {
@@ -215,7 +312,7 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
   };
 
   const loadTimepointMap = (timepoint, channelKey = 0) => {
-    if (!timepoint || !mapDatasetId || !map) return;
+    if (!timepoint || !map) return; // mapDatasetId is now timepoint (dataset alias)
     
     // Convert channelKey to number if it's a string
     const channelKeyNum = typeof channelKey === 'string' ? parseInt(channelKey) : channelKey;
@@ -229,8 +326,9 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
     const channelToUse = channelKeyNum !== undefined ? channelKeyNum : currentChannel;
     const channelName = channelNames[channelToUse] || 'BF_LED_matrix_full';
     
-    appendLog(`Loading map for timepoint: ${timepoint}, channel: ${channelName}`);
-    setSelectedTimepoint(timepoint);
+    appendLog(`Loading map for dataset: ${timepoint}, channel: ${channelName}`);
+    setSelectedTimepoint(timepoint); // timepoint is the dataset alias
+    setMapDatasetId(timepoint); // Also update the general map dataset ID
     
     // Remove any existing layers
     if (imageLayer) {
@@ -248,7 +346,7 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
       // Calculate priority based on viewport
       const priority = calculateTilePriority(tileCoord, viewExtent);
       
-      const baseUrl = `tile-for-timepoint?dataset_id=${mapDatasetId}&timepoint=${timepoint}&channel_name=${channelName}&z=${z}&x=${x}&y=${y}&priority=${priority}`;
+      const baseUrl = `tile-for-timepoint?dataset_id=${timepoint}&channel_name=${channelName}&z=${z}&x=${x}&y=${y}&priority=${priority}`;
       const params = new URLSearchParams(processingParams).toString();
       return params ? `${baseUrl}&${params}` : baseUrl;
     };
@@ -257,11 +355,11 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
       url: createTileUrl('{z}', '{x}', '{y}'),
       crossOrigin: 'anonymous',
       tileSize: 256, // Update to match Zarr chunk size
-      maxZoom: 4, // Updated for 5 scale levels
+      maxZoom: 5, // Updated for 6 scale levels
       tileGrid: getTileGrid(),
       tileLoadFunction: function(tile, src) {
         const tileCoord = tile.getTileCoord(); // [z, x, y]
-        const transformedZ = 4 - tileCoord[0]; // Updated for 6 scale levels (0-5)
+        const transformedZ = 5 - tileCoord[0]; // Updated for 6 scale levels (0-5)
         const newSrc = createTileUrl(transformedZ, tileCoord[1], tileCoord[2], tileCoord);
         
         // Create a black canvas as a fallback
@@ -279,7 +377,7 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
           .then(response => {
             if (!response.ok) {
               // If the response is not OK, use black tile
-              throw new Error(`Failed to load timepoint tile: ${response.status}`);
+              throw new Error(`Failed to load tile: ${response.status}`);
             }
             return response.text();
           })
@@ -293,10 +391,10 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
             
             const trimmed = data.replace(/^"|"$/g, '');
             tile.getImage().src = `data:image/png;base64,${trimmed}`;
-            console.log(`Loaded timepoint tile at: ${newSrc}`);
+            console.log(`Loaded tile at location: ${newSrc}`);
           })
           .catch(error => {
-            console.log(`Failed to load timepoint tile: ${newSrc}`, error);
+            console.log(`Failed to load tile: ${newSrc}`, error);
             // Use black tile for errors
             setBlackTile();
           });
@@ -354,12 +452,13 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
 
   // Updated function to load merged channels with processing settings
   const loadTimepointMapMerged = (timepoint, channelKeys) => {
-    if (!timepoint || !mapDatasetId || !map || !channelKeys.length) return;
+    if (!timepoint || !map || !channelKeys.length) return; // timepoint is the dataset alias
     
     const channelNamesStr = channelKeys.map(key => channelNames[key]).join(',');
     
-    appendLog(`Loading merged map for timepoint: ${timepoint}, channels: ${channelNamesStr}`);
-    setSelectedTimepoint(timepoint);
+    appendLog(`Loading merged map for dataset: ${timepoint}, channels: ${channelNamesStr}`);
+    setSelectedTimepoint(timepoint); // timepoint is the dataset alias
+    setMapDatasetId(timepoint); // Update general map dataset ID
     
     // Remove any existing layers
     if (imageLayer) {
@@ -377,7 +476,7 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
       // Calculate priority based on viewport
       const priority = calculateTilePriority(tileCoord, viewExtent);
       
-      const baseUrl = `merged-tiles?dataset_id=${mapDatasetId}&timepoint=${timepoint}&channels=${channelKeys.join(',')}&z=${z}&x=${x}&y=${y}&priority=${priority}`;
+      const baseUrl = `merged-tiles?dataset_id=${timepoint}&channels=${channelKeys.join(',')}&z=${z}&x=${x}&y=${y}&priority=${priority}`;
       const params = new URLSearchParams(processingParams).toString();
       return params ? `${baseUrl}&${params}` : baseUrl;
     };
@@ -386,11 +485,11 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
       url: createTileUrl('{z}', '{x}', '{y}'),
       crossOrigin: 'anonymous',
       tileSize: 256, // Update to match Zarr chunk size
-      maxZoom: 4, // Updated for 5 scale levels
+      maxZoom: 5, // Updated for 6 scale levels
       tileGrid: getTileGrid(),
       tileLoadFunction: function(tile, src) {
         const tileCoord = tile.getTileCoord(); // [z, x, y]
-        const transformedZ = 4 - tileCoord[0]; // Updated for 5 scale levels (0-4)
+        const transformedZ = 5 - tileCoord[0]; // Updated for 6 scale levels (0-5)
         const newSrc = createTileUrl(transformedZ, tileCoord[1], tileCoord[2], tileCoord);
         
         // Create a black canvas as a fallback
@@ -503,7 +602,7 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
       const priority = calculateTilePriority(tileCoord, viewExtent);
       
       // Use the gallery default dataset ID if mapDatasetId isn't available
-      const datasetId = mapDatasetId || 'agent-lens/image-map-20250429-treatment-zip';
+      const datasetId = mapDatasetId || 'agent-lens/20250506-scan-time-lapse-2025-05-06_16-56-52';
       const baseUrl = `merged-tiles?dataset_id=${datasetId}&channels=${channelKeys.join(',')}&z=${z}&x=${x}&y=${y}&priority=${priority}`;
       const params = new URLSearchParams(processingParams).toString();
       return params ? `${baseUrl}&${params}` : baseUrl;
@@ -513,11 +612,11 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
       url: createTileUrl('{z}', '{x}', '{y}'),
       crossOrigin: 'anonymous',
       tileSize: 256, // Update to match Zarr chunk size
-      maxZoom: 4, // Updated for 5 scale levels
+      maxZoom: 5, // Updated for 6 scale levels
       tileGrid: getTileGrid(),
       tileLoadFunction: function(tile, src) {
         const tileCoord = tile.getTileCoord(); // [z, x, y]
-        const transformedZ = 4 - tileCoord[0]; // Updated for 6 scale levels (0-5)
+        const transformedZ = 5 - tileCoord[0]; // Updated for 6 scale levels (0-5)
         const newSrc = createTileUrl(transformedZ, tileCoord[1], tileCoord[2], tileCoord);
         
         // Create a black canvas as a fallback
@@ -638,7 +737,7 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
       const priority = calculateTilePriority(tileCoord, viewExtent);
       
       // Use the gallery default dataset ID if mapDatasetId isn't available
-      const datasetId = mapDatasetId || 'agent-lens/image-map-20250429-treatment-zip';
+      const datasetId = mapDatasetId || 'agent-lens/20250506-scan-time-lapse-2025-05-06_16-56-52';
       const baseUrl = `tile?dataset_id=${datasetId}&timestamp=2025-04-29_16-38-27&channel_name=${channelName}&z=${z}&x=${x}&y=${y}&priority=${priority}`;
       const params = new URLSearchParams(processingParams).toString();
       return params ? `${baseUrl}&${params}` : baseUrl;
@@ -648,11 +747,11 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
       url: createTileUrl('{z}', '{x}', '{y}'),
       crossOrigin: 'anonymous',
       tileSize: 256, // Update to match Zarr chunk size
-      maxZoom: 4, // Updated for 5 scale levels
+      maxZoom: 5, // Updated for 6 scale levels
       tileGrid: getTileGrid(),
       tileLoadFunction: function(tile, src) {
         const tileCoord = tile.getTileCoord(); // [z, x, y]
-        const transformedZ = 4 - tileCoord[0]; // Updated for 5 scale levels (0-4)
+        const transformedZ = 5 - tileCoord[0]; // Updated for 6 scale levels (0-5)
         const newSrc = createTileUrl(transformedZ, tileCoord[1], tileCoord[2], tileCoord);
         
         // Create a black canvas as a fallback
@@ -745,8 +844,16 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
 
   const toggleTimepointSelector = () => {
     // If this is the first time showing the selector and we haven't loaded timepoints yet
-    if (!showTimepointSelector && timepoints.length === 0 && mapDatasetId) {
-      loadTimepoints(mapDatasetId);
+    if (!showTimepointSelector && timepoints.length === 0) {
+      // Use mapGalleryId if set, otherwise fall back to the default gallery
+      const galleryToUse = mapGalleryId || DEFAULT_GALLERY_ID;
+      loadTimepointsList(galleryToUse);
+      
+      if (!mapGalleryId) {
+        // If no gallery was set, update the state with the default
+        setMapGalleryId(DEFAULT_GALLERY_ID);
+        appendLog(`Using default gallery: ${DEFAULT_GALLERY_ID}`);
+      }
     }
     
     setShowTimepointSelector(!showTimepointSelector);
@@ -856,14 +963,14 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
                 </>
               ) : (
                 <>
-                  <i className="fas fa-clock mr-2"></i>
-                  {showTimepointSelector ? 'Hide Timepoints' : 'Select Timepoint'}
+                  <i className="fas fa-layer-group mr-2"></i>
+                  {showTimepointSelector ? 'Hide Datasets' : 'Select Dataset'}
                 </>
               )}
             </button>
             {selectedTimepoint && (
               <div className="bg-white px-4 py-2 rounded-r border-l border-blue-300 text-sm">
-                Current: {selectedTimepoint}
+                Current: {timepoints.find(tp => tp.id === selectedTimepoint)?.name || selectedTimepoint}
               </div>
             )}
           </div>
@@ -872,26 +979,35 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
         {/* Time Point Selection Dropdown */}
         {isMapViewEnabled && showTimepointSelector && (
           <div className="absolute bottom-16 left-1/2 transform -translate-x-1/2 bg-white rounded shadow-lg p-4 max-h-60 overflow-y-auto z-10 w-96">
-            <h4 className="text-lg font-medium mb-2">Select Timepoint</h4>
+            <h4 className="text-lg font-medium mb-2">Select Time-Lapse Dataset</h4>
             {isLoadingTimepoints ? (
               <div className="flex items-center justify-center p-4">
-                <i className="fas fa-spinner fa-spin mr-2"></i> Loading timepoints...
+                <i className="fas fa-spinner fa-spin mr-2"></i> Loading datasets...
               </div>
             ) : timepoints.length > 0 ? (
               <ul className="space-y-1">
-                {timepoints.map((timepoint, index) => (
+                {timepoints.map((timepointDataset, index) => ( // timepointDataset is {id: "alias", name: "display_name"}
                   <li 
                     key={index}
-                    className={`p-2 cursor-pointer hover:bg-blue-50 rounded ${selectedTimepoint === timepoint.name ? 'bg-blue-100 font-medium' : ''}`}
-                    onClick={() => isMergeMode ? loadTimepointMapMerged(timepoint.name, selectedChannels) : loadTimepointMap(timepoint.name, currentChannel)}
+                    className={`p-2 cursor-pointer hover:bg-blue-50 rounded ${selectedTimepoint === timepointDataset.id ? 'bg-blue-100 font-medium' : ''}`}
+                    onClick={() => {
+                        setMapDatasetId(timepointDataset.id); // Set the selected dataset alias
+                        setSelectedTimepoint(timepointDataset.id);
+                        if (isMergeMode) {
+                            loadTimepointMapMerged(timepointDataset.id, selectedChannels);
+                        } else {
+                            loadTimepointMap(timepointDataset.id, currentChannel);
+                        }
+                        setShowTimepointSelector(false); // Close selector after selection
+                    }}
                   >
-                    <i className={`fas fa-clock mr-2 ${selectedTimepoint === timepoint.name ? 'text-blue-500' : 'text-gray-500'}`}></i>
-                    {timepoint.name}
+                    <i className={`fas fa-film mr-2 ${selectedTimepoint === timepointDataset.id ? 'text-blue-500' : 'text-gray-500'}`}></i>
+                    {timepointDataset.name}
                   </li>
                 ))}
               </ul>
             ) : (
-              <p className="text-gray-500">No timepoints available</p>
+              <p className="text-gray-500">No time-lapse datasets available.</p>
             )}
           </div>
         )}
