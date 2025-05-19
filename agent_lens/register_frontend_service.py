@@ -1351,8 +1351,12 @@ async def setup_service(server, server_id="agent-lens"):
     Args:
         server (Server): The server instance.
     """
-    # Always use "agent-lens" as the service ID for consistency with frontend
-    # DO NOT modify server_id here to keep frontend compatibility
+    # Check if we're in connect-server mode
+    is_connect_server = "connect-server" in " ".join(sys.argv)
+    
+    # Use 'agent-lens-test' as service_id when using connect-server
+    if is_connect_server:
+        server_id = "agent-lens-test"
     
     # Ensure tile_manager is connected with the server (with proper token and so on)
     connection_success = await tile_manager.connect(workspace_token=WORKSPACE_TOKEN, server_url=SERVER_URL)
@@ -1388,8 +1392,8 @@ async def setup_service(server, server_id="agent-lens"):
     # Check if we're running locally
     is_local = "--port" in " ".join(sys.argv) or "start-server" in " ".join(sys.argv)
     
-    # Only register service health probes when not running locally
-    if not is_local:
+    # Only register service health probes when not running locally and not in connect-server mode
+    if not is_local and not is_connect_server:
         await register_service_probes(server, server_id)
 
     # Store the cleanup function in the server's config
