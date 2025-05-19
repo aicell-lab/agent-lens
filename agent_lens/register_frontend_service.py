@@ -1351,11 +1351,15 @@ async def setup_service(server, server_id="agent-lens"):
     Args:
         server (Server): The server instance.
     """
-    # Check if we're in connect-server mode
-    is_connect_server = "connect-server" in " ".join(sys.argv)
+    # Get command line arguments
+    cmd_args = " ".join(sys.argv)
     
-    # Use 'agent-lens-test' as service_id when using connect-server
-    if is_connect_server:
+    # Check if we're in connect-server mode and not in docker mode
+    is_connect_server = "connect-server" in cmd_args
+    is_docker = "--docker" in cmd_args
+    
+    # Use 'agent-lens-test' as service_id only when using connect-server in VSCode (not in docker)
+    if is_connect_server and not is_docker:
         server_id = "agent-lens-test"
     
     # Ensure tile_manager is connected with the server (with proper token and so on)
@@ -1390,10 +1394,11 @@ async def setup_service(server, server_id="agent-lens"):
     logger.info(f"Frontend service registered successfully with ID: {server_id}")
 
     # Check if we're running locally
-    is_local = "--port" in " ".join(sys.argv) or "start-server" in " ".join(sys.argv)
+    is_local = "--port" in cmd_args or "start-server" in cmd_args
     
-    # Only register service health probes when not running locally and not in connect-server mode
-    if not is_local and not is_connect_server:
+    # Only register service health probes when not running locally and not in VSCode connect-server mode
+    # Docker mode should register probes
+    if not is_local and (is_docker or not is_connect_server):
         await register_service_probes(server, server_id)
 
     # Store the cleanup function in the server's config
