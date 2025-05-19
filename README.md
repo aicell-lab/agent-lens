@@ -95,7 +95,7 @@ If you prefer to set up the application manually, follow the steps below:
 
 2. **Access the application:**
 
-  Open the browser and navigate to `http://localhost:9527/public/apps/agent-lens`.
+  Open the browser and navigate to `http://localhost:9527/agent-lens/apps/agent-lens`.
 
 ## Configuration
 
