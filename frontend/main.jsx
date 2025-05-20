@@ -8,6 +8,7 @@ import MapDisplay from './components/MapDisplay';
 import IncubatorControl from './components/IncubatorControl';
 import MicroscopeControlPanel from './components/MicroscopeControlPanel';
 import Sidebar from './components/Sidebar';
+import ImagingTasksControl from './components/ImagingTasksControl';
 import { login, initializeServices, getServer } from './utils';
 import 'ol/ol.css';
 import './main.css';
@@ -35,6 +36,7 @@ const MicroscopeControl = () => {
   const [log, setLog] = useState('');
   const [segmentService, setSegmentService] = useState(null);
   const [incubatorControlService, setIncubatorControlService] = useState(null);
+  const [orchestratorService, setOrchestratorService] = useState(null);
   const [activeTab, setActiveTab] = useState('microscope');
   const [currentMap, setCurrentMap] = useState(null);
   const [snapshotImage, setSnapshotImage] = useState(null);
@@ -69,6 +71,7 @@ const MicroscopeControl = () => {
       await initializeServices(server,
         setMicroscopeControlService, setSimilarityService, setSegmentService,
         setIncubatorControlService,
+        setOrchestratorService,
         appendLog);
       appendLog("Logged in.");
       setIsAuthenticated(true);
@@ -139,6 +142,15 @@ const MicroscopeControl = () => {
           <div className="control-view">
             <IncubatorControl
               incubatorControlService={incubatorControlService}
+              appendLog={appendLog}
+            />
+          </div>
+        );
+      case 'imaging-tasks':
+        return (
+          <div className="control-view">
+            <ImagingTasksControl
+              orchestratorService={orchestratorService}
               appendLog={appendLog}
             />
           </div>

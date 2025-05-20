@@ -25,6 +25,7 @@ export const initializeServices = async (
   setSimilarityService,
   setSegmentService,
   setIncubatorControlService, // new parameter for incubator control service
+  setOrchestratorService, // new parameter for orchestrator service
   appendLog
 ) => {
   appendLog('Initializing connection to server...');
@@ -65,6 +66,16 @@ export const initializeServices = async (
     appendLog(`Error acquiring Incubator Control service: ${error.message}`);
     setIncubatorControlService(null);
   }
+
+  // Connect to the orchestrator service
+  const orchestratorService = await tryGetService(
+    server,
+    "Orchestrator Manager",
+    "reef-imaging/orchestrator-manager-simulation", // remoteId based on workspace and service name
+    "orchestrator-manager-simulation", // localId
+    appendLog
+  );
+  setOrchestratorService(orchestratorService);
 };
 
 const tryGetService = async (server, name, remoteId, localId, appendLog) => {

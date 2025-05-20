@@ -27,6 +27,13 @@ const Sidebar = ({ activeTab, onTabChange }) => {
           <span>Incubator</span>
         </button>
         <button 
+          className={`sidebar-tab ${activeTab === 'imaging-tasks' ? 'active' : ''}`}
+          onClick={() => onTabChange('imaging-tasks')}
+        >
+          <i className="fas fa-tasks"></i>
+          <span>Imaging Tasks</span>
+        </button>
+        <button 
           className={`sidebar-tab ${activeTab === 'data-management' ? 'active' : ''}`}
           onClick={() => onTabChange('data-management')}
         >

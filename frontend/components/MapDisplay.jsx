@@ -4,7 +4,6 @@ import { makeMap, addMapMask, getTileGrid } from './MapSetup';
 import MapInteractions from './MapInteractions';
 import XYZ from 'ol/source/XYZ';
 import TileLayer from 'ol/layer/Tile';
-import MicroscopeControlPanel from './MicroscopeControlPanel';
 import ChannelSettings from './ChannelSettings';
 import { unByKey } from 'ol/Observable';
 
