@@ -14,7 +14,7 @@ services:
       - agent-lens-cache:/app/.cache
     healthcheck:
       test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/agent-lens/services/probes/liveness-agent-lens | jq -e '.status == \"ok\"'"]
-      interval: 180s
+      interval: 60s
       timeout: 30s
       retries: 1
       start_period: 120s
@@ -26,7 +26,7 @@ services:
       - ALL
 
   squid-control:
-    image: ghcr.io/aicell-lab/squid-control:sha-0803da7
+    image: ghcr.io/aicell-lab/squid-control:sha-bd23adb
     container_name: squid-control
     environment:
       - SQUID_WORKSPACE_TOKEN=${SQUID_WORKSPACE_TOKEN}
@@ -35,9 +35,11 @@ services:
       - AGENT_LENS_WORKSPACE_TOKEN=${AGENT_LENS_WORKSPACE_TOKEN}
     labels:
       - "autoheal.enable=true"
+    volumes:
+      - squid-control-cache:/app/.cache
     healthcheck:
-      test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/squid-control/services/probes/liveness-${MICROSCOPE_SERVICE_ID} | jq -e '.status == \"ok\"'"]
-      interval: 180s
+      test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/squid-control/services/probes/liveness-squid-control-reef | jq -e '.status == \"ok\"'"]
+      interval: 120s
       timeout: 30s
       retries: 1
       start_period: 120s
@@ -58,4 +60,5 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
 
 volumes:
-  agent-lens-cache: 
+  agent-lens-cache:
+  squid-control-cache:
