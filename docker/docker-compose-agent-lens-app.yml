@@ -1,6 +1,6 @@
 services:
   agent-lens:
-    image: ghcr.io/aicell-lab/agent-lens:sha-5e2666a
+    image: ghcr.io/aicell-lab/agent-lens:sha-7725206
     container_name: agent-lens
     environment:
       - WORKSPACE_TOKEN=${AGENT_LENS_WORKSPACE_TOKEN}
@@ -8,13 +8,15 @@ services:
       - CLIP_CACHE=/app/.cache
       - JWT_SECRET=${JWT_SECRET}
       - REEF_WORKSPACE_TOKEN=${REEF_WORKSPACE_TOKEN}
+    labels:
+      - "autoheal.enable=true"
     volumes:
       - agent-lens-cache:/app/.cache
     healthcheck:
       test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/agent-lens/services/probes/liveness-agent-lens | jq -e '.status == \"ok\"'"]
-      interval: 300s
-      timeout: 60s
-      retries: 3
+      interval: 180s
+      timeout: 30s
+      retries: 1
       start_period: 120s
     restart: on-failure
     user: "1000:1000"
@@ -24,17 +26,20 @@ services:
       - ALL
 
   squid-control:
-    image: ghcr.io/aicell-lab/squid-control:sha-5337124
+    image: ghcr.io/aicell-lab/squid-control:sha-0803da7
     container_name: squid-control
     environment:
       - SQUID_WORKSPACE_TOKEN=${SQUID_WORKSPACE_TOKEN}
       - WORKSPACE_TOKEN_CHATBOT=${WORKSPACE_TOKEN_CHATBOT}
       - MICROSCOPE_SERVICE_ID=${MICROSCOPE_SERVICE_ID}
+      - AGENT_LENS_WORKSPACE_TOKEN=${AGENT_LENS_WORKSPACE_TOKEN}
+    labels:
+      - "autoheal.enable=true"
     healthcheck:
       test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/squid-control/services/probes/liveness-${MICROSCOPE_SERVICE_ID} | jq -e '.status == \"ok\"'"]
-      interval: 300s
-      timeout: 60s
-      retries: 3
+      interval: 180s
+      timeout: 30s
+      retries: 1
       start_period: 120s
     restart: on-failure
     user: "1000:1000"
@@ -43,6 +48,14 @@ services:
     cap_drop:
       - ALL
 
+  autoheal:
+    image: willfarrell/autoheal
+    container_name: autoheal
+    restart: always
+    environment:
+      - AUTOHEAL_CONTAINER_LABEL=autoheal.enable
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
 
 volumes:
   agent-lens-cache: 
