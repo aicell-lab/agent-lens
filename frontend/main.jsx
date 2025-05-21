@@ -235,6 +235,7 @@ const MicroscopeControl = () => {
               onTabChange={handleTabChange} 
               onMicroscopeSelect={handleMicroscopeSelection} 
               selectedMicroscopeId={selectedMicroscopeId} 
+              incubatorControlService={incubatorControlService}
             />
             <div className="content-area">
               {renderContent()}
