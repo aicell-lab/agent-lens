@@ -26,7 +26,7 @@ const Sidebar = ({ activeTab, onTabChange, onMicroscopeSelect, selectedMicroscop
           onClick={handleMicroscopeTabClick}
         >
           <i className="fas fa-microscope"></i>
-          <span>Microscope {isMicroscopeSubMenuOpen ? '\u25B2' : '\u25BC'}</span>
+          <span>Microscopes {isMicroscopeSubMenuOpen ? '\u25B2' : '\u25BC'}</span>
         </button>
         {activeTab === 'microscope' && isMicroscopeSubMenuOpen && (
           <div className="sidebar-submenu">
@@ -41,6 +41,12 @@ const Sidebar = ({ activeTab, onTabChange, onMicroscopeSelect, selectedMicroscop
               onClick={() => handleMicroscopeSelection('reef-imaging/mirror-microscope-control-squid-1')}
             >
               <span>Real Microscope 1</span>
+            </button>
+            <button
+              className={`sidebar-submenu-tab ${selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2' ? 'active' : ''}`}
+              onClick={() => handleMicroscopeSelection('reef-imaging/mirror-microscope-control-squid-2')}
+            >
+              <span>Real Microscope 2</span>
             </button>
           </div>
         )}
