@@ -122,7 +122,7 @@ const Sidebar = ({
                   ) : (
                     <i className="fas fa-flask"></i>
                   )}
-                  <span>{isSamplePanelOpen ? 'Hide Sample Selection' : 'Select Samples'}</span>
+                  <span>{isSamplePanelOpen ? 'Hide' : 'Select Samples'}</span>
                   <i className={`fas ${isSamplePanelOpen ? 'fa-chevron-left' : 'fa-chevron-right'} microscope-toggle-icon`}></i>
                 </div>
               </button>

@@ -116,39 +116,58 @@ const SampleSelector = ({
   return (
     <div className={`sample-sidebar ${!isVisible ? 'collapsed' : ''}`}>
       <h3 className="sample-sidebar-title">Select Sample</h3>
-      <div className="sample-options">
-        {isSimulatedMicroscopeSelected && (
-          <>
+      
+      {/* Sample Options Section */}
+      <div className="sample-options-container">
+        <div className="sample-options">
+          {isSimulatedMicroscopeSelected && (
+            <>
+              <button
+                className={`sample-option ${selectedSampleId === 'simulated-sample-1' ? 'active' : ''}`}
+                onClick={() => handleSampleSelect('simulated-sample-1')}
+              >
+                <i className="fas fa-flask"></i> 
+                <span>Simulated Sample 1</span>
+              </button>
+              <button
+                className={`sample-option ${selectedSampleId === 'simulated-sample-2' ? 'active' : ''}`}
+                onClick={() => handleSampleSelect('simulated-sample-2')}
+              >
+                <i className="fas fa-flask"></i> 
+                <span>Simulated Sample 2</span>
+              </button>
+            </>
+          )}
+          {isRealMicroscopeSelected && incubatorSlots.length > 0 && incubatorSlots.map(slot => (
             <button
-              className={`sample-option ${selectedSampleId === 'simulated-sample-1' ? 'active' : ''}`}
-              onClick={() => handleSampleSelect('simulated-sample-1')}
+              key={slot.id}
+              className={`sample-option ${selectedSampleId === slot.id ? 'active' : ''}`}
+              onClick={() => handleSampleSelect(slot.id)}
             >
-              <i className="fas fa-flask"></i> 
-              <span>Simulated Sample 1</span>
+              <i className="fas fa-vial"></i> 
+              <span>{slot.name || `Slot ${slot.incubator_slot}`}</span>
             </button>
-            <button
-              className={`sample-option ${selectedSampleId === 'simulated-sample-2' ? 'active' : ''}`}
-              onClick={() => handleSampleSelect('simulated-sample-2')}
-            >
-              <i className="fas fa-flask"></i> 
-              <span>Simulated Sample 2</span>
-            </button>
-          </>
-        )}
-        {isRealMicroscopeSelected && incubatorSlots.length > 0 && incubatorSlots.map(slot => (
-          <button
-            key={slot.id}
-            className={`sample-option ${selectedSampleId === slot.id ? 'active' : ''}`}
-            onClick={() => handleSampleSelect(slot.id)}
-          >
-            <i className="fas fa-vial"></i> 
-            <span>{slot.name || `Slot ${slot.incubator_slot}`}</span>
-          </button>
-        ))}
-        {isRealMicroscopeSelected && incubatorSlots.length === 0 && (
-              <p className="no-samples-message">No occupied incubator slots found or service unavailable.</p>
-        )}
+          ))}
+          {isRealMicroscopeSelected && incubatorSlots.length === 0 && (
+                <p className="no-samples-message">No occupied incubator slots found or service unavailable.</p>
+          )}
+        </div>
+        
+        {/* Load Sample Button directly below sample list */}
+        <hr className="sidebar-divider" />
+        <button 
+          className="load-sample-button"
+          onClick={handleLoadSample}
+          disabled={!selectedSampleId}
+        >
+          <div className="button-content">
+            <i className="fas fa-upload"></i>
+            <span>Load Sample on Microscope</span>
+          </div>
+        </button>
       </div>
+
+      {/* Status Message */}
       {loadingStatus && (
         <div className={`sample-loading-status my-2 py-2 px-3 rounded text-center ${
           loadingStatus === 'Sample loaded!' ? 'bg-green-100 text-green-700' : 
@@ -159,13 +178,6 @@ const SampleSelector = ({
           {loadingStatus}
         </div>
       )}
-      <button 
-        className="load-sample-button"
-        onClick={handleLoadSample}
-        disabled={!selectedSampleId}
-      >
-        Load Sample on Microscope
-      </button>
     </div>
   );
 };
