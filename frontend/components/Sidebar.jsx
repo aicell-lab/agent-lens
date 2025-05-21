@@ -14,6 +14,7 @@ const Sidebar = ({
   const [incubatorSlots, setIncubatorSlots] = useState([]);
   const [isMicroscopePanelOpen, setIsMicroscopePanelOpen] = useState(true);
   const [isSamplePanelOpen, setIsSamplePanelOpen] = useState(false);
+  const [loadingStatus, setLoadingStatus] = useState('');
 
   // Define the mapping of sample IDs to their data aliases
   const sampleDataAliases = {
@@ -100,6 +101,7 @@ const Sidebar = ({
     }
 
     if (isSimulatedMicroscopeSelected) {
+      setLoadingStatus('Loading sample...');
       try {
         if (selectedSampleId === 'simulated-sample-1') {
           await microscopeControlService.set_simulated_sample_data_alias('squid-control/image-map-20250429-treatment-zip');
@@ -108,10 +110,16 @@ const Sidebar = ({
           await microscopeControlService.set_simulated_sample_data_alias('squid-control/image-map-20250506-treatment-zip');
           console.log('Loaded simulated sample 2');
         }
+        setLoadingStatus('Sample loaded!');
+        setTimeout(() => setLoadingStatus(''), 3000);
       } catch (error) {
         console.error('Failed to load simulated sample:', error);
+        setLoadingStatus('Error loading sample');
+        setTimeout(() => setLoadingStatus(''), 3000);
       }
     } else {
+      setLoadingStatus('Feature is in development');
+      setTimeout(() => setLoadingStatus(''), 3000);
       console.log(`Loading sample: ${selectedSampleId}`);
     }
   };
@@ -244,6 +252,16 @@ const Sidebar = ({
                  <p className="no-samples-message">No occupied incubator slots found or service unavailable.</p>
             )}
           </div>
+          {loadingStatus && (
+            <div className={`sample-loading-status my-2 py-2 px-3 rounded text-center ${
+              loadingStatus === 'Sample loaded!' ? 'bg-green-100 text-green-700' : 
+              loadingStatus === 'Error loading sample' ? 'bg-red-100 text-red-700' :
+              loadingStatus === 'Feature is in development' ? 'bg-yellow-100 text-yellow-700' :
+              'bg-blue-100 text-blue-700'
+            }`}>
+              {loadingStatus}
+            </div>
+          )}
           <button 
             className="load-sample-button"
             onClick={handleLoadSample}
