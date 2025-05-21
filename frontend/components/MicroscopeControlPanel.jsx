@@ -254,7 +254,12 @@ const MicroscopeControlPanel = ({
   return (
     <div className="bg-white bg-opacity-95 p-6 rounded-lg shadow-lg border-l border-gray-300 box-border overflow-y-auto">
       <div className="flex justify-between items-center mb-4">
-        <h3 className="text-xl font-medium">Microscope Control</h3>
+        <h3 className="text-xl font-medium">
+          {selectedMicroscopeId === 'squid-control/squid-control-reef' ? 'Simulated Microscope' :
+           selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 'Real Microscope 1' :
+           selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2' ? 'Real Microscope 2' :
+           'Microscope Control'}
+        </h3>
       </div>
       <div id="manual-control-content">
         <div
