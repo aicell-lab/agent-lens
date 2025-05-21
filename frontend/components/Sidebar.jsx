@@ -7,12 +7,19 @@ const Sidebar = ({
   onTabChange, 
   onMicroscopeSelect, 
   selectedMicroscopeId,
-  incubatorControlService
+  incubatorControlService,
+  microscopeControlService
 }) => {
   const [selectedSampleId, setSelectedSampleId] = useState(null);
   const [incubatorSlots, setIncubatorSlots] = useState([]);
   const [isMicroscopePanelOpen, setIsMicroscopePanelOpen] = useState(true);
   const [isSamplePanelOpen, setIsSamplePanelOpen] = useState(false);
+
+  // Define the mapping of sample IDs to their data aliases
+  const sampleDataAliases = {
+    'simulated-sample-1': 'squid-control/image-map-20250429-treatment-zip',
+    'simulated-sample-2': 'squid-control/image-map-20250506-treatment-zip'
+  };
 
   useEffect(() => {
     const fetchIncubatorData = async () => {
@@ -61,8 +68,24 @@ const Sidebar = ({
     }
   };
 
-  const handleToggleSamplePanel = () => {
-    setIsSamplePanelOpen(!isSamplePanelOpen);
+  const handleToggleSamplePanel = async () => {
+    const newPanelState = !isSamplePanelOpen;
+    setIsSamplePanelOpen(newPanelState);
+
+    if (newPanelState && isSimulatedMicroscopeSelected && microscopeControlService) {
+      try {
+        const currentDataAlias = await microscopeControlService.get_simulated_sample_data_alias();
+        // Find the sample ID that matches the current data alias
+        const matchingSampleId = Object.entries(sampleDataAliases)
+          .find(([_, alias]) => alias === currentDataAlias)?.[0];
+        
+        if (matchingSampleId) {
+          setSelectedSampleId(matchingSampleId);
+        }
+      } catch (error) {
+        console.error('Failed to get current simulated sample:', error);
+      }
+    }
   };
 
   const handleSampleSelect = (sampleId) => {
@@ -70,11 +93,26 @@ const Sidebar = ({
     console.log(`Sample selected: ${sampleId}`);
   };
 
-  const handleLoadSample = () => {
-    if (selectedSampleId) {
-      console.log(`Loading sample: ${selectedSampleId}`);
-    } else {
+  const handleLoadSample = async () => {
+    if (!selectedSampleId) {
       console.log('No sample selected to load.');
+      return;
+    }
+
+    if (isSimulatedMicroscopeSelected) {
+      try {
+        if (selectedSampleId === 'simulated-sample-1') {
+          await microscopeControlService.set_simulated_sample_data_alias('squid-control/image-map-20250429-treatment-zip');
+          console.log('Loaded simulated sample 1');
+        } else if (selectedSampleId === 'simulated-sample-2') {
+          await microscopeControlService.set_simulated_sample_data_alias('squid-control/image-map-20250506-treatment-zip');
+          console.log('Loaded simulated sample 2');
+        }
+      } catch (error) {
+        console.error('Failed to load simulated sample:', error);
+      }
+    } else {
+      console.log(`Loading sample: ${selectedSampleId}`);
     }
   };
 
@@ -225,6 +263,7 @@ Sidebar.propTypes = {
   onMicroscopeSelect: PropTypes.func.isRequired,
   selectedMicroscopeId: PropTypes.string,
   incubatorControlService: PropTypes.object,
+  microscopeControlService: PropTypes.object,
 };
 
 export default Sidebar; 

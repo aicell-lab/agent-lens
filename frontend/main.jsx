@@ -236,6 +236,7 @@ const MicroscopeControl = () => {
               onMicroscopeSelect={handleMicroscopeSelection} 
               selectedMicroscopeId={selectedMicroscopeId} 
               incubatorControlService={incubatorControlService}
+              microscopeControlService={microscopeControlService}
             />
             <div className="content-area">
               {renderContent()}

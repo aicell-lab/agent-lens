@@ -317,13 +317,12 @@ const MicroscopeControlPanel = ({
           {['x', 'y', 'z'].map((axis) => (
             <div key={axis} className="coordinate-group p-2 border border-gray-300 rounded-lg w-1/3">
               <div className="flex justify-between mb-2">
-                <input
-                  type="text"
-                  className="control-input w-1/2 p-2 border border-gray-300 rounded"
-                  placeholder={`${axis.toUpperCase()}(mm)`}
-                  value={axis === 'x' ? xPosition : axis === 'y' ? yPosition : zPosition}
-                  readOnly
-                />
+                <div className="position-display w-1/2 mr-2 bg-gray-100 p-2 rounded flex items-center">
+                  <span className="text-gray-600 font-medium">{axis.toUpperCase()}:</span>
+                  <span className="ml-2 text-gray-800">
+                    {(axis === 'x' ? xPosition : axis === 'y' ? yPosition : zPosition).toFixed(3)} mm
+                  </span>
+                </div>
                 <input
                   type="number"
                   className="control-input w-1/2 p-2 border border-gray-300 rounded"
