@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
 import './Sidebar.css';
+import SampleSelector from './SampleSelector';
 
 const Sidebar = ({ 
   activeTab, 
@@ -10,51 +11,15 @@ const Sidebar = ({
   incubatorControlService,
   microscopeControlService
 }) => {
-  const [selectedSampleId, setSelectedSampleId] = useState(null);
-  const [incubatorSlots, setIncubatorSlots] = useState([]);
   const [isMicroscopePanelOpen, setIsMicroscopePanelOpen] = useState(true);
   const [isSamplePanelOpen, setIsSamplePanelOpen] = useState(false);
-  const [loadingStatus, setLoadingStatus] = useState('');
 
-  // Define the mapping of sample IDs to their data aliases
-  const sampleDataAliases = {
-    'simulated-sample-1': 'squid-control/image-map-20250429-treatment-zip',
-    'simulated-sample-2': 'squid-control/image-map-20250506-treatment-zip'
-  };
-
+  // Reset sample panel state when microscope selection changes
   useEffect(() => {
-    const fetchIncubatorData = async () => {
-      if (incubatorControlService && 
-          (selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ||
-           selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2')) {
-        try {
-          const slots = [];
-          for (let i = 1; i <= 42; i++) {
-            const slotInfo = await incubatorControlService.get_slot_information(i);
-            if (slotInfo && slotInfo.name && slotInfo.name.trim()) { 
-              slots.push({ ...slotInfo, id: `slot-${i}` }); 
-            }
-          }
-          setIncubatorSlots(slots);
-          setSelectedSampleId(null); 
-        } catch (error) {
-          console.error("[Sidebar] Failed to fetch incubator slots:", error);
-          setIncubatorSlots([]);
-        }
-      } else {
-        setIncubatorSlots([]); 
-        setSelectedSampleId(null); 
-      }
-    };
-
-    if (selectedMicroscopeId) {
-        fetchIncubatorData();
-    }
     if (!selectedMicroscopeId) {
-        setIsSamplePanelOpen(false);
+      setIsSamplePanelOpen(false);
     }
-
-  }, [selectedMicroscopeId, incubatorControlService]);
+  }, [selectedMicroscopeId]);
 
   const handleMicroscopeTabClick = () => {
     if (activeTab === 'microscope') {
@@ -70,58 +35,7 @@ const Sidebar = ({
   };
 
   const handleToggleSamplePanel = async () => {
-    const newPanelState = !isSamplePanelOpen;
-    setIsSamplePanelOpen(newPanelState);
-
-    if (newPanelState && isSimulatedMicroscopeSelected && microscopeControlService) {
-      try {
-        const currentDataAlias = await microscopeControlService.get_simulated_sample_data_alias();
-        // Find the sample ID that matches the current data alias
-        const matchingSampleId = Object.entries(sampleDataAliases)
-          .find(([_, alias]) => alias === currentDataAlias)?.[0];
-        
-        if (matchingSampleId) {
-          setSelectedSampleId(matchingSampleId);
-        }
-      } catch (error) {
-        console.error('Failed to get current simulated sample:', error);
-      }
-    }
-  };
-
-  const handleSampleSelect = (sampleId) => {
-    setSelectedSampleId(sampleId);
-    console.log(`Sample selected: ${sampleId}`);
-  };
-
-  const handleLoadSample = async () => {
-    if (!selectedSampleId) {
-      console.log('No sample selected to load.');
-      return;
-    }
-
-    if (isSimulatedMicroscopeSelected) {
-      setLoadingStatus('Loading sample...');
-      try {
-        if (selectedSampleId === 'simulated-sample-1') {
-          await microscopeControlService.set_simulated_sample_data_alias('squid-control/image-map-20250429-treatment-zip');
-          console.log('Loaded simulated sample 1');
-        } else if (selectedSampleId === 'simulated-sample-2') {
-          await microscopeControlService.set_simulated_sample_data_alias('squid-control/image-map-20250506-treatment-zip');
-          console.log('Loaded simulated sample 2');
-        }
-        setLoadingStatus('Sample loaded!');
-        setTimeout(() => setLoadingStatus(''), 3000);
-      } catch (error) {
-        console.error('Failed to load simulated sample:', error);
-        setLoadingStatus('Error loading sample');
-        setTimeout(() => setLoadingStatus(''), 3000);
-      }
-    } else {
-      setLoadingStatus('Feature is in development');
-      setTimeout(() => setLoadingStatus(''), 3000);
-      console.log(`Loading sample: ${selectedSampleId}`);
-    }
+    setIsSamplePanelOpen(!isSamplePanelOpen);
   };
 
   const isRealMicroscopeSelected = selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ||
@@ -197,6 +111,7 @@ const Sidebar = ({
               <span>Real Microscope 2</span>
             </button>
           </div>
+          
           {selectedMicroscopeId && (
             <>
               <hr className="sidebar-divider" />
@@ -207,7 +122,7 @@ const Sidebar = ({
                   ) : (
                     <i className="fas fa-flask"></i>
                   )}
-                  <span>{isSamplePanelOpen ? 'Hide Samples' : 'Select Samples'}</span>
+                  <span>{isSamplePanelOpen ? 'Hide Sample Selection' : 'Select Samples'}</span>
                   <i className={`fas ${isSamplePanelOpen ? 'fa-chevron-left' : 'fa-chevron-right'} microscope-toggle-icon`}></i>
                 </div>
               </button>
@@ -217,59 +132,12 @@ const Sidebar = ({
       )}
 
       {activeTab === 'microscope' && selectedMicroscopeId && isMicroscopePanelOpen && (
-        <div className={`sample-sidebar ${!isSamplePanelOpen ? 'collapsed' : ''}`}>
-          <h3 className="sample-sidebar-title">Select Sample</h3>
-          <div className="sample-options">
-            {isSimulatedMicroscopeSelected && (
-              <>
-                <button
-                  className={`sample-option ${selectedSampleId === 'simulated-sample-1' ? 'active' : ''}`}
-                  onClick={() => handleSampleSelect('simulated-sample-1')}
-                >
-                  <i className="fas fa-flask"></i> 
-                  <span>Simulated Sample 1</span>
-                </button>
-                <button
-                  className={`sample-option ${selectedSampleId === 'simulated-sample-2' ? 'active' : ''}`}
-                  onClick={() => handleSampleSelect('simulated-sample-2')}
-                >
-                  <i className="fas fa-flask"></i> 
-                  <span>Simulated Sample 2</span>
-                </button>
-              </>
-            )}
-            {isRealMicroscopeSelected && incubatorSlots.length > 0 && incubatorSlots.map(slot => (
-              <button
-                key={slot.id}
-                className={`sample-option ${selectedSampleId === slot.id ? 'active' : ''}`}
-                onClick={() => handleSampleSelect(slot.id)}
-              >
-                <i className="fas fa-vial"></i> 
-                <span>{slot.name || `Slot ${slot.incubator_slot}`}</span>
-              </button>
-            ))}
-            {isRealMicroscopeSelected && incubatorSlots.length === 0 && (
-                 <p className="no-samples-message">No occupied incubator slots found or service unavailable.</p>
-            )}
-          </div>
-          {loadingStatus && (
-            <div className={`sample-loading-status my-2 py-2 px-3 rounded text-center ${
-              loadingStatus === 'Sample loaded!' ? 'bg-green-100 text-green-700' : 
-              loadingStatus === 'Error loading sample' ? 'bg-red-100 text-red-700' :
-              loadingStatus === 'Feature is in development' ? 'bg-yellow-100 text-yellow-700' :
-              'bg-blue-100 text-blue-700'
-            }`}>
-              {loadingStatus}
-            </div>
-          )}
-          <button 
-            className="load-sample-button"
-            onClick={handleLoadSample}
-            disabled={!selectedSampleId}
-          >
-            Load Sample on Microscope
-          </button>
-        </div>
+        <SampleSelector 
+          isVisible={isSamplePanelOpen}
+          selectedMicroscopeId={selectedMicroscopeId}
+          microscopeControlService={microscopeControlService}
+          incubatorControlService={incubatorControlService}
+        />
       )}
     </div>
   );
