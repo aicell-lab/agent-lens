@@ -42,4 +42,38 @@
 
 .sidebar-tab .fas.fa-database {
   color: #6c757d;
+}
+
+/* Sub-menu styling */
+.sidebar-submenu {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem; /* Smaller gap for sub-menu items */
+  padding-left: 1.5rem; /* Indent sub-menu items */
+  margin-top: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+
+.sidebar-submenu-tab {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem; /* Smaller padding for sub-menu items */
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  font-size: 0.9em; /* Slightly smaller font for sub-menu */
+}
+
+.sidebar-submenu-tab:hover {
+  background-color: #e0e0e0; /* Slightly different hover for sub-menu */
+}
+
+.sidebar-submenu-tab.active {
+  background-color: #d6d8db; /* Slightly different active for sub-menu */
+  font-weight: bold;
 } 
