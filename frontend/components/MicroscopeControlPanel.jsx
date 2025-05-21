@@ -14,7 +14,8 @@ const MicroscopeControlPanel = ({
   addTileLayer,
   channelNames,
   vectorLayer,
-  onClose
+  onClose,
+  selectedMicroscopeId
 }) => {
   const [isLightOn, setIsLightOn] = useState(false);
   const [xPosition, setXPosition] = useState(0);
@@ -23,60 +24,98 @@ const MicroscopeControlPanel = ({
   const [xMove, setXMove] = useState(1);
   const [yMove, setYMove] = useState(1);
   const [zMove, setZMove] = useState(0.1);
-  const [illuminationIntensity, setIlluminationIntensity] = useState(50);
+
+  // Renamed states for actual values from microscope (for display)
+  const [actualIlluminationIntensity, setActualIlluminationIntensity] = useState(50);
+  const [actualCameraExposure, setActualCameraExposure] = useState(100);
+
+  // New states for user's desired values (for input controls)
+  const [desiredIlluminationIntensity, setDesiredIlluminationIntensity] = useState(50);
+  const [desiredCameraExposure, setDesiredCameraExposure] = useState(100);
+
   const [illuminationChannel, setIlluminationChannel] = useState("0");
-  const [cameraExposure, setCameraExposure] = useState(100);
   const [isLiveView, setIsLiveView] = useState(false);
   const canvasRef = useRef(null);
 
-  const fetchStatus = async () => {
+  const fetchStatusAndUpdateActuals = async () => {
+    if (!microscopeControlService) {
+      return { intensity: actualIlluminationIntensity, exposure: actualCameraExposure }; // Return current actuals if no service
+    }
     try {
       const status = await microscopeControlService.get_status();
       setXPosition(status.current_x);
       setYPosition(status.current_y);
       setZPosition(status.current_z);
       setIsLightOn(status.is_illumination_on);
-      // Update other states if needed
+
+      let fetchedIntensity = actualIlluminationIntensity;
+      let fetchedExposure = actualCameraExposure;
+
+      let intensityExposurePair;
+      switch (illuminationChannel) {
+        case "0": intensityExposurePair = status.BF_intensity_exposure; break;
+        case "11": intensityExposurePair = status.F405_intensity_exposure; break;
+        case "12": intensityExposurePair = status.F488_intensity_exposure; break;
+        case "14": intensityExposurePair = status.F561_intensity_exposure; break;
+        case "13": intensityExposurePair = status.F638_intensity_exposure; break;
+        case "15": intensityExposurePair = status.F730_intensity_exposure; break;
+        default:
+          console.warn(`[MicroscopeControlPanel] Unknown illumination channel in fetchStatus: ${illuminationChannel}`);
+          intensityExposurePair = [actualIlluminationIntensity, actualCameraExposure]; // Fallback to current actuals
+      }
+
+      if (intensityExposurePair && intensityExposurePair.length === 2) {
+        fetchedIntensity = intensityExposurePair[0];
+        fetchedExposure = intensityExposurePair[1];
+        setActualIlluminationIntensity(fetchedIntensity);
+        setActualCameraExposure(fetchedExposure);
+      } else {
+        console.warn(`[MicroscopeControlPanel] Could not find or parse intensity/exposure for channel ${illuminationChannel} from status:`, status);
+      }
+      return { intensity: fetchedIntensity, exposure: fetchedExposure };
     } catch (error) {
       appendLog(`Failed to fetch status: ${error.message}`);
+      console.error("[MicroscopeControlPanel] Failed to fetch status:", error);
+      return { intensity: actualIlluminationIntensity, exposure: actualCameraExposure }; // Return current actuals on error
     }
   };
 
   useEffect(() => {
-    const interval = setInterval(fetchStatus, 1000); // Fetch status every second
-    return () => clearInterval(interval); // Cleanup on unmount
-  }, []);
+    if (microscopeControlService) {
+      const initAndSyncValues = async () => {
+        const { intensity, exposure } = await fetchStatusAndUpdateActuals(); // Fetches and updates actuals, returns values
+        // Sync desired values with the freshly fetched actual values
+        setDesiredIlluminationIntensity(intensity);
+        setDesiredCameraExposure(exposure);
+      };
+      initAndSyncValues();
+
+      // Periodic fetch only updates actuals
+      const interval = setInterval(fetchStatusAndUpdateActuals, 1000);
+      return () => clearInterval(interval);
+    }
+  }, [microscopeControlService, illuminationChannel, appendLog]); // Re-run if service or channel changes to re-sync
 
   useEffect(() => {
+    let defaultIntensity = 50;
+    let defaultExposure = 100;
+    // Determine defaults based on channel (can be different from the microscope's current state)
     switch (illuminationChannel) {
-      case "0":
-        setIlluminationIntensity(50);
-        setCameraExposure(100);
-        break;
-      case "11":
-        setIlluminationIntensity(50);
-        setCameraExposure(100);
-        break;
-      case "12":
-        setIlluminationIntensity(50);
-        setCameraExposure(100);
-        break;
-      case "14":
-        setIlluminationIntensity(50);
-        setCameraExposure(100);
-        break;
-      case "13":
-        setIlluminationIntensity(50);
-        setCameraExposure(100);
-        break;
-      case "15":
-        setIlluminationIntensity(50);
-        setCameraExposure(100);
-        break;
-      default:
-        break;
+      case "0": defaultIntensity = 50; defaultExposure = 100; break;
+      case "11": defaultIntensity = 50; defaultExposure = 100; break;
+      case "12": defaultIntensity = 50; defaultExposure = 100; break;
+      case "14": defaultIntensity = 50; defaultExposure = 100; break;
+      case "13": defaultIntensity = 50; defaultExposure = 100; break;
+      case "15": defaultIntensity = 50; defaultExposure = 100; break;
+      default: break;
     }
-  }, [illuminationChannel]);
+    setDesiredIlluminationIntensity(defaultIntensity);
+    setDesiredCameraExposure(defaultExposure);
+    // Note: The main useEffect listening to microscopeControlService AND illuminationChannel
+    // will then call fetchStatusAndUpdateActuals, which updates actuals and re-syncs desired values
+    // to what the microscope reports for this new channel after a brief moment.
+    // This ensures desired values start at defaults then quickly align with reality.
+  }, [illuminationChannel]); // Only depends on illuminationChannel
 
   useEffect(() => {
     if (!snapshotImage || !canvasRef.current) return;
@@ -106,17 +145,18 @@ const MicroscopeControlPanel = ({
     if (isLiveView) {
       liveViewInterval = setInterval(async () => {
         try {
-          const base64Image = await microscopeControlService.one_new_frame(cameraExposure, parseInt(illuminationChannel, 10), parseInt(illuminationIntensity, 10));
+          // Use DESIRED values for live view frames
+          const base64Image = await microscopeControlService.one_new_frame(desiredCameraExposure, parseInt(illuminationChannel, 10), parseInt(desiredIlluminationIntensity, 10));
           setSnapshotImage(`data:image/png;base64,${base64Image}`);
         } catch (error) {
           appendLog(`Error in live view: ${error.message}`);
         }
-      }, 2000);
+      }, 2000); // Consider making interval dependent on desiredCameraExposure
     } else if (liveViewInterval) {
       clearInterval(liveViewInterval);
     }
     return () => clearInterval(liveViewInterval);
-  }, [isLiveView, cameraExposure, illuminationChannel, illuminationIntensity]);
+  }, [isLiveView, desiredCameraExposure, illuminationChannel, desiredIlluminationIntensity, microscopeControlService]); // Added microscopeControlService
 
   const moveMicroscope = async (direction, multiplier) => {
     if (!microscopeControlService) return;
@@ -157,9 +197,10 @@ const MicroscopeControlPanel = ({
 
   const snapImage = async () => {
     appendLog('Snapping image...');
-    const exposureTime = cameraExposure;
+    // Use DESIRED values for snapping image
+    const exposureTime = desiredCameraExposure;
     const channel = parseInt(illuminationChannel, 10);
-    const intensity = parseInt(illuminationIntensity, 10);
+    const intensity = desiredIlluminationIntensity;
     
     try {
       const base64Image = await microscopeControlService.one_new_frame(exposureTime, channel, intensity);
@@ -213,7 +254,12 @@ const MicroscopeControlPanel = ({
   return (
     <div className="bg-white bg-opacity-95 p-6 rounded-lg shadow-lg border-l border-gray-300 box-border overflow-y-auto">
       <div className="flex justify-between items-center mb-4">
-        <h3 className="text-xl font-medium">Microscope Control</h3>
+        <h3 className="text-xl font-medium">
+          {selectedMicroscopeId === 'squid-control/squid-control-reef' ? 'Simulated Microscope' :
+           selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 'Real Microscope 1' :
+           selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2' ? 'Real Microscope 2' :
+           'Microscope Control'}
+        </h3>
       </div>
       <div id="manual-control-content">
         <div
@@ -316,18 +362,18 @@ const MicroscopeControlPanel = ({
             <div className="illumination-intensity mb-4">
               <div className="intensity-label-row flex justify-between mb-2">
                 <label>Illumination Intensity: </label>
-                <span>{illuminationIntensity}%</span>
+                {/* Display ACTUAL value from microscope */}
+                <span>{actualIlluminationIntensity}%</span>
               </div>
               <input
                 type="range"
                 className="control-input w-full"
                 min="0"
                 max="100"
-                value={illuminationIntensity}
+                // Input is bound to DESIRED value
+                value={desiredIlluminationIntensity}
                 onChange={(e) => {
-                  const newIntensity = parseInt(e.target.value, 10);
-                  setIlluminationIntensity(newIntensity);
-                  // Update server with new intensity
+                  setDesiredIlluminationIntensity(parseInt(e.target.value, 10));
                 }}
               />
             </div>
@@ -351,17 +397,21 @@ const MicroscopeControlPanel = ({
 
           <div className="camera-exposure-settings p-2 border border-gray-300 rounded-lg w-1/2">
             <label>Camera Exposure:</label>
+            {/* Display ACTUAL value from microscope */}
+            <span className="ml-2">{actualCameraExposure} ms</span> {/* Added display for actual exposure */}
             <input
               type="number"
               className="control-input w-full mt-2 p-2 border border-gray-300 rounded"
-              value={cameraExposure}
-              onChange={(e) => setCameraExposure(parseInt(e.target.value, 10))}
+              // Input is bound to DESIRED value
+              value={desiredCameraExposure}
+              onChange={(e) => setDesiredCameraExposure(parseInt(e.target.value, 10))}
             />
           </div>
         </div>
       </div>
       <div className="mt-4">
         <ChatbotButton 
+          key={selectedMicroscopeId}
           microscopeControlService={microscopeControlService} 
           appendLog={appendLog} 
         />
@@ -380,6 +430,7 @@ MicroscopeControlPanel.propTypes = {
   vectorLayer: PropTypes.object,
   addTileLayer: PropTypes.func,
   channelNames: PropTypes.object,
+  selectedMicroscopeId: PropTypes.string,
   onClose: PropTypes.func.isRequired,
 };
 
