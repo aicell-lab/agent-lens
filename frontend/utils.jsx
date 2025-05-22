@@ -34,9 +34,10 @@ export const initializeServices = async (
   setMicroscopeControlService,
   setSimilarityService,
   setSegmentService,
-  setIncubatorControlService, // new parameter for incubator control service
+  setIncubatorControlService,
+  setRoboticArmService,
   appendLog,
-  selectedMicroscopeId // Added selectedMicroscopeId
+  selectedMicroscopeId
 ) => {
   console.log(`[initializeServices] Starting. Selected Microscope ID: ${selectedMicroscopeId}`);
   appendLog('Initializing connection to server...');
@@ -95,6 +96,22 @@ export const initializeServices = async (
     console.error(`[initializeServices] Error acquiring Incubator Control service '${incubatorServiceId}':`, error);
     setIncubatorControlService(null);
   }
+
+  // Connect to the robotic arm service
+  const roboticArmServiceId = "reef-imaging/mirror-robotic-arm-control";
+  console.log(`[initializeServices] Attempting to get Robotic Arm Control service: ${roboticArmServiceId}`);
+  try {
+    appendLog(`Acquiring Robotic Arm Control service from local server...`);
+    const roboticArmService = await server.getService(roboticArmServiceId);
+    appendLog(`Robotic Arm Control service acquired from local server.`);
+    setRoboticArmService(roboticArmService);
+    console.log("[initializeServices] Robotic Arm Control service acquired.", roboticArmService);
+  } catch (error) {
+    appendLog(`Error acquiring Robotic Arm Control service: ${error.message}`);
+    console.error(`[initializeServices] Error acquiring Robotic Arm Control service '${roboticArmServiceId}':`, error);
+    setRoboticArmService(null);
+  }
+
   console.log("[initializeServices] Finished.");
 };
 

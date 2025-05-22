@@ -24,6 +24,7 @@ const MicroscopeControlPanel = ({
   const [xMove, setXMove] = useState(1);
   const [yMove, setYMove] = useState(1);
   const [zMove, setZMove] = useState(0.1);
+  const [microscopeBusy, setMicroscopeBusy] = useState(false);
 
   // Renamed states for actual values from microscope (for display)
   const [actualIlluminationIntensity, setActualIlluminationIntensity] = useState(50);
@@ -94,28 +95,7 @@ const MicroscopeControlPanel = ({
       const interval = setInterval(fetchStatusAndUpdateActuals, 1000);
       return () => clearInterval(interval);
     }
-  }, [microscopeControlService, illuminationChannel, appendLog]); // Re-run if service or channel changes to re-sync
-
-  useEffect(() => {
-    let defaultIntensity = 50;
-    let defaultExposure = 100;
-    // Determine defaults based on channel (can be different from the microscope's current state)
-    switch (illuminationChannel) {
-      case "0": defaultIntensity = 50; defaultExposure = 100; break;
-      case "11": defaultIntensity = 50; defaultExposure = 100; break;
-      case "12": defaultIntensity = 50; defaultExposure = 100; break;
-      case "14": defaultIntensity = 50; defaultExposure = 100; break;
-      case "13": defaultIntensity = 50; defaultExposure = 100; break;
-      case "15": defaultIntensity = 50; defaultExposure = 100; break;
-      default: break;
-    }
-    setDesiredIlluminationIntensity(defaultIntensity);
-    setDesiredCameraExposure(defaultExposure);
-    // Note: The main useEffect listening to microscopeControlService AND illuminationChannel
-    // will then call fetchStatusAndUpdateActuals, which updates actuals and re-syncs desired values
-    // to what the microscope reports for this new channel after a brief moment.
-    // This ensures desired values start at defaults then quickly align with reality.
-  }, [illuminationChannel]); // Only depends on illuminationChannel
+  }, [microscopeControlService, illuminationChannel]); // Re-run if service or channel changes to re-sync
 
   useEffect(() => {
     if (!snapshotImage || !canvasRef.current) return;
@@ -145,9 +125,12 @@ const MicroscopeControlPanel = ({
     if (isLiveView) {
       liveViewInterval = setInterval(async () => {
         try {
-          // Use DESIRED values for live view frames
-          const base64Image = await microscopeControlService.one_new_frame(desiredCameraExposure, parseInt(illuminationChannel, 10), parseInt(desiredIlluminationIntensity, 10));
-          setSnapshotImage(`data:image/png;base64,${base64Image}`);
+          // Only capture new frames if the microscope is not busy with other operations
+          if (!microscopeBusy && microscopeControlService) {
+            // Use DESIRED values for live view frames
+            const base64Image = await microscopeControlService.one_new_frame(desiredCameraExposure, parseInt(illuminationChannel, 10), parseInt(desiredIlluminationIntensity, 10));
+            setSnapshotImage(`data:image/png;base64,${base64Image}`);
+          }
         } catch (error) {
           appendLog(`Error in live view: ${error.message}`);
         }
@@ -156,11 +139,12 @@ const MicroscopeControlPanel = ({
       clearInterval(liveViewInterval);
     }
     return () => clearInterval(liveViewInterval);
-  }, [isLiveView, desiredCameraExposure, illuminationChannel, desiredIlluminationIntensity, microscopeControlService]); // Added microscopeControlService
+  }, [isLiveView, desiredCameraExposure, illuminationChannel, desiredIlluminationIntensity, microscopeControlService, microscopeBusy]);
 
   const moveMicroscope = async (direction, multiplier) => {
     if (!microscopeControlService) return;
     try {
+      setMicroscopeBusy(true);
       let moveX = 0, moveY = 0, moveZ = 0;
       if (direction === 'x') moveX = xMove * multiplier;
       else if (direction === 'y') moveY = yMove * multiplier;
@@ -176,12 +160,15 @@ const MicroscopeControlPanel = ({
       }
     } catch (error) {
       appendLog(`Error in moveMicroscope: ${error.message}`);
+    } finally {
+      setMicroscopeBusy(false);
     }
   };
 
   const moveToPosition = async () => {
     if (!microscopeControlService) return;
     try {
+      setMicroscopeBusy(true);
       appendLog(`Attempting to move to position: (${xMove}, ${yMove}, ${zMove})`);
       const result = await microscopeControlService.move_to_position(xMove, yMove, zMove);
       if (result.success) {
@@ -192,17 +179,21 @@ const MicroscopeControlPanel = ({
       }
     } catch (error) {
       appendLog(`Error in moveToPosition: ${error.message}`);
+    } finally {
+      setMicroscopeBusy(false);
     }
   };
 
   const snapImage = async () => {
-    appendLog('Snapping image...');
-    // Use DESIRED values for snapping image
-    const exposureTime = desiredCameraExposure;
-    const channel = parseInt(illuminationChannel, 10);
-    const intensity = desiredIlluminationIntensity;
-    
+    if (!microscopeControlService) return;
     try {
+      setMicroscopeBusy(true);
+      appendLog('Snapping image...');
+      // Use DESIRED values for snapping image
+      const exposureTime = desiredCameraExposure;
+      const channel = parseInt(illuminationChannel, 10);
+      const intensity = desiredIlluminationIntensity;
+      
       const base64Image = await microscopeControlService.one_new_frame(exposureTime, channel, intensity);
       console.log('Received base64 image data of length:', base64Image.length);
       setSnapshotImage(`data:image/png;base64,${base64Image}`);
@@ -210,21 +201,52 @@ const MicroscopeControlPanel = ({
     } catch (error) {
       console.error('Error in snapImage:', error);
       appendLog(`Error in snapImage: ${error.message}`);
+    } finally {
+      setMicroscopeBusy(false);
     }
   };
 
-  const autoFocus = async () => {
-    await microscopeControlService.auto_focus();
-    appendLog('Auto-focusing...');
+  const contrastAutoFocus = async () => {
+    if (!microscopeControlService) return;
+    try {
+      setMicroscopeBusy(true);
+      appendLog('Performing contrast autofocus...');
+      await microscopeControlService.auto_focus();
+    } catch (error) {
+      appendLog(`Error in contrast autofocus: ${error.message}`);
+    } finally {
+      setMicroscopeBusy(false);
+    }
+  };
+
+  const laserAutoFocus = async () => {
+    if (!microscopeControlService) return;
+    try {
+      setMicroscopeBusy(true);
+      appendLog('Performing laser autofocus...');
+      await microscopeControlService.do_laser_autofocus();
+    } catch (error) {
+      appendLog(`Error in laser autofocus: ${error.message}`);
+    } finally {
+      setMicroscopeBusy(false);
+    }
   };
 
   const toggleLight = async () => {
-    if (!isLightOn) {
-      appendLog('Light turned on.');
-    } else {
-      appendLog('Light turned off.');
+    if (!microscopeControlService) return;
+    try {
+      setMicroscopeBusy(true);
+      if (!isLightOn) {
+        appendLog('Light turned on.');
+      } else {
+        appendLog('Light turned off.');
+      }
+      setIsLightOn(!isLightOn);
+    } catch (error) {
+      appendLog(`Error toggling light: ${error.message}`);
+    } finally {
+      setMicroscopeBusy(false);
     }
-    setIsLightOn(!isLightOn);
   };
 
   const resetEmbedding = (map, vectorLayer) => {
@@ -283,28 +305,35 @@ const MicroscopeControlPanel = ({
         <div className="control-group mb-4">
           <div className="horizontal-buttons flex justify-between space-x-2">
             <button
-              className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/4 p-2 rounded"
+              className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/5 p-2 rounded"
               onClick={toggleLight}
               disabled={!microscopeControlService}
             >
               <i className="fas fa-lightbulb icon"></i> {isLightOn ? 'Turn Light Off' : 'Turn Light On'}
             </button>
             <button
-              className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/4 p-2 rounded"
-              onClick={autoFocus}
+              className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/5 p-2 rounded"
+              onClick={contrastAutoFocus}
               disabled={!microscopeControlService}
             >
-              <i className="fas fa-crosshairs icon"></i> Autofocus
+              <i className="fas fa-crosshairs icon"></i> Contrast Autofocus
             </button>
             <button
-              className="control-button snap-button bg-green-500 text-white hover:bg-green-600 w-1/4 p-2 rounded"
+              className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/5 p-2 rounded"
+              onClick={laserAutoFocus}
+              disabled={!microscopeControlService}
+            >
+              <i className="fas fa-bullseye icon"></i> Laser Autofocus
+            </button>
+            <button
+              className="control-button snap-button bg-green-500 text-white hover:bg-green-600 w-1/5 p-2 rounded"
               onClick={snapImage}
               disabled={!microscopeControlService}
             >
               <i className="fas fa-camera icon"></i> Snap Image
             </button>
             <button
-              className={`control-button live-button ${isLiveView ? 'bg-red-500 hover:bg-red-600' : 'bg-purple-500 hover:bg-purple-600'} text-white w-1/4 p-2 rounded`}
+              className={`control-button live-button ${isLiveView ? 'bg-red-500 hover:bg-red-600' : 'bg-purple-500 hover:bg-purple-600'} text-white w-1/5 p-2 rounded`}
               onClick={isLiveView ? stopLiveView : startLiveView}
               disabled={!microscopeControlService}
             >
@@ -317,13 +346,12 @@ const MicroscopeControlPanel = ({
           {['x', 'y', 'z'].map((axis) => (
             <div key={axis} className="coordinate-group p-2 border border-gray-300 rounded-lg w-1/3">
               <div className="flex justify-between mb-2">
-                <input
-                  type="text"
-                  className="control-input w-1/2 p-2 border border-gray-300 rounded"
-                  placeholder={`${axis.toUpperCase()}(mm)`}
-                  value={axis === 'x' ? xPosition : axis === 'y' ? yPosition : zPosition}
-                  readOnly
-                />
+                <div className="position-display w-1/2 mr-2 bg-gray-100 p-2 rounded flex items-center">
+                  <span className="text-gray-600 font-medium">{axis.toUpperCase()}:</span>
+                  <span className="ml-2 text-gray-800">
+                    {(axis === 'x' ? xPosition : axis === 'y' ? yPosition : zPosition).toFixed(3)} mm
+                  </span>
+                </div>
                 <input
                   type="number"
                   className="control-input w-1/2 p-2 border border-gray-300 rounded"
