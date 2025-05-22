@@ -476,7 +476,10 @@ const SampleSelector = ({
               <i className="fas fa-vial"></i> 
               <div className="sample-info">
                 <span className="sample-name">{slot.name || `Slot ${slot.incubator_slot}`}</span>
-                <span className="sample-location">Location: {slot.location}</span>
+                <span className="sample-location">
+                  Location: {slot.location}
+                  {slot.location === 'incubator_slot' && ` (Slot #${slot.incubator_slot})`}
+                </span>
               </div>
             </button>
           ))}
