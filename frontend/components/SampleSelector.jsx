@@ -32,7 +32,7 @@ const SampleSelector = ({
 
   // Helper function to add workflow messages
   const addWorkflowMessage = (message) => {
-    setWorkflowMessages(prev => [...prev, { message, timestamp: Date.now() }]);
+    setWorkflowMessages(prev => [{ message, timestamp: Date.now() }, ...prev]);
   };
 
   // Clear workflow messages
@@ -518,7 +518,7 @@ const SampleSelector = ({
           <h4 className="text-sm font-semibold mb-1">Operation Progress:</h4>
           <ul className="workflow-messages text-xs">
             {workflowMessages.map((msg, index) => (
-              <li key={index} className="mb-1 py-1 px-2 border-b border-gray-100 last:border-b-0">
+              <li key={index} className="mb-1 py-1 px-2 border-b border-gray-100">
                 <span className="operation-step"><i className="fas fa-circle-notch text-blue-500 mr-2"></i>{msg.message}</span>
               </li>
             ))}
