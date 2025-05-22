@@ -98,24 +98,6 @@ const MicroscopeControlPanel = ({
   }, [microscopeControlService, illuminationChannel, appendLog]); // Re-run if service or channel changes to re-sync
 
   useEffect(() => {
-    let defaultIntensity = 50;
-    let defaultExposure = 100;
-    // Determine defaults based on channel (can be different from the microscope's current state)
-    switch (illuminationChannel) {
-      case "0": defaultIntensity = 50; defaultExposure = 100; break;
-      case "11": defaultIntensity = 50; defaultExposure = 100; break;
-      case "12": defaultIntensity = 50; defaultExposure = 100; break;
-      case "14": defaultIntensity = 50; defaultExposure = 100; break;
-      case "13": defaultIntensity = 50; defaultExposure = 100; break;
-      case "15": defaultIntensity = 50; defaultExposure = 100; break;
-      default: break;
-    }
-    setDesiredIlluminationIntensity(defaultIntensity);
-    setDesiredCameraExposure(defaultExposure);
-
-  }, [illuminationChannel]); // Only depends on illuminationChannel
-
-  useEffect(() => {
     if (!snapshotImage || !canvasRef.current) return;
 
     const canvas = canvasRef.current;
