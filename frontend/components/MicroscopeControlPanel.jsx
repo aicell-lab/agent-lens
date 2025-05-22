@@ -213,9 +213,14 @@ const MicroscopeControlPanel = ({
     }
   };
 
-  const autoFocus = async () => {
+  const contrastAutoFocus = async () => {
     await microscopeControlService.auto_focus();
-    appendLog('Auto-focusing...');
+    appendLog('Performing contrast autofocus...');
+  };
+
+  const laserAutoFocus = async () => {
+    await microscopeControlService.do_laser_autofocus();
+    appendLog('Performing laser autofocus...');
   };
 
   const toggleLight = async () => {
@@ -283,28 +288,35 @@ const MicroscopeControlPanel = ({
         <div className="control-group mb-4">
           <div className="horizontal-buttons flex justify-between space-x-2">
             <button
-              className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/4 p-2 rounded"
+              className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/5 p-2 rounded"
               onClick={toggleLight}
               disabled={!microscopeControlService}
             >
               <i className="fas fa-lightbulb icon"></i> {isLightOn ? 'Turn Light Off' : 'Turn Light On'}
             </button>
             <button
-              className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/4 p-2 rounded"
-              onClick={autoFocus}
+              className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/5 p-2 rounded"
+              onClick={contrastAutoFocus}
               disabled={!microscopeControlService}
             >
-              <i className="fas fa-crosshairs icon"></i> Autofocus
+              <i className="fas fa-crosshairs icon"></i> Contrast Autofocus
             </button>
             <button
-              className="control-button snap-button bg-green-500 text-white hover:bg-green-600 w-1/4 p-2 rounded"
+              className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/5 p-2 rounded"
+              onClick={laserAutoFocus}
+              disabled={!microscopeControlService}
+            >
+              <i className="fas fa-bullseye icon"></i> Laser Autofocus
+            </button>
+            <button
+              className="control-button snap-button bg-green-500 text-white hover:bg-green-600 w-1/5 p-2 rounded"
               onClick={snapImage}
               disabled={!microscopeControlService}
             >
               <i className="fas fa-camera icon"></i> Snap Image
             </button>
             <button
-              className={`control-button live-button ${isLiveView ? 'bg-red-500 hover:bg-red-600' : 'bg-purple-500 hover:bg-purple-600'} text-white w-1/4 p-2 rounded`}
+              className={`control-button live-button ${isLiveView ? 'bg-red-500 hover:bg-red-600' : 'bg-purple-500 hover:bg-purple-600'} text-white w-1/5 p-2 rounded`}
               onClick={isLiveView ? stopLiveView : startLiveView}
               disabled={!microscopeControlService}
             >
