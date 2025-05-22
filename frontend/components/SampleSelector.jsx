@@ -15,6 +15,8 @@ const SampleSelector = ({
   const [roboticArmServiceState, setRoboticArmServiceState] = useState(null);
   const [currentOperation, setCurrentOperation] = useState(null);
   const [workflowMessages, setWorkflowMessages] = useState([]);
+  // Track loaded sample ID on current microscope
+  const [loadedSampleOnMicroscope, setLoadedSampleOnMicroscope] = useState(null);
 
   // Define the mapping of sample IDs to their data aliases
   const sampleDataAliases = {
@@ -25,6 +27,8 @@ const SampleSelector = ({
   const isRealMicroscopeSelected = selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ||
                                 selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2';
   const isSimulatedMicroscopeSelected = selectedMicroscopeId === 'squid-control/squid-control-reef';
+  const currentMicroscopeNumber = selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 1 : 
+                                 selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2' ? 2 : 0;
 
   // Helper function to add workflow messages
   const addWorkflowMessage = (message) => {
@@ -34,6 +38,28 @@ const SampleSelector = ({
   // Clear workflow messages
   const clearWorkflowMessages = () => {
     setWorkflowMessages([]);
+  };
+
+  // Helper function to update sample location
+  const updateSampleLocation = async (incubatorSlot, newLocation) => {
+    if (!incubatorControlService) return;
+    try {
+      await incubatorControlService.update_sample_location(incubatorSlot, newLocation);
+      addWorkflowMessage(`Sample location updated to: ${newLocation}`);
+      
+      // If this is a location related to a microscope, track the loaded sample
+      if (newLocation === 'microscope1' || newLocation === 'microscope2') {
+        setLoadedSampleOnMicroscope(`slot-${incubatorSlot}`);
+      } else if (newLocation === 'incubator_slot') {
+        setLoadedSampleOnMicroscope(null);
+      }
+      
+      // Refresh the slots data after location update
+      await fetchIncubatorData();
+    } catch (error) {
+      console.error(`Failed to update sample location to ${newLocation}:`, error);
+      addWorkflowMessage(`Error updating sample location: ${error.message}`);
+    }
   };
 
   // Connect to robotic arm service when real microscope is selected
@@ -51,14 +77,8 @@ const SampleSelector = ({
             light_on: async () => addWorkflowMessage("Robotic arm light turned on"),
             light_off: async () => addWorkflowMessage("Robotic arm light turned off"),
             grab_sample_from_incubator: async () => addWorkflowMessage("Sample grabbed from incubator"),
-            transport_from_incubator_to_microscope1: async () => addWorkflowMessage("Sample transported to microscope 1"),
-            transport_from_incubator_to_microscope2: async () => addWorkflowMessage("Sample transported to microscope 2"),
-            put_sample_on_microscope1: async () => addWorkflowMessage("Sample placed on microscope 1"),
-            put_sample_on_microscope2: async () => addWorkflowMessage("Sample placed on microscope 2"),
-            grab_sample_from_microscope1: async () => addWorkflowMessage("Sample grabbed from microscope 1"),
-            grab_sample_from_microscope2: async () => addWorkflowMessage("Sample grabbed from microscope 2"),
-            transport_from_microscope1_to_incubator: async () => addWorkflowMessage("Sample transported from microscope 1 to incubator"),
-            transport_from_microscope2_to_incubator: async () => addWorkflowMessage("Sample transported from microscope 2 to incubator"),
+            incubator_to_microscope: async (microscopeNumber) => addWorkflowMessage(`Sample transported to microscope ${microscopeNumber}`),
+            microscope_to_incubator: async (microscopeNumber) => addWorkflowMessage(`Sample transported from microscope ${microscopeNumber} to incubator`),
             put_sample_on_incubator: async () => addWorkflowMessage("Sample placed on incubator")
           };
           
@@ -98,37 +118,60 @@ const SampleSelector = ({
     fetchCurrentSample();
   }, [isVisible, isSimulatedMicroscopeSelected, microscopeControlService]);
 
-  // Fetch incubator data when microscope selection changes
-  useEffect(() => {
-    const fetchIncubatorData = async () => {
-      if (incubatorControlService && 
-          (selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ||
-           selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2')) {
-        try {
-          // Get information for all slots at once
-          const allSlotInfo = await incubatorControlService.get_slot_information();
-          // Filter slots with names and preserve the original incubator_slot number
-          const slots = (allSlotInfo || []).filter(slotInfo => 
-            slotInfo && slotInfo.name && slotInfo.name.trim()
-          ).map(slotInfo => ({
-            ...slotInfo,
-            id: `slot-${slotInfo.incubator_slot}`
-            // Use the incubator_slot already present in the data
-          }));
-          setIncubatorSlots(slots);
-          setSelectedSampleId(null); 
+  // Fetch incubator data when microscope selection changes or after location updates
+  const fetchIncubatorData = async () => {
+    if (incubatorControlService && 
+        (selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ||
+          selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2')) {
+      try {
+        // Get information for all slots at once
+        const allSlotInfo = await incubatorControlService.get_slot_information();
+        const slots = (allSlotInfo || []).filter(slotInfo => 
+          slotInfo && slotInfo.name && slotInfo.name.trim()
+        ).map(slotInfo => ({
+          ...slotInfo,
+          id: `slot-${slotInfo.incubator_slot}`
+        }));
+        
+        // Check if any samples are loaded on the current microscope
+        const samplesOnCurrentMicroscope = slots.filter(slot => 
+          slot.location === `microscope${currentMicroscopeNumber}`
+        );
+        
+        if (samplesOnCurrentMicroscope.length > 0) {
+          // If a sample is already on this microscope, set it as selected and loaded
+          setSelectedSampleId(samplesOnCurrentMicroscope[0].id);
+          setIsSampleLoaded(true);
+          setLoadedSampleOnMicroscope(samplesOnCurrentMicroscope[0].id);
+        } else {
+          // No sample on this microscope
           setIsSampleLoaded(false);
-        } catch (error) {
-          console.error("[SampleSelector] Failed to fetch incubator slots:", error);
-          setIncubatorSlots([]);
+          
+          // Clear selected sample if it was previously set for this microscope
+          if (selectedSampleId && selectedSampleId.startsWith('slot-')) {
+            const selectedSlot = slots.find(slot => slot.id === selectedSampleId);
+            if (!selectedSlot || selectedSlot.location !== 'incubator_slot') {
+              setSelectedSampleId(null);
+            }
+          }
         }
-      } else {
-        setIncubatorSlots([]); 
-        setSelectedSampleId(null); 
+        
+        setIncubatorSlots(slots);
+      } catch (error) {
+        console.error("[SampleSelector] Failed to fetch incubator slots:", error);
+        setIncubatorSlots([]);
         setIsSampleLoaded(false);
+        setSelectedSampleId(null);
       }
-    };
+    } else {
+      setIncubatorSlots([]); 
+      setSelectedSampleId(null); 
+      setIsSampleLoaded(false);
+    }
+  };
 
+  // Call fetchIncubatorData when microscope selection changes
+  useEffect(() => {
     if (selectedMicroscopeId) { 
       fetchIncubatorData();
     }
@@ -205,6 +248,8 @@ const SampleSelector = ({
         // 1. Incubator releases the sample
         addWorkflowMessage("Getting sample from slot to transfer station");
         await incubatorControlService.get_sample_from_slot_to_transfer_station(incubatorSlot);
+        // Update sample location to incubator_station
+        await updateSampleLocation(incubatorSlot, "incubator_station");
         addWorkflowMessage("Plate loaded onto transfer station");
         
         // Connect robotic arm and turn on light
@@ -217,8 +262,20 @@ const SampleSelector = ({
         
         // 3. Use robotic arm to transport sample to microscope
         const microscopeNumber = selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 1 : 2;
+        
+        // Update sample location to robotic_arm
+        await updateSampleLocation(incubatorSlot, "robotic_arm");
         addWorkflowMessage(`Transporting sample to microscope ${microscopeNumber}`);
-        await armService.incubator_to_microscope(microscopeNumber);
+        
+        // Call the appropriate transport method based on microscope number
+        if (microscopeNumber === 1) {
+          await armService.incubator_to_microscope(microscopeNumber);
+        } else {
+          await armService.incubator_to_microscope(microscopeNumber);
+        }
+        
+        // Update sample location to microscope1 or microscope2
+        await updateSampleLocation(incubatorSlot, `microscope${microscopeNumber}`);
         addWorkflowMessage("Sample placed on microscope");
         
         // Turn off light and disconnect robotic arm
@@ -247,13 +304,6 @@ const SampleSelector = ({
       return;
     }
 
-    // Special case for microscope 2: show message instead of unloading
-    if (selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2') {
-      clearWorkflowMessages(); // Clear any previous messages
-      setLoadingStatus('Unloading sample for microscope 2 is not ready...');
-      setTimeout(() => setLoadingStatus(''), 3000);
-      return;
-    }
 
     // Clear previous workflow messages
     clearWorkflowMessages();
@@ -292,12 +342,10 @@ const SampleSelector = ({
         const incubatorSlot = parseInt(slotMatch[1], 10);
         addWorkflowMessage(`Unloading sample to incubator slot ${incubatorSlot}`);
         
-        // Check sample status
-        const sampleStatus = await incubatorControlService.get_sample_status(incubatorSlot);
-        addWorkflowMessage(`Sample status: ${sampleStatus}`);
-        
-        if (sampleStatus !== "OUT") {
-          throw new Error("Plate is not outside incubator");
+        // Check sample status and location
+        const selectedSlot = incubatorSlots.find(slot => slot.id === selectedSampleId);
+        if (!selectedSlot || selectedSlot.location !== `microscope${currentMicroscopeNumber}`) {
+          throw new Error(`Sample is not on microscope ${currentMicroscopeNumber}`);
         }
         
         // Use the provided robotic arm service or the locally created one
@@ -316,12 +364,26 @@ const SampleSelector = ({
         
         // 2. Transport from microscope to incubator
         const microscopeNumber = selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 1 : 2;
+        
+        // Update sample location to robotic_arm
+        await updateSampleLocation(incubatorSlot, "robotic_arm");
         addWorkflowMessage(`Transporting sample from microscope ${microscopeNumber} to incubator`);
-        await armService.microscope_to_incubator(microscopeNumber);
+        
+        // Call the appropriate transport method based on microscope number
+        if (microscopeNumber === 1) {
+          await armService.microscope_to_incubator(microscopeNumber);
+        } else {
+          await armService.microscope_to_incubator(microscopeNumber);
+        }
+        // Update sample location to incubator_station
+        await updateSampleLocation(incubatorSlot, "incubator_station");
         addWorkflowMessage("Sample transported to incubator");
         
         // 3. Incubator collects the sample
         await incubatorControlService.put_sample_from_transfer_station_to_slot(incubatorSlot);
+        
+        // Update sample location to incubator_slot
+        await updateSampleLocation(incubatorSlot, "incubator_slot");
         addWorkflowMessage("Sample moved to incubator slot");
         
         // Turn off light, disconnect robotic arm, and return microscope stage
@@ -342,6 +404,39 @@ const SampleSelector = ({
         setTimeout(() => setLoadingStatus(''), 3000);
       }
     }
+  };
+
+  // Determine if a sample can be selected based on its location
+  const canSelectSample = (slot) => {
+    // For simulated microscope, always allow selection
+    if (isSimulatedMicroscopeSelected) return true;
+    
+    // Only samples in incubator_slot can be selected when no sample is loaded
+    if (!isSampleLoaded) {
+      return slot.location === 'incubator_slot';
+    }
+    
+    // If a sample is already loaded, only the currently loaded sample can be selected
+    return slot.location === `microscope${currentMicroscopeNumber}`;
+  };
+
+  // Get class name for sample button based on location and selected state
+  const getSampleButtonClass = (slot) => {
+    let className = 'sample-option';
+    
+    // Add selected state
+    if (selectedSampleId === slot.id) {
+      className += ' active';
+    }
+    
+    // Add color state based on location
+    if (slot.location === 'incubator_slot') {
+      className += ' green-sample';
+    } else {
+      className += ' orange-sample';
+    }
+    
+    return className;
   };
 
   return (
@@ -374,12 +469,15 @@ const SampleSelector = ({
           {isRealMicroscopeSelected && incubatorSlots.length > 0 && incubatorSlots.map(slot => (
             <button
               key={slot.id}
-              className={`sample-option ${selectedSampleId === slot.id ? 'active' : ''}`}
+              className={getSampleButtonClass(slot)}
               onClick={() => handleSampleSelect(slot.id)}
-              disabled={currentOperation !== null}
+              disabled={currentOperation !== null || !canSelectSample(slot)}
             >
               <i className="fas fa-vial"></i> 
-              <span>{slot.name || `Slot ${slot.incubator_slot}`}</span>
+              <div className="sample-info">
+                <span className="sample-name">{slot.name || `Slot ${slot.incubator_slot}`}</span>
+                <span className="sample-location">Location: {slot.location}</span>
+              </div>
             </button>
           ))}
           {isRealMicroscopeSelected && incubatorSlots.length === 0 && (
