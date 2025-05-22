@@ -24,6 +24,7 @@ const MicroscopeControlPanel = ({
   const [xMove, setXMove] = useState(1);
   const [yMove, setYMove] = useState(1);
   const [zMove, setZMove] = useState(0.1);
+  const [microscopeBusy, setMicroscopeBusy] = useState(false);
 
   // Renamed states for actual values from microscope (for display)
   const [actualIlluminationIntensity, setActualIlluminationIntensity] = useState(50);
@@ -111,10 +112,7 @@ const MicroscopeControlPanel = ({
     }
     setDesiredIlluminationIntensity(defaultIntensity);
     setDesiredCameraExposure(defaultExposure);
-    // Note: The main useEffect listening to microscopeControlService AND illuminationChannel
-    // will then call fetchStatusAndUpdateActuals, which updates actuals and re-syncs desired values
-    // to what the microscope reports for this new channel after a brief moment.
-    // This ensures desired values start at defaults then quickly align with reality.
+
   }, [illuminationChannel]); // Only depends on illuminationChannel
 
   useEffect(() => {
@@ -145,9 +143,12 @@ const MicroscopeControlPanel = ({
     if (isLiveView) {
       liveViewInterval = setInterval(async () => {
         try {
-          // Use DESIRED values for live view frames
-          const base64Image = await microscopeControlService.one_new_frame(desiredCameraExposure, parseInt(illuminationChannel, 10), parseInt(desiredIlluminationIntensity, 10));
-          setSnapshotImage(`data:image/png;base64,${base64Image}`);
+          // Only capture new frames if the microscope is not busy with other operations
+          if (!microscopeBusy && microscopeControlService) {
+            // Use DESIRED values for live view frames
+            const base64Image = await microscopeControlService.one_new_frame(desiredCameraExposure, parseInt(illuminationChannel, 10), parseInt(desiredIlluminationIntensity, 10));
+            setSnapshotImage(`data:image/png;base64,${base64Image}`);
+          }
         } catch (error) {
           appendLog(`Error in live view: ${error.message}`);
         }
@@ -156,11 +157,12 @@ const MicroscopeControlPanel = ({
       clearInterval(liveViewInterval);
     }
     return () => clearInterval(liveViewInterval);
-  }, [isLiveView, desiredCameraExposure, illuminationChannel, desiredIlluminationIntensity, microscopeControlService]); // Added microscopeControlService
+  }, [isLiveView, desiredCameraExposure, illuminationChannel, desiredIlluminationIntensity, microscopeControlService, microscopeBusy]);
 
   const moveMicroscope = async (direction, multiplier) => {
     if (!microscopeControlService) return;
     try {
+      setMicroscopeBusy(true);
       let moveX = 0, moveY = 0, moveZ = 0;
       if (direction === 'x') moveX = xMove * multiplier;
       else if (direction === 'y') moveY = yMove * multiplier;
@@ -176,12 +178,15 @@ const MicroscopeControlPanel = ({
       }
     } catch (error) {
       appendLog(`Error in moveMicroscope: ${error.message}`);
+    } finally {
+      setMicroscopeBusy(false);
     }
   };
 
   const moveToPosition = async () => {
     if (!microscopeControlService) return;
     try {
+      setMicroscopeBusy(true);
       appendLog(`Attempting to move to position: (${xMove}, ${yMove}, ${zMove})`);
       const result = await microscopeControlService.move_to_position(xMove, yMove, zMove);
       if (result.success) {
@@ -192,17 +197,21 @@ const MicroscopeControlPanel = ({
       }
     } catch (error) {
       appendLog(`Error in moveToPosition: ${error.message}`);
+    } finally {
+      setMicroscopeBusy(false);
     }
   };
 
   const snapImage = async () => {
-    appendLog('Snapping image...');
-    // Use DESIRED values for snapping image
-    const exposureTime = desiredCameraExposure;
-    const channel = parseInt(illuminationChannel, 10);
-    const intensity = desiredIlluminationIntensity;
-    
+    if (!microscopeControlService) return;
     try {
+      setMicroscopeBusy(true);
+      appendLog('Snapping image...');
+      // Use DESIRED values for snapping image
+      const exposureTime = desiredCameraExposure;
+      const channel = parseInt(illuminationChannel, 10);
+      const intensity = desiredIlluminationIntensity;
+      
       const base64Image = await microscopeControlService.one_new_frame(exposureTime, channel, intensity);
       console.log('Received base64 image data of length:', base64Image.length);
       setSnapshotImage(`data:image/png;base64,${base64Image}`);
@@ -210,26 +219,52 @@ const MicroscopeControlPanel = ({
     } catch (error) {
       console.error('Error in snapImage:', error);
       appendLog(`Error in snapImage: ${error.message}`);
+    } finally {
+      setMicroscopeBusy(false);
     }
   };
 
   const contrastAutoFocus = async () => {
-    await microscopeControlService.auto_focus();
-    appendLog('Performing contrast autofocus...');
+    if (!microscopeControlService) return;
+    try {
+      setMicroscopeBusy(true);
+      appendLog('Performing contrast autofocus...');
+      await microscopeControlService.auto_focus();
+    } catch (error) {
+      appendLog(`Error in contrast autofocus: ${error.message}`);
+    } finally {
+      setMicroscopeBusy(false);
+    }
   };
 
   const laserAutoFocus = async () => {
-    await microscopeControlService.do_laser_autofocus();
-    appendLog('Performing laser autofocus...');
+    if (!microscopeControlService) return;
+    try {
+      setMicroscopeBusy(true);
+      appendLog('Performing laser autofocus...');
+      await microscopeControlService.do_laser_autofocus();
+    } catch (error) {
+      appendLog(`Error in laser autofocus: ${error.message}`);
+    } finally {
+      setMicroscopeBusy(false);
+    }
   };
 
   const toggleLight = async () => {
-    if (!isLightOn) {
-      appendLog('Light turned on.');
-    } else {
-      appendLog('Light turned off.');
+    if (!microscopeControlService) return;
+    try {
+      setMicroscopeBusy(true);
+      if (!isLightOn) {
+        appendLog('Light turned on.');
+      } else {
+        appendLog('Light turned off.');
+      }
+      setIsLightOn(!isLightOn);
+    } catch (error) {
+      appendLog(`Error toggling light: ${error.message}`);
+    } finally {
+      setMicroscopeBusy(false);
     }
-    setIsLightOn(!isLightOn);
   };
 
   const resetEmbedding = (map, vectorLayer) => {
