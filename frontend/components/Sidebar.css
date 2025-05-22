@@ -1,6 +1,7 @@
 .sidebar-container {
   display: flex;
   height: 100vh;
+  overflow-x: hidden; /* Prevent horizontal scrollbar during transition */
 }
 
 .main-sidebar {
@@ -8,6 +9,8 @@
   background-color: #f8f9fa;
   border-right: 1px solid #dee2e6;
   padding: 1rem 0;
+  z-index: 2;
+  flex-shrink: 0; /* Prevent main sidebar from shrinking */
 }
 
 .sidebar-tabs {
@@ -29,6 +32,7 @@
   border-radius: 0.25rem;
   cursor: pointer;
   transition: background-color 0.2s;
+  position: relative; /* For positioning the toggle icon */
 }
 
 .sidebar-tab:hover {
@@ -44,13 +48,36 @@
   width: 20px;
 }
 
+.microscope-toggle-icon {
+  margin-left: auto; /* Pushes icon to the right */
+  font-size: 0.9em;
+  transition: transform 0.3s ease;
+}
+
 /* Microscope Sidebar Styles */
-.microscope-sidebar {
-  width: 250px;
+.microscope-sidebar, .sample-sidebar {
   background-color: #ffffff;
   border-left: 1px solid #dee2e6;
   padding: 1.5rem;
   box-shadow: -2px 0 5px rgba(0, 0, 0, 0.05);
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: width 0.3s ease, padding 0.3s ease, border 0.3s ease, opacity 0.3s ease;
+  flex-shrink: 0;
+}
+
+.microscope-sidebar {
+  width: 250px;
+}
+
+.microscope-sidebar.collapsed {
+  width: 0;
+  padding-left: 0;
+  padding-right: 0;
+  border-left-width: 0;
+  opacity: 0;
 }
 
 .microscope-sidebar-title {
@@ -58,12 +85,61 @@
   font-weight: 600;
   margin-bottom: 1.5rem;
   color: #495057;
+  white-space: nowrap; /* Prevent title from wrapping when collapsing */
 }
 
 .microscope-options {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  /* flex-grow: 1; /* Removed to allow button to sit below */
+}
+
+.sidebar-divider {
+  margin-top: 1rem;    /* Space above the line */
+  margin-bottom: 1rem; /* Space below the line */
+  border: 0;
+  border-top: 1px solid #e0e0e0; /* Light gray line */
+}
+
+.toggle-sample-panel-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;  /* Changed from center to space-between */
+  gap: 0.5rem;
+  padding: 0.6rem;
+  border: 1px solid #007bff;
+  background-color: #007bff;
+  color: white;
+  border-radius: 0.3rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  text-align: center;
+  transition: background-color 0.2s, border-color 0.2s;
+  width: 100%;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.toggle-sample-panel-button:hover {
+  background-color: #0056b3;
+  border-color: #0056b3;
+}
+
+.toggle-sample-panel-button i {
+  width: auto; /* Override default sidebar tab icon width */
+}
+
+.toggle-sample-panel-button .button-content {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.toggle-sample-panel-button .well-plate-icon {
+  font-size: 1.1rem;
+  margin-left: auto;
 }
 
 .microscope-option {
@@ -78,6 +154,7 @@
   text-align: left;
   cursor: pointer;
   transition: all 0.2s ease;
+  white-space: nowrap; /* Prevent text from wrapping */
 }
 
 .microscope-option:hover {
@@ -94,19 +171,265 @@
 .microscope-option i {
   font-size: 1.2rem;
   color: #495057;
+  flex-shrink: 0; /* Prevent icon from shrinking */
 }
 
 .microscope-option span {
   font-size: 0.95rem;
   color: #212529;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Sample Sidebar Styles */
+.sample-sidebar {
+  width: 280px;
+  background-color: #fdfdfd;
+  border-left: 1px solid #d1d5db;
+  padding: 1.5rem;
+  box-shadow: -3px 0 6px rgba(0, 0, 0, 0.06);
+  transition: width 0.3s ease, padding 0.3s ease, border 0.3s ease, opacity 0.3s ease;
+}
+
+.sample-sidebar.collapsed {
+  width: 0;
+  padding-left: 0;
+  padding-right: 0;
+  border-left-width: 0;
+  opacity: 0;
+}
+
+.sample-sidebar-title {
+  font-size: 1.15rem;
+  font-weight: 600;
+  margin-bottom: 1.5rem;
+  color: #343a40;
+  white-space: nowrap;
+}
+
+.sample-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  flex-grow: 1;
+  overflow-y: auto;
+  max-height: calc(100vh - 150px);
+  transition: opacity 0.3s ease;
+}
+
+.sample-option {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.9rem;
+  border: 1px solid #e0e0e0;
+  border-radius: 0.4rem;
+  background: none;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.sample-option:hover {
+  background-color: #f5f5f5;
+  border-color: #b0b0b0;
+}
+
+.sample-option.active {
+  background-color: #f0f7ff;
+  border: 2px solid #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.3);
+  transform: translateY(-1px);
+  font-weight: 600;
+  position: relative;
+}
+
+.sample-option.active::after {
+  content: '';
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background-color: #2563eb;
+  border: 2px solid white;
+  z-index: 1;
+}
+
+.sample-option.active.green-sample {
+  background-color: rgba(220, 252, 231, 0.7);
+  border: 2px solid #16a34a;
+  box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.3);
+}
+
+.sample-option.active.green-sample::after {
+  background-color: #16a34a;
+}
+
+.sample-option.active.orange-sample {
+  background-color: rgba(254, 240, 212, 0.7);
+  border: 2px solid #ea580c;
+  box-shadow: 0 0 0 2px rgba(234, 88, 12, 0.3);
+}
+
+.sample-option.active.orange-sample::after {
+  background-color: #ea580c;
+}
+
+.sample-option i {
+  font-size: 1.1rem;
+  color: #404040;
+  flex-shrink: 0;
+}
+
+.sample-option span {
+  font-size: 0.9rem;
+  color: #1a1a1a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Sample color indicators */
+.sample-option.green-sample {
+  background-color: rgba(220, 252, 231, 0.5); /* Light green background */
+  border-color: #22c55e; /* Green border */
+}
+
+.sample-option.orange-sample {
+  background-color: rgba(254, 240, 212, 0.5); /* Light orange background */
+  border-color: #f97316; /* Orange border */
+  cursor: not-allowed;
+}
+
+.sample-option.orange-sample:not(.active) {
+  opacity: 0.8;
+}
+
+.sample-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+/* Sample info layout */
+.sample-info {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+  overflow: hidden;
+}
+
+.sample-name {
+  font-weight: 500;
+  margin-bottom: 0.2rem;
+}
+
+.sample-location {
+  font-size: 0.8rem;
+  color: #6b7280;
+  white-space: normal;
+}
+
+.load-sample-button {
+  margin-top: auto;
+  padding: 0.75rem 1.5rem;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 0.3rem;
+  cursor: pointer;
+  font-size: 0.9rem;  /* Reduced from 1rem */
+  font-weight: 500;
+  text-align: center;
+  transition: background-color 0.2s, opacity 0.3s ease, visibility 0.3s ease;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.load-sample-button:hover {
+  background-color: #0056b3;
+}
+
+.load-sample-button:disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.load-sample-button.processing, .unload-sample-button.processing {
+  background-color: #6c757d;
+  border-color: #6c757d;
+  position: relative;
+  cursor: not-allowed;
+}
+
+.load-sample-button.processing .fa-spinner, .unload-sample-button.processing .fa-spinner {
+  margin-right: 8px;
+  color: #ffffff;
+}
+
+.unload-sample-button {
+  margin-top: auto;
+  padding: 0.75rem 1.5rem;
+  background-color: #dc3545;
+  color: white;
+  border: none;
+  border-radius: 0.3rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  text-align: center;
+  transition: background-color 0.2s, opacity 0.3s ease, visibility 0.3s ease;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.unload-sample-button:hover {
+  background-color: #c82333;
+}
+
+.unload-sample-button:disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+/* Visibility for content inside collapsed panels */
+.microscope-sidebar.collapsed > *:not(.toggle-sample-panel-button),
+.sample-sidebar.collapsed > * {
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.1s ease, visibility 0.1s ease;
+}
+
+/* Ensure the new toggle button in microscope panel remains visible if panel is not fully collapsed */
+.microscope-sidebar .toggle-sample-panel-button {
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 0.3s ease 0.1s, visibility 0.3s ease 0.1s; /* Slight delay for appearing */
+}
+
+.microscope-sidebar.collapsed .toggle-sample-panel-button {
+    opacity: 0 !important;
+    visibility: hidden !important;
+}
+
+.no-samples-message {
+  padding: 1rem;
+  text-align: center;
+  color: #6c757d;
+  font-style: italic;
+  white-space: normal;
 }
 
 /* Sub-menu styling */
 .sidebar-submenu {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem; /* Smaller gap for sub-menu items */
-  padding-left: 1.5rem; /* Indent sub-menu items */
+  gap: 0.25rem;
+  padding-left: 1.5rem;
   margin-top: 0.25rem;
   margin-bottom: 0.25rem;
 }
@@ -115,7 +438,7 @@
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.5rem 1rem; /* Smaller padding for sub-menu items */
+  padding: 0.5rem 1rem;
   border: none;
   background: none;
   width: 100%;
@@ -123,14 +446,24 @@
   border-radius: 0.25rem;
   cursor: pointer;
   transition: background-color 0.2s;
-  font-size: 0.9em; /* Slightly smaller font for sub-menu */
+  font-size: 0.9em;
 }
 
 .sidebar-submenu-tab:hover {
-  background-color: #e0e0e0; /* Slightly different hover for sub-menu */
+  background-color: #e0e0e0;
 }
 
 .sidebar-submenu-tab.active {
-  background-color: #d6d8db; /* Slightly different active for sub-menu */
+  background-color: #d6d8db;
   font-weight: bold;
+}
+
+/* Ensure smooth transition for sample options */
+.sample-options {
+  transition: opacity 0.3s ease;
+}
+
+.sample-sidebar.collapsed .sample-options {
+  opacity: 0;
+  visibility: hidden;
 } 
