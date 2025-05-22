@@ -95,7 +95,7 @@ const MicroscopeControlPanel = ({
       const interval = setInterval(fetchStatusAndUpdateActuals, 1000);
       return () => clearInterval(interval);
     }
-  }, [microscopeControlService, illuminationChannel, appendLog]); // Re-run if service or channel changes to re-sync
+  }, [microscopeControlService, illuminationChannel]); // Re-run if service or channel changes to re-sync
 
   useEffect(() => {
     if (!snapshotImage || !canvasRef.current) return;
