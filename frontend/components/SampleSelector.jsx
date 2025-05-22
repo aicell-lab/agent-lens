@@ -489,24 +489,42 @@ const SampleSelector = ({
         <hr className="sidebar-divider" />
         {!isSampleLoaded ? (
           <button 
-            className="load-sample-button"
+            className={`load-sample-button ${currentOperation ? 'processing' : ''}`}
             onClick={handleLoadSample}
             disabled={!selectedSampleId || currentOperation !== null}
           >
             <div className="button-content">
-              <i className="fas fa-upload"></i>
-              <span>Load Sample on Microscope</span>
+              {currentOperation === 'loading' ? (
+                <>
+                  <i className="fas fa-spinner fa-spin"></i>
+                  <span>Loading Sample...</span>
+                </>
+              ) : (
+                <>
+                  <i className="fas fa-upload"></i>
+                  <span>Load Sample on Microscope</span>
+                </>
+              )}
             </div>
           </button>
         ) : (
           <button 
-            className="unload-sample-button"
+            className={`unload-sample-button ${currentOperation ? 'processing' : ''}`}
             onClick={handleUnloadSample}
             disabled={!selectedSampleId || currentOperation !== null}
           >
             <div className="button-content">
-              <i className="fas fa-download"></i>
-              <span>Unload Sample from Microscope</span>
+              {currentOperation === 'unloading' ? (
+                <>
+                  <i className="fas fa-spinner fa-spin"></i>
+                  <span>Unloading Sample...</span>
+                </>
+              ) : (
+                <>
+                  <i className="fas fa-download"></i>
+                  <span>Unload Sample</span>
+                </>
+              )}
             </div>
           </button>
         )}
