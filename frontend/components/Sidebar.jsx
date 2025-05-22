@@ -9,7 +9,8 @@ const Sidebar = ({
   onMicroscopeSelect, 
   selectedMicroscopeId,
   incubatorControlService,
-  microscopeControlService
+  microscopeControlService,
+  roboticArmService
 }) => {
   const [isMicroscopePanelOpen, setIsMicroscopePanelOpen] = useState(true);
   const [isSamplePanelOpen, setIsSamplePanelOpen] = useState(false);
@@ -137,6 +138,7 @@ const Sidebar = ({
           selectedMicroscopeId={selectedMicroscopeId}
           microscopeControlService={microscopeControlService}
           incubatorControlService={incubatorControlService}
+          roboticArmService={roboticArmService}
         />
       )}
     </div>
@@ -150,6 +152,7 @@ Sidebar.propTypes = {
   selectedMicroscopeId: PropTypes.string,
   incubatorControlService: PropTypes.object,
   microscopeControlService: PropTypes.object,
+  roboticArmService: PropTypes.object
 };
 
 export default Sidebar; 

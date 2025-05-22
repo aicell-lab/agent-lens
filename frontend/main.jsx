@@ -35,6 +35,7 @@ const MicroscopeControl = () => {
   const [log, setLog] = useState('');
   const [segmentService, setSegmentService] = useState(null);
   const [incubatorControlService, setIncubatorControlService] = useState(null);
+  const [roboticArmService, setRoboticArmService] = useState(null);
   const [activeTab, setActiveTab] = useState('microscope');
   const [currentMap, setCurrentMap] = useState(null);
   const [snapshotImage, setSnapshotImage] = useState(null);
@@ -119,7 +120,7 @@ const MicroscopeControl = () => {
       console.log(`[handleLogin] Calling initializeServices with microscopeIdToUse: ${microscopeIdToUse}`);
       await initializeServices(server,
         setMicroscopeControlService, setSimilarityService, setSegmentService,
-        setIncubatorControlService,
+        setIncubatorControlService, setRoboticArmService,
         (msg) => { console.log(`[initializeServices in Login]: ${msg}`); appendLog(msg); },
         microscopeIdToUse
       );
@@ -237,6 +238,7 @@ const MicroscopeControl = () => {
               selectedMicroscopeId={selectedMicroscopeId} 
               incubatorControlService={incubatorControlService}
               microscopeControlService={microscopeControlService}
+              roboticArmService={roboticArmService}
             />
             <div className="content-area">
               {renderContent()}
