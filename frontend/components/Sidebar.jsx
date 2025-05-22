@@ -46,44 +46,44 @@ const Sidebar = ({
   return (
     <div className="sidebar-container">
       <div className="main-sidebar">
-        <div className="sidebar-tabs">
-          <button 
-            className={`sidebar-tab ${activeTab === 'microscope' ? 'active' : ''}`}
-            onClick={handleMicroscopeTabClick}
-          >
-            <i className="fas fa-microscope"></i>
+      <div className="sidebar-tabs">
+        <button 
+          className={`sidebar-tab ${activeTab === 'microscope' ? 'active' : ''}`}
+          onClick={handleMicroscopeTabClick}
+        >
+          <i className="fas fa-microscope"></i>
             <span>Microscopes</span>
             <i className={`fas ${activeTab === 'microscope' && isMicroscopePanelOpen ? 'fa-chevron-left' : 'fa-chevron-right'} microscope-toggle-icon`}></i>
-          </button>
-          <button 
-            className={`sidebar-tab ${activeTab === 'main' ? 'active' : ''}`}
-            onClick={() => onTabChange('main')}
-          >
-            <i className="fas fa-home"></i>
-            <span>Image Map</span>
-          </button>
-          <button 
-            className={`sidebar-tab ${activeTab === 'incubator' ? 'active' : ''}`}
-            onClick={() => onTabChange('incubator')}
-          >
-            <i className="fas fa-temperature-high"></i>
-            <span>Incubator</span>
-          </button>
-          <button 
-            className={`sidebar-tab ${activeTab === 'data-management' ? 'active' : ''}`}
-            onClick={() => onTabChange('data-management')}
-          >
-            <i className="fas fa-map"></i>
-            <span>Data Management</span>
-          </button>
-          <button 
-            className={`sidebar-tab ${activeTab === 'dashboard' ? 'active' : ''}`}
-            onClick={() => onTabChange('dashboard')}
-          >
-            <i className="fas fa-tachometer-alt"></i>
-            <span>Dashboard</span>
-          </button>
-        </div>
+            </button>
+        <button 
+          className={`sidebar-tab ${activeTab === 'main' ? 'active' : ''}`}
+          onClick={() => onTabChange('main')}
+        >
+          <i className="fas fa-home"></i>
+          <span>Image Map</span>
+        </button>
+        <button 
+          className={`sidebar-tab ${activeTab === 'incubator' ? 'active' : ''}`}
+          onClick={() => onTabChange('incubator')}
+        >
+          <i className="fas fa-temperature-high"></i>
+          <span>Incubator</span>
+        </button>
+        <button 
+          className={`sidebar-tab ${activeTab === 'data-management' ? 'active' : ''}`}
+          onClick={() => onTabChange('data-management')}
+        >
+          <i className="fas fa-map"></i>
+          <span>Data Management</span>
+        </button>
+        <button 
+          className={`sidebar-tab ${activeTab === 'dashboard' ? 'active' : ''}`}
+          onClick={() => onTabChange('dashboard')}
+        >
+          <i className="fas fa-tachometer-alt"></i>
+          <span>Dashboard</span>
+        </button>
+      </div>
       </div>
       
       {activeTab === 'microscope' && (

@@ -105,13 +105,16 @@ const SampleSelector = ({
           (selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ||
            selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2')) {
         try {
-          const slots = [];
-          for (let i = 1; i <= 42; i++) {
-            const slotInfo = await incubatorControlService.get_slot_information(i);
-            if (slotInfo && slotInfo.name && slotInfo.name.trim()) { 
-              slots.push({ ...slotInfo, id: `slot-${i}`, incubator_slot: i }); 
-            }
-          }
+          // Get information for all slots at once
+          const allSlotInfo = await incubatorControlService.get_slot_information();
+          // Filter slots with names and preserve the original incubator_slot number
+          const slots = (allSlotInfo || []).filter(slotInfo => 
+            slotInfo && slotInfo.name && slotInfo.name.trim()
+          ).map(slotInfo => ({
+            ...slotInfo,
+            id: `slot-${slotInfo.incubator_slot}`
+            // Use the incubator_slot already present in the data
+          }));
           setIncubatorSlots(slots);
           setSelectedSampleId(null); 
           setIsSampleLoaded(false);
@@ -139,14 +142,6 @@ const SampleSelector = ({
   const handleLoadSample = async () => {
     if (!selectedSampleId) {
       console.log('No sample selected to load.');
-      return;
-    }
-
-    // Special case for microscope 2: show message instead of loading
-    if (selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2') {
-      clearWorkflowMessages(); // Clear any previous messages
-      setLoadingStatus('Loading sample for microscope 2 is not ready...');
-      setTimeout(() => setLoadingStatus(''), 3000);
       return;
     }
 
@@ -207,29 +202,26 @@ const SampleSelector = ({
           throw new Error("Robotic arm service not available");
         }
         
-        // Connect to robotic arm and start workflow
+        // 1. Incubator releases the sample
+        addWorkflowMessage("Getting sample from slot to transfer station");
+        await incubatorControlService.get_sample_from_slot_to_transfer_station(incubatorSlot);
+        addWorkflowMessage("Plate loaded onto transfer station");
+        
+        // Connect robotic arm and turn on light
         await armService.connect();
         await armService.light_on();
         
-        // Prepare incubator and microscope in parallel
-        addWorkflowMessage("Getting sample from slot to transfer station");
-        await incubatorControlService.get_sample_from_slot_to_transfer_station(incubatorSlot);
+        // 2. Home microscope stage
         addWorkflowMessage("Homing microscope stage");
         await microscopeControlService.home_stage();
         
-        addWorkflowMessage("Plate loaded onto transfer station");
-        await armService.grab_sample_from_incubator();
-        
-        // Transport to appropriate microscope
-        if (selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1') {
-          await armService.transport_from_incubator_to_microscope1();
-          await armService.put_sample_on_microscope1();
-        } else {
-          await armService.transport_from_incubator_to_microscope2();
-          await armService.put_sample_on_microscope2();
-        }
-        
+        // 3. Use robotic arm to transport sample to microscope
+        const microscopeNumber = selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 1 : 2;
+        addWorkflowMessage(`Transporting sample to microscope ${microscopeNumber}`);
+        await armService.incubator_to_microscope(microscopeNumber);
         addWorkflowMessage("Sample placed on microscope");
+        
+        // Turn off light and disconnect robotic arm
         await microscopeControlService.return_stage();
         await armService.light_off();
         await armService.disconnect();
@@ -314,31 +306,26 @@ const SampleSelector = ({
           throw new Error("Robotic arm service not available");
         }
         
-        // Connect to robotic arm and start workflow
-        await armService.connect();
-        await armService.light_on();
-        
+        // 1. Home microscope stage
         addWorkflowMessage("Homing microscope stage");
         await microscopeControlService.home_stage();
         
-        // Grab from appropriate microscope
-        if (selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1') {
-          await armService.grab_sample_from_microscope1();
-          await armService.transport_from_microscope1_to_incubator();
-        } else {
-          await armService.grab_sample_from_microscope2();
-          await armService.transport_from_microscope2_to_incubator();
-        }
+        // Connect robotic arm and turn on light
+        await armService.connect();
+        await armService.light_on();
         
-        addWorkflowMessage("Robotic arm moved to incubator");
-        await armService.put_sample_on_incubator();
-        addWorkflowMessage("Sample placed on incubator");
+        // 2. Transport from microscope to incubator
+        const microscopeNumber = selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 1 : 2;
+        addWorkflowMessage(`Transporting sample from microscope ${microscopeNumber} to incubator`);
+        await armService.microscope_to_incubator(microscopeNumber);
+        addWorkflowMessage("Sample transported to incubator");
         
-        // Return sample to incubator slot and return microscope stage in parallel
+        // 3. Incubator collects the sample
         await incubatorControlService.put_sample_from_transfer_station_to_slot(incubatorSlot);
         addWorkflowMessage("Sample moved to incubator slot");
-        await microscopeControlService.return_stage();
         
+        // Turn off light, disconnect robotic arm, and return microscope stage
+        await microscopeControlService.return_stage();
         await armService.light_off();
         await armService.disconnect();
         
