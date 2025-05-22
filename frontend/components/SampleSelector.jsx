@@ -142,6 +142,14 @@ const SampleSelector = ({
       return;
     }
 
+    // Special case for microscope 2: show message instead of loading
+    if (selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2') {
+      clearWorkflowMessages(); // Clear any previous messages
+      setLoadingStatus('Loading sample for microscope 2 is not ready...');
+      setTimeout(() => setLoadingStatus(''), 3000);
+      return;
+    }
+
     // Clear previous workflow messages
     clearWorkflowMessages();
     
@@ -244,6 +252,14 @@ const SampleSelector = ({
   const handleUnloadSample = async () => {
     if (!selectedSampleId) {
       console.log('No sample selected to unload.');
+      return;
+    }
+
+    // Special case for microscope 2: show message instead of unloading
+    if (selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2') {
+      clearWorkflowMessages(); // Clear any previous messages
+      setLoadingStatus('Unloading sample for microscope 2 is not ready...');
+      setTimeout(() => setLoadingStatus(''), 3000);
       return;
     }
 
