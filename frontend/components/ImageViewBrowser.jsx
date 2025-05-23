@@ -103,6 +103,12 @@ const ImageViewBrowser = ({ appendLog }) => {
     appendLog(`Selected dataset: ${datasetId}`);
   };
 
+  const handleDatasetDoubleClick = (datasetId) => {
+    setSelectedDataset(datasetId);
+    handleBrowseFiles();
+    appendLog(`Opening dataset: ${datasetId}`);
+  };
+
   const handleBrowseFiles = () => {
     if (!selectedDataset) return;
     setCurrentView('files');
@@ -193,6 +199,7 @@ const ImageViewBrowser = ({ appendLog }) => {
                       key={dataset.id}
                       className={`dataset-card ${selectedDataset === dataset.id ? 'selected' : ''}`}
                       onClick={() => handleDatasetClick(dataset.id)}
+                      onDoubleClick={() => handleDatasetDoubleClick(dataset.id)}
                     >
                       <div className="dataset-icon">
                         <i className="fas fa-database"></i>
