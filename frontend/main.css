@@ -26,6 +26,388 @@
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
+/* Image View Placeholder Styles */
+.image-view-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  text-align: center;
+  color: #6c757d;
+}
+
+.image-view-placeholder h3 {
+  margin-bottom: 1rem;
+  color: #495057;
+  font-weight: 500;
+}
+
+.image-view-placeholder p {
+  font-size: 1.1rem;
+  max-width: 600px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* Image View Browser Styles */
+.image-view-browser {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.browser-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  text-align: center;
+  color: #6c757d;
+}
+
+.browser-placeholder h3 {
+  margin-bottom: 1rem;
+  color: #495057;
+  font-weight: 500;
+}
+
+.browser-placeholder p {
+  font-size: 1.1rem;
+  max-width: 600px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.browser-title {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #212529;
+}
+
+.gallery-subtitle {
+  font-size: 0.9rem;
+  font-weight: 400;
+  color: #6c757d;
+}
+
+/* Loading State */
+.loading-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 2rem;
+  color: #6c757d;
+  font-size: 1.1rem;
+}
+
+/* Datasets View */
+.datasets-view {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  flex: 1;
+}
+
+.datasets-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 1rem;
+  flex: 1;
+}
+
+.dataset-card {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1.5rem;
+  border: 2px solid #e9ecef;
+  border-radius: 0.5rem;
+  background: white;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.dataset-card:hover {
+  border-color: #007bff;
+  box-shadow: 0 4px 8px rgba(0, 123, 255, 0.1);
+  transform: translateY(-2px);
+}
+
+.dataset-card.selected {
+  border-color: #007bff;
+  background-color: #f8f9ff;
+  box-shadow: 0 4px 12px rgba(0, 123, 255, 0.15);
+}
+
+.dataset-icon {
+  font-size: 2rem;
+  color: #007bff;
+  flex-shrink: 0;
+}
+
+.dataset-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.dataset-name {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0 0 0.25rem 0;
+  color: #212529;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dataset-id {
+  font-size: 0.85rem;
+  color: #6c757d;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.no-datasets {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 3rem;
+  color: #6c757d;
+  text-align: center;
+}
+
+.no-datasets i {
+  font-size: 3rem;
+  opacity: 0.5;
+}
+
+.dataset-actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  padding: 1rem;
+  border-top: 1px solid #e9ecef;
+  background-color: #f8f9fa;
+  border-radius: 0 0 0.5rem 0.5rem;
+  margin: -1rem -1rem 0 -1rem;
+}
+
+.action-button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 500;
+  text-decoration: none;
+  transition: all 0.2s ease;
+  min-width: 150px;
+  justify-content: center;
+}
+
+.action-button.primary {
+  background-color: #007bff;
+  color: white;
+}
+
+.action-button.primary:hover {
+  background-color: #0056b3;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0, 123, 255, 0.25);
+}
+
+.action-button.secondary {
+  background-color: #28a745;
+  color: white;
+}
+
+.action-button.secondary:hover {
+  background-color: #218838;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(40, 167, 69, 0.25);
+}
+
+/* Files View */
+.files-view {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  flex: 1;
+}
+
+.files-header {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.back-to-datasets-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid #6c757d;
+  background-color: transparent;
+  color: #6c757d;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.2s ease;
+  align-self: flex-start;
+}
+
+.back-to-datasets-btn:hover {
+  background-color: #6c757d;
+  color: white;
+  transform: translateX(-2px);
+}
+
+.breadcrumb-navigation {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0.75rem;
+  background-color: #f8f9fa;
+  border-radius: 0.375rem;
+  font-size: 0.9rem;
+}
+
+.breadcrumb-item {
+  color: #007bff;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  transition: background-color 0.2s;
+  display: flex;
+  align-items: center;
+}
+
+.breadcrumb-item:hover {
+  background-color: #e9ecef;
+  text-decoration: underline;
+}
+
+.breadcrumb-item.root {
+  font-weight: 500;
+}
+
+.breadcrumb-separator {
+  color: #6c757d;
+  margin: 0 0.25rem;
+  user-select: none;
+}
+
+.files-listing {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.files-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1rem;
+  flex: 1;
+}
+
+.file-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid #e9ecef;
+  border-radius: 0.375rem;
+  background: white;
+  transition: all 0.2s ease;
+  text-align: center;
+}
+
+.file-card.folder {
+  cursor: pointer;
+}
+
+.file-card.folder:hover {
+  border-color: #ffc107;
+  box-shadow: 0 2px 8px rgba(255, 193, 7, 0.2);
+  transform: translateY(-2px);
+}
+
+.file-card.file {
+  opacity: 0.7;
+}
+
+.file-icon {
+  font-size: 2rem;
+  flex-shrink: 0;
+}
+
+.file-card.folder .file-icon {
+  color: #ffc107;
+}
+
+.file-card.file .file-icon {
+  color: #6c757d;
+}
+
+.file-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  width: 100%;
+}
+
+.file-name {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #212529;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-size {
+  font-size: 0.75rem;
+  color: #6c757d;
+  margin: 0;
+}
+
+.no-files {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 3rem;
+  color: #6c757d;
+  text-align: center;
+}
+
+.no-files i {
+  font-size: 3rem;
+  opacity: 0.5;
+}
+
 .data-management-view {
   flex: 1;
   padding: 1rem;

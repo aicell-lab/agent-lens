@@ -217,7 +217,22 @@ const SampleSelector = ({
         setTimeout(() => setLoadingStatus(''), 3000);
       }
     } else {
-      // For real microscopes
+      // For real microscopes - Add validation and logging
+      console.log(`[SampleSelector] Loading sample on microscope. Selected ID: ${selectedMicroscopeId}`);
+      console.log(`[SampleSelector] Microscope control service:`, microscopeControlService);
+      
+      // Validation: Ensure we have the correct microscope service
+      if (!microscopeControlService) {
+        addWorkflowMessage("Error: No microscope service available");
+        setLoadingStatus('Error: No microscope service available');
+        setTimeout(() => setLoadingStatus(''), 3000);
+        return;
+      }
+
+      const expectedMicroscopeNumber = selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 1 : 2;
+      addWorkflowMessage(`Preparing to load sample on Microscope ${expectedMicroscopeNumber}`);
+      console.log(`[SampleSelector] Expected microscope number: ${expectedMicroscopeNumber}`);
+      
       setLoadingStatus('Loading sample from incubator...'); 
       setCurrentOperation('loading');
       
@@ -256,12 +271,19 @@ const SampleSelector = ({
         await armService.connect();
         await armService.light_on();
         
-        // 2. Home microscope stage
-        addWorkflowMessage("Homing microscope stage");
+        // 2. Home microscope stage - Add validation and logging
+        addWorkflowMessage(`Homing microscope stage for Microscope ${expectedMicroscopeNumber}`);
+        console.log(`[SampleSelector] About to home stage for microscope ${expectedMicroscopeNumber} with service:`, microscopeControlService);
         await microscopeControlService.home_stage();
+        addWorkflowMessage(`Microscope ${expectedMicroscopeNumber} stage homed successfully`);
         
         // 3. Use robotic arm to transport sample to microscope
         const microscopeNumber = selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 1 : 2;
+        
+        // Double-check consistency
+        if (microscopeNumber !== expectedMicroscopeNumber) {
+          throw new Error(`Microscope number mismatch: expected ${expectedMicroscopeNumber}, got ${microscopeNumber}`);
+        }
         
         // Update sample location to robotic_arm
         await updateSampleLocation(incubatorSlot, "robotic_arm");
@@ -304,7 +326,6 @@ const SampleSelector = ({
       return;
     }
 
-
     // Clear previous workflow messages
     clearWorkflowMessages();
     
@@ -328,7 +349,22 @@ const SampleSelector = ({
         setTimeout(() => setLoadingStatus(''), 3000);
       }
     } else {
-      // For real microscopes
+      // For real microscopes - Add validation and logging
+      console.log(`[SampleSelector] Unloading sample from microscope. Selected ID: ${selectedMicroscopeId}`);
+      console.log(`[SampleSelector] Microscope control service:`, microscopeControlService);
+      
+      // Validation: Ensure we have the correct microscope service
+      if (!microscopeControlService) {
+        addWorkflowMessage("Error: No microscope service available");
+        setLoadingStatus('Error: No microscope service available');
+        setTimeout(() => setLoadingStatus(''), 3000);
+        return;
+      }
+
+      const expectedMicroscopeNumber = selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 1 : 2;
+      addWorkflowMessage(`Preparing to unload sample from Microscope ${expectedMicroscopeNumber}`);
+      console.log(`[SampleSelector] Expected microscope number: ${expectedMicroscopeNumber}`);
+      
       setLoadingStatus('Unloading sample to incubator...'); 
       setCurrentOperation('unloading');
       
@@ -354,9 +390,11 @@ const SampleSelector = ({
           throw new Error("Robotic arm service not available");
         }
         
-        // 1. Home microscope stage
-        addWorkflowMessage("Homing microscope stage");
+        // 1. Home microscope stage - Add validation and logging
+        addWorkflowMessage(`Homing microscope stage for Microscope ${expectedMicroscopeNumber}`);
+        console.log(`[SampleSelector] About to home stage for microscope ${expectedMicroscopeNumber} with service:`, microscopeControlService);
         await microscopeControlService.home_stage();
+        addWorkflowMessage(`Microscope ${expectedMicroscopeNumber} stage homed successfully`);
         
         // Connect robotic arm and turn on light
         await armService.connect();
@@ -364,6 +402,11 @@ const SampleSelector = ({
         
         // 2. Transport from microscope to incubator
         const microscopeNumber = selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 1 : 2;
+        
+        // Double-check consistency
+        if (microscopeNumber !== expectedMicroscopeNumber) {
+          throw new Error(`Microscope number mismatch: expected ${expectedMicroscopeNumber}, got ${microscopeNumber}`);
+        }
         
         // Update sample location to robotic_arm
         await updateSampleLocation(incubatorSlot, "robotic_arm");

@@ -789,6 +789,75 @@ def get_frontend_api():
             logger.error(traceback.format_exc())
             return []
 
+    @app.get("/gallery-info")
+    async def get_gallery_info(gallery_id: str):
+        """
+        Endpoint to fetch information about a specific gallery.
+        
+        Args:
+            gallery_id (str): The ID of the gallery to get information for.
+            
+        Returns:
+            dict: Gallery information including name from manifest.
+        """
+        # Ensure the artifact manager is connected
+        if artifact_manager_instance.server is None:
+            server_for_am, svc_for_am = await get_artifact_manager()
+            await artifact_manager_instance.connect_server(server_for_am)
+        
+        try:
+            logger.info(f"Fetching gallery info for: {gallery_id}")
+            
+            # Try to get the gallery information directly
+            try:
+                gallery_info = await artifact_manager_instance._svc.get(gallery_id)
+                if gallery_info:
+                    # Extract display name using the same pattern as datasets
+                    display_name = gallery_info.get("manifest", {}).get("name", gallery_info.get("alias", gallery_id))
+                    logger.info(f"Gallery info found: {display_name} for {gallery_id}")
+                    return {
+                        "id": gallery_id,
+                        "name": display_name,
+                        "manifest": gallery_info.get("manifest", {}),
+                        "alias": gallery_info.get("alias", gallery_id)
+                    }
+            except Exception as get_error:
+                logger.warning(f"Could not get gallery info directly: {get_error}")
+            
+            # Fallback: try to list the gallery to see if it exists
+            try:
+                gallery_contents = await artifact_manager_instance._svc.list(parent_id=gallery_id)
+                if gallery_contents is not None:
+                    # Gallery exists but we couldn't get its manifest
+                    # Use the gallery ID parts as fallback name
+                    fallback_name = gallery_id.split('/')[-1] if '/' in gallery_id else gallery_id
+                    logger.info(f"Gallery exists but no manifest info available, using fallback name: {fallback_name}")
+                    return {
+                        "id": gallery_id,
+                        "name": fallback_name,
+                        "manifest": {},
+                        "alias": fallback_name
+                    }
+            except Exception as list_error:
+                logger.error(f"Gallery {gallery_id} does not seem to exist: {list_error}")
+            
+            # Gallery not found
+            return {
+                "error": f"Gallery {gallery_id} not found",
+                "id": gallery_id,
+                "name": gallery_id.split('/')[-1] if '/' in gallery_id else gallery_id
+            }
+            
+        except Exception as e:
+            logger.error(f"Error fetching gallery info: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return {
+                "error": str(e),
+                "id": gallery_id,
+                "name": gallery_id.split('/')[-1] if '/' in gallery_id else gallery_id
+            }
+
     @app.get("/subfolders")
     async def get_subfolders(dataset_id: str, dir_path: str = None, offset: int = 0, limit: int = 20):
         """
