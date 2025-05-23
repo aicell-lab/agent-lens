@@ -8,10 +8,10 @@ import MapDisplay from './components/MapDisplay';
 import IncubatorControl from './components/IncubatorControl';
 import MicroscopeControlPanel from './components/MicroscopeControlPanel';
 import Sidebar from './components/Sidebar';
+import ImageViewBrowser from './components/ImageViewBrowser';
 import { login, initializeServices, getServer, tryGetService } from './utils';
 import 'ol/ol.css';
 import './main.css';
-import DataManagement from './components/DataManagement';
 
 // Import packages that might cause issues
 // to handle them safely with error boundaries
@@ -36,7 +36,7 @@ const MicroscopeControl = () => {
   const [segmentService, setSegmentService] = useState(null);
   const [incubatorControlService, setIncubatorControlService] = useState(null);
   const [roboticArmService, setRoboticArmService] = useState(null);
-  const [activeTab, setActiveTab] = useState('microscope');
+  const [activeTab, setActiveTab] = useState('image-view');
   const [currentMap, setCurrentMap] = useState(null);
   const [snapshotImage, setSnapshotImage] = useState(null);
   const [addTileLayer, setAddTileLayer] = useState(null);
@@ -140,8 +140,8 @@ const MicroscopeControl = () => {
 
   // Handle tab change with cleanup logic for image map
   const handleTabChange = (tab) => {
-    // If navigating away from the image map tab, clean up resources
-    if (activeTab === 'main' && tab !== 'main' && currentMap) {
+    // If navigating away from the image map view, clean up resources
+    if ((activeTab === 'image-view-map') && (tab !== 'image-view' && tab !== 'image-view-map') && currentMap) {
       // Clean up the map resources
       appendLog("Stopping image map access");
       
@@ -169,8 +169,16 @@ const MicroscopeControl = () => {
 
   const renderContent = () => {
     switch (activeTab) {
-      case 'main':
-        // Only render MapDisplay when the Image Map tab is active
+      case 'image-view':
+        return (
+          <div className="control-view">
+            <ImageViewBrowser
+              appendLog={appendLog}
+            />
+          </div>
+        );
+      case 'image-view-map':
+        // Only render MapDisplay when in image-view-map mode
         return (
           <MapDisplay
             appendLog={appendLog}
@@ -211,12 +219,6 @@ const MicroscopeControl = () => {
         return (
           <div className="control-view">
             <LogSection log={log} />
-          </div>
-        );
-      case 'data-management':
-        return (
-          <div className="control-view">
-            <DataManagement appendLog={appendLog} />
           </div>
         );
       default:
