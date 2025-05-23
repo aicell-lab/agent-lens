@@ -64,7 +64,7 @@ const MicroscopeControl = () => {
   }, []);
 
   useEffect(() => {
-    if (isAuthenticated && microscopeControlService) {
+    if (isAuthenticated) {
       const reinitializeMicroscope = async () => {
         console.log(`[Effect Hook] Attempting to switch microscope. Selected ID: ${selectedMicroscopeId}`);
         appendLog(`Switching microscope to: ${selectedMicroscopeId}`);
@@ -95,6 +95,10 @@ const MicroscopeControl = () => {
             setMicroscopeControlService(newMicroscopeService);
             appendLog("Microscope service switched successfully.");
             console.log("[Effect Hook] Microscope service state updated.");
+            
+            // Add a small delay to ensure the service is fully updated in the component tree
+            await new Promise(resolve => setTimeout(resolve, 100));
+            console.log("[Effect Hook] Microscope service initialization complete.");
           } else {
             console.error("[Effect Hook] Failed to obtain new microscope service. tryGetService returned null.");
             appendLog("Failed to switch microscope service. Service object was null.");
