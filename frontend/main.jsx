@@ -44,6 +44,7 @@ const MicroscopeControl = () => {
   const [vectorLayer, setVectorLayer] = useState(null);
   const [loginError, setLoginError] = useState(null);
   const [selectedMicroscopeId, setSelectedMicroscopeId] = useState("squid-control/squid-control-reef");
+  const [currentOperation, setCurrentOperation] = useState(null);
 
   useEffect(() => {
     const checkTokenAndInit = async () => {
@@ -206,6 +207,10 @@ const MicroscopeControl = () => {
               channelNames={channelNames}
               vectorLayer={vectorLayer}
               selectedMicroscopeId={selectedMicroscopeId}
+              incubatorControlService={incubatorControlService}
+              roboticArmService={roboticArmService}
+              currentOperation={currentOperation}
+              setCurrentOperation={setCurrentOperation}
               onClose={() => {}}
             />
           </div>
@@ -245,6 +250,7 @@ const MicroscopeControl = () => {
               incubatorControlService={incubatorControlService}
               microscopeControlService={microscopeControlService}
               roboticArmService={roboticArmService}
+              currentOperation={currentOperation}
             />
             <div className="content-area">
               {renderContent()}

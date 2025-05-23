@@ -3,6 +3,7 @@ import PropTypes from 'prop-types';
 import ControlButton from './ControlButton';
 import CameraSettings from './CameraSettings';
 import ChatbotButton from './ChatbotButton';
+import SampleSelector from './SampleSelector';
 
 const MicroscopeControlPanel = ({
   map,
@@ -15,7 +16,11 @@ const MicroscopeControlPanel = ({
   channelNames,
   vectorLayer,
   onClose,
-  selectedMicroscopeId
+  selectedMicroscopeId,
+  incubatorControlService,
+  roboticArmService,
+  currentOperation,
+  setCurrentOperation,
 }) => {
   const [isLightOn, setIsLightOn] = useState(false);
   const [xPosition, setXPosition] = useState(0);
@@ -25,6 +30,9 @@ const MicroscopeControlPanel = ({
   const [yMove, setYMove] = useState(1);
   const [zMove, setZMove] = useState(0.1);
   const [microscopeBusy, setMicroscopeBusy] = useState(false);
+
+  // State for SampleSelector dropdown visibility
+  const [isSampleSelectorOpen, setIsSampleSelectorOpen] = useState(false);
 
   // Renamed states for actual values from microscope (for display)
   const [actualIlluminationIntensity, setActualIlluminationIntensity] = useState(50);
@@ -273,15 +281,48 @@ const MicroscopeControlPanel = ({
     setIsLiveView(false);
   };
 
+  // Toggle for SampleSelector dropdown
+  const toggleSampleSelector = () => {
+    setIsSampleSelectorOpen(!isSampleSelectorOpen);
+  };
+
   return (
-    <div className="bg-white bg-opacity-95 p-6 rounded-lg shadow-lg border-l border-gray-300 box-border overflow-y-auto">
+    <div className="microscope-control-panel-container bg-white bg-opacity-95 p-6 rounded-lg shadow-lg border-l border-gray-300 box-border overflow-y-auto">
+      {/* SampleSelector is always mounted for persistent connection, visibility is controlled */}
+      <SampleSelector 
+        isVisible={isSampleSelectorOpen} // Controls visibility via CSS
+        selectedMicroscopeId={selectedMicroscopeId}
+        microscopeControlService={microscopeControlService}
+        incubatorControlService={incubatorControlService}
+        roboticArmService={roboticArmService}
+        currentOperation={currentOperation}
+        setCurrentOperation={setCurrentOperation}
+        // We might need a way to close it from within SampleSelector, or it closes on sample load/unload
+      />
+
       <div className="flex justify-between items-center mb-4">
-        <h3 className="text-xl font-medium">
-          {selectedMicroscopeId === 'squid-control/squid-control-reef' ? 'Simulated Microscope' :
-           selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 'Real Microscope 1' :
-           selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2' ? 'Real Microscope 2' :
-           'Microscope Control'}
-        </h3>
+        {/* Container for microscope title and sample selector button */}
+        <div className="flex items-center justify-start flex-grow">
+          <h3 className="text-xl font-medium mr-4">
+            {selectedMicroscopeId === 'squid-control/squid-control-reef' ? 'Simulated Microscope' :
+             selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 'Real Microscope 1' :
+             selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2' ? 'Real Microscope 2' :
+             'Microscope Control'}
+          </h3>
+          {/* Button to toggle SampleSelector dropdown - Renamed and moved */}
+          {selectedMicroscopeId && ( // Only show if a microscope is selected
+            <button 
+              onClick={toggleSampleSelector}
+              className="sample-selector-toggle-button p-2 bg-gray-200 hover:bg-gray-300 rounded shadow text-sm"
+              title="Select or manage samples"
+            >
+              <i className="fas fa-flask mr-2"></i>
+              Select Samples
+              <i className={`fas ${isSampleSelectorOpen ? 'fa-chevron-up' : 'fa-chevron-down'} ml-2`}></i>
+            </button>
+          )}
+        </div>
+        {/* Potentially other controls on the right side of the header can go here */}
       </div>
       <div id="manual-control-content">
         <div
@@ -460,6 +501,10 @@ MicroscopeControlPanel.propTypes = {
   channelNames: PropTypes.object,
   selectedMicroscopeId: PropTypes.string,
   onClose: PropTypes.func.isRequired,
+  incubatorControlService: PropTypes.object,
+  roboticArmService: PropTypes.object,
+  currentOperation: PropTypes.string,
+  setCurrentOperation: PropTypes.func,
 };
 
 export default MicroscopeControlPanel; 
