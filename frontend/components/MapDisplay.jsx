@@ -8,6 +8,41 @@ import MicroscopeControlPanel from './MicroscopeControlPanel';
 import ChannelSettings from './ChannelSettings';
 import { unByKey } from 'ol/Observable';
 
+// Simple Priority Queue for managing fetch requests
+class PQueue {
+  constructor(concurrency = 8) {
+    this.concurrency = concurrency;
+    this.queue = [];
+    this.activeCount = 0;
+  }
+
+  add(task) {
+    return new Promise((resolve, reject) => {
+      this.queue.push({ task, resolve, reject });
+      this._processQueue();
+    });
+  }
+
+  _processQueue() {
+    if (this.activeCount >= this.concurrency || this.queue.length === 0) {
+      return;
+    }
+
+    const { task, resolve, reject } = this.queue.shift();
+    this.activeCount++;
+
+    task()
+      .then(resolve)
+      .catch(reject)
+      .finally(() => {
+        this.activeCount--;
+        this._processQueue();
+      });
+  }
+}
+
+const tileRequestQueue = new PQueue(8); // Limit to 8 concurrent tile fetches
+
 // Utility function to get the correct service ID
 const getServiceId = () => {
   // Check if we're in test mode by looking at the URL
@@ -375,42 +410,27 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
         const transformedZ = 5 - tileCoord[0]; // Updated for 6 scale levels (0-5)
         const newSrc = createTileUrl(transformedZ, tileCoord[1], tileCoord[2], tileCoord);
         
-        // Create a black canvas as a fallback
-        const setBlackTile = () => {
-          const tileCanvas = document.createElement('canvas');
-          tileCanvas.width = 256;
-          tileCanvas.height = 256;
-          const ctx = tileCanvas.getContext('2d');
-          ctx.fillStyle = 'black';
-          ctx.fillRect(0, 0, 256, 256);
-          tile.getImage().src = tileCanvas.toDataURL();
-        };
-        
-        fetch(newSrc)
-          .then(response => {
+        tileRequestQueue.add(async () => {
+          try {
+            const response = await fetch(newSrc);
             if (!response.ok) {
-              // If the response is not OK, use black tile
-              throw new Error(`Failed to load tile: ${response.status}`);
-            }
-            return response.text();
-          })
-          .then(data => {
-            // Check if the data is empty or contains only zeros
-            if (!data || data === '""' || data.length < 100) {
-              // Likely an empty tile, use black instead
-              setBlackTile();
+              console.log(`Failed to load tile: ${newSrc}, status: ${response.status}`);
+              tile.setState(3); // TileState.ERROR
               return;
             }
-            
+            const data = await response.text();
+            if (!data || data === '""' || data.length < 100) {
+              console.log(`Empty or invalid tile data: ${newSrc}`);
+              tile.setState(3); // TileState.ERROR
+              return;
+            }
             const trimmed = data.replace(/^"|"$/g, '');
             tile.getImage().src = `data:image/png;base64,${trimmed}`;
-            console.log(`Loaded tile at location: ${newSrc}`);
-          })
-          .catch(error => {
+          } catch (error) {
             console.log(`Failed to load tile: ${newSrc}`, error);
-            // Use black tile for errors
-            setBlackTile();
-          });
+            tile.setState(3); // TileState.ERROR
+          }
+        });
       }
     });
     
@@ -506,42 +526,27 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
         const transformedZ = 5 - tileCoord[0]; // Updated for 6 scale levels (0-5)
         const newSrc = createTileUrl(transformedZ, tileCoord[1], tileCoord[2], tileCoord);
         
-        // Create a black canvas as a fallback
-        const setBlackTile = () => {
-          const tileCanvas = document.createElement('canvas');
-          tileCanvas.width = 256;
-          tileCanvas.height = 256;
-          const ctx = tileCanvas.getContext('2d');
-          ctx.fillStyle = 'black';
-          ctx.fillRect(0, 0, 256, 256);
-          tile.getImage().src = tileCanvas.toDataURL();
-        };
-        
-        fetch(newSrc)
-          .then(response => {
+        tileRequestQueue.add(async () => {
+          try {
+            const response = await fetch(newSrc);
             if (!response.ok) {
-              // If the response is not OK, use black tile
-              throw new Error(`Failed to load merged timepoint tile: ${response.status}`);
-            }
-            return response.text();
-          })
-          .then(data => {
-            // Check if the data is empty or contains only zeros
-            if (!data || data === '""' || data.length < 100) {
-              // Likely an empty tile, use black instead
-              setBlackTile();
+              console.log(`Failed to load merged tile: ${newSrc}, status: ${response.status}`);
+              tile.setState(3); // TileState.ERROR
               return;
             }
-            
+            const data = await response.text();
+            if (!data || data === '""' || data.length < 100) {
+              console.log(`Empty or invalid merged tile data: ${newSrc}`);
+              tile.setState(3); // TileState.ERROR
+              return;
+            }
             const trimmed = data.replace(/^"|"$/g, '');
             tile.getImage().src = `data:image/png;base64,${trimmed}`;
-            console.log(`Loaded merged timepoint tile at: ${newSrc}`);
-          })
-          .catch(error => {
-            console.log(`Failed to load merged timepoint tile: ${newSrc}`, error);
-            // Use black tile for errors
-            setBlackTile();
-          });
+          } catch (error) {
+            console.log(`Failed to load merged tile: ${newSrc}`, error);
+            tile.setState(3); // TileState.ERROR
+          }
+        });
       }
     });
     
@@ -634,42 +639,27 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
         const transformedZ = 5 - tileCoord[0]; // Updated for 6 scale levels (0-5)
         const newSrc = createTileUrl(transformedZ, tileCoord[1], tileCoord[2], tileCoord);
         
-        // Create a black canvas as a fallback
-        const setBlackTile = () => {
-          const tileCanvas = document.createElement('canvas');
-          tileCanvas.width = 256;
-          tileCanvas.height = 256;
-          const ctx = tileCanvas.getContext('2d');
-          ctx.fillStyle = 'black';
-          ctx.fillRect(0, 0, 256, 256);
-          tile.getImage().src = tileCanvas.toDataURL();
-        };
-        
-        fetch(newSrc)
-          .then(response => {
+        tileRequestQueue.add(async () => {
+          try {
+            const response = await fetch(newSrc);
             if (!response.ok) {
-              // If the response is not OK, use black tile
-              throw new Error(`Failed to load merged tile: ${response.status}`);
-            }
-            return response.text();
-          })
-          .then(data => {
-            // Check if the data is empty or contains only zeros
-            if (!data || data === '""' || data.length < 100) {
-              // Likely an empty tile, use black instead
-              setBlackTile();
+              console.log(`Failed to load merged tile: ${newSrc}, status: ${response.status}`);
+              tile.setState(3); // TileState.ERROR
               return;
             }
-            
+            const data = await response.text();
+            if (!data || data === '""' || data.length < 100) {
+              console.log(`Empty or invalid merged tile data: ${newSrc}`);
+              tile.setState(3); // TileState.ERROR
+              return;
+            }
             const trimmed = data.replace(/^"|"$/g, '');
             tile.getImage().src = `data:image/png;base64,${trimmed}`;
-            console.log(`Loaded merged tile at location: ${newSrc}`);
-          })
-          .catch(error => {
+          } catch (error) {
             console.log(`Failed to load merged tile: ${newSrc}`, error);
-            // Use black tile for errors
-            setBlackTile();
-          });
+            tile.setState(3); // TileState.ERROR
+          }
+        });
       }
     });
     
@@ -770,42 +760,27 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
         const transformedZ = 5 - tileCoord[0]; // Updated for 6 scale levels (0-5)
         const newSrc = createTileUrl(transformedZ, tileCoord[1], tileCoord[2], tileCoord);
         
-        // Create a black canvas as a fallback
-        const setBlackTile = () => {
-          const tileCanvas = document.createElement('canvas');
-          tileCanvas.width = 256;
-          tileCanvas.height = 256;
-          const ctx = tileCanvas.getContext('2d');
-          ctx.fillStyle = 'black';
-          ctx.fillRect(0, 0, 256, 256);
-          tile.getImage().src = tileCanvas.toDataURL();
-        };
-        
-        fetch(newSrc)
-          .then(response => {
+        tileRequestQueue.add(async () => {
+          try {
+            const response = await fetch(newSrc);
             if (!response.ok) {
-              // If the response is not OK, use black tile
-              throw new Error(`Failed to load tile: ${response.status}`);
-            }
-            return response.text();
-          })
-          .then(data => {
-            // Check if the data is empty or contains only zeros
-            if (!data || data === '""' || data.length < 100) {
-              // Likely an empty tile, use black instead
-              setBlackTile();
+              console.log(`Failed to load tile: ${newSrc}, status: ${response.status}`);
+              tile.setState(3); // TileState.ERROR
               return;
             }
-            
+            const data = await response.text();
+            if (!data || data === '""' || data.length < 100) {
+              console.log(`Empty or invalid tile data: ${newSrc}`);
+              tile.setState(3); // TileState.ERROR
+              return;
+            }
             const trimmed = data.replace(/^"|"$/g, '');
             tile.getImage().src = `data:image/png;base64,${trimmed}`;
-            console.log(`Loaded tile at location: ${newSrc}`);
-          })
-          .catch(error => {
+          } catch (error) {
             console.log(`Failed to load tile: ${newSrc}`, error);
-            // Use black tile for errors
-            setBlackTile();
-          });
+            tile.setState(3); // TileState.ERROR
+          }
+        });
       }
     });
     

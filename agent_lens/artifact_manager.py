@@ -341,6 +341,10 @@ class ZarrTileManager:
         self.tile_processor_task = None
         self.cache_cleanup_task = None
 
+        # For per-tile processing locks in get_tile_np_data
+        self.tile_processing_locks = {} 
+        self.tile_processing_locks_lock = Lock() # Lock for accessing/modifying self.tile_processing_locks
+
     async def _get_http_session(self):
         """Get or create an aiohttp.ClientSession with increased connection pool."""
         async with self.http_session_lock:
@@ -623,138 +627,166 @@ class ZarrTileManager:
             else:
                 del self.empty_regions_cache[tile_cache_key]
         
-        # Construct path to .zarray metadata
-        # Assuming scale_level is integer 0, 1, 2... corresponding to "scale0", "scale1"...
-        zarray_path_in_dataset = f"{channel}/scale{scale}/.zarray"
-        zarray_metadata = await self._fetch_zarr_metadata(dataset_id, zarray_path_in_dataset)
+        # Acquire or create a lock for this specific tile
+        async with self.tile_processing_locks_lock:
+            if tile_cache_key not in self.tile_processing_locks:
+                self.tile_processing_locks[tile_cache_key] = asyncio.Lock()
+        
+        tile_specific_lock = self.tile_processing_locks[tile_cache_key]
 
-        if not zarray_metadata:
-            logger.error(f"Failed to get .zarray metadata for {dataset_id}/{zarray_path_in_dataset}")
-            self._add_to_empty_regions_cache(tile_cache_key) # Assume missing metadata means empty
-            return None
-
-        try:
-            z_shape = zarray_metadata["shape"]         # [total_height, total_width]
-            z_chunks = zarray_metadata["chunks"]       # [chunk_height, chunk_width]
-            z_dtype_str = zarray_metadata["dtype"]
-            z_dtype = np.dtype(z_dtype_str)
-            z_compressor_meta = zarray_metadata["compressor"] # Can be null
-            # z_filters_meta = zarray_metadata.get("filters") # numcodecs handles filters if part of codec
-            z_fill_value = zarray_metadata.get("fill_value") # Important for empty/partial chunks
-
-        except KeyError as e:
-            logger.error(f"Incomplete .zarray metadata for {dataset_id}/{zarray_path_in_dataset}: Missing key {e}")
-            return None
-
-        # Check chunk coordinates are within bounds of the scale array
-        num_chunks_y_total = (z_shape[0] + z_chunks[0] - 1) // z_chunks[0]
-        num_chunks_x_total = (z_shape[1] + z_chunks[1] - 1) // z_chunks[1]
-
-        if not (0 <= y < num_chunks_y_total and 0 <= x < num_chunks_x_total):
-            logger.info(f"Chunk coordinates ({x}, {y}) out of bounds for {dataset_id}/{channel}/scale{scale} (max: {num_chunks_x_total-1}, {num_chunks_y_total-1})")
-            self._add_to_empty_regions_cache(tile_cache_key)
-            return None
+        async with tile_specific_lock:
+            # Re-check caches now that we have the lock, as another task might have populated it
+            if tile_cache_key in self.processed_tile_cache:
+                cached_data = self.processed_tile_cache[tile_cache_key] # Re-fetch, it might have been updated
+                if time.time() - cached_data['timestamp'] < self.processed_tile_ttl:
+                    logger.info(f"Using cached processed tile data for {tile_cache_key} (after lock)")
+                    return cached_data['data']
+                else: # Expired while waiting for lock or by another thread
+                    del self.processed_tile_cache[tile_cache_key]
             
-        # Determine path to the zip file and the chunk name within that zip
-        # Interpretation: {y}.zip contains a row of chunks, chunk file is named {x}
-        zip_file_path_in_dataset = f"{channel}/scale{scale}/{y}.zip"
-        chunk_name_in_zip = str(x)
-
-        # Construct the full chunk download URL
-        # SERVER_URL defined globally in the module, self.workspace="agent-lens"
-        chunk_download_url = f"{SERVER_URL}/{self.workspace}/artifacts/{dataset_id}/zip-files/{zip_file_path_in_dataset}?path={chunk_name_in_zip}"
-        
-        logger.info(f"Attempting to fetch chunk: {chunk_download_url}")
-        
-        http_session = await self._get_http_session()
-        raw_chunk_bytes = None
-        try:
-            async with http_session.get(chunk_download_url, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                if response.status == 200:
-                    raw_chunk_bytes = await response.read()
-                elif response.status == 404:
-                    logger.warning(f"Chunk not found (404) at {chunk_download_url}. Treating as empty.")
-                    self._add_to_empty_regions_cache(tile_cache_key)
-                    # Create an empty tile using fill_value if available
-                    empty_tile_data = np.full(z_chunks, z_fill_value if z_fill_value is not None else 0, dtype=z_dtype)
-                    return empty_tile_data[:self.tile_size, :self.tile_size] # Ensure correct output size
+            if tile_cache_key in self.empty_regions_cache: # Re-check empty cache
+                expiry_time = self.empty_regions_cache[tile_cache_key]
+                if time.time() < expiry_time:
+                    logger.info(f"Skipping known empty tile: {tile_cache_key} (after lock)")
+                    return None
                 else:
-                    error_text = await response.text()
-                    logger.error(f"Error fetching chunk {chunk_download_url}: HTTP {response.status} - {error_text}")
-                    return None # Indicate error
-        except asyncio.TimeoutError:
-            logger.error(f"Timeout fetching chunk: {chunk_download_url}")
-            return None
-        except aiohttp.ClientError as e: # More specific aiohttp errors
-            logger.error(f"ClientError fetching chunk {chunk_download_url}: {e}")
-            return None
-        except Exception as e: # Catch-all for other unexpected errors during fetch
-            logger.error(f"Unexpected error fetching chunk {chunk_download_url}: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            return None
+                    del self.empty_regions_cache[tile_cache_key]
 
-        if not raw_chunk_bytes: # Should be caught by 404 or other errors, but as a safeguard
-            logger.warning(f"No data received for chunk: {chunk_download_url}, though HTTP status was not an error.")
-            self._add_to_empty_regions_cache(tile_cache_key)
-            empty_tile_data = np.full(z_chunks, z_fill_value if z_fill_value is not None else 0, dtype=z_dtype)
-            return empty_tile_data[:self.tile_size, :self.tile_size]
+            # Construct path to .zarray metadata
+            # Assuming scale_level is integer 0, 1, 2... corresponding to "scale0", "scale1"...
+            zarray_path_in_dataset = f"{channel}/scale{scale}/.zarray"
+            zarray_metadata = await self._fetch_zarr_metadata(dataset_id, zarray_path_in_dataset)
 
+            if not zarray_metadata:
+                logger.error(f"Failed to get .zarray metadata for {dataset_id}/{zarray_path_in_dataset}")
+                self._add_to_empty_regions_cache(tile_cache_key) # Assume missing metadata means empty
+                return None
 
-        # 4. Decompress and decode chunk data
-        try:
-            if z_compressor_meta is None: # Raw, uncompressed data
-                decompressed_data = raw_chunk_bytes
-            else:
-                codec = numcodecs.get_codec(z_compressor_meta) # Handles filters too if defined in compressor object
-                decompressed_data = codec.decode(raw_chunk_bytes)
-            
-            # Convert to NumPy array and reshape. Chunk shape from .zarray is [height, width]
-            chunk_data = np.frombuffer(decompressed_data, dtype=z_dtype).reshape(z_chunks)
-            
-            # The Zarr chunk might be smaller than self.tile_size if it's a partial edge chunk.
-            # Or it could be larger if .zarray chunks are not self.tile_size.
-            # We need to return a tile of self.tile_size.
-            
-            final_tile_data = np.full((self.tile_size, self.tile_size), 
-                                       z_fill_value if z_fill_value is not None else 0, 
-                                       dtype=z_dtype)
-            
-            # Determine the slice to copy from chunk_data and where to place it in final_tile_data
-            copy_height = min(chunk_data.shape[0], self.tile_size)
-            copy_width = min(chunk_data.shape[1], self.tile_size)
-            
-            final_tile_data[:copy_height, :copy_width] = chunk_data[:copy_height, :copy_width]
+            try:
+                z_shape = zarray_metadata["shape"]         # [total_height, total_width]
+                z_chunks = zarray_metadata["chunks"]       # [chunk_height, chunk_width]
+                z_dtype_str = zarray_metadata["dtype"]
+                z_dtype = np.dtype(z_dtype_str)
+                z_compressor_meta = zarray_metadata["compressor"] # Can be null
+                # z_filters_meta = zarray_metadata.get("filters") # numcodecs handles filters if part of codec
+                z_fill_value = zarray_metadata.get("fill_value") # Important for empty/partial chunks
 
-        except Exception as e:
-            logger.error(f"Error decompressing/decoding chunk from {chunk_download_url}: {e}")
-            logger.error(f"Metadata: dtype={z_dtype_str}, compressor={z_compressor_meta}, chunk_shape={z_chunks}")
-            import traceback
-            logger.error(traceback.format_exc())
-            return None # Indicate error
+            except KeyError as e:
+                logger.error(f"Incomplete .zarray metadata for {dataset_id}/{zarray_path_in_dataset}: Missing key {e}")
+                return None
 
-        # 5. Check if tile is effectively empty (e.g., all fill_value or zeros)
-        # Use a small threshold for non-zero values if fill_value is 0 or not defined
-        is_empty_threshold = 10 
-        if z_fill_value is not None:
-            if np.all(final_tile_data == z_fill_value):
-                logger.info(f"Tile data is all fill_value ({z_fill_value}), treating as empty: {tile_cache_key}")
+            # Check chunk coordinates are within bounds of the scale array
+            num_chunks_y_total = (z_shape[0] + z_chunks[0] - 1) // z_chunks[0]
+            num_chunks_x_total = (z_shape[1] + z_chunks[1] - 1) // z_chunks[1]
+
+            if not (0 <= y < num_chunks_y_total and 0 <= x < num_chunks_x_total):
+                logger.info(f"Chunk coordinates ({x}, {y}) out of bounds for {dataset_id}/{channel}/scale{scale} (max: {num_chunks_x_total-1}, {num_chunks_y_total-1})")
                 self._add_to_empty_regions_cache(tile_cache_key)
-                return None # Return None for empty tiles based on fill_value
-        elif np.count_nonzero(final_tile_data) < is_empty_threshold:
-            logger.info(f"Tile data is effectively empty (few non-zeros), treating as empty: {tile_cache_key}")
-            self._add_to_empty_regions_cache(tile_cache_key)
-            return None
+                return None
+            
+            # Determine path to the zip file and the chunk name within that zip
+            # Interpretation: {y}.zip contains a row of chunks, chunk file is named {x}
+            zip_file_path_in_dataset = f"{channel}/scale{scale}/{y}.zip"
+            chunk_name_in_zip = str(x)
 
-        # 6. Cache the processed tile
-        self.processed_tile_cache[tile_cache_key] = {
-            'data': final_tile_data,
-            'timestamp': time.time()
-        }
-        
-        total_time = time.time() - start_time
-        logger.info(f"Total tile processing time for {tile_cache_key}: {total_time:.3f}s, size: {final_tile_data.nbytes/1024:.1f}KB")
-        
+            # Construct the full chunk download URL
+            # SERVER_URL defined globally in the module, self.workspace="agent-lens"
+            chunk_download_url = f"{SERVER_URL}/{self.workspace}/artifacts/{dataset_id}/zip-files/{zip_file_path_in_dataset}?path={chunk_name_in_zip}"
+            
+            logger.info(f"Attempting to fetch chunk: {chunk_download_url}")
+            
+            http_session = await self._get_http_session()
+            raw_chunk_bytes = None
+            try:
+                async with http_session.get(chunk_download_url, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                    if response.status == 200:
+                        raw_chunk_bytes = await response.read()
+                    elif response.status == 404:
+                        logger.warning(f"Chunk not found (404) at {chunk_download_url}. Treating as empty.")
+                        self._add_to_empty_regions_cache(tile_cache_key)
+                        # Create an empty tile using fill_value if available
+                        empty_tile_data = np.full(z_chunks, z_fill_value if z_fill_value is not None else 0, dtype=z_dtype)
+                        return empty_tile_data[:self.tile_size, :self.tile_size] # Ensure correct output size
+                    else:
+                        error_text = await response.text()
+                        logger.error(f"Error fetching chunk {chunk_download_url}: HTTP {response.status} - {error_text}")
+                        return None # Indicate error
+            except asyncio.TimeoutError:
+                logger.error(f"Timeout fetching chunk: {chunk_download_url}")
+                return None
+            except aiohttp.ClientError as e: # More specific aiohttp errors
+                logger.error(f"ClientError fetching chunk {chunk_download_url}: {e}")
+                return None
+            except Exception as e: # Catch-all for other unexpected errors during fetch
+                logger.error(f"Unexpected error fetching chunk {chunk_download_url}: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+                return None
+
+            if not raw_chunk_bytes: # Should be caught by 404 or other errors, but as a safeguard
+                logger.warning(f"No data received for chunk: {chunk_download_url}, though HTTP status was not an error.")
+                self._add_to_empty_regions_cache(tile_cache_key)
+                empty_tile_data = np.full(z_chunks, z_fill_value if z_fill_value is not None else 0, dtype=z_dtype)
+                return empty_tile_data[:self.tile_size, :self.tile_size]
+
+
+            # 4. Decompress and decode chunk data
+            try:
+                if z_compressor_meta is None: # Raw, uncompressed data
+                    decompressed_data = raw_chunk_bytes
+                else:
+                    codec = numcodecs.get_codec(z_compressor_meta) # Handles filters too if defined in compressor object
+                    decompressed_data = codec.decode(raw_chunk_bytes)
+                
+                # Convert to NumPy array and reshape. Chunk shape from .zarray is [height, width]
+                chunk_data = np.frombuffer(decompressed_data, dtype=z_dtype).reshape(z_chunks)
+                
+                # The Zarr chunk might be smaller than self.tile_size if it's a partial edge chunk.
+                # Or it could be larger if .zarray chunks are not self.tile_size.
+                # We need to return a tile of self.tile_size.
+                
+                final_tile_data = np.full((self.tile_size, self.tile_size), 
+                                           z_fill_value if z_fill_value is not None else 0, 
+                                           dtype=z_dtype)
+                
+                # Determine the slice to copy from chunk_data and where to place it in final_tile_data
+                copy_height = min(chunk_data.shape[0], self.tile_size)
+                copy_width = min(chunk_data.shape[1], self.tile_size)
+                
+                final_tile_data[:copy_height, :copy_width] = chunk_data[:copy_height, :copy_width]
+
+            except Exception as e:
+                logger.error(f"Error decompressing/decoding chunk from {chunk_download_url}: {e}")
+                logger.error(f"Metadata: dtype={z_dtype_str}, compressor={z_compressor_meta}, chunk_shape={z_chunks}")
+                import traceback
+                logger.error(traceback.format_exc())
+                return None # Indicate error
+
+            # 5. Check if tile is effectively empty (e.g., all fill_value or zeros)
+            # Use a small threshold for non-zero values if fill_value is 0 or not defined
+            is_empty_threshold = 10 
+            if z_fill_value is not None:
+                if np.all(final_tile_data == z_fill_value):
+                    logger.info(f"Tile data is all fill_value ({z_fill_value}), treating as empty: {tile_cache_key}")
+                    self._add_to_empty_regions_cache(tile_cache_key) # Cache as empty
+                    return None # Return None for empty tiles based on fill_value
+            elif np.count_nonzero(final_tile_data) < is_empty_threshold:
+                logger.info(f"Tile data is effectively empty (few non-zeros), treating as empty: {tile_cache_key}")
+                self._add_to_empty_regions_cache(tile_cache_key) # Cache as empty
+                return None
+
+            # 6. Cache the processed tile
+            self.processed_tile_cache[tile_cache_key] = {
+                'data': final_tile_data,
+                'timestamp': time.time()
+            }
+            
+            total_time = time.time() - start_time
+            logger.info(f"Total tile processing time for {tile_cache_key}: {total_time:.3f}s, size: {final_tile_data.nbytes/1024:.1f}KB")
+            
+            # final_tile_data is returned outside the lock by initial design, which is fine
+            # as it's read from local var.
+
         return final_tile_data
 
     def _add_to_empty_regions_cache(self, key):
