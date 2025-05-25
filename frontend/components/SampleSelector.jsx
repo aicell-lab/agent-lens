@@ -25,8 +25,8 @@ const SampleSelector = ({
 
   // Define the mapping of sample IDs to their data aliases
   const sampleDataAliases = {
-    'simulated-sample-1': 'squid-control/image-map-20250429-treatment-zip',
-    'simulated-sample-2': 'squid-control/image-map-20250506-treatment-zip'
+    'simulated-sample-1': 'agent-lens/20250506-scan-time-lapse-2025-05-06_17-56-38',
+    'simulated-sample-2': 'agent-lens/20250429-scan-time-lapse-2025-04-29_15-38-36'
   };
   
   const isRealMicroscopeSelected = selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ||
@@ -202,10 +202,10 @@ const SampleSelector = ({
       try {
         addWorkflowMessage("Loading simulated sample...");
         if (selectedSampleId === 'simulated-sample-1') {
-          await microscopeControlService.set_simulated_sample_data_alias('squid-control/image-map-20250429-treatment-zip');
+          await microscopeControlService.set_simulated_sample_data_alias('agent-lens/20250506-scan-time-lapse-2025-05-06_17-56-38');
           addWorkflowMessage('Loaded simulated sample 1');
         } else if (selectedSampleId === 'simulated-sample-2') {
-          await microscopeControlService.set_simulated_sample_data_alias('squid-control/image-map-20250506-treatment-zip');
+          await microscopeControlService.set_simulated_sample_data_alias('agent-lens/20250429-scan-time-lapse-2025-04-29_15-38-36');
           addWorkflowMessage('Loaded simulated sample 2');
         }
         setLoadingStatus('Sample loaded!'); // Update status on success
