@@ -23,7 +23,8 @@ const Sidebar = ({
   const [selectedGalleryId, setSelectedGalleryId] = useState('agent-lens/20250506-scan-time-lapse-gallery');
   const [selectedGalleryName, setSelectedGalleryName] = useState('');
   const [availableGalleries, setAvailableGalleries] = useState([
-    { id: 'agent-lens/20250506-scan-time-lapse-gallery', name: 'Default Time-lapse Gallery' }
+    { id: 'agent-lens/20250506-scan-time-lapse-gallery', name: 'Default Time-lapse Gallery' },
+    { id: 'agent-lens/hpa-sample-gallery', name: 'HPA Sample Gallery' }
   ]);
   const [isSettingUpGalleryMap, setIsSettingUpGalleryMap] = useState(false);
 

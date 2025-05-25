@@ -26,7 +26,8 @@ const SampleSelector = ({
   // Define the mapping of sample IDs to their data aliases
   const sampleDataAliases = {
     'simulated-sample-1': 'agent-lens/20250506-scan-time-lapse-2025-05-06_17-56-38',
-    'simulated-sample-2': 'agent-lens/20250429-scan-time-lapse-2025-04-29_15-38-36'
+    'simulated-sample-2': 'agent-lens/20250429-scan-time-lapse-2025-04-29_15-38-36',
+    'simulated-sample-3': 'agent-lens/hpa-sample-2025-01-14_15-00-51'
   };
   
   const isRealMicroscopeSelected = selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ||
@@ -201,12 +202,12 @@ const SampleSelector = ({
       setCurrentOperation('loading');
       try {
         addWorkflowMessage("Loading simulated sample...");
-        if (selectedSampleId === 'simulated-sample-1') {
-          await microscopeControlService.set_simulated_sample_data_alias('agent-lens/20250506-scan-time-lapse-2025-05-06_17-56-38');
-          addWorkflowMessage('Loaded simulated sample 1');
-        } else if (selectedSampleId === 'simulated-sample-2') {
-          await microscopeControlService.set_simulated_sample_data_alias('agent-lens/20250429-scan-time-lapse-2025-04-29_15-38-36');
-          addWorkflowMessage('Loaded simulated sample 2');
+        const dataAlias = sampleDataAliases[selectedSampleId];
+        if (dataAlias) {
+          await microscopeControlService.set_simulated_sample_data_alias(dataAlias);
+          addWorkflowMessage(`Loaded ${selectedSampleId}`);
+        } else {
+          throw new Error(`No data alias found for ${selectedSampleId}`);
         }
         setLoadingStatus('Sample loaded!'); // Update status on success
         setIsSampleLoaded(true);
@@ -511,6 +512,14 @@ const SampleSelector = ({
               >
                 <i className="fas fa-flask"></i> 
                 <span>Simulated Sample 2</span>
+              </button>
+              <button
+                className={`sample-option ${selectedSampleId === 'simulated-sample-3' ? 'active' : ''}`}
+                onClick={() => handleSampleSelect('simulated-sample-3')}
+                disabled={currentOperation !== null}
+              >
+                <i className="fas fa-flask"></i> 
+                <span>Simulated Sample 3</span>
               </button>
             </>
           )}
