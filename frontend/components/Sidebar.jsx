@@ -90,7 +90,7 @@ const Sidebar = ({
   };
 
   const handleImageViewTabClick = () => {
-    if (activeTab === 'image-view') {
+    if (activeTab === 'image-view' || activeTab === 'image-view-map') {
       const newPanelState = !isImageViewPanelOpen;
       setIsImageViewPanelOpen(newPanelState);
     } else {
@@ -116,6 +116,34 @@ const Sidebar = ({
     window.dispatchEvent(new CustomEvent('gallerySelected', { 
       detail: { galleryId: selectedGalleryId, galleryName: selectedGalleryName } 
     }));
+  };
+
+  const handleGalleryDoubleClick = (galleryId) => {
+    // Step 1: Select the gallery (this updates UI and might trigger async name fetch)
+    setSelectedGalleryId(galleryId);
+
+    // Step 2: Prepare to trigger the data loading for ImageViewBrowser
+    const galleryInfo = availableGalleries.find(g => g.id === galleryId);
+    const nameToDispatch = galleryInfo ? galleryInfo.name : (galleryId.split('/').pop() || galleryId);
+    setSelectedGalleryName(nameToDispatch); // Set name for immediate consistency
+
+    // Step 3: Update localStorage and dispatch the event for ImageViewBrowser.
+    localStorage.setItem('selectedGalleryId', galleryId);
+    localStorage.setItem('selectedGalleryName', nameToDispatch);
+    window.dispatchEvent(new CustomEvent('gallerySelected', {
+      detail: { galleryId: galleryId, galleryName: nameToDispatch }
+    }));
+
+    // Step 4: Ensure the correct tab and panel state
+    if (activeTab === 'image-view-map') {
+      onTabChange('image-view'); // Switch from map view to browser view
+    } else if (activeTab !== 'image-view') {
+      onTabChange('image-view'); // Switch to image view tab if not already on it or map view
+    }
+
+    if (!isImageViewPanelOpen) {
+      setIsImageViewPanelOpen(true); // Open the panel if it's closed
+    }
   };
 
   const handleViewGalleryImageData = async () => {
@@ -150,11 +178,6 @@ const Sidebar = ({
   const handleCloseMapView = () => {
     // Close the map view and return to image view
     onTabChange('image-view');
-  };
-
-  const handleGallerySelect = async (galleryId) => {
-    setSelectedGalleryId(galleryId);
-    // Gallery name will be fetched by the useEffect
   };
 
   const handleAddGallery = () => {
@@ -303,10 +326,11 @@ const Sidebar = ({
                 <div 
                   key={gallery.id}
                   className={`gallery-option ${selectedGalleryId === gallery.id ? 'active' : ''}`}
+                  onDoubleClick={() => handleGalleryDoubleClick(gallery.id)} // Double click handler
                 >
                   <button
                     className="gallery-select-btn"
-                    onClick={() => handleGallerySelect(gallery.id)}
+                    // onClick is removed to prevent single-click selection changing highlight
                   >
                     <i className="fas fa-folder"></i>
                     <span>{gallery.name}</span>
