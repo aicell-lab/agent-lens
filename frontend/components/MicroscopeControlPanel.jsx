@@ -31,7 +31,7 @@ const MicroscopeControlPanel = ({
   const [zMove, setZMove] = useState(0.1);
   const [microscopeBusy, setMicroscopeBusy] = useState(false);
 
-  // State for SampleSelector dropdown visibility
+  // State for SampleSelector dropdown
   const [isSampleSelectorOpen, setIsSampleSelectorOpen] = useState(false);
 
   // Renamed states for actual values from microscope (for display)
@@ -45,6 +45,18 @@ const MicroscopeControlPanel = ({
   const [illuminationChannel, setIlluminationChannel] = useState("0");
   const [isLiveView, setIsLiveView] = useState(false);
   const canvasRef = useRef(null);
+
+  // Refs to hold the latest actual values for use in debounced effects
+  const actualIlluminationIntensityRef = useRef(actualIlluminationIntensity);
+  const actualCameraExposureRef = useRef(actualCameraExposure);
+
+  useEffect(() => {
+    actualIlluminationIntensityRef.current = actualIlluminationIntensity;
+  }, [actualIlluminationIntensity]);
+
+  useEffect(() => {
+    actualCameraExposureRef.current = actualCameraExposure;
+  }, [actualCameraExposure]);
 
   const fetchStatusAndUpdateActuals = async () => {
     if (!microscopeControlService) {
@@ -105,6 +117,50 @@ const MicroscopeControlPanel = ({
     }
   }, [microscopeControlService, illuminationChannel]); // Re-run if service or channel changes to re-sync
 
+  // Effect to update illumination when desiredIlluminationIntensity or illuminationChannel changes
+  useEffect(() => {
+    if (!microscopeControlService) return;
+
+    const handler = setTimeout(async () => {
+      try {
+        setMicroscopeBusy(true);
+        appendLog(`Setting illumination (debounced) to channel ${illuminationChannel}, intensity ${desiredIlluminationIntensity}%`);
+        await microscopeControlService.set_illumination(parseInt(illuminationChannel, 10), desiredIlluminationIntensity);
+        await fetchStatusAndUpdateActuals(); // Update UI after successful set
+        appendLog('Illumination updated successfully (debounced).');
+      } catch (error) {
+        appendLog(`Error setting illumination (debounced): ${error.message}`);
+        console.error("[MicroscopeControlPanel] Error setting illumination (debounced):", error);
+      } finally {
+        setMicroscopeBusy(false);
+      }
+    }, 300); // 300ms debounce
+
+    return () => clearTimeout(handler);
+  }, [desiredIlluminationIntensity, illuminationChannel, microscopeControlService, appendLog]);
+  
+  // Effect to update camera exposure when desiredCameraExposure or illuminationChannel changes
+  useEffect(() => {
+    if (!microscopeControlService) return;
+
+    const handler = setTimeout(async () => {
+      try {
+        setMicroscopeBusy(true);
+        appendLog(`Setting camera exposure (debounced) for channel ${illuminationChannel} to ${desiredCameraExposure}ms`);
+        await microscopeControlService.set_camera_exposure(parseInt(illuminationChannel, 10), desiredCameraExposure);
+        await fetchStatusAndUpdateActuals(); // Update UI after successful set
+        appendLog('Camera exposure updated successfully (debounced).');
+      } catch (error) {
+        appendLog(`Error setting camera exposure (debounced): ${error.message}`);
+        console.error("[MicroscopeControlPanel] Error setting camera exposure (debounced):", error);
+      } finally {
+        setMicroscopeBusy(false);
+      }
+    }, 300); // 300ms debounce
+
+    return () => clearTimeout(handler);
+  }, [desiredCameraExposure, illuminationChannel, microscopeControlService, appendLog]);
+
   useEffect(() => {
     if (!snapshotImage || !canvasRef.current) return;
 
@@ -136,7 +192,7 @@ const MicroscopeControlPanel = ({
           // Only capture new frames if the microscope is not busy with other operations
           if (!microscopeBusy && microscopeControlService) {
             // Use DESIRED values for live view frames
-            const base64Image = await microscopeControlService.one_new_frame(desiredCameraExposure, parseInt(illuminationChannel, 10), parseInt(desiredIlluminationIntensity, 10));
+            const base64Image = await microscopeControlService.one_new_frame();
             setSnapshotImage(`data:image/png;base64,${base64Image}`);
           }
         } catch (error) {
@@ -147,7 +203,7 @@ const MicroscopeControlPanel = ({
       clearInterval(liveViewInterval);
     }
     return () => clearInterval(liveViewInterval);
-  }, [isLiveView, desiredCameraExposure, illuminationChannel, desiredIlluminationIntensity, microscopeControlService, microscopeBusy]);
+  }, [isLiveView, microscopeControlService, microscopeBusy, appendLog]);
 
   const moveMicroscope = async (direction, multiplier) => {
     if (!microscopeControlService) return;
@@ -197,12 +253,14 @@ const MicroscopeControlPanel = ({
     try {
       setMicroscopeBusy(true);
       appendLog('Snapping image...');
-      // Use DESIRED values for snapping image
-      const exposureTime = desiredCameraExposure;
-      const channel = parseInt(illuminationChannel, 10);
-      const intensity = desiredIlluminationIntensity;
+
+      if (isLiveView) {
+        stopLiveView(); // Terminate live view first
+        // Give a moment for live view to fully stop before snapping
+        await new Promise(resolve => setTimeout(resolve, 100)); 
+      }
       
-      const base64Image = await microscopeControlService.one_new_frame(exposureTime, channel, intensity);
+      const base64Image = await microscopeControlService.one_new_frame();
       console.log('Received base64 image data of length:', base64Image.length);
       setSnapshotImage(`data:image/png;base64,${base64Image}`);
       appendLog('Image snapped and fetched successfully.');
@@ -444,6 +502,8 @@ const MicroscopeControlPanel = ({
                 onChange={(e) => {
                   setDesiredIlluminationIntensity(parseInt(e.target.value, 10));
                 }}
+                // Disable if microscope is busy to prevent rapid firing of set_illumination
+                disabled={microscopeBusy}
               />
             </div>
 

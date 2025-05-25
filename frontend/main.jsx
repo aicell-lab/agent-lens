@@ -1,4 +1,4 @@
-import React, { StrictMode, useEffect, useState } from 'react';
+import React, { StrictMode, useEffect, useState, useCallback } from 'react';
 import ReactDOM from 'react-dom/client';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import '@fortawesome/fontawesome-free/css/all.min.css';
@@ -45,6 +45,10 @@ const MicroscopeControl = () => {
   const [loginError, setLoginError] = useState(null);
   const [selectedMicroscopeId, setSelectedMicroscopeId] = useState("squid-control/squid-control-reef");
   const [currentOperation, setCurrentOperation] = useState(null);
+
+  const appendLog = useCallback((message) => {
+    setLog((prevLog) => prevLog + message + '\n');
+  }, []);
 
   useEffect(() => {
     const checkTokenAndInit = async () => {
@@ -138,10 +142,6 @@ const MicroscopeControl = () => {
       localStorage.removeItem("token");
     }
   };
-
-  const appendLog = (message) => {
-      setLog((prevLog) => prevLog + message + '\n');
-  };  
 
   // Handle tab change with cleanup logic for image map
   const handleTabChange = (tab) => {
