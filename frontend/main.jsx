@@ -1,4 +1,4 @@
-import React, { StrictMode, useEffect, useState } from 'react';
+import React, { StrictMode, useEffect, useState, useCallback } from 'react';
 import ReactDOM from 'react-dom/client';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import '@fortawesome/fontawesome-free/css/all.min.css';
@@ -44,6 +44,11 @@ const MicroscopeControl = () => {
   const [vectorLayer, setVectorLayer] = useState(null);
   const [loginError, setLoginError] = useState(null);
   const [selectedMicroscopeId, setSelectedMicroscopeId] = useState("squid-control/squid-control-reef");
+  const [currentOperation, setCurrentOperation] = useState(null);
+
+  const appendLog = useCallback((message) => {
+    setLog((prevLog) => prevLog + message + '\n');
+  }, []);
 
   useEffect(() => {
     const checkTokenAndInit = async () => {
@@ -138,10 +143,6 @@ const MicroscopeControl = () => {
     }
   };
 
-  const appendLog = (message) => {
-      setLog((prevLog) => prevLog + message + '\n');
-  };  
-
   // Handle tab change with cleanup logic for image map
   const handleTabChange = (tab) => {
     // If navigating away from the image map view, clean up resources
@@ -206,6 +207,10 @@ const MicroscopeControl = () => {
               channelNames={channelNames}
               vectorLayer={vectorLayer}
               selectedMicroscopeId={selectedMicroscopeId}
+              incubatorControlService={incubatorControlService}
+              roboticArmService={roboticArmService}
+              currentOperation={currentOperation}
+              setCurrentOperation={setCurrentOperation}
               onClose={() => {}}
             />
           </div>
@@ -245,6 +250,7 @@ const MicroscopeControl = () => {
               incubatorControlService={incubatorControlService}
               microscopeControlService={microscopeControlService}
               roboticArmService={roboticArmService}
+              currentOperation={currentOperation}
             />
             <div className="content-area">
               {renderContent()}

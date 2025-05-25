@@ -1,27 +1,32 @@
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
 
+// NOTE: Ensure corresponding CSS for .sample-selector-dropdown and .hidden is added.
+// .sample-selector-dropdown { position: absolute; top: 50px; /* Adjust as needed */ left: 20px; z-index: 1000; background: white; border: 1px solid #ccc; box-shadow: 0 2px 10px rgba(0,0,0,0.1); padding: 15px; border-radius: 5px; width: 300px; /* Or max-content */ }
+// .hidden { display: none; }
+
 const SampleSelector = ({ 
   isVisible, 
   selectedMicroscopeId, 
   microscopeControlService,
   incubatorControlService,
-  roboticArmService
+  roboticArmService,
+  currentOperation,
+  setCurrentOperation
 }) => {
   const [selectedSampleId, setSelectedSampleId] = useState(null);
   const [incubatorSlots, setIncubatorSlots] = useState([]);
   const [loadingStatus, setLoadingStatus] = useState('');
   const [isSampleLoaded, setIsSampleLoaded] = useState(false);
   const [roboticArmServiceState, setRoboticArmServiceState] = useState(null);
-  const [currentOperation, setCurrentOperation] = useState(null);
   const [workflowMessages, setWorkflowMessages] = useState([]);
   // Track loaded sample ID on current microscope
   const [loadedSampleOnMicroscope, setLoadedSampleOnMicroscope] = useState(null);
 
   // Define the mapping of sample IDs to their data aliases
   const sampleDataAliases = {
-    'simulated-sample-1': 'squid-control/image-map-20250429-treatment-zip',
-    'simulated-sample-2': 'squid-control/image-map-20250506-treatment-zip'
+    'simulated-sample-1': 'agent-lens/20250506-scan-time-lapse-2025-05-06_17-56-38',
+    'simulated-sample-2': 'agent-lens/20250429-scan-time-lapse-2025-04-29_15-38-36'
   };
   
   const isRealMicroscopeSelected = selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ||
@@ -197,10 +202,10 @@ const SampleSelector = ({
       try {
         addWorkflowMessage("Loading simulated sample...");
         if (selectedSampleId === 'simulated-sample-1') {
-          await microscopeControlService.set_simulated_sample_data_alias('squid-control/image-map-20250429-treatment-zip');
+          await microscopeControlService.set_simulated_sample_data_alias('agent-lens/20250506-scan-time-lapse-2025-05-06_17-56-38');
           addWorkflowMessage('Loaded simulated sample 1');
         } else if (selectedSampleId === 'simulated-sample-2') {
-          await microscopeControlService.set_simulated_sample_data_alias('squid-control/image-map-20250506-treatment-zip');
+          await microscopeControlService.set_simulated_sample_data_alias('agent-lens/20250429-scan-time-lapse-2025-04-29_15-38-36');
           addWorkflowMessage('Loaded simulated sample 2');
         }
         setLoadingStatus('Sample loaded!'); // Update status on success
@@ -465,7 +470,7 @@ const SampleSelector = ({
 
   // Get class name for sample button based on location and selected state
   const getSampleButtonClass = (slot) => {
-    let className = 'sample-option';
+    let className = 'sample-option'; // Base class from Sidebar.css, can be reused or made specific
     
     // Add selected state
     if (selectedSampleId === slot.id) {
@@ -483,7 +488,7 @@ const SampleSelector = ({
   };
 
   return (
-    <div className={`sample-sidebar ${!isVisible ? 'collapsed' : ''}`}>
+    <div className={`sample-selector-dropdown ${!isVisible ? 'hidden' : ''}`}>
       <h3 className="sample-sidebar-title">Select Sample</h3>
       
       {/* Sample Options Section */}
@@ -610,7 +615,9 @@ SampleSelector.propTypes = {
   selectedMicroscopeId: PropTypes.string,
   microscopeControlService: PropTypes.object,
   incubatorControlService: PropTypes.object,
-  roboticArmService: PropTypes.object
+  roboticArmService: PropTypes.object,
+  currentOperation: PropTypes.string,
+  setCurrentOperation: PropTypes.func
 };
 
 export default SampleSelector; 

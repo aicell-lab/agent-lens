@@ -8,13 +8,16 @@ const Sidebar = ({
   onTabChange, 
   onMicroscopeSelect, 
   selectedMicroscopeId,
-  incubatorControlService,
-  microscopeControlService,
-  roboticArmService
+  // incubatorControlService, // Will be passed directly to SampleSelector if needed elsewhere
+  // microscopeControlService, // Will be passed directly to SampleSelector if needed elsewhere
+  // roboticArmService // Will be passed directly to SampleSelector if needed elsewhere
+  currentOperation, // Added prop to disable navigation during sample operations
 }) => {
-  const [isMicroscopePanelOpen, setIsMicroscopePanelOpen] = useState(true);
-  const [isSamplePanelOpen, setIsSamplePanelOpen] = useState(false);
-  
+  // State for microscope dropdown
+  const [isMicroscopeDropdownOpen, setIsMicroscopeDropdownOpen] = useState(false);
+  // const [isMicroscopePanelOpen, setIsMicroscopePanelOpen] = useState(true); // Removed
+  // const [isSamplePanelOpen, setIsSamplePanelOpen] = useState(false); // SampleSelector will be moved
+
   // New state for Image View
   const [isImageViewPanelOpen, setIsImageViewPanelOpen] = useState(false);
   const [selectedGalleryId, setSelectedGalleryId] = useState('agent-lens/20250506-scan-time-lapse-gallery');
@@ -24,17 +27,13 @@ const Sidebar = ({
   ]);
   const [isSettingUpGalleryMap, setIsSettingUpGalleryMap] = useState(false);
 
+  // New state for main sidebar collapse
+  const [isMainSidebarCollapsed, setIsMainSidebarCollapsed] = useState(false);
+
   // Set default tab to 'microscope' on component mount
   useEffect(() => {
     onTabChange('microscope');
   }, []); // Empty dependency array means this runs once on mount
-
-  // Reset sample panel state when microscope selection changes
-  useEffect(() => {
-    if (!selectedMicroscopeId) {
-      setIsSamplePanelOpen(false);
-    }
-  }, [selectedMicroscopeId]);
 
   // Fetch gallery name when gallery ID changes
   useEffect(() => {
@@ -80,14 +79,12 @@ const Sidebar = ({
 
   const handleMicroscopeTabClick = () => {
     if (activeTab === 'microscope') {
-      const newPanelState = !isMicroscopePanelOpen;
-      setIsMicroscopePanelOpen(newPanelState);
-      if (!newPanelState) {
-        setIsSamplePanelOpen(false);
-      }
+      // Toggle dropdown instead of panel
+      setIsMicroscopeDropdownOpen(!isMicroscopeDropdownOpen);
     } else {
       onTabChange('microscope');
-      setIsMicroscopePanelOpen(true);
+      setIsMicroscopeDropdownOpen(true); // Open dropdown when switching to this tab
+      // setIsMicroscopePanelOpen(true); // Removed
     }
   };
 
@@ -101,9 +98,9 @@ const Sidebar = ({
     }
   };
 
-  const handleToggleSamplePanel = async () => {
-    setIsSamplePanelOpen(!isSamplePanelOpen);
-  };
+  // const handleToggleSamplePanel = async () => { // Removed: SampleSelector will be moved
+  //   setIsSamplePanelOpen(!isSamplePanelOpen);
+  // };
 
   const handleBrowseData = () => {
     // If we're currently in map view, close it first
@@ -184,99 +181,103 @@ const Sidebar = ({
                                  selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2';
   const isSimulatedMicroscopeSelected = selectedMicroscopeId === 'squid-control/squid-control-reef';
 
+  // Toggle function for main sidebar collapse
+  const toggleMainSidebarCollapse = () => {
+    if (!currentOperation) { // Only allow collapse/expand if no operation is in progress
+      setIsMainSidebarCollapsed(!isMainSidebarCollapsed);
+    }
+  };
+
   return (
     <div className="sidebar-container">
-      <div className="main-sidebar">
+      <div className={`main-sidebar ${isMainSidebarCollapsed ? 'main-sidebar-collapsed' : ''}`}>
         <div className="sidebar-tabs">
           <button 
             className={`sidebar-tab ${activeTab === 'microscope' ? 'active' : ''}`}
             onClick={handleMicroscopeTabClick}
+            title={isMainSidebarCollapsed ? "Microscopes" : ""} // Show title on hover when collapsed
           >
             <i className="fas fa-microscope"></i>
-            <span>Microscopes</span>
-            <i className={`fas ${activeTab === 'microscope' && isMicroscopePanelOpen ? 'fa-chevron-left' : 'fa-chevron-right'} microscope-toggle-icon`}></i>
+            {!isMainSidebarCollapsed && <span>Microscopes</span>}
+            {!isMainSidebarCollapsed && <i className={`fas ${isMicroscopeDropdownOpen ? 'fa-chevron-down' : 'fa-chevron-right'} microscope-toggle-icon`}></i>}
           </button>
+          {/* Microscope Dropdown Submenu */}
+          {activeTab === 'microscope' && isMicroscopeDropdownOpen && !isMainSidebarCollapsed && (
+            <div className="sidebar-submenu microscope-options-dropdown">
+              <button
+                className={`sidebar-submenu-tab ${selectedMicroscopeId === 'squid-control/squid-control-reef' ? 'active' : ''}`}
+                onClick={() => {
+                  onMicroscopeSelect('squid-control/squid-control-reef');
+                  // setIsMicroscopeDropdownOpen(false); // Optional: close dropdown on selection
+                }}
+              >
+                <i className="fas fa-desktop"></i> {/* Changed icon for simulated */}
+                <span>Simulated Microscope</span>
+              </button>
+              <button
+                className={`sidebar-submenu-tab ${selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 'active' : ''}`}
+                onClick={() => {
+                  onMicroscopeSelect('reef-imaging/mirror-microscope-control-squid-1');
+                  // setIsMicroscopeDropdownOpen(false); // Optional: close dropdown on selection
+                }}
+              >
+                <i className="fas fa-microscope"></i>
+                <span>Real Microscope 1</span>
+              </button>
+              <button
+                className={`sidebar-submenu-tab ${selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2' ? 'active' : ''}`}
+                onClick={() => {
+                  onMicroscopeSelect('reef-imaging/mirror-microscope-control-squid-2');
+                  // setIsMicroscopeDropdownOpen(false); // Optional: close dropdown on selection
+                }}
+              >
+                <i className="fas fa-microscope"></i>
+                <span>Real Microscope 2</span>
+              </button>
+            </div>
+          )}
           <button 
             className={`sidebar-tab ${activeTab === 'image-view' || activeTab === 'image-view-map' ? 'active' : ''}`}
             onClick={handleImageViewTabClick}
+            disabled={!!currentOperation} 
+            title={currentOperation ? "Sample operation in progress" : (isMainSidebarCollapsed ? "Image View" : "View images and galleries")}
           >
             <i className="fas fa-images"></i>
-            <span>Image View</span>
-            <i className={`fas ${(activeTab === 'image-view' || activeTab === 'image-view-map') && isImageViewPanelOpen ? 'fa-chevron-left' : 'fa-chevron-right'} microscope-toggle-icon`}></i>
+            {!isMainSidebarCollapsed && <span>Image View</span>}
+            {!isMainSidebarCollapsed && <i className={`fas ${(activeTab === 'image-view' || activeTab === 'image-view-map') && isImageViewPanelOpen ? 'fa-chevron-left' : 'fa-chevron-right'} microscope-toggle-icon`}></i>}
           </button>
           <button 
             className={`sidebar-tab ${activeTab === 'incubator' ? 'active' : ''}`}
             onClick={() => onTabChange('incubator')}
+            disabled={!!currentOperation} 
+            title={currentOperation ? "Sample operation in progress" : (isMainSidebarCollapsed ? "Incubator" : "Control incubator")}
           >
             <i className="fas fa-temperature-high"></i>
-            <span>Incubator</span>
+            {!isMainSidebarCollapsed && <span>Incubator</span>}
           </button>
           <button 
             className={`sidebar-tab ${activeTab === 'dashboard' ? 'active' : ''}`}
             onClick={() => onTabChange('dashboard')}
+            disabled={!!currentOperation} 
+            title={currentOperation ? "Sample operation in progress" : (isMainSidebarCollapsed ? "Dashboard" : "View dashboard and logs")}
           >
             <i className="fas fa-tachometer-alt"></i>
-            <span>Dashboard</span>
+            {!isMainSidebarCollapsed && <span>Dashboard</span>}
+          </button>
+        </div>
+        {/* Collapse/Expand button for the main sidebar */}
+        <div className="main-sidebar-toggle-container">
+          <button 
+            onClick={toggleMainSidebarCollapse} 
+            className="main-sidebar-toggle-button"
+            disabled={!!currentOperation}
+            title={currentOperation ? "Sample operation in progress" : (isMainSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar")}
+          >
+            <i className={`fas ${isMainSidebarCollapsed ? 'fa-chevron-right' : 'fa-chevron-left'}`}></i>
           </button>
         </div>
       </div>
       
-      {activeTab === 'microscope' && (
-        <div className={`microscope-sidebar ${!isMicroscopePanelOpen ? 'collapsed' : ''}`}>
-          <h3 className="microscope-sidebar-title">Select Microscope</h3>
-          <div className="microscope-options">
-            <button
-              className={`microscope-option ${selectedMicroscopeId === 'squid-control/squid-control-reef' ? 'active' : ''}`}
-              onClick={() => onMicroscopeSelect('squid-control/squid-control-reef')}
-            >
-              <i className="fas fa-microscope"></i>
-              <span>Simulated Microscope</span>
-            </button>
-            <button
-              className={`microscope-option ${selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 'active' : ''}`}
-              onClick={() => onMicroscopeSelect('reef-imaging/mirror-microscope-control-squid-1')}
-            >
-              <i className="fas fa-microscope"></i>
-              <span>Real Microscope 1</span>
-            </button>
-            <button
-              className={`microscope-option ${selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2' ? 'active' : ''}`}
-              onClick={() => onMicroscopeSelect('reef-imaging/mirror-microscope-control-squid-2')}
-            >
-              <i className="fas fa-microscope"></i>
-              <span>Real Microscope 2</span>
-            </button>
-          </div>
-          
-          {selectedMicroscopeId && (
-            <>
-              <hr className="sidebar-divider" />
-              <button onClick={handleToggleSamplePanel} className="toggle-sample-panel-button">
-                <div className="button-content">
-                  {isSamplePanelOpen ? (
-                    <i className="fas fa-eye-slash"></i>
-                  ) : (
-                    <i className="fas fa-flask"></i>
-                  )}
-                  <span>{isSamplePanelOpen ? 'Hide' : 'Select Samples'}</span>
-                  <i className={`fas ${isSamplePanelOpen ? 'fa-chevron-left' : 'fa-chevron-right'} microscope-toggle-icon`}></i>
-                </div>
-              </button>
-            </>
-          )}
-        </div>
-      )}
-
-      {activeTab === 'microscope' && selectedMicroscopeId && isMicroscopePanelOpen && (
-        <SampleSelector 
-          isVisible={isSamplePanelOpen}
-          selectedMicroscopeId={selectedMicroscopeId}
-          microscopeControlService={microscopeControlService}
-          incubatorControlService={incubatorControlService}
-          roboticArmService={roboticArmService}
-        />
-      )}
-
       {(activeTab === 'image-view' || activeTab === 'image-view-map') && (
         <div className={`image-view-sidebar ${!isImageViewPanelOpen ? 'collapsed' : ''}`}>
           <h3 className="image-view-sidebar-title">Select Image Gallery</h3>
@@ -376,9 +377,10 @@ Sidebar.propTypes = {
   onTabChange: PropTypes.func.isRequired,
   onMicroscopeSelect: PropTypes.func.isRequired,
   selectedMicroscopeId: PropTypes.string,
-  incubatorControlService: PropTypes.object,
-  microscopeControlService: PropTypes.object,
-  roboticArmService: PropTypes.object
+  // incubatorControlService: PropTypes.object, // Removed from here
+  // microscopeControlService: PropTypes.object, // Removed from here
+  // roboticArmService: PropTypes.object // Removed from here
+  currentOperation: PropTypes.string, // Added prop type
 };
 
 export default Sidebar; 

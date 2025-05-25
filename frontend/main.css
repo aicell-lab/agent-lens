@@ -493,4 +493,221 @@
   border-radius: 50%;
   background-color: #22c55e;
   border: 1px solid white;
-} 
+}
+
+/* Styles for MicroscopeControlPanel */
+.microscope-control-panel-container {
+  position: relative; /* Needed for absolute positioning of SampleSelector dropdown */
+}
+
+/* Styles for the SampleSelector toggle button in MicroscopeControlPanel */
+.sample-selector-toggle-button {
+  /* Using Tailwind classes primarily, but can add specifics here */
+  /* Example: min-width: 120px; */
+}
+
+/* Styles for the SampleSelector dropdown itself */
+.sample-selector-dropdown {
+  position: absolute;
+  top: 60px; /* Adjust based on the height of the header/toggle button area */
+  left: 20px; /* Adjust for desired left alignment */
+  z-index: 1000; /* Ensure it's above other content */
+  background-color: white;
+  border: 1px solid #ccc;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  padding: 1rem;
+  border-radius: 0.375rem; /* Tailwind: rounded-md */
+  width: 320px; /* Adjust as needed, can be max-content or a fixed width */
+  max-height: calc(100vh - 100px); /* Prevent it from being too tall */
+  overflow-y: auto;
+}
+
+.sample-selector-dropdown.hidden {
+  display: none;
+}
+
+/* Re-purposed/generic styles that SampleSelector might still use from old Sidebar.css */
+/* These were originally in Sidebar.css for SampleSelector, now generalized or moved */
+.sample-sidebar-title { /* Assuming SampleSelector still uses this class for its title */
+  font-size: 1.15rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+  color: #343a40;
+}
+
+.sample-options-container {
+  /* Container for options and buttons if needed */
+}
+
+.sample-options { /* Used inside SampleSelector for the list of samples */
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem; /* Tailwind: space-y-3 */
+  margin-bottom: 1rem;
+}
+
+.sample-option {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem; /* Tailwind: space-x-3 */
+  padding: 0.75rem; /* Tailwind: p-3 */
+  border: 1px solid #e0e0e0; /* Tailwind: border border-gray-300 */
+  border-radius: 0.375rem; /* Tailwind: rounded-md */
+  background: none;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.sample-option:hover {
+  background-color: #f5f5f5; /* Tailwind: hover:bg-gray-100 */
+  border-color: #b0b0b0; /* Tailwind: hover:border-gray-400 */
+}
+
+.sample-option.active {
+  background-color: #f0f7ff; /* Example: bg-blue-50 */
+  border: 2px solid #2563eb; /* Example: border-2 border-blue-600 */
+  font-weight: 600;
+}
+
+/* Styles for green/orange indicators, if still used by SampleSelector */
+.sample-option.green-sample {
+  background-color: rgba(220, 252, 231, 0.5); /* Light green background */
+  border-color: #22c55e; /* Green border */
+}
+
+.sample-option.orange-sample {
+  background-color: rgba(254, 240, 212, 0.5); /* Light orange background */
+  border-color: #f97316; /* Orange border */
+  /* cursor: not-allowed; might be handled by :disabled */
+}
+
+.sample-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.sample-info {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+  overflow: hidden;
+}
+
+.sample-name {
+  font-weight: 500;
+  margin-bottom: 0.2rem;
+}
+
+.sample-location {
+  font-size: 0.8rem;
+  color: #6b7280;
+  white-space: normal;
+}
+
+.load-sample-button, .unload-sample-button {
+  display: flex; /* For centering icon and text */
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem; /* Space between icon and text */
+  padding: 0.75rem 1rem; /* Tailwind: py-3 px-4 */
+  border: none;
+  border-radius: 0.375rem; /* Tailwind: rounded-md */
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  text-align: center;
+  transition: background-color 0.2s, opacity 0.3s ease;
+  width: 100%;
+}
+
+.load-sample-button {
+  background-color: #007bff; /* Tailwind: bg-blue-500 */
+  color: white;
+}
+
+.load-sample-button:hover:not(:disabled) {
+  background-color: #0056b3; /* Tailwind: hover:bg-blue-700 */
+}
+
+.unload-sample-button {
+  background-color: #dc3545; /* Tailwind: bg-red-500 */
+  color: white;
+}
+
+.unload-sample-button:hover:not(:disabled) {
+  background-color: #c82333; /* Tailwind: hover:bg-red-700 */
+}
+
+.load-sample-button:disabled, .unload-sample-button:disabled {
+  background-color: #cccccc; /* Tailwind: bg-gray-300 */
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.load-sample-button.processing, .unload-sample-button.processing {
+  background-color: #6c757d; /* Tailwind: bg-gray-500 */
+}
+
+.load-sample-button .button-content .fa-spinner, 
+.unload-sample-button .button-content .fa-spinner {
+  margin-right: 8px; /* Or use gap on parent */
+}
+
+.sidebar-divider { /* Re-define if SampleSelector uses it, or use Tailwind hr */
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+  border: 0;
+  border-top: 1px solid #e0e0e0; /* Tailwind: border-t border-gray-200 */
+}
+
+.workflow-messages-container { /* Styles for workflow messages in SampleSelector */
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+  border: 1px solid #e5e7eb; /* Tailwind: border border-gray-200 */
+  border-radius: 0.25rem; /* Tailwind: rounded-sm */
+  padding: 0.5rem; /* Tailwind: p-2 */
+  background-color: #f9fafb; /* Tailwind: bg-gray-50 */
+  max-height: 12rem; /* Tailwind: max-h-48 */
+  overflow-y: auto;
+}
+
+.workflow-messages-container h4 {
+  font-size: 0.875rem; /* Tailwind: text-sm */
+  font-weight: 600; /* Tailwind: font-semibold */
+  margin-bottom: 0.25rem; /* Tailwind: mb-1 */
+}
+
+.workflow-messages {
+  font-size: 0.75rem; /* Tailwind: text-xs */
+  list-style-type: none; /* Ensure no bullets */
+  padding-left: 0; /* Remove default padding */
+}
+
+.workflow-messages li {
+  margin-bottom: 0.25rem; /* Tailwind: mb-1 */
+  padding: 0.25rem 0.5rem; /* Tailwind: py-1 px-2 */
+  border-bottom: 1px solid #f3f4f6; /* Tailwind: border-b border-gray-100 */
+}
+
+.workflow-messages .operation-step .fa-circle-notch {
+  color: #3b82f6; /* Tailwind: text-blue-500 */
+  margin-right: 0.5rem; /* Tailwind: mr-2 */
+}
+
+.sample-loading-status { /* For the status message at the bottom of SampleSelector */
+  margin-top: 0.5rem; /* Tailwind: my-2 -> mt-2 if no mb needed */
+  margin-bottom: 0.5rem;
+  padding: 0.5rem 0.75rem; /* Tailwind: py-2 px-3 */
+  border-radius: 0.25rem; /* Tailwind: rounded */
+  text-align: center;
+}
+
+/* Specific colors for sample-loading-status (can be done with Tailwind too) */
+.sample-loading-status.bg-green-100 { background-color: #d1fae5; }
+.sample-loading-status.text-green-700 { color: #047857; }
+.sample-loading-status.bg-red-100 { background-color: #fee2e2; }
+.sample-loading-status.text-red-700 { color: #b91c1c; }
+.sample-loading-status.bg-blue-100 { background-color: #dbeafe; }
+.sample-loading-status.text-blue-700 { color: #1d4ed8; } 
