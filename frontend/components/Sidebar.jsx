@@ -19,12 +19,17 @@ const Sidebar = ({
   // const [isSamplePanelOpen, setIsSamplePanelOpen] = useState(false); // SampleSelector will be moved
 
   // New state for Image View
+  const initialDefaultGalleryId = 'agent-lens/20250506-scan-time-lapse-gallery';
+  const hpaGalleryId = 'agent-lens/hpa-sample-gallery';
+
   const [isImageViewPanelOpen, setIsImageViewPanelOpen] = useState(false);
-  const [selectedGalleryId, setSelectedGalleryId] = useState('agent-lens/20250506-scan-time-lapse-gallery');
-  const [selectedGalleryName, setSelectedGalleryName] = useState('');
+  const [selectedGalleryId, setSelectedGalleryId] = useState(initialDefaultGalleryId);
+  const [selectedGalleryName, setSelectedGalleryName] = useState(
+    initialDefaultGalleryId.split('/').pop() || initialDefaultGalleryId
+  ); // Placeholder, will be updated
   const [availableGalleries, setAvailableGalleries] = useState([
-    { id: 'agent-lens/20250506-scan-time-lapse-gallery', name: 'Default Time-lapse Gallery' },
-    { id: 'agent-lens/hpa-sample-gallery', name: 'HPA Sample Gallery' }
+    { id: initialDefaultGalleryId, name: initialDefaultGalleryId.split('/').pop() || initialDefaultGalleryId },
+    { id: hpaGalleryId, name: hpaGalleryId.split('/').pop() || hpaGalleryId }
   ]);
   const [isSettingUpGalleryMap, setIsSettingUpGalleryMap] = useState(false);
 
@@ -33,49 +38,72 @@ const Sidebar = ({
 
   // Set default tab to 'microscope' on component mount
   useEffect(() => {
+    // Set default tab on initial mount
     onTabChange('microscope');
-  }, []); // Empty dependency array means this runs once on mount
 
-  // Fetch gallery name when gallery ID changes
+    // Setup and sync the initial default gallery
+    const setupInitialDefaultGallery = async () => {
+      // Fetch the definitive name for the initial gallery.
+      // This call will also update selectedGalleryName state (if initialDefaultGalleryId is still selectedGalleryId)
+      // and its entry in availableGalleries state via fetchGalleryInfo's internal logic.
+      const definitiveInitialName = await fetchGalleryInfo(initialDefaultGalleryId);
+
+      // Now, ensure ImageViewBrowser uses this default gallery by setting localStorage
+      // and dispatching the event. This overrides any stale value in localStorage.
+      localStorage.setItem('selectedGalleryId', initialDefaultGalleryId);
+      localStorage.setItem('selectedGalleryName', definitiveInitialName); // Use the name that fetchGalleryInfo determined
+      window.dispatchEvent(new CustomEvent('gallerySelected', {
+        detail: { galleryId: initialDefaultGalleryId, galleryName: definitiveInitialName }
+      }));
+    };
+
+    setupInitialDefaultGallery();
+  }, []); // Runs ONCE on mount
+
+  // Effect to fetch gallery info when selectedGalleryId changes (e.g., by double-click or initial set)
   useEffect(() => {
     if (selectedGalleryId) {
+      // This will fetch info for the initialDefaultGalleryId on mount (as selectedGalleryId starts with it)
+      // and for any subsequent changes to selectedGalleryId.
+      // fetchGalleryInfo updates selectedGalleryName if the fetched ID matches current selectedGalleryId.
       fetchGalleryInfo(selectedGalleryId);
     }
-  }, [selectedGalleryId]);
+  }, [selectedGalleryId]); // Re-run when selectedGalleryId changes
 
-  // Also fetch gallery info on component mount for the default gallery
-  useEffect(() => {
-    if (selectedGalleryId) {
-      fetchGalleryInfo(selectedGalleryId);
+  const fetchGalleryInfo = async (galleryIdToFetch) => {
+    let galleryDisplayName = galleryIdToFetch.split('/').pop() || galleryIdToFetch; // Fallback
+
+    // Use a more specific name from availableGalleries if it's already been fetched and is better than derived
+    const existingGalleryInList = availableGalleries.find(g => g.id === galleryIdToFetch);
+    if (existingGalleryInList && existingGalleryInList.name !== (galleryIdToFetch.split('/').pop() || galleryIdToFetch)) {
+      galleryDisplayName = existingGalleryInList.name;
     }
-  }, []); // Empty dependency array means this runs once on mount
 
-  const fetchGalleryInfo = async (galleryId) => {
     try {
       const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
-      const response = await fetch(`/agent-lens/apps/${serviceId}/gallery-info?gallery_id=${encodeURIComponent(galleryId)}`);
+      const response = await fetch(`/agent-lens/apps/${serviceId}/gallery-info?gallery_id=${encodeURIComponent(galleryIdToFetch)}`);
       const data = await response.json();
-      
       if (response.ok && data) {
-        // Use the same pattern as in register_frontend_service.py for getting display name
-        const displayName = data.manifest?.name || data.alias || galleryId.split('/').pop() || galleryId;
-        setSelectedGalleryName(displayName);
-        
-        // Update the gallery in availableGalleries if it exists
-        setAvailableGalleries(prev => prev.map(gallery => 
-          gallery.id === galleryId 
-            ? { ...gallery, name: displayName }
-            : gallery
-        ));
-      } else {
-        // Fallback to derived name if API fails
-        setSelectedGalleryName(galleryId.split('/').pop() || galleryId);
+        // Prefer manifest name, then alias, then derived name
+        galleryDisplayName = data.manifest?.name || data.alias || (galleryIdToFetch.split('/').pop() || galleryIdToFetch);
       }
     } catch (error) {
-      console.error('Error fetching gallery info:', error);
-      // Fallback to derived name if API fails
-      setSelectedGalleryName(galleryId.split('/').pop() || galleryId);
+      console.error(`Error fetching gallery info for ${galleryIdToFetch}:`, error);
+      // On error, galleryDisplayName retains its current value (derived or from existing list)
     }
+
+    // Update selectedGalleryName state only if the fetched info is for the *currently selected* gallery in the UI
+    if (galleryIdToFetch === selectedGalleryId) {
+      setSelectedGalleryName(galleryDisplayName);
+    }
+
+    // Update the name in the availableGalleries list state
+    setAvailableGalleries(prevGalleries =>
+      prevGalleries.map(gallery =>
+        gallery.id === galleryIdToFetch ? { ...gallery, name: galleryDisplayName } : gallery
+      )
+    );
+    return galleryDisplayName; // Return the determined name for use by callers like setupInitialDefaultGallery
   };
 
   const handleMicroscopeTabClick = () => {
@@ -99,37 +127,19 @@ const Sidebar = ({
     }
   };
 
-  // const handleToggleSamplePanel = async () => { // Removed: SampleSelector will be moved
-  //   setIsSamplePanelOpen(!isSamplePanelOpen);
-  // };
-
-  const handleBrowseData = () => {
-    // If we're currently in map view, close it first
-    if (activeTab === 'image-view-map') {
-      onTabChange('image-view');
-    }
-    
-    // Store the selected gallery ID and name for the main content area to use
-    localStorage.setItem('selectedGalleryId', selectedGalleryId);
-    localStorage.setItem('selectedGalleryName', selectedGalleryName);
-    // Trigger a custom event to notify main content area
-    window.dispatchEvent(new CustomEvent('gallerySelected', { 
-      detail: { galleryId: selectedGalleryId, galleryName: selectedGalleryName } 
-    }));
-  };
-
-  const handleGalleryDoubleClick = (galleryId) => {
-    // Step 1: Select the gallery (this updates UI and might trigger async name fetch)
+  const handleGalleryItemClick = (galleryId) => {
+    // Step 1: Select the gallery (this updates UI and might trigger async name fetch via useEffect)
     setSelectedGalleryId(galleryId);
 
     // Step 2: Prepare to trigger the data loading for ImageViewBrowser
+
     const galleryInfo = availableGalleries.find(g => g.id === galleryId);
     const nameToDispatch = galleryInfo ? galleryInfo.name : (galleryId.split('/').pop() || galleryId);
-    setSelectedGalleryName(nameToDispatch); // Set name for immediate consistency
+    // setSelectedGalleryName(nameToDispatch); // This will be handled by useEffect watching selectedGalleryId
 
     // Step 3: Update localStorage and dispatch the event for ImageViewBrowser.
     localStorage.setItem('selectedGalleryId', galleryId);
-    localStorage.setItem('selectedGalleryName', nameToDispatch);
+    localStorage.setItem('selectedGalleryName', nameToDispatch); // Use the name we have now
     window.dispatchEvent(new CustomEvent('gallerySelected', {
       detail: { galleryId: galleryId, galleryName: nameToDispatch }
     }));
@@ -144,6 +154,21 @@ const Sidebar = ({
     if (!isImageViewPanelOpen) {
       setIsImageViewPanelOpen(true); // Open the panel if it's closed
     }
+  };
+
+  const handleBrowseData = () => {
+    // If we're currently in map view, close it first
+    if (activeTab === 'image-view-map') {
+      onTabChange('image-view');
+    }
+    
+    // Store the selected gallery ID and name for the main content area to use
+    localStorage.setItem('selectedGalleryId', selectedGalleryId);
+    localStorage.setItem('selectedGalleryName', selectedGalleryName);
+    // Trigger a custom event to notify main content area
+    window.dispatchEvent(new CustomEvent('gallerySelected', { 
+      detail: { galleryId: selectedGalleryId, galleryName: selectedGalleryName } 
+    }));
   };
 
   const handleViewGalleryImageData = async () => {
@@ -196,7 +221,9 @@ const Sidebar = ({
       const updatedGalleries = availableGalleries.filter(g => g.id !== galleryId);
       setAvailableGalleries(updatedGalleries);
       if (selectedGalleryId === galleryId) {
-        setSelectedGalleryId(updatedGalleries[0].id);
+        // If the removed gallery was the selected one, select the first in the new list
+        const newSelectedId = updatedGalleries[0].id;
+        handleGalleryItemClick(newSelectedId); // Use the click handler to ensure all logic runs
       }
     }
   };
@@ -326,19 +353,20 @@ const Sidebar = ({
                 <div 
                   key={gallery.id}
                   className={`gallery-option ${selectedGalleryId === gallery.id ? 'active' : ''}`}
-                  onDoubleClick={() => handleGalleryDoubleClick(gallery.id)} // Double click handler
+                  onClick={() => handleGalleryItemClick(gallery.id)} // Changed to single click
                 >
-                  <button
-                    className="gallery-select-btn"
-                    // onClick is removed to prevent single-click selection changing highlight
-                  >
+                  {/* The inner button is primarily for layout and visual grouping, not a separate click target changing selection */}
+                  <button className="gallery-select-btn" tabIndex="-1"> {/* tabIndex to prevent double focus */}
                     <i className="fas fa-folder"></i>
                     <span>{gallery.name}</span>
                   </button>
                   {availableGalleries.length > 1 && (
                     <button
                       className="gallery-remove-btn"
-                      onClick={() => handleRemoveGallery(gallery.id)}
+                      onClick={(e) => { 
+                        e.stopPropagation(); // Prevent gallery selection when removing
+                        handleRemoveGallery(gallery.id); 
+                      }}
                       title="Remove Gallery"
                     >
                       <i className="fas fa-times"></i>
@@ -402,9 +430,6 @@ Sidebar.propTypes = {
   onTabChange: PropTypes.func.isRequired,
   onMicroscopeSelect: PropTypes.func.isRequired,
   selectedMicroscopeId: PropTypes.string,
-  // incubatorControlService: PropTypes.object, // Removed from here
-  // microscopeControlService: PropTypes.object, // Removed from here
-  // roboticArmService: PropTypes.object // Removed from here
   currentOperation: PropTypes.string, // Added prop type
 };
 

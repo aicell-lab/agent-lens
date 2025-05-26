@@ -2,7 +2,7 @@ import React from 'react';
 import PropTypes from 'prop-types';
 import MapButton from './MapButton';
 
-const PenButton = ({ appendLog, setIsFirstClick, snapshotImage, isPenActive, setIsPenActive, isProcessing }) => {
+const PenButton = ({ appendLog, setIsFirstClick, snapshotImage, isPenActive, setIsPenActive, isProcessing, top }) => {
     
     const activatePenTool = () => {
         if (!snapshotImage && !isPenActive) {
@@ -29,7 +29,7 @@ const PenButton = ({ appendLog, setIsFirstClick, snapshotImage, isPenActive, set
         <MapButton 
             onClick={activatePenTool} 
             icon={isPenActive ? "fa-pencil-alt" : "fa-magic"} 
-            top="420" 
+            top={top}
             disabled={isProcessing}
             style={buttonStyle}
             title={isPenActive ? "Deactivate segmentation tool" : "Activate segmentation tool"}
@@ -45,6 +45,7 @@ PenButton.propTypes = {
     isPenActive: PropTypes.bool.isRequired,
     setIsPenActive: PropTypes.func.isRequired,
     isProcessing: PropTypes.bool,
+    top: PropTypes.string,
 };
 
 export default PenButton;

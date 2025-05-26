@@ -57,7 +57,10 @@ const SampleSelector = ({
       if (newLocation === 'microscope1' || newLocation === 'microscope2') {
         setLoadedSampleOnMicroscope(`slot-${incubatorSlot}`);
       } else if (newLocation === 'incubator_slot') {
-        setLoadedSampleOnMicroscope(null);
+        // If moved back to incubator, ensure it's not marked as loaded on this scope
+        if (loadedSampleOnMicroscope === `slot-${incubatorSlot}`) {
+            setLoadedSampleOnMicroscope(null);
+        }
       }
       
       // Refresh the slots data after location update
@@ -114,9 +117,14 @@ const SampleSelector = ({
           if (matchingSampleId) {
             setSelectedSampleId(matchingSampleId);
             setIsSampleLoaded(true);
+          } else {
+            setSelectedSampleId(null);
+            setIsSampleLoaded(false);
           }
         } catch (error) {
           console.error('Failed to get current simulated sample:', error);
+          setSelectedSampleId(null);
+          setIsSampleLoaded(false);
         }
       }
     };
@@ -126,11 +134,8 @@ const SampleSelector = ({
 
   // Fetch incubator data when microscope selection changes or after location updates
   const fetchIncubatorData = async () => {
-    if (incubatorControlService && 
-        (selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ||
-          selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2')) {
+    if (incubatorControlService && isRealMicroscopeSelected) {
       try {
-        // Get information for all slots at once
         const allSlotInfo = await incubatorControlService.get_slot_information();
         const slots = (allSlotInfo || []).filter(slotInfo => 
           slotInfo && slotInfo.name && slotInfo.name.trim()
@@ -139,51 +144,61 @@ const SampleSelector = ({
           id: `slot-${slotInfo.incubator_slot}`
         }));
         
-        // Check if any samples are loaded on the current microscope
-        const samplesOnCurrentMicroscope = slots.filter(slot => 
+        const sampleOnThisMicroscope = slots.find(slot => 
           slot.location === `microscope${currentMicroscopeNumber}`
         );
         
-        if (samplesOnCurrentMicroscope.length > 0) {
-          // If a sample is already on this microscope, set it as selected and loaded
-          setSelectedSampleId(samplesOnCurrentMicroscope[0].id);
+        if (sampleOnThisMicroscope) {
+          setSelectedSampleId(sampleOnThisMicroscope.id);
           setIsSampleLoaded(true);
-          setLoadedSampleOnMicroscope(samplesOnCurrentMicroscope[0].id);
+          setLoadedSampleOnMicroscope(sampleOnThisMicroscope.id);
         } else {
-          // No sample on this microscope
           setIsSampleLoaded(false);
-          
-          // Clear selected sample if it was previously set for this microscope
-          if (selectedSampleId && selectedSampleId.startsWith('slot-')) {
-            const selectedSlot = slots.find(slot => slot.id === selectedSampleId);
-            if (!selectedSlot || selectedSlot.location !== 'incubator_slot') {
-              setSelectedSampleId(null);
+          setLoadedSampleOnMicroscope(null);
+          // If no sample is on this microscope, selectedSampleId should only be set if it's an incubator slot
+          // and not a sample that *was* on another microscope.
+          if (selectedSampleId && selectedSampleId.startsWith('slot-')){
+            const currentSelectedSlot = slots.find(s => s.id === selectedSampleId);
+            if(!currentSelectedSlot || currentSelectedSlot.location !== 'incubator_slot'){
+              setSelectedSampleId(null); // Clear selection if it's not a valid incubator slot to pick next
             }
+          } else if (selectedSampleId && !selectedSampleId.startsWith('slot-')) {
+            // This case is for simulated samples, should not clear if it's a valid simulated ID
           }
         }
-        
         setIncubatorSlots(slots);
       } catch (error) {
         console.error("[SampleSelector] Failed to fetch incubator slots:", error);
         setIncubatorSlots([]);
         setIsSampleLoaded(false);
         setSelectedSampleId(null);
+        setLoadedSampleOnMicroscope(null);
       }
-    } else {
+    } else if (isSimulatedMicroscopeSelected) {
+      // For simulated, check if a sample is loaded via its state
+    } else { // No specific microscope type or no service
       setIncubatorSlots([]); 
       setSelectedSampleId(null); 
       setIsSampleLoaded(false);
+      setLoadedSampleOnMicroscope(null);
     }
   };
 
-  // Call fetchIncubatorData when microscope selection changes
+  // Call fetchIncubatorData when microscope selection changes or service becomes available
   useEffect(() => {
-    if (selectedMicroscopeId) { 
-      fetchIncubatorData();
-    }
-  }, [selectedMicroscopeId, incubatorControlService]);
+    fetchIncubatorData();
+  }, [selectedMicroscopeId, incubatorControlService, currentMicroscopeNumber]);
 
   const handleSampleSelect = (sampleId) => {
+    if (isSampleLoaded) {
+      // If a sample is loaded, only allow re-selecting the currently loaded sample.
+      const currentlyLoadedSample = isSimulatedMicroscopeSelected ? selectedSampleId : loadedSampleOnMicroscope;
+      if (sampleId !== currentlyLoadedSample) {
+        console.log('A sample is already loaded. Unload it first or re-select the current one.');
+        return; // Do not change selection
+      }
+    }
+    // If no sample is loaded, or if the loaded sample itself is clicked again, allow setting selectedSampleId.
     setSelectedSampleId(sampleId);
     console.log(`Sample selected: ${sampleId}`);
   };
@@ -194,11 +209,10 @@ const SampleSelector = ({
       return;
     }
 
-    // Clear previous workflow messages
     clearWorkflowMessages();
     
     if (isSimulatedMicroscopeSelected) {
-      setLoadingStatus('Loading sample...'); // Set loading status
+      setLoadingStatus('Loading sample...');
       setCurrentOperation('loading');
       try {
         addWorkflowMessage("Loading simulated sample...");
@@ -209,25 +223,20 @@ const SampleSelector = ({
         } else {
           throw new Error(`No data alias found for ${selectedSampleId}`);
         }
-        setLoadingStatus('Sample loaded!'); // Update status on success
+        setLoadingStatus('Sample loaded!');
         setIsSampleLoaded(true);
+        // selectedSampleId is already set correctly for simulated
         setCurrentOperation(null);
-        // Auto-clear message after 3 seconds
         setTimeout(() => setLoadingStatus(''), 3000);
       } catch (error) {
         console.error('Failed to load simulated sample:', error);
         addWorkflowMessage(`Error: ${error.message}`);
-        setLoadingStatus('Error loading sample'); // Show error status
+        setLoadingStatus('Error loading sample');
         setCurrentOperation(null);
-        // Auto-clear error message after 3 seconds
         setTimeout(() => setLoadingStatus(''), 3000);
       }
-    } else {
-      // For real microscopes - Add validation and logging
+    } else { // Real Microscope
       console.log(`[SampleSelector] Loading sample on microscope. Selected ID: ${selectedMicroscopeId}`);
-      console.log(`[SampleSelector] Microscope control service:`, microscopeControlService);
-      
-      // Validation: Ensure we have the correct microscope service
       if (!microscopeControlService) {
         addWorkflowMessage("Error: No microscope service available");
         setLoadingStatus('Error: No microscope service available');
@@ -235,78 +244,43 @@ const SampleSelector = ({
         return;
       }
 
-      const expectedMicroscopeNumber = selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 1 : 2;
+      const expectedMicroscopeNumber = currentMicroscopeNumber;
       addWorkflowMessage(`Preparing to load sample on Microscope ${expectedMicroscopeNumber}`);
-      console.log(`[SampleSelector] Expected microscope number: ${expectedMicroscopeNumber}`);
-      
       setLoadingStatus('Loading sample from incubator...'); 
       setCurrentOperation('loading');
       
       try {
-        // Get incubator slot number from the selected sample ID
         const slotMatch = selectedSampleId.match(/slot-(\d+)/);
-        if (!slotMatch) {
-          throw new Error("Invalid slot ID format");
-        }
-        
+        if (!slotMatch) throw new Error("Invalid slot ID format");
         const incubatorSlot = parseInt(slotMatch[1], 10);
+
         addWorkflowMessage(`Loading sample from incubator slot ${incubatorSlot}`);
-        
-        // Check sample status
         const sampleStatus = await incubatorControlService.get_sample_status(incubatorSlot);
         addWorkflowMessage(`Sample status: ${sampleStatus}`);
+        if (sampleStatus !== "IN") throw new Error("Plate is not inside incubator");
         
-        if (sampleStatus !== "IN") {
-          throw new Error("Plate is not inside incubator");
-        }
-        
-        // Use the provided robotic arm service or the locally created one
         const armService = roboticArmService || roboticArmServiceState;
-        if (!armService) {
-          throw new Error("Robotic arm service not available");
-        }
+        if (!armService) throw new Error("Robotic arm service not available");
         
-        // 1. Incubator releases the sample
         addWorkflowMessage("Getting sample from slot to transfer station");
         await incubatorControlService.get_sample_from_slot_to_transfer_station(incubatorSlot);
-        // Update sample location to incubator_station
         await updateSampleLocation(incubatorSlot, "incubator_station");
         addWorkflowMessage("Plate loaded onto transfer station");
         
-        // Connect robotic arm and turn on light
         await armService.connect();
         await armService.light_on();
         
-        // 2. Home microscope stage - Add validation and logging
         addWorkflowMessage(`Homing microscope stage for Microscope ${expectedMicroscopeNumber}`);
-        console.log(`[SampleSelector] About to home stage for microscope ${expectedMicroscopeNumber} with service:`, microscopeControlService);
         await microscopeControlService.home_stage();
         addWorkflowMessage(`Microscope ${expectedMicroscopeNumber} stage homed successfully`);
         
-        // 3. Use robotic arm to transport sample to microscope
-        const microscopeNumber = selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 1 : 2;
-        
-        // Double-check consistency
-        if (microscopeNumber !== expectedMicroscopeNumber) {
-          throw new Error(`Microscope number mismatch: expected ${expectedMicroscopeNumber}, got ${microscopeNumber}`);
-        }
-        
-        // Update sample location to robotic_arm
         await updateSampleLocation(incubatorSlot, "robotic_arm");
-        addWorkflowMessage(`Transporting sample to microscope ${microscopeNumber}`);
+        addWorkflowMessage(`Transporting sample to microscope ${expectedMicroscopeNumber}`);
+        await armService.incubator_to_microscope(expectedMicroscopeNumber);
         
-        // Call the appropriate transport method based on microscope number
-        if (microscopeNumber === 1) {
-          await armService.incubator_to_microscope(microscopeNumber);
-        } else {
-          await armService.incubator_to_microscope(microscopeNumber);
-        }
-        
-        // Update sample location to microscope1 or microscope2
-        await updateSampleLocation(incubatorSlot, `microscope${microscopeNumber}`);
+        await updateSampleLocation(incubatorSlot, `microscope${expectedMicroscopeNumber}`);
         addWorkflowMessage("Sample placed on microscope");
         
-        // Turn off light and disconnect robotic arm
         await microscopeControlService.return_stage();
         await armService.light_off();
         await armService.disconnect();
@@ -314,6 +288,7 @@ const SampleSelector = ({
         addWorkflowMessage("Sample plate successfully loaded onto microscope stage");
         setLoadingStatus('Sample successfully loaded onto microscope.');
         setIsSampleLoaded(true);
+        setLoadedSampleOnMicroscope(selectedSampleId); // Ensure this is set
         setCurrentOperation(null);
         setTimeout(() => setLoadingStatus(''), 3000);
       } catch (error) {
@@ -321,134 +296,114 @@ const SampleSelector = ({
         addWorkflowMessage(`Error: ${error.message}`);
         setLoadingStatus(`Error loading sample: ${error.message}`);
         setCurrentOperation(null);
+        // Attempt to revert location if arm transfer failed mid-way
+        const slotMatch = selectedSampleId.match(/slot-(\d+)/);
+        if(slotMatch){
+            const incubatorSlot = parseInt(slotMatch[1], 10);
+            const currentSlotInfo = incubatorSlots.find(s => s.id === selectedSampleId);
+            if(currentSlotInfo && currentSlotInfo.location !== 'incubator_slot'){
+                try { await updateSampleLocation(incubatorSlot, "incubator_slot"); } catch (e) { console.error("Error reverting location:", e);}
+            }
+        }
         setTimeout(() => setLoadingStatus(''), 3000);
       }
     }
   };
 
   const handleUnloadSample = async () => {
-    if (!selectedSampleId) {
-      console.log('No sample selected to unload.');
+    if (!selectedSampleId && !loadedSampleOnMicroscope) {
+      console.log('No sample selected or loaded to unload.');
       return;
     }
 
-    // Clear previous workflow messages
     clearWorkflowMessages();
-    
+    const sampleToUnloadId = loadedSampleOnMicroscope || selectedSampleId;
+
     if (isSimulatedMicroscopeSelected) {
       setLoadingStatus('Unloading sample...'); 
       setCurrentOperation('unloading');
       try {
         addWorkflowMessage("Unloading simulated sample...");
-        // For simulated microscope, just clear the sample
         await microscopeControlService.set_simulated_sample_data_alias('');
         addWorkflowMessage("Sample unloaded successfully");
         setLoadingStatus('Sample unloaded!');
-        setIsSampleLoaded(false);
-        setCurrentOperation(null);
-        setTimeout(() => setLoadingStatus(''), 3000);
       } catch (error) {
         console.error('Failed to unload simulated sample:', error);
         addWorkflowMessage(`Error: ${error.message}`);
         setLoadingStatus('Error unloading sample');
+      } finally {
+        setIsSampleLoaded(false);
+        setSelectedSampleId(null);
         setCurrentOperation(null);
         setTimeout(() => setLoadingStatus(''), 3000);
       }
-    } else {
-      // For real microscopes - Add validation and logging
-      console.log(`[SampleSelector] Unloading sample from microscope. Selected ID: ${selectedMicroscopeId}`);
-      console.log(`[SampleSelector] Microscope control service:`, microscopeControlService);
-      
-      // Validation: Ensure we have the correct microscope service
-      if (!microscopeControlService) {
+    } else { // Real Microscope
+      if (!sampleToUnloadId || !sampleToUnloadId.startsWith('slot-')) {
+        addWorkflowMessage("Error: No valid real sample identified as loaded.");
+        setLoadingStatus('Error: No valid real sample identified as loaded.');
+        setTimeout(() => setLoadingStatus(''), 3000);
+        return;
+      }
+      console.log(`[SampleSelector] Unloading sample ${sampleToUnloadId} from microscope ${selectedMicroscopeId}`);
+      if (!microscopeControlService) { 
         addWorkflowMessage("Error: No microscope service available");
         setLoadingStatus('Error: No microscope service available');
         setTimeout(() => setLoadingStatus(''), 3000);
         return;
       }
 
-      const expectedMicroscopeNumber = selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 1 : 2;
+      const expectedMicroscopeNumber = currentMicroscopeNumber;
       addWorkflowMessage(`Preparing to unload sample from Microscope ${expectedMicroscopeNumber}`);
-      console.log(`[SampleSelector] Expected microscope number: ${expectedMicroscopeNumber}`);
-      
       setLoadingStatus('Unloading sample to incubator...'); 
       setCurrentOperation('unloading');
       
       try {
-        // Get incubator slot number from the selected sample ID
-        const slotMatch = selectedSampleId.match(/slot-(\d+)/);
-        if (!slotMatch) {
-          throw new Error("Invalid slot ID format");
-        }
-        
+        const slotMatch = sampleToUnloadId.match(/slot-(\d+)/);
+        if (!slotMatch) throw new Error("Invalid slot ID format for unloading");
         const incubatorSlot = parseInt(slotMatch[1], 10);
+
         addWorkflowMessage(`Unloading sample to incubator slot ${incubatorSlot}`);
-        
-        // Check sample status and location
-        const selectedSlot = incubatorSlots.find(slot => slot.id === selectedSampleId);
-        if (!selectedSlot || selectedSlot.location !== `microscope${currentMicroscopeNumber}`) {
-          throw new Error(`Sample is not on microscope ${currentMicroscopeNumber}`);
+        const selectedSlotInfo = incubatorSlots.find(slot => slot.id === sampleToUnloadId);
+        if (!selectedSlotInfo || selectedSlotInfo.location !== `microscope${expectedMicroscopeNumber}`) {
+          throw new Error(`Sample ${sampleToUnloadId} is not on microscope ${expectedMicroscopeNumber}. Location: ${selectedSlotInfo?.location}`);
         }
         
-        // Use the provided robotic arm service or the locally created one
         const armService = roboticArmService || roboticArmServiceState;
-        if (!armService) {
-          throw new Error("Robotic arm service not available");
-        }
+        if (!armService) throw new Error("Robotic arm service not available");
         
-        // 1. Home microscope stage - Add validation and logging
         addWorkflowMessage(`Homing microscope stage for Microscope ${expectedMicroscopeNumber}`);
-        console.log(`[SampleSelector] About to home stage for microscope ${expectedMicroscopeNumber} with service:`, microscopeControlService);
         await microscopeControlService.home_stage();
         addWorkflowMessage(`Microscope ${expectedMicroscopeNumber} stage homed successfully`);
         
-        // Connect robotic arm and turn on light
         await armService.connect();
         await armService.light_on();
         
-        // 2. Transport from microscope to incubator
-        const microscopeNumber = selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 1 : 2;
-        
-        // Double-check consistency
-        if (microscopeNumber !== expectedMicroscopeNumber) {
-          throw new Error(`Microscope number mismatch: expected ${expectedMicroscopeNumber}, got ${microscopeNumber}`);
-        }
-        
-        // Update sample location to robotic_arm
         await updateSampleLocation(incubatorSlot, "robotic_arm");
-        addWorkflowMessage(`Transporting sample from microscope ${microscopeNumber} to incubator`);
-        
-        // Call the appropriate transport method based on microscope number
-        if (microscopeNumber === 1) {
-          await armService.microscope_to_incubator(microscopeNumber);
-        } else {
-          await armService.microscope_to_incubator(microscopeNumber);
-        }
-        // Update sample location to incubator_station
+        addWorkflowMessage(`Transporting sample from microscope ${expectedMicroscopeNumber} to incubator`);
+        await armService.microscope_to_incubator(expectedMicroscopeNumber);
         await updateSampleLocation(incubatorSlot, "incubator_station");
-        addWorkflowMessage("Sample transported to incubator");
+        addWorkflowMessage("Sample transported to incubator transfer station");
         
-        // 3. Incubator collects the sample
         await incubatorControlService.put_sample_from_transfer_station_to_slot(incubatorSlot);
-        
-        // Update sample location to incubator_slot
-        await updateSampleLocation(incubatorSlot, "incubator_slot");
+        await updateSampleLocation(incubatorSlot, "incubator_slot"); // This will trigger fetchIncubatorData
         addWorkflowMessage("Sample moved to incubator slot");
         
-        // Turn off light, disconnect robotic arm, and return microscope stage
         await microscopeControlService.return_stage();
         await armService.light_off();
         await armService.disconnect();
         
         addWorkflowMessage("Sample successfully unloaded from the microscopy stage");
         setLoadingStatus('Sample successfully unloaded to incubator.');
-        setIsSampleLoaded(false);
-        setCurrentOperation(null);
-        setTimeout(() => setLoadingStatus(''), 3000);
       } catch (error) {
         console.error('Failed to unload sample:', error);
         addWorkflowMessage(`Error: ${error.message}`);
         setLoadingStatus(`Error unloading sample: ${error.message}`);
+        // Attempt to refresh state even on error
+        await fetchIncubatorData(); 
+      } finally {
+        setIsSampleLoaded(false);
+        setLoadedSampleOnMicroscope(null);
+        setSelectedSampleId(null);
         setCurrentOperation(null);
         setTimeout(() => setLoadingStatus(''), 3000);
       }
@@ -457,32 +412,41 @@ const SampleSelector = ({
 
   // Determine if a sample can be selected based on its location
   const canSelectSample = (slot) => {
-    // For simulated microscope, always allow selection
-    if (isSimulatedMicroscopeSelected) return true;
-    
-    // Only samples in incubator_slot can be selected when no sample is loaded
-    if (!isSampleLoaded) {
-      return slot.location === 'incubator_slot';
+    // If a sample is loaded on this real microscope, only that sample itself is selectable (to enable unload)
+    if (isSampleLoaded && isRealMicroscopeSelected && slot.id === loadedSampleOnMicroscope) {
+      return true;
     }
-    
-    // If a sample is already loaded, only the currently loaded sample can be selected
-    return slot.location === `microscope${currentMicroscopeNumber}`;
+    // If no sample is loaded (on this real microscope), only incubator_slot samples are selectable for loading
+    if (!isSampleLoaded && isRealMicroscopeSelected && slot.location === 'incubator_slot') {
+      return true;
+    }
+    // For simulated microscope, always allow selection if no operation is ongoing (disabled state handles currentOperation)
+    if (isSimulatedMicroscopeSelected) {
+      return true; // Actual selection logic is in handleSampleSelect
+    }
+    return false; // Otherwise, not selectable
   };
 
   // Get class name for sample button based on location and selected state
   const getSampleButtonClass = (slot) => {
-    let className = 'sample-option'; // Base class from Sidebar.css, can be reused or made specific
+    let className = 'sample-option';
     
-    // Add selected state
-    if (selectedSampleId === slot.id) {
+    if (isSampleLoaded && slot.id === loadedSampleOnMicroscope) {
+      // If a sample is loaded on this real microscope, it's active
+      className += ' active';
+    } else if (!isSampleLoaded && selectedSampleId === slot.id) {
+      // If no sample is loaded, the one explicitly selected is active
       className += ' active';
     }
     
-    // Add color state based on location
     if (slot.location === 'incubator_slot') {
       className += ' green-sample';
-    } else {
+    } else if (slot.location === `microscope${currentMicroscopeNumber}`){
+      // Sample on the current microscope is orange (and active if loadedSampleOnMicroscope matches)
       className += ' orange-sample';
+    } else if (slot.location !== 'incubator_slot') {
+        // Sample on another microscope or robotic arm, etc. is orange but not necessarily active
+        className += ' orange-sample';
     }
     
     return className;
@@ -492,35 +456,21 @@ const SampleSelector = ({
     <div className={`sample-selector-dropdown ${!isVisible ? 'hidden' : ''}`}>
       <h3 className="sample-sidebar-title">Select Sample</h3>
       
-      {/* Sample Options Section */}
       <div className="sample-options-container">
         <div className="sample-options">
           {isSimulatedMicroscopeSelected && (
             <>
-              <button
-                className={`sample-option ${selectedSampleId === 'simulated-sample-1' ? 'active' : ''}`}
-                onClick={() => handleSampleSelect('simulated-sample-1')}
-                disabled={currentOperation !== null}
-              >
-                <i className="fas fa-flask"></i> 
-                <span>Simulated Sample 1</span>
-              </button>
-              <button
-                className={`sample-option ${selectedSampleId === 'simulated-sample-2' ? 'active' : ''}`}
-                onClick={() => handleSampleSelect('simulated-sample-2')}
-                disabled={currentOperation !== null}
-              >
-                <i className="fas fa-flask"></i> 
-                <span>Simulated Sample 2</span>
-              </button>
-              <button
-                className={`sample-option ${selectedSampleId === 'simulated-sample-3' ? 'active' : ''}`}
-                onClick={() => handleSampleSelect('simulated-sample-3')}
-                disabled={currentOperation !== null}
-              >
-                <i className="fas fa-flask"></i> 
-                <span>Simulated Sample 3</span>
-              </button>
+              {Object.keys(sampleDataAliases).map(sampleKey => (
+                <button
+                  key={sampleKey}
+                  className={`sample-option ${(isSampleLoaded ? selectedSampleId === sampleKey : selectedSampleId === sampleKey) ? 'active' : ''}`}
+                  onClick={() => handleSampleSelect(sampleKey)}
+                  disabled={currentOperation !== null || (isSampleLoaded && selectedSampleId !== sampleKey)}
+                >
+                  <i className="fas fa-flask"></i> 
+                  <span>{sampleKey.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</span>
+                </button>
+              ))}
             </>
           )}
           {isRealMicroscopeSelected && incubatorSlots.length > 0 && incubatorSlots.map(slot => (
@@ -545,13 +495,14 @@ const SampleSelector = ({
           )}
         </div>
         
-        {/* Load/Unload Sample Button directly below sample list */}
         <hr className="sidebar-divider" />
         {!isSampleLoaded ? (
           <button 
             className={`load-sample-button ${currentOperation ? 'processing' : ''}`}
             onClick={handleLoadSample}
-            disabled={!selectedSampleId || currentOperation !== null}
+            disabled={!selectedSampleId || currentOperation !== null || 
+                        (isRealMicroscopeSelected && incubatorSlots.find(s=>s.id === selectedSampleId)?.location !== 'incubator_slot')
+            }
           >
             <div className="button-content">
               {currentOperation === 'loading' ? (
@@ -571,7 +522,10 @@ const SampleSelector = ({
           <button 
             className={`unload-sample-button ${currentOperation ? 'processing' : ''}`}
             onClick={handleUnloadSample}
-            disabled={!selectedSampleId || currentOperation !== null}
+            disabled={currentOperation !== null || 
+                       (isSimulatedMicroscopeSelected && selectedSampleId === null) || 
+                       (isRealMicroscopeSelected && loadedSampleOnMicroscope === null)
+            }
           >
             <div className="button-content">
               {currentOperation === 'unloading' ? (
@@ -590,7 +544,6 @@ const SampleSelector = ({
         )}
       </div>
 
-      {/* Workflow Messages */}
       {workflowMessages.length > 0 && (
         <div className="workflow-messages-container mt-4 mb-2 border border-gray-200 rounded p-2 bg-gray-50 max-h-48 overflow-y-auto">
           <h4 className="text-sm font-semibold mb-1">Operation Progress:</h4>
@@ -604,10 +557,9 @@ const SampleSelector = ({
         </div>
       )}
 
-      {/* Status Message */}
       {loadingStatus && (
         <div className={`sample-loading-status my-2 py-2 px-3 rounded text-center ${
-          loadingStatus.includes('successfully') ? 'bg-green-100 text-green-700' : 
+          loadingStatus.includes('successfully') || loadingStatus.includes('Sample loaded!') || loadingStatus.includes('Sample unloaded!') ? 'bg-green-100 text-green-700' : 
           loadingStatus.includes('Error') ? 'bg-red-100 text-red-700' :
           currentOperation === 'loading' || currentOperation === 'unloading' ? 'bg-blue-100 text-blue-700' :
           'bg-blue-100 text-blue-700'
