@@ -3,6 +3,7 @@ import PropTypes from 'prop-types';
 import ControlButton from './ControlButton';
 import CameraSettings from './CameraSettings';
 import ChatbotButton from './ChatbotButton';
+import SampleSelector from './SampleSelector';
 
 const MicroscopeControlPanel = ({
   map,
@@ -15,7 +16,11 @@ const MicroscopeControlPanel = ({
   channelNames,
   vectorLayer,
   onClose,
-  selectedMicroscopeId
+  selectedMicroscopeId,
+  incubatorControlService,
+  roboticArmService,
+  currentOperation,
+  setCurrentOperation,
 }) => {
   const [isLightOn, setIsLightOn] = useState(false);
   const [xPosition, setXPosition] = useState(0);
@@ -25,6 +30,9 @@ const MicroscopeControlPanel = ({
   const [yMove, setYMove] = useState(1);
   const [zMove, setZMove] = useState(0.1);
   const [microscopeBusy, setMicroscopeBusy] = useState(false);
+
+  // State for SampleSelector dropdown
+  const [isSampleSelectorOpen, setIsSampleSelectorOpen] = useState(false);
 
   // Renamed states for actual values from microscope (for display)
   const [actualIlluminationIntensity, setActualIlluminationIntensity] = useState(50);
@@ -37,6 +45,18 @@ const MicroscopeControlPanel = ({
   const [illuminationChannel, setIlluminationChannel] = useState("0");
   const [isLiveView, setIsLiveView] = useState(false);
   const canvasRef = useRef(null);
+
+  // Refs to hold the latest actual values for use in debounced effects
+  const actualIlluminationIntensityRef = useRef(actualIlluminationIntensity);
+  const actualCameraExposureRef = useRef(actualCameraExposure);
+
+  useEffect(() => {
+    actualIlluminationIntensityRef.current = actualIlluminationIntensity;
+  }, [actualIlluminationIntensity]);
+
+  useEffect(() => {
+    actualCameraExposureRef.current = actualCameraExposure;
+  }, [actualCameraExposure]);
 
   const fetchStatusAndUpdateActuals = async () => {
     if (!microscopeControlService) {
@@ -97,6 +117,50 @@ const MicroscopeControlPanel = ({
     }
   }, [microscopeControlService, illuminationChannel]); // Re-run if service or channel changes to re-sync
 
+  // Effect to update illumination when desiredIlluminationIntensity or illuminationChannel changes
+  useEffect(() => {
+    if (!microscopeControlService) return;
+
+    const handler = setTimeout(async () => {
+      try {
+        setMicroscopeBusy(true);
+        appendLog(`Setting illumination (debounced) to channel ${illuminationChannel}, intensity ${desiredIlluminationIntensity}%`);
+        await microscopeControlService.set_illumination(parseInt(illuminationChannel, 10), desiredIlluminationIntensity);
+        await fetchStatusAndUpdateActuals(); // Update UI after successful set
+        appendLog('Illumination updated successfully (debounced).');
+      } catch (error) {
+        appendLog(`Error setting illumination (debounced): ${error.message}`);
+        console.error("[MicroscopeControlPanel] Error setting illumination (debounced):", error);
+      } finally {
+        setMicroscopeBusy(false);
+      }
+    }, 300); // 300ms debounce
+
+    return () => clearTimeout(handler);
+  }, [desiredIlluminationIntensity, illuminationChannel, microscopeControlService, appendLog]);
+  
+  // Effect to update camera exposure when desiredCameraExposure or illuminationChannel changes
+  useEffect(() => {
+    if (!microscopeControlService) return;
+
+    const handler = setTimeout(async () => {
+      try {
+        setMicroscopeBusy(true);
+        appendLog(`Setting camera exposure (debounced) for channel ${illuminationChannel} to ${desiredCameraExposure}ms`);
+        await microscopeControlService.set_camera_exposure(parseInt(illuminationChannel, 10), desiredCameraExposure);
+        await fetchStatusAndUpdateActuals(); // Update UI after successful set
+        appendLog('Camera exposure updated successfully (debounced).');
+      } catch (error) {
+        appendLog(`Error setting camera exposure (debounced): ${error.message}`);
+        console.error("[MicroscopeControlPanel] Error setting camera exposure (debounced):", error);
+      } finally {
+        setMicroscopeBusy(false);
+      }
+    }, 300); // 300ms debounce
+
+    return () => clearTimeout(handler);
+  }, [desiredCameraExposure, illuminationChannel, microscopeControlService, appendLog]);
+
   useEffect(() => {
     if (!snapshotImage || !canvasRef.current) return;
 
@@ -128,7 +192,7 @@ const MicroscopeControlPanel = ({
           // Only capture new frames if the microscope is not busy with other operations
           if (!microscopeBusy && microscopeControlService) {
             // Use DESIRED values for live view frames
-            const base64Image = await microscopeControlService.one_new_frame(desiredCameraExposure, parseInt(illuminationChannel, 10), parseInt(desiredIlluminationIntensity, 10));
+            const base64Image = await microscopeControlService.one_new_frame();
             setSnapshotImage(`data:image/png;base64,${base64Image}`);
           }
         } catch (error) {
@@ -139,7 +203,7 @@ const MicroscopeControlPanel = ({
       clearInterval(liveViewInterval);
     }
     return () => clearInterval(liveViewInterval);
-  }, [isLiveView, desiredCameraExposure, illuminationChannel, desiredIlluminationIntensity, microscopeControlService, microscopeBusy]);
+  }, [isLiveView, microscopeControlService, microscopeBusy, appendLog]);
 
   const moveMicroscope = async (direction, multiplier) => {
     if (!microscopeControlService) return;
@@ -189,12 +253,14 @@ const MicroscopeControlPanel = ({
     try {
       setMicroscopeBusy(true);
       appendLog('Snapping image...');
-      // Use DESIRED values for snapping image
-      const exposureTime = desiredCameraExposure;
-      const channel = parseInt(illuminationChannel, 10);
-      const intensity = desiredIlluminationIntensity;
+
+      if (isLiveView) {
+        stopLiveView(); // Terminate live view first
+        // Give a moment for live view to fully stop before snapping
+        await new Promise(resolve => setTimeout(resolve, 100)); 
+      }
       
-      const base64Image = await microscopeControlService.one_new_frame(exposureTime, channel, intensity);
+      const base64Image = await microscopeControlService.one_new_frame();
       console.log('Received base64 image data of length:', base64Image.length);
       setSnapshotImage(`data:image/png;base64,${base64Image}`);
       appendLog('Image snapped and fetched successfully.');
@@ -273,15 +339,48 @@ const MicroscopeControlPanel = ({
     setIsLiveView(false);
   };
 
+  // Toggle for SampleSelector dropdown
+  const toggleSampleSelector = () => {
+    setIsSampleSelectorOpen(!isSampleSelectorOpen);
+  };
+
   return (
-    <div className="bg-white bg-opacity-95 p-6 rounded-lg shadow-lg border-l border-gray-300 box-border overflow-y-auto">
+    <div className="microscope-control-panel-container bg-white bg-opacity-95 p-6 rounded-lg shadow-lg border-l border-gray-300 box-border overflow-y-auto">
+      {/* SampleSelector is always mounted for persistent connection, visibility is controlled */}
+      <SampleSelector 
+        isVisible={isSampleSelectorOpen} // Controls visibility via CSS
+        selectedMicroscopeId={selectedMicroscopeId}
+        microscopeControlService={microscopeControlService}
+        incubatorControlService={incubatorControlService}
+        roboticArmService={roboticArmService}
+        currentOperation={currentOperation}
+        setCurrentOperation={setCurrentOperation}
+        // We might need a way to close it from within SampleSelector, or it closes on sample load/unload
+      />
+
       <div className="flex justify-between items-center mb-4">
-        <h3 className="text-xl font-medium">
-          {selectedMicroscopeId === 'squid-control/squid-control-reef' ? 'Simulated Microscope' :
-           selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 'Real Microscope 1' :
-           selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2' ? 'Real Microscope 2' :
-           'Microscope Control'}
-        </h3>
+        {/* Container for microscope title and sample selector button */}
+        <div className="flex items-center justify-start flex-grow">
+          <h3 className="text-xl font-medium mr-4">
+            {selectedMicroscopeId === 'squid-control/squid-control-reef' ? 'Simulated Microscope' :
+             selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 'Real Microscope 1' :
+             selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2' ? 'Real Microscope 2' :
+             'Microscope Control'}
+          </h3>
+          {/* Button to toggle SampleSelector dropdown - Renamed and moved */}
+          {selectedMicroscopeId && ( // Only show if a microscope is selected
+            <button 
+              onClick={toggleSampleSelector}
+              className="sample-selector-toggle-button p-2 bg-gray-200 hover:bg-gray-300 rounded shadow text-sm"
+              title="Select or manage samples"
+            >
+              <i className="fas fa-flask mr-2"></i>
+              Select Samples
+              <i className={`fas ${isSampleSelectorOpen ? 'fa-chevron-up' : 'fa-chevron-down'} ml-2`}></i>
+            </button>
+          )}
+        </div>
+        {/* Potentially other controls on the right side of the header can go here */}
       </div>
       <div id="manual-control-content">
         <div
@@ -403,6 +502,8 @@ const MicroscopeControlPanel = ({
                 onChange={(e) => {
                   setDesiredIlluminationIntensity(parseInt(e.target.value, 10));
                 }}
+                // Disable if microscope is busy to prevent rapid firing of set_illumination
+                disabled={microscopeBusy}
               />
             </div>
 
@@ -460,6 +561,10 @@ MicroscopeControlPanel.propTypes = {
   channelNames: PropTypes.object,
   selectedMicroscopeId: PropTypes.string,
   onClose: PropTypes.func.isRequired,
+  incubatorControlService: PropTypes.object,
+  roboticArmService: PropTypes.object,
+  currentOperation: PropTypes.string,
+  setCurrentOperation: PropTypes.func,
 };
 
 export default MicroscopeControlPanel; 

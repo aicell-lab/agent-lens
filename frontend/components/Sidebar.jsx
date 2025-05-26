@@ -8,91 +8,117 @@ const Sidebar = ({
   onTabChange, 
   onMicroscopeSelect, 
   selectedMicroscopeId,
-  incubatorControlService,
-  microscopeControlService,
-  roboticArmService
+  // incubatorControlService, // Will be passed directly to SampleSelector if needed elsewhere
+  // microscopeControlService, // Will be passed directly to SampleSelector if needed elsewhere
+  // roboticArmService // Will be passed directly to SampleSelector if needed elsewhere
+  currentOperation, // Added prop to disable navigation during sample operations
 }) => {
-  const [isMicroscopePanelOpen, setIsMicroscopePanelOpen] = useState(true);
-  const [isSamplePanelOpen, setIsSamplePanelOpen] = useState(false);
-  
+  // State for microscope dropdown
+  const [isMicroscopeDropdownOpen, setIsMicroscopeDropdownOpen] = useState(false);
+  // const [isMicroscopePanelOpen, setIsMicroscopePanelOpen] = useState(true); // Removed
+  // const [isSamplePanelOpen, setIsSamplePanelOpen] = useState(false); // SampleSelector will be moved
+
   // New state for Image View
+  const initialDefaultGalleryId = 'agent-lens/20250506-scan-time-lapse-gallery';
+  const hpaGalleryId = 'agent-lens/hpa-sample-gallery';
+
   const [isImageViewPanelOpen, setIsImageViewPanelOpen] = useState(false);
-  const [selectedGalleryId, setSelectedGalleryId] = useState('agent-lens/20250506-scan-time-lapse-gallery');
-  const [selectedGalleryName, setSelectedGalleryName] = useState('');
+  const [selectedGalleryId, setSelectedGalleryId] = useState(initialDefaultGalleryId);
+  const [selectedGalleryName, setSelectedGalleryName] = useState(
+    initialDefaultGalleryId.split('/').pop() || initialDefaultGalleryId
+  ); // Placeholder, will be updated
   const [availableGalleries, setAvailableGalleries] = useState([
-    { id: 'agent-lens/20250506-scan-time-lapse-gallery', name: 'Default Time-lapse Gallery' }
+    { id: initialDefaultGalleryId, name: initialDefaultGalleryId.split('/').pop() || initialDefaultGalleryId },
+    { id: hpaGalleryId, name: hpaGalleryId.split('/').pop() || hpaGalleryId }
   ]);
   const [isSettingUpGalleryMap, setIsSettingUpGalleryMap] = useState(false);
 
+  // New state for main sidebar collapse
+  const [isMainSidebarCollapsed, setIsMainSidebarCollapsed] = useState(false);
+
   // Set default tab to 'microscope' on component mount
   useEffect(() => {
+    // Set default tab on initial mount
     onTabChange('microscope');
-  }, []); // Empty dependency array means this runs once on mount
 
-  // Reset sample panel state when microscope selection changes
-  useEffect(() => {
-    if (!selectedMicroscopeId) {
-      setIsSamplePanelOpen(false);
-    }
-  }, [selectedMicroscopeId]);
+    // Setup and sync the initial default gallery
+    const setupInitialDefaultGallery = async () => {
+      // Fetch the definitive name for the initial gallery.
+      // This call will also update selectedGalleryName state (if initialDefaultGalleryId is still selectedGalleryId)
+      // and its entry in availableGalleries state via fetchGalleryInfo's internal logic.
+      const definitiveInitialName = await fetchGalleryInfo(initialDefaultGalleryId);
 
-  // Fetch gallery name when gallery ID changes
+      // Now, ensure ImageViewBrowser uses this default gallery by setting localStorage
+      // and dispatching the event. This overrides any stale value in localStorage.
+      localStorage.setItem('selectedGalleryId', initialDefaultGalleryId);
+      localStorage.setItem('selectedGalleryName', definitiveInitialName); // Use the name that fetchGalleryInfo determined
+      window.dispatchEvent(new CustomEvent('gallerySelected', {
+        detail: { galleryId: initialDefaultGalleryId, galleryName: definitiveInitialName }
+      }));
+    };
+
+    setupInitialDefaultGallery();
+  }, []); // Runs ONCE on mount
+
+  // Effect to fetch gallery info when selectedGalleryId changes (e.g., by double-click or initial set)
   useEffect(() => {
     if (selectedGalleryId) {
+      // This will fetch info for the initialDefaultGalleryId on mount (as selectedGalleryId starts with it)
+      // and for any subsequent changes to selectedGalleryId.
+      // fetchGalleryInfo updates selectedGalleryName if the fetched ID matches current selectedGalleryId.
       fetchGalleryInfo(selectedGalleryId);
     }
-  }, [selectedGalleryId]);
+  }, [selectedGalleryId]); // Re-run when selectedGalleryId changes
 
-  // Also fetch gallery info on component mount for the default gallery
-  useEffect(() => {
-    if (selectedGalleryId) {
-      fetchGalleryInfo(selectedGalleryId);
+  const fetchGalleryInfo = async (galleryIdToFetch) => {
+    let galleryDisplayName = galleryIdToFetch.split('/').pop() || galleryIdToFetch; // Fallback
+
+    // Use a more specific name from availableGalleries if it's already been fetched and is better than derived
+    const existingGalleryInList = availableGalleries.find(g => g.id === galleryIdToFetch);
+    if (existingGalleryInList && existingGalleryInList.name !== (galleryIdToFetch.split('/').pop() || galleryIdToFetch)) {
+      galleryDisplayName = existingGalleryInList.name;
     }
-  }, []); // Empty dependency array means this runs once on mount
 
-  const fetchGalleryInfo = async (galleryId) => {
     try {
       const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
-      const response = await fetch(`/agent-lens/apps/${serviceId}/gallery-info?gallery_id=${encodeURIComponent(galleryId)}`);
+      const response = await fetch(`/agent-lens/apps/${serviceId}/gallery-info?gallery_id=${encodeURIComponent(galleryIdToFetch)}`);
       const data = await response.json();
-      
       if (response.ok && data) {
-        // Use the same pattern as in register_frontend_service.py for getting display name
-        const displayName = data.manifest?.name || data.alias || galleryId.split('/').pop() || galleryId;
-        setSelectedGalleryName(displayName);
-        
-        // Update the gallery in availableGalleries if it exists
-        setAvailableGalleries(prev => prev.map(gallery => 
-          gallery.id === galleryId 
-            ? { ...gallery, name: displayName }
-            : gallery
-        ));
-      } else {
-        // Fallback to derived name if API fails
-        setSelectedGalleryName(galleryId.split('/').pop() || galleryId);
+        // Prefer manifest name, then alias, then derived name
+        galleryDisplayName = data.manifest?.name || data.alias || (galleryIdToFetch.split('/').pop() || galleryIdToFetch);
       }
     } catch (error) {
-      console.error('Error fetching gallery info:', error);
-      // Fallback to derived name if API fails
-      setSelectedGalleryName(galleryId.split('/').pop() || galleryId);
+      console.error(`Error fetching gallery info for ${galleryIdToFetch}:`, error);
+      // On error, galleryDisplayName retains its current value (derived or from existing list)
     }
+
+    // Update selectedGalleryName state only if the fetched info is for the *currently selected* gallery in the UI
+    if (galleryIdToFetch === selectedGalleryId) {
+      setSelectedGalleryName(galleryDisplayName);
+    }
+
+    // Update the name in the availableGalleries list state
+    setAvailableGalleries(prevGalleries =>
+      prevGalleries.map(gallery =>
+        gallery.id === galleryIdToFetch ? { ...gallery, name: galleryDisplayName } : gallery
+      )
+    );
+    return galleryDisplayName; // Return the determined name for use by callers like setupInitialDefaultGallery
   };
 
   const handleMicroscopeTabClick = () => {
     if (activeTab === 'microscope') {
-      const newPanelState = !isMicroscopePanelOpen;
-      setIsMicroscopePanelOpen(newPanelState);
-      if (!newPanelState) {
-        setIsSamplePanelOpen(false);
-      }
+      // Toggle dropdown instead of panel
+      setIsMicroscopeDropdownOpen(!isMicroscopeDropdownOpen);
     } else {
       onTabChange('microscope');
-      setIsMicroscopePanelOpen(true);
+      setIsMicroscopeDropdownOpen(true); // Open dropdown when switching to this tab
+      // setIsMicroscopePanelOpen(true); // Removed
     }
   };
 
   const handleImageViewTabClick = () => {
-    if (activeTab === 'image-view') {
+    if (activeTab === 'image-view' || activeTab === 'image-view-map') {
       const newPanelState = !isImageViewPanelOpen;
       setIsImageViewPanelOpen(newPanelState);
     } else {
@@ -101,8 +127,33 @@ const Sidebar = ({
     }
   };
 
-  const handleToggleSamplePanel = async () => {
-    setIsSamplePanelOpen(!isSamplePanelOpen);
+  const handleGalleryItemClick = (galleryId) => {
+    // Step 1: Select the gallery (this updates UI and might trigger async name fetch via useEffect)
+    setSelectedGalleryId(galleryId);
+
+    // Step 2: Prepare to trigger the data loading for ImageViewBrowser
+
+    const galleryInfo = availableGalleries.find(g => g.id === galleryId);
+    const nameToDispatch = galleryInfo ? galleryInfo.name : (galleryId.split('/').pop() || galleryId);
+    // setSelectedGalleryName(nameToDispatch); // This will be handled by useEffect watching selectedGalleryId
+
+    // Step 3: Update localStorage and dispatch the event for ImageViewBrowser.
+    localStorage.setItem('selectedGalleryId', galleryId);
+    localStorage.setItem('selectedGalleryName', nameToDispatch); // Use the name we have now
+    window.dispatchEvent(new CustomEvent('gallerySelected', {
+      detail: { galleryId: galleryId, galleryName: nameToDispatch }
+    }));
+
+    // Step 4: Ensure the correct tab and panel state
+    if (activeTab === 'image-view-map') {
+      onTabChange('image-view'); // Switch from map view to browser view
+    } else if (activeTab !== 'image-view') {
+      onTabChange('image-view'); // Switch to image view tab if not already on it or map view
+    }
+
+    if (!isImageViewPanelOpen) {
+      setIsImageViewPanelOpen(true); // Open the panel if it's closed
+    }
   };
 
   const handleBrowseData = () => {
@@ -154,11 +205,6 @@ const Sidebar = ({
     onTabChange('image-view');
   };
 
-  const handleGallerySelect = async (galleryId) => {
-    setSelectedGalleryId(galleryId);
-    // Gallery name will be fetched by the useEffect
-  };
-
   const handleAddGallery = () => {
     const galleryId = prompt('Enter gallery ID:');
     if (galleryId && !availableGalleries.find(g => g.id === galleryId)) {
@@ -175,7 +221,9 @@ const Sidebar = ({
       const updatedGalleries = availableGalleries.filter(g => g.id !== galleryId);
       setAvailableGalleries(updatedGalleries);
       if (selectedGalleryId === galleryId) {
-        setSelectedGalleryId(updatedGalleries[0].id);
+        // If the removed gallery was the selected one, select the first in the new list
+        const newSelectedId = updatedGalleries[0].id;
+        handleGalleryItemClick(newSelectedId); // Use the click handler to ensure all logic runs
       }
     }
   };
@@ -184,99 +232,103 @@ const Sidebar = ({
                                  selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2';
   const isSimulatedMicroscopeSelected = selectedMicroscopeId === 'squid-control/squid-control-reef';
 
+  // Toggle function for main sidebar collapse
+  const toggleMainSidebarCollapse = () => {
+    if (!currentOperation) { // Only allow collapse/expand if no operation is in progress
+      setIsMainSidebarCollapsed(!isMainSidebarCollapsed);
+    }
+  };
+
   return (
     <div className="sidebar-container">
-      <div className="main-sidebar">
+      <div className={`main-sidebar ${isMainSidebarCollapsed ? 'main-sidebar-collapsed' : ''}`}>
         <div className="sidebar-tabs">
           <button 
             className={`sidebar-tab ${activeTab === 'microscope' ? 'active' : ''}`}
             onClick={handleMicroscopeTabClick}
+            title={isMainSidebarCollapsed ? "Microscopes" : ""} // Show title on hover when collapsed
           >
             <i className="fas fa-microscope"></i>
-            <span>Microscopes</span>
-            <i className={`fas ${activeTab === 'microscope' && isMicroscopePanelOpen ? 'fa-chevron-left' : 'fa-chevron-right'} microscope-toggle-icon`}></i>
+            {!isMainSidebarCollapsed && <span>Microscopes</span>}
+            {!isMainSidebarCollapsed && <i className={`fas ${isMicroscopeDropdownOpen ? 'fa-chevron-down' : 'fa-chevron-right'} microscope-toggle-icon`}></i>}
           </button>
+          {/* Microscope Dropdown Submenu */}
+          {activeTab === 'microscope' && isMicroscopeDropdownOpen && !isMainSidebarCollapsed && (
+            <div className="sidebar-submenu microscope-options-dropdown">
+              <button
+                className={`sidebar-submenu-tab ${selectedMicroscopeId === 'squid-control/squid-control-reef' ? 'active' : ''}`}
+                onClick={() => {
+                  onMicroscopeSelect('squid-control/squid-control-reef');
+                  // setIsMicroscopeDropdownOpen(false); // Optional: close dropdown on selection
+                }}
+              >
+                <i className="fas fa-desktop"></i> {/* Changed icon for simulated */}
+                <span>Simulated Microscope</span>
+              </button>
+              <button
+                className={`sidebar-submenu-tab ${selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 'active' : ''}`}
+                onClick={() => {
+                  onMicroscopeSelect('reef-imaging/mirror-microscope-control-squid-1');
+                  // setIsMicroscopeDropdownOpen(false); // Optional: close dropdown on selection
+                }}
+              >
+                <i className="fas fa-microscope"></i>
+                <span>Real Microscope 1</span>
+              </button>
+              <button
+                className={`sidebar-submenu-tab ${selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2' ? 'active' : ''}`}
+                onClick={() => {
+                  onMicroscopeSelect('reef-imaging/mirror-microscope-control-squid-2');
+                  // setIsMicroscopeDropdownOpen(false); // Optional: close dropdown on selection
+                }}
+              >
+                <i className="fas fa-microscope"></i>
+                <span>Real Microscope 2</span>
+              </button>
+            </div>
+          )}
           <button 
             className={`sidebar-tab ${activeTab === 'image-view' || activeTab === 'image-view-map' ? 'active' : ''}`}
             onClick={handleImageViewTabClick}
+            disabled={!!currentOperation} 
+            title={currentOperation ? "Sample operation in progress" : (isMainSidebarCollapsed ? "Image View" : "View images and galleries")}
           >
             <i className="fas fa-images"></i>
-            <span>Image View</span>
-            <i className={`fas ${(activeTab === 'image-view' || activeTab === 'image-view-map') && isImageViewPanelOpen ? 'fa-chevron-left' : 'fa-chevron-right'} microscope-toggle-icon`}></i>
+            {!isMainSidebarCollapsed && <span>Image View</span>}
+            {!isMainSidebarCollapsed && <i className={`fas ${(activeTab === 'image-view' || activeTab === 'image-view-map') && isImageViewPanelOpen ? 'fa-chevron-left' : 'fa-chevron-right'} microscope-toggle-icon`}></i>}
           </button>
           <button 
             className={`sidebar-tab ${activeTab === 'incubator' ? 'active' : ''}`}
             onClick={() => onTabChange('incubator')}
+            disabled={!!currentOperation} 
+            title={currentOperation ? "Sample operation in progress" : (isMainSidebarCollapsed ? "Incubator" : "Control incubator")}
           >
             <i className="fas fa-temperature-high"></i>
-            <span>Incubator</span>
+            {!isMainSidebarCollapsed && <span>Incubator</span>}
           </button>
           <button 
             className={`sidebar-tab ${activeTab === 'dashboard' ? 'active' : ''}`}
             onClick={() => onTabChange('dashboard')}
+            disabled={!!currentOperation} 
+            title={currentOperation ? "Sample operation in progress" : (isMainSidebarCollapsed ? "Dashboard" : "View dashboard and logs")}
           >
             <i className="fas fa-tachometer-alt"></i>
-            <span>Dashboard</span>
+            {!isMainSidebarCollapsed && <span>Dashboard</span>}
+          </button>
+        </div>
+        {/* Collapse/Expand button for the main sidebar */}
+        <div className="main-sidebar-toggle-container">
+          <button 
+            onClick={toggleMainSidebarCollapse} 
+            className="main-sidebar-toggle-button"
+            disabled={!!currentOperation}
+            title={currentOperation ? "Sample operation in progress" : (isMainSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar")}
+          >
+            <i className={`fas ${isMainSidebarCollapsed ? 'fa-chevron-right' : 'fa-chevron-left'}`}></i>
           </button>
         </div>
       </div>
       
-      {activeTab === 'microscope' && (
-        <div className={`microscope-sidebar ${!isMicroscopePanelOpen ? 'collapsed' : ''}`}>
-          <h3 className="microscope-sidebar-title">Select Microscope</h3>
-          <div className="microscope-options">
-            <button
-              className={`microscope-option ${selectedMicroscopeId === 'squid-control/squid-control-reef' ? 'active' : ''}`}
-              onClick={() => onMicroscopeSelect('squid-control/squid-control-reef')}
-            >
-              <i className="fas fa-microscope"></i>
-              <span>Simulated Microscope</span>
-            </button>
-            <button
-              className={`microscope-option ${selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 'active' : ''}`}
-              onClick={() => onMicroscopeSelect('reef-imaging/mirror-microscope-control-squid-1')}
-            >
-              <i className="fas fa-microscope"></i>
-              <span>Real Microscope 1</span>
-            </button>
-            <button
-              className={`microscope-option ${selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2' ? 'active' : ''}`}
-              onClick={() => onMicroscopeSelect('reef-imaging/mirror-microscope-control-squid-2')}
-            >
-              <i className="fas fa-microscope"></i>
-              <span>Real Microscope 2</span>
-            </button>
-          </div>
-          
-          {selectedMicroscopeId && (
-            <>
-              <hr className="sidebar-divider" />
-              <button onClick={handleToggleSamplePanel} className="toggle-sample-panel-button">
-                <div className="button-content">
-                  {isSamplePanelOpen ? (
-                    <i className="fas fa-eye-slash"></i>
-                  ) : (
-                    <i className="fas fa-flask"></i>
-                  )}
-                  <span>{isSamplePanelOpen ? 'Hide' : 'Select Samples'}</span>
-                  <i className={`fas ${isSamplePanelOpen ? 'fa-chevron-left' : 'fa-chevron-right'} microscope-toggle-icon`}></i>
-                </div>
-              </button>
-            </>
-          )}
-        </div>
-      )}
-
-      {activeTab === 'microscope' && selectedMicroscopeId && isMicroscopePanelOpen && (
-        <SampleSelector 
-          isVisible={isSamplePanelOpen}
-          selectedMicroscopeId={selectedMicroscopeId}
-          microscopeControlService={microscopeControlService}
-          incubatorControlService={incubatorControlService}
-          roboticArmService={roboticArmService}
-        />
-      )}
-
       {(activeTab === 'image-view' || activeTab === 'image-view-map') && (
         <div className={`image-view-sidebar ${!isImageViewPanelOpen ? 'collapsed' : ''}`}>
           <h3 className="image-view-sidebar-title">Select Image Gallery</h3>
@@ -301,18 +353,20 @@ const Sidebar = ({
                 <div 
                   key={gallery.id}
                   className={`gallery-option ${selectedGalleryId === gallery.id ? 'active' : ''}`}
+                  onClick={() => handleGalleryItemClick(gallery.id)} // Changed to single click
                 >
-                  <button
-                    className="gallery-select-btn"
-                    onClick={() => handleGallerySelect(gallery.id)}
-                  >
+                  {/* The inner button is primarily for layout and visual grouping, not a separate click target changing selection */}
+                  <button className="gallery-select-btn" tabIndex="-1"> {/* tabIndex to prevent double focus */}
                     <i className="fas fa-folder"></i>
                     <span>{gallery.name}</span>
                   </button>
                   {availableGalleries.length > 1 && (
                     <button
                       className="gallery-remove-btn"
-                      onClick={() => handleRemoveGallery(gallery.id)}
+                      onClick={(e) => { 
+                        e.stopPropagation(); // Prevent gallery selection when removing
+                        handleRemoveGallery(gallery.id); 
+                      }}
                       title="Remove Gallery"
                     >
                       <i className="fas fa-times"></i>
@@ -376,9 +430,7 @@ Sidebar.propTypes = {
   onTabChange: PropTypes.func.isRequired,
   onMicroscopeSelect: PropTypes.func.isRequired,
   selectedMicroscopeId: PropTypes.string,
-  incubatorControlService: PropTypes.object,
-  microscopeControlService: PropTypes.object,
-  roboticArmService: PropTypes.object
+  currentOperation: PropTypes.string, // Added prop type
 };
 
 export default Sidebar; 
