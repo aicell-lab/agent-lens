@@ -904,8 +904,8 @@ const MapDisplay = ({ appendLog, segmentService, microscopeControlService, incub
     0: '#ffffff', // Brightfield - white
     11: '#9955ff', // 405nm - violet
     12: '#22ff22', // 488nm - green
-    14: '#ff5555', // 561nm - red-orange 
-    13: '#ff0000'  // 638nm - deep red
+    14: '#FFA500', // 561nm - Orange (changed from red-orange #ff5555)
+    13: '#FF00FF'  // 638nm - Fuchsia/Magenta (changed from deep red #ff0000)
   };
 
   return (
