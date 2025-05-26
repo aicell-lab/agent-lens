@@ -8,8 +8,8 @@ const MapButton = ({ onClick, icon, bottom = null, top = null, right = null, lef
             style={{
                 top: top !== null ? `${top}px` : 'auto',
                 bottom: bottom !== null ? `${bottom}px` : 'auto',
-                right: right !== null ? `${right}px` : 'auto',
-                left: left !== null ? `${left}px` : (right === null ? '10px' : 'auto'),
+                right: right !== null ? `${right}px` : (left === null ? '10px' : 'auto'),
+                left: left !== null ? `${left}px` : 'auto',
                 ...style
             }}
             onClick={onClick}

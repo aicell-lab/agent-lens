@@ -265,6 +265,7 @@ const MapInteractions = ({
             isPenActive={isPenActive}
             setIsPenActive={setIsPenActive}
             isProcessing={isProcessing}
+            top="150"
           />
           <SegmentControls 
             segmentService={segmentService} 
@@ -273,12 +274,13 @@ const MapInteractions = ({
             setSelectedModel={setSelectedModel} 
             map={map} 
             extent={extent} 
-            appendLog={appendLog} 
+            appendLog={appendLog}
+            top="60"
           />
           <DrawButton 
             drawType="Point" 
             icon="fa-map-marker-alt" 
-            top="520" 
+            top="192"
             map={map} 
             vectorLayer={vectorLayer} 
             setIsDrawingActive={setIsDrawingActive} 
@@ -286,7 +288,7 @@ const MapInteractions = ({
           <DrawButton 
             drawType="Polygon" 
             icon="fa-draw-polygon" 
-            top="570" 
+            top="234"
             map={map} 
             vectorLayer={vectorLayer} 
             setIsDrawingActive={setIsDrawingActive} 

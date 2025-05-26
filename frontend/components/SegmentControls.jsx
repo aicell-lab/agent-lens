@@ -51,8 +51,8 @@ const SegmentButton = ({ appendLog, snapshotImage, segmentService, map, extent, 
     return (
       <>
         <select
-          className="absolute left-2.5 p-1.5 z-40 bg-blue-600 text-white border-none rounded-md text-base font-medium cursor-pointer shadow-inner transition-all duration-300 ease-in-out hover:bg-blue-800 hover:shadow-xl hover:translate-y-[-2px]"
-          style={{ top: '370px' }}
+          className="absolute right-1 p-0.5 z-40 w-24 bg-blue-600 text-white border-none rounded-md text-sm font-medium cursor-pointer shadow-inner transition-all duration-300 ease-in-out hover:bg-blue-800 hover:shadow-xl hover:translate-y-[-2px]"
+          style={{ top: '60px' }}
           value={selectedModel}
           onChange={(e) => setSelectedModel(e.target.value)}
         >
@@ -63,7 +63,7 @@ const SegmentButton = ({ appendLog, snapshotImage, segmentService, map, extent, 
         </select>
         <button
           className="absolute w-16 h-8 z-40 bg-blue-600 text-white border-none rounded-md text-xs font-medium cursor-pointer shadow-inner transition-all duration-300 ease-in-out hover:bg-blue-800 hover:shadow-xl hover:translate-y-[-2px]"
-          style={{ top: '470px', left: '10px' }}
+          style={{ top: '110px', right: '10px' }}
           onClick={handleSegmentAllCells}
           disabled={!snapshotImage || !segmentService}
           title={!snapshotImage ? "Please capture an image from the Microscope Control panel first" : "Auto Segment"}
