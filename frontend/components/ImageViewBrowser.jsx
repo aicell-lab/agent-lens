@@ -25,24 +25,29 @@ const ImageViewBrowser = ({ appendLog }) => {
       const { galleryId, galleryName } = event.detail;
       setSelectedGalleryId(galleryId);
       setSelectedGalleryName(galleryName);
-      setCurrentView('datasets');
+      setCurrentView('datasets'); // Always switch to dataset view when gallery changes
+      setDatasets([]); // Clear previous datasets
+      setSelectedDataset(''); // Clear previous dataset selection
       loadDatasets(galleryId);
     };
 
-    // Also check localStorage for initial gallery
     const storedGalleryId = localStorage.getItem('selectedGalleryId');
     const storedGalleryName = localStorage.getItem('selectedGalleryName');
     if (storedGalleryId) {
       setSelectedGalleryId(storedGalleryId);
       setSelectedGalleryName(storedGalleryName || storedGalleryId.split('/').pop() || storedGalleryId);
       loadDatasets(storedGalleryId);
+    } else {
+      // If no gallery is in local storage, perhaps clear datasets or show a prompt
+      setDatasets([]);
+      setCurrentView('datasets');
     }
 
     window.addEventListener('gallerySelected', handleGallerySelected);
     return () => {
       window.removeEventListener('gallerySelected', handleGallerySelected);
     };
-  }, []);
+  }, []); 
 
   // Load subfolders when dataset or path changes
   useEffect(() => {
@@ -52,6 +57,7 @@ const ImageViewBrowser = ({ appendLog }) => {
   }, [selectedDataset, currentPath, currentView]);
 
   const loadDatasets = async (galleryId) => {
+    if (!galleryId) return;
     setIsLoadingDatasets(true);
     appendLog(`Loading datasets from gallery: ${galleryId}...`);
     
@@ -100,17 +106,20 @@ const ImageViewBrowser = ({ appendLog }) => {
 
   const handleDatasetClick = (datasetId) => {
     setSelectedDataset(datasetId);
-    appendLog(`Selected dataset: ${datasetId}`);
-  };
-
-  const handleDatasetDoubleClick = (datasetId) => {
-    setSelectedDataset(datasetId);
-    handleBrowseFiles();
-    appendLog(`Opening dataset: ${datasetId}`);
+    // Immediately switch to file browsing view for this dataset
+    setCurrentView('files');
+    setCurrentPath(''); // Start at the root of the dataset
+    setBreadcrumbs([]);
+    appendLog(`Browsing files in dataset: ${datasetId}`);
   };
 
   const handleBrowseFiles = () => {
-    if (!selectedDataset) return;
+    // This function is now effectively merged into handleDatasetClick if a dataset is already selected by click.
+
+    if (!selectedDataset) {
+        appendLog("Please select a dataset first to browse its files.");
+        return;
+    }
     setCurrentView('files');
     setCurrentPath('');
     setBreadcrumbs([]);
@@ -170,7 +179,7 @@ const ImageViewBrowser = ({ appendLog }) => {
       <div className="image-view-browser">
         <div className="browser-placeholder">
           <h3>Image Data Browser</h3>
-          <p>Select a gallery from the sidebar and click "Browse Data" to view available datasets.</p>
+          <p>Select a gallery from the sidebar to view available datasets.</p>
         </div>
       </div>
     );
@@ -180,7 +189,7 @@ const ImageViewBrowser = ({ appendLog }) => {
     <div className="image-view-browser">
       <h3 className="browser-title">
         {currentView === 'datasets' ? 'Available Datasets' : 'Browse Files'}
-        <span className="gallery-subtitle">Gallery: {selectedGalleryName}</span>
+        {selectedGalleryName && <span className="gallery-subtitle">Gallery: {selectedGalleryName}</span>}
       </h3>
 
       {currentView === 'datasets' ? (
@@ -198,8 +207,7 @@ const ImageViewBrowser = ({ appendLog }) => {
                     <div 
                       key={dataset.id}
                       className={`dataset-card ${selectedDataset === dataset.id ? 'selected' : ''}`}
-                      onClick={() => handleDatasetClick(dataset.id)}
-                      onDoubleClick={() => handleDatasetDoubleClick(dataset.id)}
+                      onClick={() => handleDatasetClick(dataset.id)} // Single click to select and browse
                     >
                       <div className="dataset-icon">
                         <i className="fas fa-database"></i>
@@ -213,26 +221,15 @@ const ImageViewBrowser = ({ appendLog }) => {
                 ) : (
                   <div className="no-datasets">
                     <i className="fas fa-folder-open"></i>
-                    <p>No datasets available in this gallery</p>
+                    <p>No datasets available in this gallery, or gallery not found.</p>
                   </div>
                 )}
               </div>
 
-              {selectedDataset && (
-                <div className="dataset-actions">
-                  <button 
-                    onClick={handleBrowseFiles} 
-                    className="action-button secondary"
-                  >
-                    <i className="fas fa-folder-open mr-2"></i>
-                    Browse Files
-                  </button>
-                </div>
-              )}
             </>
           )}
         </div>
-      ) : (
+      ) : ( // currentView === 'files'
         <div className="files-view">
           <div className="files-header">
             <button 
@@ -249,7 +246,7 @@ const ImageViewBrowser = ({ appendLog }) => {
                 onClick={() => navigateToBreadcrumb(-1)}
               >
                 <i className="fas fa-home mr-1"></i>
-                Root
+                Root ({selectedDataset ? selectedDataset.split('/').pop() : 'Dataset'})
               </span>
               {breadcrumbs.map((crumb, index) => (
                 <React.Fragment key={index}>
@@ -294,7 +291,7 @@ const ImageViewBrowser = ({ appendLog }) => {
                 ) : (
                   <div className="no-files">
                     <i className="fas fa-folder-open"></i>
-                    <p>No files found in this directory</p>
+                    <p>No files or folders found in this directory.</p>
                   </div>
                 )}
               </div>
