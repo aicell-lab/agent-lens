@@ -1,6 +1,6 @@
 services:
   agent-lens:
-    image: ghcr.io/aicell-lab/agent-lens:sha-1d2e5ee
+    image: ghcr.io/aicell-lab/agent-lens:sha-4ef0b56
     container_name: agent-lens
     environment:
       - WORKSPACE_TOKEN=${AGENT_LENS_WORKSPACE_TOKEN}
@@ -26,13 +26,14 @@ services:
       - ALL
 
   squid-control:
-    image: ghcr.io/aicell-lab/squid-control:sha-dd796c0
+    image: ghcr.io/aicell-lab/squid-control:sha-11e58aa
     container_name: squid-control
     environment:
       - SQUID_WORKSPACE_TOKEN=${SQUID_WORKSPACE_TOKEN}
       - WORKSPACE_TOKEN_CHATBOT=${WORKSPACE_TOKEN_CHATBOT}
       - MICROSCOPE_SERVICE_ID=${MICROSCOPE_SERVICE_ID}
       - AGENT_LENS_WORKSPACE_TOKEN=${AGENT_LENS_WORKSPACE_TOKEN}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
     labels:
       - "autoheal.enable=true"
     volumes:
