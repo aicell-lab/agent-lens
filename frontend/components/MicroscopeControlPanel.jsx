@@ -46,6 +46,9 @@ const MicroscopeControlPanel = ({
   const [isLiveView, setIsLiveView] = useState(false);
   const canvasRef = useRef(null);
 
+  // State for collapsing the right panel
+  const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false);
+
   // Refs to hold the latest actual values for use in debounced effects
   const actualIlluminationIntensityRef = useRef(actualIlluminationIntensity);
   const actualCameraExposureRef = useRef(actualCameraExposure);
@@ -344,51 +347,19 @@ const MicroscopeControlPanel = ({
     setIsSampleSelectorOpen(!isSampleSelectorOpen);
   };
 
-  return (
-    <div className="microscope-control-panel-container bg-white bg-opacity-95 p-6 rounded-lg shadow-lg border-l border-gray-300 box-border overflow-y-auto">
-      {/* SampleSelector is always mounted for persistent connection, visibility is controlled */}
-      <SampleSelector 
-        isVisible={isSampleSelectorOpen} // Controls visibility via CSS
-        selectedMicroscopeId={selectedMicroscopeId}
-        microscopeControlService={microscopeControlService}
-        incubatorControlService={incubatorControlService}
-        roboticArmService={roboticArmService}
-        currentOperation={currentOperation}
-        setCurrentOperation={setCurrentOperation}
-        // We might need a way to close it from within SampleSelector, or it closes on sample load/unload
-      />
+  const toggleRightPanel = () => {
+    setIsRightPanelCollapsed(!isRightPanelCollapsed);
+  };
 
-      <div className="flex justify-between items-center mb-4">
-        {/* Container for microscope title and sample selector button */}
-        <div className="flex items-center justify-start flex-grow">
-          <h3 className="text-xl font-medium mr-4">
-            {selectedMicroscopeId === 'squid-control/squid-control-reef' ? 'Simulated Microscope' :
-             selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 'Real Microscope 1' :
-             selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2' ? 'Real Microscope 2' :
-             'Microscope Control'}
-          </h3>
-          {/* Button to toggle SampleSelector dropdown - Renamed and moved */}
-          {selectedMicroscopeId && ( // Only show if a microscope is selected
-            <button 
-              onClick={toggleSampleSelector}
-              className="sample-selector-toggle-button p-2 bg-gray-200 hover:bg-gray-300 rounded shadow text-sm"
-              title="Select or manage samples"
-            >
-              <i className="fas fa-flask mr-2"></i>
-              Select Samples
-              <i className={`fas ${isSampleSelectorOpen ? 'fa-chevron-up' : 'fa-chevron-down'} ml-2`}></i>
-            </button>
-          )}
-        </div>
-        {/* Potentially other controls on the right side of the header can go here */}
-      </div>
-      <div id="manual-control-content">
+  return (
+    <div className="microscope-control-panel-container new-mcp-layout bg-white bg-opacity-95 p-4 rounded-lg shadow-lg border-l border-gray-300 box-border">
+      {/* Left Side: Image Display */}
+      <div className={`mcp-image-display-area ${isRightPanelCollapsed ? 'expanded' : ''}`}>
         <div
           id="image-display"
-          className={`mb-4 w-full border ${
+          className={`w-full border ${
             snapshotImage ? 'border-gray-300' : 'border-dotted border-gray-400'
           } rounded flex items-center justify-center`}
-          style={{ height: '400px' }}
         >
           {snapshotImage ? (
             <img
@@ -400,150 +371,194 @@ const MicroscopeControlPanel = ({
             <p className="placeholder-text text-center">Image Display</p>
           )}
         </div>
+        {/* Toggle button for the right panel */}
+        <button 
+          onClick={toggleRightPanel}
+          className="right-panel-toggle-button"
+          title={isRightPanelCollapsed ? "Show Controls" : "Hide Controls"}
+        >
+          <i className={`fas ${isRightPanelCollapsed ? 'fa-chevron-left' : 'fa-chevron-right'}`}></i>
+        </button>
+      </div>
 
-        <div className="control-group mb-4">
-          <div className="horizontal-buttons flex justify-between space-x-2">
-            <button
-              className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/5 p-2 rounded"
-              onClick={toggleLight}
-              disabled={!microscopeControlService}
-            >
-              <i className="fas fa-lightbulb icon"></i> {isLightOn ? 'Turn Light Off' : 'Turn Light On'}
-            </button>
-            <button
-              className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/5 p-2 rounded"
-              onClick={contrastAutoFocus}
-              disabled={!microscopeControlService}
-            >
-              <i className="fas fa-crosshairs icon"></i> Contrast Autofocus
-            </button>
-            <button
-              className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/5 p-2 rounded"
-              onClick={laserAutoFocus}
-              disabled={!microscopeControlService}
-            >
-              <i className="fas fa-bullseye icon"></i> Laser Autofocus
-            </button>
-            <button
-              className="control-button snap-button bg-green-500 text-white hover:bg-green-600 w-1/5 p-2 rounded"
-              onClick={snapImage}
-              disabled={!microscopeControlService}
-            >
-              <i className="fas fa-camera icon"></i> Snap Image
-            </button>
-            <button
-              className={`control-button live-button ${isLiveView ? 'bg-red-500 hover:bg-red-600' : 'bg-purple-500 hover:bg-purple-600'} text-white w-1/5 p-2 rounded`}
-              onClick={isLiveView ? stopLiveView : startLiveView}
-              disabled={!microscopeControlService}
-            >
-              <i className="fas fa-video icon"></i> {isLiveView ? 'Stop Live' : 'Live'}
-            </button>
+      {/* Right Side: Controls and Chatbot */}
+      <div className={`mcp-controls-chatbot-area ${isRightPanelCollapsed ? 'collapsed' : ''}`}>
+        {/* Top-Right: Microscope Controls */}
+        <div className="mcp-microscope-controls-area">
+          {/* SampleSelector is moved here for better positioning context of its dropdown */}
+          <SampleSelector 
+            isVisible={isSampleSelectorOpen}
+            selectedMicroscopeId={selectedMicroscopeId}
+            microscopeControlService={microscopeControlService}
+            incubatorControlService={incubatorControlService}
+            roboticArmService={roboticArmService}
+            currentOperation={currentOperation}
+            setCurrentOperation={setCurrentOperation}
+          />
+
+          <div className="flex justify-between items-center mb-4">
+            <div className="flex items-center justify-start flex-grow">
+              <h3 className="text-lg font-medium mr-3">
+                {selectedMicroscopeId === 'squid-control/squid-control-reef' ? 'Simulated Microscope' :
+                 selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 'Real Microscope 1' :
+                 selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2' ? 'Real Microscope 2' :
+                 'Microscope Control'}
+              </h3>
+              {selectedMicroscopeId && (
+                <button 
+                  onClick={toggleSampleSelector}
+                  className="sample-selector-toggle-button p-1 bg-gray-200 hover:bg-gray-300 rounded shadow text-sm"
+                  title="Select or manage samples"
+                >
+                  <i className="fas fa-flask mr-1"></i>
+                  Select Samples
+                  <i className={`fas ${isSampleSelectorOpen ? 'fa-chevron-up' : 'fa-chevron-down'} ml-1`}></i>
+                </button>
+              )}
+            </div>
           </div>
-        </div>
+          
+          <div className="control-group mb-3">
+            <div className="horizontal-buttons flex justify-between space-x-1">
+              <button
+                className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/5 px-1.5 py-0.5 rounded text-xs"
+                onClick={toggleLight}
+                disabled={!microscopeControlService}
+              >
+                <i className="fas fa-lightbulb icon mr-1"></i> {isLightOn ? 'Light Off' : 'Light On'}
+              </button>
+              <button
+                className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/5 px-1.5 py-0.5 rounded text-xs"
+                onClick={contrastAutoFocus}
+                disabled={!microscopeControlService}
+              >
+                <i className="fas fa-crosshairs icon mr-1"></i> Contrast AF
+              </button>
+              <button
+                className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/5 px-1.5 py-0.5 rounded text-xs"
+                onClick={laserAutoFocus}
+                disabled={!microscopeControlService}
+              >
+                <i className="fas fa-bullseye icon mr-1"></i> Laser AF
+              </button>
+              <button
+                className="control-button snap-button bg-green-500 text-white hover:bg-green-600 w-1/5 px-1.5 py-0.5 rounded text-xs"
+                onClick={snapImage}
+                disabled={!microscopeControlService}
+              >
+                <i className="fas fa-camera icon mr-1"></i> Snap
+              </button>
+              <button
+                className={`control-button live-button ${isLiveView ? 'bg-red-500 hover:bg-red-600' : 'bg-purple-500 hover:bg-purple-600'} text-white w-1/5 px-1.5 py-0.5 rounded text-xs`}
+                onClick={isLiveView ? stopLiveView : startLiveView}
+                disabled={!microscopeControlService}
+              >
+                <i className="fas fa-video icon mr-1"></i> {isLiveView ? 'Stop' : 'Live'}
+              </button>
+            </div>
+          </div>
 
-        <div className="coordinate-container mb-4 flex justify-between">
-          {['x', 'y', 'z'].map((axis) => (
-            <div key={axis} className="coordinate-group p-2 border border-gray-300 rounded-lg w-1/3">
-              <div className="flex justify-between mb-2">
-                <div className="position-display w-1/2 mr-2 bg-gray-100 p-2 rounded flex items-center">
-                  <span className="text-gray-600 font-medium">{axis.toUpperCase()}:</span>
-                  <span className="ml-2 text-gray-800">
-                    {(axis === 'x' ? xPosition : axis === 'y' ? yPosition : zPosition).toFixed(3)} mm
-                  </span>
+          <div className="coordinate-container mb-3 flex justify-between space-x-1">
+            {['x', 'y', 'z'].map((axis) => (
+              <div key={axis} className="coordinate-group p-1 border border-gray-300 rounded-lg w-1/3">
+                <div className="flex justify-between mb-1">
+                  <div className="position-display w-1/2 mr-1 bg-gray-100 p-1 rounded flex items-center text-xs">
+                    <span className="text-gray-600 font-normal text-xs">{axis.toUpperCase()}:</span>
+                    <span className="ml-1 text-gray-800 text-xs">
+                      {(axis === 'x' ? xPosition : axis === 'y' ? yPosition : zPosition).toFixed(3)} mm
+                    </span>
+                  </div>
+                  <input
+                    type="number"
+                    className="control-input w-1/2 p-1 border border-gray-300 rounded text-xs"
+                    placeholder={`d${axis.toUpperCase()}(mm)`}
+                    value={axis === 'x' ? xMove : axis === 'y' ? yMove : zMove}
+                    onChange={(e) => {
+                      const value = parseFloat(e.target.value);
+                      if (axis === 'x') setXMove(value);
+                      else if (axis === 'y') setYMove(value);
+                      else setZMove(value);
+                    }}
+                  />
+                </div>
+                <div className="aligned-buttons flex justify-between space-x-1">
+                  <button
+                    className="half-button bg-blue-500 text-white hover:bg-blue-600 w-1/2 p-1 rounded text-xs"
+                    onClick={() => moveMicroscope(axis, -1)}
+                    disabled={!microscopeControlService}
+                  >
+                    <i className={`fas fa-arrow-${axis === 'x' ? 'left' : 'down'} mr-1`}></i> {axis.toUpperCase()}-
+                  </button>
+                  <button
+                    className="half-button bg-blue-500 text-white hover:bg-blue-600 w-1/2 p-1 rounded text-xs"
+                    onClick={() => moveMicroscope(axis, 1)}
+                    disabled={!microscopeControlService}
+                  >
+                    {axis.toUpperCase()}+ <i className={`fas fa-arrow-${axis === 'x' ? 'right' : 'up'} ml-1`}></i>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="illumination-camera-container mb-3 flex justify-between space-x-1">
+            <div className="illumination-settings p-1 border border-gray-300 rounded-lg w-1/2">
+              <div className="illumination-intensity mb-2">
+                <div className="intensity-label-row flex justify-between mb-1 text-xs">
+                  <label>Illumination Intensity: </label>
+                  <span>{actualIlluminationIntensity}%</span>
                 </div>
                 <input
-                  type="number"
-                  className="control-input w-1/2 p-2 border border-gray-300 rounded"
-                  placeholder={`d${axis.toUpperCase()}(mm)`}
-                  value={axis === 'x' ? xMove : axis === 'y' ? yMove : zMove}
+                  type="range"
+                  className="control-input w-full"
+                  min="0"
+                  max="100"
+                  value={desiredIlluminationIntensity}
                   onChange={(e) => {
-                    const value = parseFloat(e.target.value);
-                    if (axis === 'x') setXMove(value);
-                    else if (axis === 'y') setYMove(value);
-                    else setZMove(value);
+                    setDesiredIlluminationIntensity(parseInt(e.target.value, 10));
                   }}
+                  disabled={microscopeBusy}
                 />
               </div>
-              <div className="aligned-buttons flex justify-between">
-                <button
-                  className="half-button bg-blue-500 text-white hover:bg-blue-600 w-1/2 mr-1 p-2 rounded"
-                  onClick={() => moveMicroscope(axis, -1)}
-                  disabled={!microscopeControlService}
+
+              <div className="illumination-channel text-xs">
+                <label>Illumination Channel:</label>
+                <select
+                  className="control-input w-full mt-1 p-1 border border-gray-300 rounded text-xs"
+                  value={illuminationChannel}
+                  onChange={(e) => setIlluminationChannel(e.target.value)}
                 >
-                  <i className={`fas fa-arrow-${axis === 'x' ? 'left' : 'down'}`}></i> {axis.toUpperCase()}-
-                </button>
-                <button
-                  className="half-button bg-blue-500 text-white hover:bg-blue-600 w-1/2 ml-1 p-2 rounded"
-                  onClick={() => moveMicroscope(axis, 1)}
-                  disabled={!microscopeControlService}
-                >
-                  {axis.toUpperCase()}+ <i className={`fas fa-arrow-${axis === 'x' ? 'right' : 'up'}`}></i>
-                </button>
+                  <option value="0">BF LED matrix full</option>
+                  <option value="11">Fluorescence 405 nm Ex</option>
+                  <option value="12">Fluorescence 488 nm Ex</option>
+                  <option value="14">Fluorescence 561nm Ex</option>
+                  <option value="13">Fluorescence 638nm Ex</option>
+                  <option value="15">Fluorescence 730nm Ex</option>
+                </select>
               </div>
             </div>
-          ))}
-        </div>
 
-        <div className="illumination-camera-container mb-4 flex justify-between">
-          <div className="illumination-settings p-2 border border-gray-300 rounded-lg w-1/2">
-            <div className="illumination-intensity mb-4">
-              <div className="intensity-label-row flex justify-between mb-2">
-                <label>Illumination Intensity: </label>
-                {/* Display ACTUAL value from microscope */}
-                <span>{actualIlluminationIntensity}%</span>
-              </div>
+            <div className="camera-exposure-settings p-1 border border-gray-300 rounded-lg w-1/2 text-xs">
+              <label>Camera Exposure:</label>
+              <span className="ml-1">{actualCameraExposure} ms</span>
               <input
-                type="range"
-                className="control-input w-full"
-                min="0"
-                max="100"
-                // Input is bound to DESIRED value
-                value={desiredIlluminationIntensity}
-                onChange={(e) => {
-                  setDesiredIlluminationIntensity(parseInt(e.target.value, 10));
-                }}
-                // Disable if microscope is busy to prevent rapid firing of set_illumination
-                disabled={microscopeBusy}
+                type="number"
+                className="control-input w-full mt-1 p-1 border border-gray-300 rounded text-xs"
+                value={desiredCameraExposure}
+                onChange={(e) => setDesiredCameraExposure(parseInt(e.target.value, 10))}
               />
             </div>
-
-            <div className="illumination-channel">
-              <label>Illumination Channel:</label>
-              <select
-                className="control-input w-full mt-2 p-2 border border-gray-300 rounded"
-                value={illuminationChannel}
-                onChange={(e) => setIlluminationChannel(e.target.value)}
-              >
-                <option value="0">BF LED matrix full</option>
-                <option value="11">Fluorescence 405 nm Ex</option>
-                <option value="12">Fluorescence 488 nm Ex</option>
-                <option value="14">Fluorescence 561nm Ex</option>
-                <option value="13">Fluorescence 638nm Ex</option>
-                <option value="15">Fluorescence 730nm Ex</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="camera-exposure-settings p-2 border border-gray-300 rounded-lg w-1/2">
-            <label>Camera Exposure:</label>
-            {/* Display ACTUAL value from microscope */}
-            <span className="ml-2">{actualCameraExposure} ms</span> {/* Added display for actual exposure */}
-            <input
-              type="number"
-              className="control-input w-full mt-2 p-2 border border-gray-300 rounded"
-              // Input is bound to DESIRED value
-              value={desiredCameraExposure}
-              onChange={(e) => setDesiredCameraExposure(parseInt(e.target.value, 10))}
-            />
           </div>
         </div>
-      </div>
-      <div className="mt-4">
-        <ChatbotButton 
-          key={selectedMicroscopeId}
-          microscopeControlService={microscopeControlService} 
-          appendLog={appendLog} 
-        />
+
+        {/* Bottom-Right: Chatbot */}
+        <div className="mcp-chatbot-area">
+          <ChatbotButton 
+            key={selectedMicroscopeId}
+            microscopeControlService={microscopeControlService} 
+            appendLog={appendLog} 
+          />
+        </div>
       </div>
     </div>
   );

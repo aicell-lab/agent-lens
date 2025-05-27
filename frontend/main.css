@@ -509,15 +509,16 @@
 /* Styles for the SampleSelector dropdown itself */
 .sample-selector-dropdown {
   position: absolute;
-  top: 60px; /* Adjust based on the height of the header/toggle button area */
-  left: 20px; /* Adjust for desired left alignment */
+  top: 50px; /* Example: Adjust based on the toggle button's position in the new layout */
+  left: 10px; /* Example: Adjust as needed */
   z-index: 1000; /* Ensure it's above other content */
   background-color: white;
   border: 1px solid #ccc;
   box-shadow: 0 4px 12px rgba(0,0,0,0.15);
   padding: 1rem;
   border-radius: 0.375rem; /* Tailwind: rounded-md */
-  width: 320px; /* Adjust as needed, can be max-content or a fixed width */
+  width: calc(100% - 20px); /* Make it almost full width of its parent, with some padding */
+  box-sizing: border-box;
   max-height: calc(100vh - 100px); /* Prevent it from being too tall */
   overflow-y: auto;
 }
@@ -710,4 +711,140 @@
 .sample-loading-status.bg-red-100 { background-color: #fee2e2; }
 .sample-loading-status.text-red-700 { color: #b91c1c; }
 .sample-loading-status.bg-blue-100 { background-color: #dbeafe; }
-.sample-loading-status.text-blue-700 { color: #1d4ed8; } 
+.sample-loading-status.text-blue-700 { color: #1d4ed8; }
+
+/* New styles for MicroscopeControlPanel layout */
+.new-mcp-layout {
+  display: flex;
+  flex-direction: row; /* Align children (image area and controls/chatbot area) horizontally */
+  height: 100%; /* Make the panel take full height of its container */
+  gap: 1rem; /* Space between image area and controls/chatbot area */
+}
+
+.mcp-image-display-area {
+  flex: 2; /* Image area takes 2/3 of the space, adjust ratio as needed */
+  display: flex;
+  flex-direction: column; /* Stack children vertically if there were multiple */
+  height: 100%;
+  position: relative; /* For positioning the toggle button */
+  transition: flex-basis 0.3s ease-in-out;
+}
+
+/* Ensure the image-display div within image area takes full height */
+.mcp-image-display-area #image-display {
+  height: 100%; 
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Custom smaller font for XYZ stage location display */
+.position-display .text-gray-600,
+.position-display .text-gray-800 {
+  font-size: 0.65rem; /* Example: 10.4px if base is 16px. Adjust as needed */
+  line-height: 0.85rem;
+}
+
+.mcp-image-display-area #image-display img {
+  max-height: 100%;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+.mcp-controls-chatbot-area {
+  flex: 1; /* Controls/chatbot area takes 1/3 of the space */
+  display: flex;
+  flex-direction: column; /* Stack microscope controls and chatbot vertically */
+  gap: 1rem; /* Space between microscope controls and chatbot */
+  height: 100%; /* Take full height */
+  position: relative; /* For SampleSelector dropdown positioning context */
+  transition: flex-basis 0.3s ease-in-out, padding 0.3s ease-in-out; /* Added padding transition */
+  overflow: hidden; /* Prevent content overflow during animation */
+}
+
+.mcp-microscope-controls-area {
+  flex-grow: 1; /* Microscope controls take available vertical space, pushing chatbot down */
+  overflow-y: auto; /* Allow scrolling for controls if content overflows */
+  padding: 1rem; /* Add some padding inside the controls area */
+  border: 1px solid #e5e7eb; /* Optional: border for visual separation */
+  border-radius: 0.375rem; /* Optional: rounded corners */
+  position: relative; /* Important for SampleSelector dropdown positioning */
+  transition: padding 0.3s ease-in-out; /* For smooth padding change on collapse */
+}
+
+.mcp-chatbot-area {
+  /* Chatbot takes its natural height, or you can specify a fixed/min-height */
+  /* flex-shrink: 0; ensure it doesn't shrink if controls area is too large */
+  padding: 0.5rem; /* Padding for the chatbot area */
+  border: 1px solid #e5e7eb; /* Optional: border */
+  border-radius: 0.375rem; /* Optional: rounded corners */
+  display: flex; /* To make ChatbotButton fill the area */
+  flex-direction: column; /* Stack elements if ChatbotButton had siblings */
+}
+
+.mcp-chatbot-area > div { /* Assuming ChatbotButton is a div or wrapped in one */
+  height: 100%; /* Make the ChatbotButton component take full height of its parent */
+  display: flex;
+  flex-direction: column;
+}
+
+.mcp-chatbot-area > div > button {
+  flex-grow: 1; /* Make the button itself grow to fill the ChatbotButton component area */
+}
+
+/* Styles for right panel collapse */
+.mcp-image-display-area {
+  position: relative; /* For positioning the toggle button */
+  transition: flex-basis 0.3s ease-in-out;
+}
+
+.right-panel-toggle-button {
+  position: absolute;
+  top: 50%;
+  right: 0px; /* Position on the right edge of the image area */
+  transform: translateY(-50%);
+  background-color: rgba(100, 100, 100, 0.6);
+  color: white;
+  border: none;
+  padding: 10px 5px;
+  cursor: pointer;
+  border-top-left-radius: 5px;
+  border-bottom-left-radius: 5px;
+  z-index: 10; /* Ensure it's above the image */
+  transition: background-color 0.3s ease;
+}
+
+.right-panel-toggle-button:hover {
+  background-color: rgba(80, 80, 80, 0.8);
+}
+
+.mcp-controls-chatbot-area.collapsed {
+  /* display: none; /* This will hide the panel */ /* Replaced with flex-basis */
+  flex-basis: 0;
+  padding-left: 0;
+  padding-right: 0;
+  /* gap should effectively disappear as children might also be hidden or shrunk */
+}
+
+/* When controls area is collapsed, its direct children should also not take space */
+.mcp-controls-chatbot-area.collapsed .mcp-microscope-controls-area,
+.mcp-controls-chatbot-area.collapsed .mcp-chatbot-area {
+    padding: 0;
+    border-width: 0; /* Hide borders when collapsed */
+    /* Child elements will be hidden by the parent's overflow: hidden and zero flex-basis */
+}
+
+/* Ensure that when collapsed, the content effectively disappears quickly to not show during shrink */
+.mcp-controls-chatbot-area.collapsed > * {
+  visibility: hidden; /* Hide content immediately when starting to collapse */
+  transition: visibility 0s 0.3s; /* Delay hiding until after transition */
+}
+
+.mcp-controls-chatbot-area:not(.collapsed) > * {
+  visibility: visible;
+  transition: visibility 0s;
+}
+
+.mcp-image-display-area.expanded {
+  flex-basis: 100%; /* Image area takes full width when panel is collapsed */
+} 
