@@ -8,15 +8,10 @@ const Sidebar = ({
   onTabChange, 
   onMicroscopeSelect, 
   selectedMicroscopeId,
-  // incubatorControlService, // Will be passed directly to SampleSelector if needed elsewhere
-  // microscopeControlService, // Will be passed directly to SampleSelector if needed elsewhere
-  // roboticArmService // Will be passed directly to SampleSelector if needed elsewhere
   currentOperation, // Added prop to disable navigation during sample operations
 }) => {
   // State for microscope dropdown
-  const [isMicroscopeDropdownOpen, setIsMicroscopeDropdownOpen] = useState(false);
-  // const [isMicroscopePanelOpen, setIsMicroscopePanelOpen] = useState(true); // Removed
-  // const [isSamplePanelOpen, setIsSamplePanelOpen] = useState(false); // SampleSelector will be moved
+  const [isMicroscopeDropdownOpen, setIsMicroscopeDropdownOpen] = useState(true);
 
   // New state for Image View
   const initialDefaultGalleryId = 'agent-lens/20250506-scan-time-lapse-gallery';

@@ -225,7 +225,6 @@ const SampleSelector = ({
         }
         setLoadingStatus('Sample loaded!');
         setIsSampleLoaded(true);
-        // selectedSampleId is already set correctly for simulated
         setCurrentOperation(null);
         setTimeout(() => setLoadingStatus(''), 3000);
       } catch (error) {
@@ -288,7 +287,7 @@ const SampleSelector = ({
         addWorkflowMessage("Sample plate successfully loaded onto microscope stage");
         setLoadingStatus('Sample successfully loaded onto microscope.');
         setIsSampleLoaded(true);
-        setLoadedSampleOnMicroscope(selectedSampleId); // Ensure this is set
+        setLoadedSampleOnMicroscope(selectedSampleId);
         setCurrentOperation(null);
         setTimeout(() => setLoadingStatus(''), 3000);
       } catch (error) {
@@ -327,11 +326,14 @@ const SampleSelector = ({
         await microscopeControlService.set_simulated_sample_data_alias('');
         addWorkflowMessage("Sample unloaded successfully");
         setLoadingStatus('Sample unloaded!');
+        setIsSampleLoaded(false);
+        setSelectedSampleId(null);
+        setCurrentOperation(null);
+        setTimeout(() => setLoadingStatus(''), 3000);
       } catch (error) {
         console.error('Failed to unload simulated sample:', error);
         addWorkflowMessage(`Error: ${error.message}`);
         setLoadingStatus('Error unloading sample');
-      } finally {
         setIsSampleLoaded(false);
         setSelectedSampleId(null);
         setCurrentOperation(null);
@@ -394,13 +396,16 @@ const SampleSelector = ({
         
         addWorkflowMessage("Sample successfully unloaded from the microscopy stage");
         setLoadingStatus('Sample successfully unloaded to incubator.');
+        setIsSampleLoaded(false);
+        setLoadedSampleOnMicroscope(null);
+        setSelectedSampleId(null);
+        setCurrentOperation(null);
+        setTimeout(() => setLoadingStatus(''), 3000);
       } catch (error) {
         console.error('Failed to unload sample:', error);
         addWorkflowMessage(`Error: ${error.message}`);
         setLoadingStatus(`Error unloading sample: ${error.message}`);
-        // Attempt to refresh state even on error
         await fetchIncubatorData(); 
-      } finally {
         setIsSampleLoaded(false);
         setLoadedSampleOnMicroscope(null);
         setSelectedSampleId(null);
@@ -496,31 +501,30 @@ const SampleSelector = ({
         </div>
         
         <hr className="sidebar-divider" />
-        {!isSampleLoaded ? (
+        {/* Revised button rendering logic to prioritize currentOperation */}
+        {currentOperation === 'unloading' ? (
           <button 
-            className={`load-sample-button ${currentOperation ? 'processing' : ''}`}
-            onClick={handleLoadSample}
-            disabled={!selectedSampleId || currentOperation !== null || 
-                        (isRealMicroscopeSelected && incubatorSlots.find(s=>s.id === selectedSampleId)?.location !== 'incubator_slot')
-            }
+            className={`unload-sample-button processing`}
+            disabled={true} // Always disabled while processing
           >
             <div className="button-content">
-              {currentOperation === 'loading' ? (
-                <>
-                  <i className="fas fa-spinner fa-spin"></i>
-                  <span>Loading Sample...</span>
-                </>
-              ) : (
-                <>
-                  <i className="fas fa-upload"></i>
-                  <span>Load Sample on Microscope</span>
-                </>
-              )}
+              <i className="fas fa-spinner fa-spin"></i>
+              <span>Unloading Sample...</span>
             </div>
           </button>
-        ) : (
+        ) : currentOperation === 'loading' ? (
           <button 
-            className={`unload-sample-button ${currentOperation ? 'processing' : ''}`}
+            className={`load-sample-button processing`}
+            disabled={true} // Always disabled while processing
+          >
+            <div className="button-content">
+              <i className="fas fa-spinner fa-spin"></i>
+              <span>Loading Sample...</span>
+            </div>
+          </button>
+        ) : isSampleLoaded ? (
+          <button 
+            className={`unload-sample-button ${currentOperation /* Should be null here */ ? 'processing' : ''}`}
             onClick={handleUnloadSample}
             disabled={currentOperation !== null || 
                        (isSimulatedMicroscopeSelected && selectedSampleId === null) || 
@@ -528,7 +532,7 @@ const SampleSelector = ({
             }
           >
             <div className="button-content">
-              {currentOperation === 'unloading' ? (
+              {currentOperation === 'unloading' /* Should be false here */ ? (
                 <>
                   <i className="fas fa-spinner fa-spin"></i>
                   <span>Unloading Sample...</span>
@@ -537,6 +541,28 @@ const SampleSelector = ({
                 <>
                   <i className="fas fa-download"></i>
                   <span>Unload Sample</span>
+                </>
+              )}
+            </div>
+          </button>
+        ) : (
+          <button 
+            className={`load-sample-button ${currentOperation /* Should be null here */ ? 'processing' : ''}`}
+            onClick={handleLoadSample}
+            disabled={!selectedSampleId || currentOperation !== null || 
+                        (isRealMicroscopeSelected && incubatorSlots.find(s=>s.id === selectedSampleId)?.location !== 'incubator_slot')
+            }
+          >
+            <div className="button-content">
+              {currentOperation === 'loading' /* Should be false here */ ? (
+                <>
+                  <i className="fas fa-spinner fa-spin"></i>
+                  <span>Loading Sample...</span>
+                </>
+              ) : (
+                <>
+                  <i className="fas fa-upload"></i>
+                  <span>Load Sample on Microscope</span>
                 </>
               )}
             </div>
