@@ -247,9 +247,11 @@ const Sidebar = ({
             {!isMainSidebarCollapsed && <span>Microscopes</span>}
             {!isMainSidebarCollapsed && <i className={`fas ${isMicroscopeDropdownOpen ? 'fa-chevron-down' : 'fa-chevron-right'} microscope-toggle-icon`}></i>}
           </button>
-          {/* Microscope Dropdown Submenu */}
-          {activeTab === 'microscope' && isMicroscopeDropdownOpen && !isMainSidebarCollapsed && (
-            <div className="sidebar-submenu microscope-options-dropdown">
+          {/* Microscope Dropdown Submenu - Modified for CSS transition */}
+          {activeTab === 'microscope' && !isMainSidebarCollapsed && (
+            <div 
+              className={`sidebar-submenu microscope-options-dropdown ${isMicroscopeDropdownOpen ? 'open' : ''}`}
+            >
               <button
                 className={`sidebar-submenu-tab ${selectedMicroscopeId === 'squid-control/squid-control-reef' ? 'active' : ''}`}
                 onClick={() => {
