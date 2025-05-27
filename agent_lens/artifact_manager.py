@@ -20,7 +20,6 @@ import aiohttp
 from collections import deque
 import zarr
 from zarr.storage import LRUStoreCache, FSStore
-import fsspec
 import time
 from asyncio import Lock
 import threading

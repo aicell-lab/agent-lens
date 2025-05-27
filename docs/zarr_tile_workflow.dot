@@ -10,125 +10,148 @@ digraph ZarrTileWorkflow {
         style=filled;
         color=lightgrey;
         
-        user [label="User Interaction", fillcolor=lightyellow];
+        user_interaction [label="User Interaction
+(Pan, Zoom, Select Channel/Dataset)", fillcolor=lightyellow];
         map_component [label="OpenLayers Map Component"];
-        channel_selection [label="Channel Selection/Merge"];
-        image_processing [label="Image Processing Settings\n(contrast, brightness, threshold)"];
-        request_tile [label="Request Tile\n(dataset_id, timepoint, channel, z, x, y)"];
-        render_tile [label="Render Base64 Image"];
+        frontend_settings [label="Channel Selection / Image Processing Settings
+(contrast, brightness, color, dataset_id, channel_name)"];
+        tile_url_construction [label="Construct Tile URL
+(e.g., /tile-for-timepoint with dataset_id, channel, z,x,y, processing_params)"];
+        fetch_tile_request [label="Fetch Tile (Base64 PNG)
+(PQueue for concurrent requests)"];
+        render_tile [label="Render Base64 Image on Map"];
         
-        user -> channel_selection;
-        user -> image_processing;
-        channel_selection -> request_tile;
-        image_processing -> request_tile;
-        request_tile -> render_tile;
+        user_interaction -> frontend_settings;
+        frontend_settings -> tile_url_construction;
+        map_component -> tile_url_construction [label="View change triggers requests"];
+        tile_url_construction -> fetch_tile_request;
+        fetch_tile_request -> render_tile;
         render_tile -> map_component;
     }
     
     // Backend FastAPI endpoints
     subgraph cluster_fastapi {
-        label="FastAPI Endpoints (register_frontend_service.py)";
+        label="FastAPI Endpoints (e.g., register_frontend_service.py)";
         style=filled;
         color=lightgrey;
         
-        tile_endpoint [label="/tile Endpoint"];
-        merged_tiles_endpoint [label="/merged-tiles Endpoint"];
-        timepoint_endpoint [label="/tile-for-timepoint Endpoint"];
-        process_image [label="Process Tile Data\n(Apply contrast, brightness, etc.)"];
-        encode_image [label="Convert to PNG & Base64 Encode"];
+        api_endpoint [label="API Endpoints
+(/tile, /merged-tiles, /tile-for-timepoint)"];
+        parse_request [label="Parse Request Parameters
+(dataset_id, channel, z,x,y, processing_params)"];
+        call_zarr_tile_manager [label="Call ZarrTileManager.get_tile_bytes()"];
+        apply_image_processing [label="Apply Image Processing to NumPy Array
+(contrast, brightness, color mapping)"];
+        encode_to_png_base64 [label="Convert NumPy to PNG & Base64 Encode"];
+        return_response [label="Return Base64 PNG String"];
         
-        tile_endpoint -> process_image;
-        merged_tiles_endpoint -> process_image;
-        timepoint_endpoint -> process_image;
-        process_image -> encode_image;
+        api_endpoint -> parse_request;
+        parse_request -> call_zarr_tile_manager;
+        call_zarr_tile_manager -> apply_image_processing [label="NumPy tile data"];
+        apply_image_processing -> encode_to_png_base64;
+        encode_to_png_base64 -> return_response;
     }
     
-    // ZarrTileManager with background processing
-    subgraph cluster_zarr_manager {
+    // ZarrTileManager
+    subgraph cluster_zarr_tile_manager {
         label="ZarrTileManager (artifact_manager.py)";
         style=filled;
         color=lightgrey;
         
-        get_tile_bytes [label="get_tile_bytes()"];
-        get_tile_np_data [label="get_tile_np_data()"];
-        get_zarr_group [label="get_zarr_group()"];
-        zarr_cache [label="Zarr Group Cache\n(with URL expiry tracking)"];
-        background_init [label="Background Initialization\n(_initialize_zarr_group_in_background())"];
-        thread_pool [label="Thread Pool\n(For non-blocking operations)"];
+        ztm_get_tile_bytes [label="get_tile_bytes()"];
+        ztm_get_tile_np_data [label="get_tile_np_data()"];
+        ztm_metadata_cache [label="Metadata Cache
+(.zarray, .zgroup)"];
+        ztm_processed_cache [label="Processed Tile Cache
+(NumPy arrays)"];
+        ztm_empty_cache [label="Empty Regions Cache"];
+        ztm_fetch_metadata [label="_fetch_zarr_metadata()
+(for .zarray)"];
+        ztm_fetch_chunk [label="Fetch & Decompress Chunk via HTTP"];
+        ztm_aiohttp_session [label="aiohttp.ClientSession"];
         
-        get_tile_bytes -> get_tile_np_data;
-        get_tile_np_data -> get_zarr_group;
-        get_zarr_group -> zarr_cache [label="Check cache first"];
-        get_zarr_group -> background_init [label="Start if not cached"];
-        background_init -> thread_pool [label="Run in thread pool"];
-        background_init -> zarr_cache [label="Store result"];
+        ztm_get_tile_bytes -> ztm_get_tile_np_data;
+        ztm_get_tile_np_data -> ztm_processed_cache [label="Check cache"];
+        ztm_get_tile_np_data -> ztm_empty_cache [label="Check cache"];
+        ztm_get_tile_np_data -> ztm_fetch_metadata [label="If not cached/invalid"];
+        ztm_fetch_metadata -> ztm_metadata_cache [label="Check/Store"];
+        ztm_get_tile_np_data -> ztm_fetch_chunk [label="If data needed"];
+        ztm_fetch_chunk -> ztm_aiohttp_session;
+        ztm_fetch_chunk -> ztm_processed_cache [label="Store result"];
+        ztm_fetch_chunk -> ztm_empty_cache [label="Store if empty"];
     }
     
-    // Artifact Manager with S3
-    subgraph cluster_artifact_manager {
-        label="ArtifactManager";
+    // AgentLensArtifactManager (for metadata)
+    subgraph cluster_agent_lens_artifact_manager {
+        label="AgentLensArtifactManager (artifact_manager.py)";
         style=filled;
         color=lightgrey;
         
-        get_file [label="get_file()\nGet pre-signed S3 download URL"];
+        alam_get_file [label="get_file()
+(Used for .zarray, .zgroup metadata)"];
     }
     
-    // S3 Storage layer
-    subgraph cluster_s3 {
-        label="S3 Storage";
+    // Hypha Backend Services & S3
+    subgraph cluster_hypha_s3 {
+        label="Hypha Backend & S3 Storage";
         style=filled;
         color=lightyellow;
         
-        s3_bucket [label="S3 Bucket\n(hypha-workspaces)"];
-        presigned_url [label="Pre-signed URL\n(with 1-hour expiry)"];
+        hypha_service_metadata [label="Hypha Service
+(Provides download URL for metadata files)"];
+        hypha_service_chunk [label="Hypha HTTP Endpoint
+(Serves specific chunk from a Zip file)"];
+        s3_bucket [label="S3 Bucket
+(e.g., hypha-workspaces, stores Zarr datasets as Zip files, metadata files)"];
         
-        s3_bucket -> presigned_url;
+        hypha_service_metadata -> s3_bucket [label="Accesses metadata file"];
+        hypha_service_chunk -> s3_bucket [label="Accesses Zip file, extracts chunk"];
     }
     
-    // Zarr Storage with fsspec details
-    subgraph cluster_zarr_storage {
-        label="Zarr Storage";
-        style=filled;
-        color=lightgrey;
-        
-        fsstore [label="FSStore\n(zip::download_url)"];
-        http_file [label="HTTP File Handler\n(Range requests)"];
-        zip_index [label="Zip Central Directory\n(Downloaded first)"];
-        zip_chunks [label="Zip File Chunks\n(Downloaded on demand)"];
-        lru_cache [label="LRUStoreCache\n(256MB memory cache)"];
-        zarr_group [label="zarr.group()"];
-        zarr_array [label="scale{z}[y:y+tile_size, x:x+tile_size]"];
-        
-        fsstore -> http_file [label="fsspec chained protocol"];
-        http_file -> zip_index [label="Get zip structure"];
-        http_file -> zip_chunks [label="Range request for chunks"];
-        fsstore -> lru_cache [label="Cache chunks"];
-        lru_cache -> zarr_group;
-        zarr_group -> zarr_array;
-    }
+    // Connections between components
+    fetch_tile_request -> api_endpoint [lhead=cluster_fastapi, label="HTTP GET"];
+    return_response -> fetch_tile_request [label="Base64 PNG"];
     
-    // Connect the clusters
-    request_tile -> tile_endpoint [lhead=cluster_fastapi];
-    encode_image -> render_tile;
+    call_zarr_tile_manager -> ztm_get_tile_bytes [lhead=cluster_zarr_tile_manager];
     
-    tile_endpoint -> get_tile_np_data;
-    merged_tiles_endpoint -> get_tile_np_data;
-    timepoint_endpoint -> get_tile_np_data;
+    ztm_fetch_metadata -> alam_get_file [lhead=cluster_agent_lens_artifact_manager];
+    alam_get_file -> hypha_service_metadata [lhead=cluster_hypha_s3, label="Request metadata file URL"];
     
-    get_zarr_group -> get_file;
-    get_file -> s3_bucket [label="Request presigned URL"];
-    presigned_url -> fsstore [label="Use URL to access zip file"];
+    ztm_aiohttp_session -> hypha_service_chunk [lhead=cluster_hypha_s3, label="HTTP GET chunk URL
+(e.g., .../zip-files/.../{y}.zip?path={x})"];
     
-    // Key data flow explanation
-    data_flow1 [shape=note, fillcolor=lightyellow, label="1. Frontend requests tile with\ndataset_id, timepoint, channel, z, x, y"];
-    data_flow2 [shape=note, fillcolor=lightyellow, label="2. Endpoint constructs appropriate URL\nand processes image settings"];
-    data_flow3 [shape=note, fillcolor=lightyellow, label="3. ZarrTileManager initializes Zarr in background\nand tracks URL expiration"];
-    data_flow4 [shape=note, fillcolor=lightyellow, label="4. fsspec retrieves specific chunks via HTTP range requests:\n- First downloads zip central directory\n- Uses range requests for needed chunks only\n- Never downloads entire zip file"];
-    data_flow5 [shape=note, fillcolor=lightyellow, label="5. Processed tile is returned as Base64 PNG\nwhile Zarr initialization continues in background"];
+    // Notes explaining key parts of the workflow
+    note_intro [shape=note, fillcolor=lightyellow, label="Workflow for Zarr-based tile rendering with direct Hypha chunk access."];
     
-    data_flow1 -> request_tile [style=invis];
-    data_flow2 -> tile_endpoint [style=invis];
-    data_flow3 -> get_tile_np_data [style=invis];
-    data_flow4 -> fsstore [style=invis];
-    data_flow5 -> encode_image [style=invis];
+    note_frontend_request [shape=note, fillcolor=lightyellow, label="1. Frontend constructs a URL for a tile, including dataset alias (timepoint),
+channel, zoom level (z), tile coordinates (x,y), and image processing parameters.
+It sends this request to a FastAPI endpoint."];
+    note_frontend_request -> tile_url_construction [style=invis];
+
+    note_fastapi_handling [shape=note, fillcolor=lightyellow, label="2. FastAPI endpoint receives the request, parses parameters,
+ and calls ZarrTileManager.get_tile_bytes()."];
+    note_fastapi_handling -> api_endpoint [style=invis];
+
+    note_ztm_metadata [shape=note, fillcolor=lightyellow, label="3. ZarrTileManager._fetch_zarr_metadata() (if needed) uses
+AgentLensArtifactManager.get_file() to fetch .zarray metadata.
+This involves Hypha providing a URL to the metadata file in S3."];
+    note_ztm_metadata -> ztm_fetch_metadata [style=invis];
+    
+    note_ztm_chunk_fetch [shape=note, fillcolor=lightyellow, label="4. ZarrTileManager.get_tile_np_data() then constructs a direct HTTP URL
+ to a Hypha endpoint that serves the specific compressed chunk from a larger
+ Zip file (e.g., /.../zip-files/{channel}/scale{s}/{y}.zip?path={x}).
+ It uses aiohttp to fetch this chunk."];
+    note_ztm_chunk_fetch -> ztm_fetch_chunk [style=invis];
+
+    note_ztm_processing_cache [shape=note, fillcolor=lightyellow, label="5. The fetched chunk is decompressed (e.g., using numcodecs).
+The resulting NumPy array is cached (processed_tile_cache) or marked as empty
+(empty_regions_cache). The NumPy array is returned to FastAPI."];
+    note_ztm_processing_cache -> ztm_get_tile_np_data [style=invis];
+
+    note_fastapi_image_gen [shape=note, fillcolor=lightyellow, label="6. FastAPI applies image processing (contrast, brightness, color mapping)
+ to the NumPy array, converts it to a PNG image, and Base64 encodes it."];
+    note_fastapi_image_gen -> apply_image_processing [style=invis];
+
+    note_frontend_render [shape=note, fillcolor=lightyellow, label="7. Frontend receives the Base64 PNG string and renders it on the map."];
+    note_frontend_render -> render_tile [style=invis];
 } 
