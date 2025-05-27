@@ -847,4 +847,12 @@
 
 .mcp-image-display-area.expanded {
   flex-basis: 100%; /* Image area takes full width when panel is collapsed */
+}
+
+/* Force disabled styles for microscope controls if Tailwind utilities are overridden */
+.mcp-microscope-controls-area button[disabled],
+.mcp-microscope-controls-area input[disabled],
+.mcp-microscope-controls-area select[disabled] {
+  cursor: not-allowed !important;
+  opacity: 0.75 !important; /* Or 0.5 if you prefer Tailwind's default disabled opacity */
 } 

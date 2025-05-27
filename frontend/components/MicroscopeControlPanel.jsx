@@ -421,37 +421,37 @@ const MicroscopeControlPanel = ({
           <div className="control-group mb-3">
             <div className="horizontal-buttons flex justify-between space-x-1">
               <button
-                className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/5 px-1.5 py-0.5 rounded text-xs"
+                className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/5 px-1.5 py-0.5 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
                 onClick={toggleLight}
-                disabled={!microscopeControlService}
+                disabled={!microscopeControlService || currentOperation !== null}
               >
                 <i className="fas fa-lightbulb icon mr-1"></i> {isLightOn ? 'Light Off' : 'Light On'}
               </button>
               <button
-                className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/5 px-1.5 py-0.5 rounded text-xs"
+                className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/5 px-1.5 py-0.5 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
                 onClick={contrastAutoFocus}
-                disabled={!microscopeControlService}
+                disabled={!microscopeControlService || currentOperation !== null}
               >
                 <i className="fas fa-crosshairs icon mr-1"></i> Contrast AF
               </button>
               <button
-                className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/5 px-1.5 py-0.5 rounded text-xs"
+                className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/5 px-1.5 py-0.5 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
                 onClick={laserAutoFocus}
-                disabled={!microscopeControlService}
+                disabled={!microscopeControlService || currentOperation !== null}
               >
                 <i className="fas fa-bullseye icon mr-1"></i> Laser AF
               </button>
               <button
-                className="control-button snap-button bg-green-500 text-white hover:bg-green-600 w-1/5 px-1.5 py-0.5 rounded text-xs"
+                className="control-button snap-button bg-green-500 text-white hover:bg-green-600 w-1/5 px-1.5 py-0.5 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
                 onClick={snapImage}
-                disabled={!microscopeControlService}
+                disabled={!microscopeControlService || currentOperation !== null}
               >
                 <i className="fas fa-camera icon mr-1"></i> Snap
               </button>
               <button
-                className={`control-button live-button ${isLiveView ? 'bg-red-500 hover:bg-red-600' : 'bg-purple-500 hover:bg-purple-600'} text-white w-1/5 px-1.5 py-0.5 rounded text-xs`}
+                className={`control-button live-button ${isLiveView ? 'bg-red-500 hover:bg-red-600' : 'bg-purple-500 hover:bg-purple-600'} text-white w-1/5 px-1.5 py-0.5 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed`}
                 onClick={isLiveView ? stopLiveView : startLiveView}
-                disabled={!microscopeControlService}
+                disabled={!microscopeControlService || currentOperation !== null}
               >
                 <i className="fas fa-video icon mr-1"></i> {isLiveView ? 'Stop' : 'Live'}
               </button>
@@ -470,29 +470,31 @@ const MicroscopeControlPanel = ({
                   </div>
                   <input
                     type="number"
-                    className="control-input w-1/2 p-1 border border-gray-300 rounded text-xs"
+                    className="control-input w-1/2 p-1 border border-gray-300 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
                     placeholder={`d${axis.toUpperCase()}(mm)`}
                     value={axis === 'x' ? xMove : axis === 'y' ? yMove : zMove}
                     onChange={(e) => {
                       const value = parseFloat(e.target.value);
+                      if (currentOperation) return;
                       if (axis === 'x') setXMove(value);
                       else if (axis === 'y') setYMove(value);
                       else setZMove(value);
                     }}
+                    disabled={currentOperation !== null}
                   />
                 </div>
                 <div className="aligned-buttons flex justify-between space-x-1">
                   <button
-                    className="half-button bg-blue-500 text-white hover:bg-blue-600 w-1/2 p-1 rounded text-xs"
+                    className="half-button bg-blue-500 text-white hover:bg-blue-600 w-1/2 p-1 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
                     onClick={() => moveMicroscope(axis, -1)}
-                    disabled={!microscopeControlService}
+                    disabled={!microscopeControlService || currentOperation !== null}
                   >
                     <i className={`fas fa-arrow-${axis === 'x' ? 'left' : 'down'} mr-1`}></i> {axis.toUpperCase()}-
                   </button>
                   <button
-                    className="half-button bg-blue-500 text-white hover:bg-blue-600 w-1/2 p-1 rounded text-xs"
+                    className="half-button bg-blue-500 text-white hover:bg-blue-600 w-1/2 p-1 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
                     onClick={() => moveMicroscope(axis, 1)}
-                    disabled={!microscopeControlService}
+                    disabled={!microscopeControlService || currentOperation !== null}
                   >
                     {axis.toUpperCase()}+ <i className={`fas fa-arrow-${axis === 'x' ? 'right' : 'up'} ml-1`}></i>
                   </button>
@@ -510,23 +512,28 @@ const MicroscopeControlPanel = ({
                 </div>
                 <input
                   type="range"
-                  className="control-input w-full"
+                  className="control-input w-full disabled:opacity-75 disabled:cursor-not-allowed"
                   min="0"
                   max="100"
                   value={desiredIlluminationIntensity}
                   onChange={(e) => {
+                    if (currentOperation) return;
                     setDesiredIlluminationIntensity(parseInt(e.target.value, 10));
                   }}
-                  disabled={microscopeBusy}
+                  disabled={microscopeBusy || currentOperation !== null}
                 />
               </div>
 
               <div className="illumination-channel text-xs">
                 <label>Illumination Channel:</label>
                 <select
-                  className="control-input w-full mt-1 p-1 border border-gray-300 rounded text-xs"
+                  className="control-input w-full mt-1 p-1 border border-gray-300 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
                   value={illuminationChannel}
-                  onChange={(e) => setIlluminationChannel(e.target.value)}
+                  onChange={(e) => {
+                    if (currentOperation) return;
+                    setIlluminationChannel(e.target.value);
+                  }}
+                  disabled={currentOperation !== null}
                 >
                   <option value="0">BF LED matrix full</option>
                   <option value="11">Fluorescence 405 nm Ex</option>
@@ -540,12 +547,16 @@ const MicroscopeControlPanel = ({
 
             <div className="camera-exposure-settings p-1 border border-gray-300 rounded-lg w-1/2 text-xs">
               <label>Camera Exposure:</label>
-              <span className="ml-1">{actualCameraExposure} ms</span>
+              <span className="ml-1 text-gray-800 text-xs">{actualCameraExposure} ms</span>
               <input
                 type="number"
-                className="control-input w-full mt-1 p-1 border border-gray-300 rounded text-xs"
+                className="control-input w-full mt-1 p-1 border border-gray-300 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
                 value={desiredCameraExposure}
-                onChange={(e) => setDesiredCameraExposure(parseInt(e.target.value, 10))}
+                onChange={(e) => {
+                  if (currentOperation) return;
+                  setDesiredCameraExposure(parseInt(e.target.value, 10));
+                }}
+                disabled={currentOperation !== null}
               />
             </div>
           </div>
