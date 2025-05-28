@@ -197,6 +197,7 @@ const MicroscopeControl = () => {
         return (
           <div className="control-view">
             <MicroscopeControlPanel
+              key={selectedMicroscopeId}
               microscopeControlService={microscopeControlService}
               appendLog={appendLog}
               map={currentMap}

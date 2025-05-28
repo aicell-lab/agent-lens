@@ -184,7 +184,15 @@
   font-size: 0.9em;
 }
 
-.sidebar-submenu-tab:hover {
+.sidebar-submenu-tab:disabled {
+  background-color: #f8f9fa; /* Lighter when disabled */
+  border-color: #e9ecef;
+  color: #adb5bd;
+  cursor: not-allowed;
+  opacity: 0.75;
+}
+
+.sidebar-submenu-tab:hover:not(:disabled) {
   background-color: #e0e0e0;
 }
 

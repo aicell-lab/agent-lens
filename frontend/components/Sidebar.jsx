@@ -258,6 +258,7 @@ const Sidebar = ({
                   onMicroscopeSelect('squid-control/squid-control-reef');
                   // setIsMicroscopeDropdownOpen(false); // Optional: close dropdown on selection
                 }}
+                disabled={!!currentOperation}
               >
                 <i className="fas fa-desktop"></i> {/* Changed icon for simulated */}
                 <span>Simulated Microscope</span>
@@ -268,6 +269,7 @@ const Sidebar = ({
                   onMicroscopeSelect('reef-imaging/mirror-microscope-control-squid-1');
                   // setIsMicroscopeDropdownOpen(false); // Optional: close dropdown on selection
                 }}
+                disabled={!!currentOperation}
               >
                 <i className="fas fa-microscope"></i>
                 <span>Real Microscope 1</span>
@@ -278,6 +280,7 @@ const Sidebar = ({
                   onMicroscopeSelect('reef-imaging/mirror-microscope-control-squid-2');
                   // setIsMicroscopeDropdownOpen(false); // Optional: close dropdown on selection
                 }}
+                disabled={!!currentOperation}
               >
                 <i className="fas fa-microscope"></i>
                 <span>Real Microscope 2</span>
