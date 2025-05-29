@@ -29,123 +29,204 @@ const getService = async (server, remoteId, localId = null) => {
   }
 };
 
+// HyphaServerManager Class
+export class HyphaServerManager {
+  constructor(token) {
+    if (!token) {
+      throw new Error("HyphaServerManager requires an authentication token.");
+    }
+    this.token = token;
+    this.servers = {}; // Cache for server connections { workspace: serverPromise }
+    this.serverConnections = {}; // Cache for actual server objects { workspace: serverObject }
+    this.defaultServerUrl = "https://hypha.aicell.io/"; // Make configurable if needed
+    this.defaultClientNamePrefix = "hypha-client";
+  }
+
+  async getServer(workspace) {
+    if (!workspace) {
+      console.warn("[HyphaServerManager] Workspace cannot be null or empty. Using default 'agent-lens'.");
+      workspace = "agent-lens"; // Or handle as an error
+    }
+
+    if (this.serverConnections[workspace]) {
+      // TODO: Add a check here if the server is still connected, if hypha-client exposes such a method.
+      // For now, we assume if it's in serverConnections, it's good or will be re-established by hypha-rpc internals if needed on call.
+      // Alternatively, always return the promise from this.servers to let hypha-rpc handle re-connection implicitly.
+      console.log(`[HyphaServerManager] Returning existing connection for workspace: ${workspace}`);
+      return this.serverConnections[workspace];
+    }
+
+    if (!this.servers[workspace]) {
+      console.log(`[HyphaServerManager] Creating new connection promise for workspace: ${workspace}`);
+      this.servers[workspace] = window.hyphaWebsocketClient.connectToServer({
+        server_url: this.defaultServerUrl,
+        token: this.token,
+        workspace: workspace,
+        name: `${this.defaultClientNamePrefix}-${workspace}`,
+        method_timeout: 30000, // Increased timeout slightly
+      }).then(server => {
+        this.serverConnections[workspace] = server; // Cache the resolved server object
+        console.log(`[HyphaServerManager] Successfully connected to workspace: ${workspace}`);
+        return server;
+      }).catch(error => {
+        console.error(`[HyphaServerManager] Failed to connect to workspace ${workspace}:`, error);
+        delete this.servers[workspace]; // Remove promise on failure to allow retry
+        delete this.serverConnections[workspace];
+        // Check for permission-related keywords in the error message
+        const errorMessage = error.message ? error.message.toLowerCase() : '';
+        if (errorMessage.includes('permission denied') || 
+            errorMessage.includes('unauthorized') || 
+            errorMessage.includes('forbidden') ||
+            errorMessage.includes('token is not valid for workspace') || // Hypha specific
+            errorMessage.includes('no permission to access workspace')) { // Hypha specific
+          throw new Error(`Permission denied for workspace '${workspace}'. Please check your access rights.`);
+        }
+        throw error; // Re-throw original or a wrapped error if not permission-specific
+      });
+    }
+    return this.servers[workspace]; // Return the promise
+  }
+
+  async disconnectAll() {
+    console.log("[HyphaServerManager] Disconnecting all server connections...");
+    const promises = [];
+    for (const workspace in this.serverConnections) {
+      if (this.serverConnections[workspace] && typeof this.serverConnections[workspace].disconnect === 'function') {
+        console.log(`[HyphaServerManager] Disconnecting from workspace: ${workspace}`);
+        promises.push(
+          this.serverConnections[workspace].disconnect().catch(e => 
+            console.error(`[HyphaServerManager] Error disconnecting from ${workspace}:`, e)
+          )
+        );
+      }
+    }
+    await Promise.all(promises);
+    this.servers = {};
+    this.serverConnections = {};
+    console.log("[HyphaServerManager] All server connections disconnected.");
+  }
+}
+
 export const initializeServices = async (
-  server,
+  hyphaManager, // Changed from server to hyphaManager
   setMicroscopeControlService,
   setSimilarityService,
   setSegmentService,
   setIncubatorControlService,
   setRoboticArmService,
   appendLog,
-  selectedMicroscopeId
+  selectedMicroscopeId, // This is the full ID like "workspace/service-name"
+  showNotification = null // New optional parameter for showing notifications
 ) => {
-  console.log(`[initializeServices] Starting. Selected Microscope ID: ${selectedMicroscopeId}`);
-  appendLog('Initializing connection to server...');
+  console.log(`[initializeServices] Starting with HyphaManager. Selected Microscope ID: ${selectedMicroscopeId}`);
+  appendLog('Initializing services using HyphaManager...');
 
   const segmentationServiceRemoteId = "agent-lens/interactive-segmentation";
   const segmentationServiceLocalId = "interactive-segmentation";
-  console.log(`[initializeServices] Attempting to get Segmentation service. Remote: ${segmentationServiceRemoteId}, Local: ${segmentationServiceLocalId}`);
   const segmentationService = await tryGetService(
-    server,
+    hyphaManager,
     "Segmentation",
     segmentationServiceRemoteId,
     segmentationServiceLocalId,
-    appendLog
+    appendLog,
+    showNotification
   );
   setSegmentService(segmentationService);
-  console.log("[initializeServices] Segmentation service initialized.", segmentationService);
 
-  const microscopeRemoteId = selectedMicroscopeId;
-  const microscopeLocalId = selectedMicroscopeId === "squid-control/squid-control-reef" ? null : selectedMicroscopeId;
-  console.log(`[initializeServices] Attempting to get Microscope Control service. Remote: ${microscopeRemoteId}, Local: ${microscopeLocalId}`);
+  // For microscope, selectedMicroscopeId is already the full remote ID
+  const microscopeLocalId = selectedMicroscopeId.startsWith("squid-control/") ? null : selectedMicroscopeId; 
+  // This local ID logic might need refinement based on how local simulated vs real microscopes are identified.
+  // Assuming squid-control based ones might have a specific local setup if localId is null for them.
   const microscopeControlService = await tryGetService(
-    server,
+    hyphaManager,
     "Microscope Control",
-    microscopeRemoteId,
-    microscopeLocalId,
-    appendLog
+    selectedMicroscopeId, // Full remote ID
+    microscopeLocalId,    // Potentially null or specific local ID
+    appendLog,
+    showNotification
   );
   setMicroscopeControlService(microscopeControlService);
-  console.log("[initializeServices] Microscope Control service initialized.", microscopeControlService);
 
   const similarityServiceRemoteId = "agent-lens/similarity-search";
   const similarityServiceLocalId = "similarity-search";
-  console.log(`[initializeServices] Attempting to get Similarity Search service. Remote: ${similarityServiceRemoteId}, Local: ${similarityServiceLocalId}`);
   const similarityService = await tryGetService(
-    server,
+    hyphaManager,
     "Similarity Search",
     similarityServiceRemoteId,
     similarityServiceLocalId,
-    appendLog
+    appendLog,
+    showNotification
   );
   setSimilarityService(similarityService);
-  console.log("[initializeServices] Similarity Search service initialized.", similarityService);
   
-  // Connect to the separate incubator server
-  const incubatorServiceId = "reef-imaging/mirror-incubator-control";
-  console.log(`[initializeServices] Attempting to get Incubator Control service: ${incubatorServiceId}`);
-  try {
-    appendLog(`Acquiring Incubator Control service from local server...`);
-    const incubatorServer = server; // Assuming same server for now, as per original logic
-    const incubatorControlService = await incubatorServer.getService(incubatorServiceId);
-    appendLog(`Incubator Control service acquired from local server.`);
-    setIncubatorControlService(incubatorControlService);
-    console.log("[initializeServices] Incubator Control service acquired.", incubatorControlService);
-  } catch (error) {
-    appendLog(`Error acquiring Incubator Control service: ${error.message}`);
-    console.error(`[initializeServices] Error acquiring Incubator Control service '${incubatorServiceId}':`, error);
-    setIncubatorControlService(null);
-  }
+  const incubatorServiceIdFull = "reef-imaging/mirror-incubator-control";
+  const incubatorControlService = await tryGetService(
+    hyphaManager,
+    "Incubator Control",
+    incubatorServiceIdFull,
+    null, // Assuming no special local ID for incubator, always remote via manager
+    appendLog,
+    showNotification
+  );
+  setIncubatorControlService(incubatorControlService);
 
-  // Connect to the robotic arm service
-  const roboticArmServiceId = "reef-imaging/mirror-robotic-arm-control";
-  console.log(`[initializeServices] Attempting to get Robotic Arm Control service: ${roboticArmServiceId}`);
-  try {
-    appendLog(`Acquiring Robotic Arm Control service from local server...`);
-    const roboticArmService = await server.getService(roboticArmServiceId);
-    appendLog(`Robotic Arm Control service acquired from local server.`);
-    setRoboticArmService(roboticArmService);
-    console.log("[initializeServices] Robotic Arm Control service acquired.", roboticArmService);
-  } catch (error) {
-    appendLog(`Error acquiring Robotic Arm Control service: ${error.message}`);
-    console.error(`[initializeServices] Error acquiring Robotic Arm Control service '${roboticArmServiceId}':`, error);
-    setRoboticArmService(null);
-  }
+  const roboticArmServiceIdFull = "reef-imaging/mirror-robotic-arm-control";
+  const roboticArmService = await tryGetService(
+    hyphaManager,
+    "Robotic Arm Control",
+    roboticArmServiceIdFull,
+    null, // Assuming no special local ID for arm, always remote via manager
+    appendLog,
+    showNotification
+  );
+  setRoboticArmService(roboticArmService);
 
   console.log("[initializeServices] Finished.");
 };
 
-export const tryGetService = async (server, name, remoteId, localId, appendLog) => {
-  console.log(`[tryGetService] For service '${name}'. Remote ID: '${remoteId}', Local ID: '${localId}'`);
+export const tryGetService = async (hyphaManager, name, remoteIdWithWorkspace, localId, appendLog, showNotification = null) => {
+  console.log(`[tryGetService] For service '${name}'. Remote ID (full): '${remoteIdWithWorkspace}', Local ID: '${localId}'`);
+  appendLog(`Acquiring ${name} service (${remoteIdWithWorkspace})...`);
   try {
-    appendLog(`Acquiring ${name} service...`);
-    const svc = await getService(server, remoteId, localId);
-    appendLog(`${name} service acquired.`);
-    console.log(`[tryGetService] Successfully acquired '${name}' service.`);
+    const parts = remoteIdWithWorkspace.split('/');
+    if (parts.length < 2 && !isLocal()) {
+        // If not local and no workspace specified, this is an issue unless it's a public service meant to be in default workspace
+        // However, our manager always needs a workspace. Assume default if not parseable.
+        console.warn(`[tryGetService] Remote ID '${remoteIdWithWorkspace}' for '${name}' does not seem to contain a workspace. Defaulting to 'agent-lens'.`);
+    }
+    const workspaceName = parts.length > 1 ? parts[0] : 'agent-lens'; // Default to agent-lens if no workspace in ID
+    let serviceIdToGet = parts.length > 1 ? parts.slice(1).join('/') : remoteIdWithWorkspace;
+
+    const useLocal = localId && isLocal();
+    if (useLocal) {
+      serviceIdToGet = localId; // If local and localId provided, workspace might not be relevant for local getService
+      console.log(`[tryGetService] Attempting to get LOCAL service '${serviceIdToGet}' in workspace '${workspaceName}' for '${name}'`);
+    } else {
+      console.log(`[tryGetService] Attempting to get REMOTE service '${serviceIdToGet}' in workspace '${workspaceName}' for '${name}'`);
+    }
+
+    const server = await hyphaManager.getServer(workspaceName);
+    if (!server) {
+        throw new Error(`Failed to get server for workspace ${workspaceName}`);
+    }
+
+    const svc = await server.getService(serviceIdToGet);
+    appendLog(`${name} service acquired from ${workspaceName}.`);
+    console.log(`[tryGetService] Successfully acquired '${name}' service from ${workspaceName}.`);
     return svc;
   } catch (error) {
-    appendLog(`Error acquiring ${name} service: ${error.message}`);
-    console.error(`[tryGetService] Error acquiring '${name}' service (Remote: '${remoteId}', Local: '${localId}'):`, error);
+    const errorMessage = `Error acquiring ${name} service (${remoteIdWithWorkspace}): ${error.message}`;
+    appendLog(errorMessage);
+    console.error(`[tryGetService] Error acquiring '${name}' (Remote: '${remoteIdWithWorkspace}', Local: '${localId}'):`, error);
+    
+    // Check if this is a permission error and show notification
+    if (showNotification && error.message && error.message.includes('Permission denied for workspace')) {
+      showNotification(error.message, 'error');
+    }
+    
     return null;
   }
 };
-
-export const getServer = async (token) => {
-  console.log("[getServer] Attempting to connect to Hypha server with token:", token ? "Token Provided" : "No Token");
-	try {
-    const server = await hyphaWebsocketClient.connectToServer({
-      server_url: "https://hypha.aicell.io/",
-      token: token,
-      workspace: "agent-lens",
-      method_timeout: 500,
-    });
-    console.log("[getServer] Successfully connected to Hypha server:", server);
-    return server;
-  } catch (error) {
-    console.error("[getServer] Error connecting to Hypha server:", error);
-    throw error;
-  }
-}
 
 const login_callback = (context) => {
   console.log("[login_callback] Invoked. Login URL:", context.login_url);

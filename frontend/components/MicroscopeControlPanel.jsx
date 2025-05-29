@@ -27,8 +27,8 @@ const MicroscopeControlPanel = ({
   roboticArmService,
   currentOperation,
   setCurrentOperation,
-  hyphaServer, // New prop for Hypha server connection object
-  hyphaAuthToken, // New prop for Hypha auth token
+  hyphaManager, // Changed from hyphaServer and hyphaAuthToken
+  showNotification = null, // New prop for showing notifications
 }) => {
   const [isLightOn, setIsLightOn] = useState(false);
   const [xPosition, setXPosition] = useState(0);
@@ -58,7 +58,6 @@ const MicroscopeControlPanel = ({
   const [isWebRtcActive, setIsWebRtcActive] = useState(false);
   const [webRtcPc, setWebRtcPc] = useState(null);
   const [webRtcError, setWebRtcError] = useState(null);
-  const [webRtcDedicatedServer, setWebRtcDedicatedServer] = useState(null); // For WebRTC specific server connection
   const [remoteStream, setRemoteStream] = useState(null); // State for the incoming WebRTC stream
 
   // State for collapsing the right panel - THIS WAS ACCIDENTALLY REMOVED, ADDING IT BACK
@@ -204,9 +203,9 @@ const MicroscopeControlPanel = ({
 
   // WebRTC Streaming Logic
   const startWebRtcStream = async () => {
-    if (!hyphaAuthToken) {
-      appendLog("WebRTC Error: Hypha auth token not available.");
-      setWebRtcError("Hypha auth token not available.");
+    if (!hyphaManager) {
+      appendLog("WebRTC Error: HyphaManager not available.");
+      setWebRtcError("HyphaManager not available.");
       setIsWebRtcActive(false);
       return;
     }
@@ -234,21 +233,15 @@ const MicroscopeControlPanel = ({
     setWebRtcError(null);
     setMicroscopeBusy(true);
 
-    let tempServerForRtc = null; // Temporary server instance for this function scope
-
     try {
-      appendLog(`Connecting to Hypha server for WebRTC with workspace: ${targetWorkspace}`);
-      tempServerForRtc = await window.hyphaWebsocketClient.connectToServer({
-        server_url: "https://hypha.aicell.io/", // Consider making this configurable if needed
-        token: hyphaAuthToken,
-        workspace: targetWorkspace,
-        name: `webrtc-client-${selectedMicroscopeId.replace(/\//g, '-')}`,
-        method_timeout: 60, // As in demo
-      });
-      setWebRtcDedicatedServer(tempServerForRtc);
-      appendLog('Successfully connected to Hypha server for WebRTC.');
+      // Get server for the target workspace from the manager
+      const serverForRtc = await hyphaManager.getServer(targetWorkspace);
+      if (!serverForRtc) {
+        throw new Error(`Failed to get server for workspace ${targetWorkspace} from HyphaManager.`);
+      }
+      appendLog(`Got Hypha server for WebRTC workspace: ${targetWorkspace}`);
 
-      let iceServers = [{ "urls": ["stun:stun.l.google.com:19302"] }]; // Fallback
+      let iceServers = [{ "urls": ["stun:stun.l.google.com:19302"] }];
       try {
         const response = await fetch('https://ai.imjoy.io/public/services/coturn/get_rtc_ice_servers');
         if (response.ok) {
@@ -256,14 +249,14 @@ const MicroscopeControlPanel = ({
           appendLog('Fetched ICE servers successfully.');
         } else {
           appendLog('Failed to fetch ICE servers, using fallback STUN server.');
-        }
-      } catch (error) {
+          }
+        } catch (error) {
         appendLog(`Error fetching ICE servers: ${error.message}. Using fallback STUN server.`);
       }
 
       const pc = await window.hyphaWebsocketClient.getRTCService(
-        tempServerForRtc, // Use the new server connected to the correct workspace
-        simpleWebRtcServiceName, // Use the simple service name
+        serverForRtc, // Use the server from HyphaManager
+        simpleWebRtcServiceName, 
         {
           ice_servers: iceServers,
           on_init: async (peerConnection) => {
@@ -363,32 +356,23 @@ const MicroscopeControlPanel = ({
       } else if (pc && typeof pc.close === 'function') { 
         pc.close();
       }
-      // Also disconnect the dedicated server if it was connected
-      if (tempServerForRtc) {
-        appendLog('Disconnecting temporary WebRTC server due to error.');
-        await tempServerForRtc.disconnect();
-        setWebRtcDedicatedServer(null); // Clear from state if it was set before error
+      // Show notification for permission errors
+      if (showNotification && error.message && error.message.includes('Permission denied for workspace')) {
+        showNotification(error.message, 'error');
       }
+      // No need to manually disconnect serverForRtc, manager handles it
     } finally {
       setMicroscopeBusy(false);
     }
   };
 
-  const stopWebRtcStream = async () => { // Made async for disconnect
+  const stopWebRtcStream = () => { // No longer needs to be async
     appendLog('Stopping WebRTC stream...');
     if (webRtcPc) {
       webRtcPc.close();
       setWebRtcPc(null);
     }
-    if (webRtcDedicatedServer) {
-      appendLog('Disconnecting WebRTC dedicated server...');
-      try {
-        await webRtcDedicatedServer.disconnect();
-      } catch (e) {
-        appendLog(`Error disconnecting WebRTC dedicated server: ${e.message}`);
-      }
-      setWebRtcDedicatedServer(null);
-    }
+    // No dedicated server to disconnect here, HyphaManager handles server lifecycles.
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
@@ -675,8 +659,8 @@ const MicroscopeControlPanel = ({
               <button
                 className={`control-button live-button ${isWebRtcActive ? 'bg-red-500 hover:bg-red-600' : 'bg-purple-500 hover:bg-purple-600'} text-white w-1/5 px-1.5 py-0.5 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed`}
                 onClick={toggleWebRtcStream}
-                disabled={!microscopeControlService || currentOperation !== null || !hyphaServer || microscopeBusy}
-                title={!hyphaServer ? "Hypha server not connected" : (isWebRtcActive ? "Stop Live Stream" : "Start Live Stream")}
+                disabled={!microscopeControlService || currentOperation !== null || !hyphaManager || microscopeBusy}
+                title={!hyphaManager ? "HyphaManager not connected" : (isWebRtcActive ? "Stop Live Stream" : "Start Live Stream")}
               >
                 <i className="fas fa-video icon mr-1"></i> {isWebRtcActive ? 'Stop Live' : 'Start Live'}
               </button>
@@ -816,8 +800,8 @@ MicroscopeControlPanel.propTypes = {
   roboticArmService: PropTypes.object,
   currentOperation: PropTypes.string,
   setCurrentOperation: PropTypes.func,
-  hyphaServer: PropTypes.object, // General server connection (if still needed for other things)
-  hyphaAuthToken: PropTypes.string, // Added prop type for Hypha auth token
+  hyphaManager: PropTypes.object, // Changed prop type
+  showNotification: PropTypes.func, // Added prop type for notification function
 };
 
 export default MicroscopeControlPanel; 
