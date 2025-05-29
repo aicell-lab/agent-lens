@@ -26,8 +26,11 @@ services:
       - ALL
 
   squid-control:
-    image: ghcr.io/aicell-lab/squid-control:sha-11e58aa
+    image: ghcr.io/aicell-lab/squid-control:sha-4836170
     container_name: squid-control
+    network_mode: "host"
+    ports:
+      - "10000-10050:10000-10050/udp"
     environment:
       - SQUID_WORKSPACE_TOKEN=${SQUID_WORKSPACE_TOKEN}
       - WORKSPACE_TOKEN_CHATBOT=${WORKSPACE_TOKEN_CHATBOT}
