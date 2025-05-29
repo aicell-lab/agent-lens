@@ -45,6 +45,8 @@ const MicroscopeControl = () => {
   const [loginError, setLoginError] = useState(null);
   const [selectedMicroscopeId, setSelectedMicroscopeId] = useState("squid-control/squid-control-reef");
   const [currentOperation, setCurrentOperation] = useState(null);
+  const [hyphaServerState, setHyphaServerState] = useState(null);
+  const [hyphaAuthToken, setHyphaAuthToken] = useState(localStorage.getItem("token"));
 
   const appendLog = useCallback((message) => {
     setLog((prevLog) => prevLog + message + '\n');
@@ -80,15 +82,17 @@ const MicroscopeControl = () => {
             throw new Error("No token found for re-initialization");
           }
           console.log("[Effect Hook] Token found. Getting server...");
-          const server = await getServer(token);
-          console.log("[Effect Hook] Server object obtained:", server);
+          const serverToUse = hyphaServerState || await getServer(token);
+          if (!hyphaServerState) setHyphaServerState(serverToUse);
+
+          console.log("[Effect Hook] Server object obtained for microscope service init:", serverToUse);
           
           const remoteId = selectedMicroscopeId;
           const localIdToUse = selectedMicroscopeId === "squid-control/squid-control-reef" ? null : selectedMicroscopeId;
           console.log(`[Effect Hook] Calling tryGetService with server, name: "Microscope Control", remoteId: ${remoteId}, localId: ${localIdToUse}`);
 
           const newMicroscopeService = await tryGetService(
-            server,
+            serverToUse,
             "Microscope Control",
             remoteId,
             localIdToUse,
@@ -123,8 +127,10 @@ const MicroscopeControl = () => {
       setLoginError(null);
       const token = await login();
       console.log("[handleLogin] Login successful, token obtained:", token);
+      setHyphaAuthToken(token);
       const server = await getServer(token);
       console.log("[handleLogin] Server object obtained:", server);
+      setHyphaServerState(server);
       
       console.log(`[handleLogin] Calling initializeServices with microscopeIdToUse: ${microscopeIdToUse}`);
       await initializeServices(server,
@@ -212,6 +218,8 @@ const MicroscopeControl = () => {
               roboticArmService={roboticArmService}
               currentOperation={currentOperation}
               setCurrentOperation={setCurrentOperation}
+              hyphaServer={hyphaServerState}
+              hyphaAuthToken={hyphaAuthToken}
               onClose={() => {}}
             />
           </div>

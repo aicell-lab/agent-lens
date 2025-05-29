@@ -5,6 +5,12 @@ import CameraSettings from './CameraSettings';
 import ChatbotButton from './ChatbotButton';
 import SampleSelector from './SampleSelector';
 
+const WEBRTC_SERVICE_IDS = {
+  "squid-control/squid-control-reef": "squid-control/video-track-squid-control-reef",
+  "reef-imaging/mirror-microscope-control-squid-1": "reef-imaging/video-track-microscope-control-squid-1",
+  "reef-imaging/mirror-microscope-control-squid-2": "reef-imaging/video-track-microscope-control-squid-2", // Assuming typo correction
+};
+
 const MicroscopeControlPanel = ({
   map,
   setSnapshotImage,
@@ -21,6 +27,8 @@ const MicroscopeControlPanel = ({
   roboticArmService,
   currentOperation,
   setCurrentOperation,
+  hyphaServer, // New prop for Hypha server connection object
+  hyphaAuthToken, // New prop for Hypha auth token
 }) => {
   const [isLightOn, setIsLightOn] = useState(false);
   const [xPosition, setXPosition] = useState(0);
@@ -43,10 +51,17 @@ const MicroscopeControlPanel = ({
   const [desiredCameraExposure, setDesiredCameraExposure] = useState(100);
 
   const [illuminationChannel, setIlluminationChannel] = useState("0");
-  const [isLiveView, setIsLiveView] = useState(false);
   const canvasRef = useRef(null);
+  const videoRef = useRef(null);
 
-  // State for collapsing the right panel
+  // WebRTC State
+  const [isWebRtcActive, setIsWebRtcActive] = useState(false);
+  const [webRtcPc, setWebRtcPc] = useState(null);
+  const [webRtcError, setWebRtcError] = useState(null);
+  const [webRtcDedicatedServer, setWebRtcDedicatedServer] = useState(null); // For WebRTC specific server connection
+  const [remoteStream, setRemoteStream] = useState(null); // State for the incoming WebRTC stream
+
+  // State for collapsing the right panel - THIS WAS ACCIDENTALLY REMOVED, ADDING IT BACK
   const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false);
 
   // Refs to hold the latest actual values for use in debounced effects
@@ -165,7 +180,7 @@ const MicroscopeControlPanel = ({
   }, [desiredCameraExposure, illuminationChannel, microscopeControlService, appendLog]);
 
   useEffect(() => {
-    if (!snapshotImage || !canvasRef.current) return;
+    if (!snapshotImage || !canvasRef.current || isWebRtcActive) return;
 
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
@@ -185,28 +200,243 @@ const MicroscopeControlPanel = ({
 
     console.log('Setting image source (length):', snapshotImage.length);
     img.src = snapshotImage;
-  }, [snapshotImage]);
+  }, [snapshotImage, isWebRtcActive]);
 
-  useEffect(() => {
-    let liveViewInterval;
-    if (isLiveView) {
-      liveViewInterval = setInterval(async () => {
-        try {
-          // Only capture new frames if the microscope is not busy with other operations
-          if (!microscopeBusy && microscopeControlService) {
-            // Use DESIRED values for live view frames
-            const base64Image = await microscopeControlService.one_new_frame();
-            setSnapshotImage(`data:image/png;base64,${base64Image}`);
-          }
-        } catch (error) {
-          appendLog(`Error in live view: ${error.message}`);
-        }
-      }, 2000); // Consider making interval dependent on desiredCameraExposure
-    } else if (liveViewInterval) {
-      clearInterval(liveViewInterval);
+  // WebRTC Streaming Logic
+  const startWebRtcStream = async () => {
+    if (!hyphaAuthToken) {
+      appendLog("WebRTC Error: Hypha auth token not available.");
+      setWebRtcError("Hypha auth token not available.");
+      setIsWebRtcActive(false);
+      return;
     }
-    return () => clearInterval(liveViewInterval);
-  }, [isLiveView, microscopeControlService, microscopeBusy, appendLog]);
+
+    const fullWebRtcServiceId = WEBRTC_SERVICE_IDS[selectedMicroscopeId];
+    if (!selectedMicroscopeId || !fullWebRtcServiceId) {
+      appendLog(`WebRTC Error: No WebRTC service ID configured for ${selectedMicroscopeId}`);
+      setWebRtcError(`No WebRTC service ID configured for ${selectedMicroscopeId}`);
+      setIsWebRtcActive(false);
+      return;
+    }
+
+    const serviceIdParts = fullWebRtcServiceId.split('/');
+    const targetWorkspace = serviceIdParts.length > 1 ? serviceIdParts[0] : null; // Infer workspace
+    const simpleWebRtcServiceName = serviceIdParts.length > 1 ? serviceIdParts[serviceIdParts.length - 1] : serviceIdParts[0];
+
+    if (!targetWorkspace) {
+        appendLog(`WebRTC Error: Could not determine workspace from WebRTC service ID ${fullWebRtcServiceId}`);
+        setWebRtcError(`Could not determine workspace for ${fullWebRtcServiceId}`);
+        setIsWebRtcActive(false);
+        return;
+    }
+
+    appendLog(`Starting WebRTC stream for ${selectedMicroscopeId} (Target Workspace: ${targetWorkspace}, Service: ${simpleWebRtcServiceName})...`);
+    setWebRtcError(null);
+    setMicroscopeBusy(true);
+
+    let tempServerForRtc = null; // Temporary server instance for this function scope
+
+    try {
+      appendLog(`Connecting to Hypha server for WebRTC with workspace: ${targetWorkspace}`);
+      tempServerForRtc = await window.hyphaWebsocketClient.connectToServer({
+        server_url: "https://hypha.aicell.io/", // Consider making this configurable if needed
+        token: hyphaAuthToken,
+        workspace: targetWorkspace,
+        name: `webrtc-client-${selectedMicroscopeId.replace(/\//g, '-')}`,
+        method_timeout: 60, // As in demo
+      });
+      setWebRtcDedicatedServer(tempServerForRtc);
+      appendLog('Successfully connected to Hypha server for WebRTC.');
+
+      let iceServers = [{ "urls": ["stun:stun.l.google.com:19302"] }]; // Fallback
+      try {
+        const response = await fetch('https://ai.imjoy.io/public/services/coturn/get_rtc_ice_servers');
+        if (response.ok) {
+          iceServers = await response.json();
+          appendLog('Fetched ICE servers successfully.');
+        } else {
+          appendLog('Failed to fetch ICE servers, using fallback STUN server.');
+        }
+      } catch (error) {
+        appendLog(`Error fetching ICE servers: ${error.message}. Using fallback STUN server.`);
+      }
+
+      const pc = await window.hyphaWebsocketClient.getRTCService(
+        tempServerForRtc, // Use the new server connected to the correct workspace
+        simpleWebRtcServiceName, // Use the simple service name
+        {
+          ice_servers: iceServers,
+          on_init: async (peerConnection) => {
+            appendLog('WebRTC peer connection initialized by client.');
+            
+            peerConnection.addEventListener('track', (evt) => {
+              appendLog(`WebRTC track received: ${evt.track.kind}, ID: ${evt.track.id}, Stream IDs: ${evt.streams.map(s => s.id).join(', ')}`);
+              if (evt.track.kind === 'video') {
+                if (evt.streams && evt.streams[0]) {
+                  appendLog(`Setting remote video stream (ID: ${evt.streams[0].id}) to state.`);
+                  setRemoteStream(evt.streams[0]);
+                } else {
+                  appendLog('Video track received, but no associated stream. Creating new stream.');
+                  const newStream = new MediaStream();
+                  newStream.addTrack(evt.track);
+                  setRemoteStream(newStream);
+                }
+              }
+            });
+
+            peerConnection.addEventListener('connectionstatechange', () => {
+              appendLog(`WebRTC connection state: ${peerConnection.connectionState}`);
+              if (['closed', 'failed', 'disconnected'].includes(peerConnection.connectionState)) {
+                appendLog('WebRTC connection closed or failed. Stopping stream.');
+                // Calling stopWebRtcStream directly here can cause issues if pc is not yet set in state
+                // Consider a more robust state management or event for this
+                if(webRtcPc || pc) { // Check if pc is available from closure or state
+                    (webRtcPc || pc).close();
+                }
+                setIsWebRtcActive(false); 
+                if (videoRef.current) videoRef.current.srcObject = null;
+              }
+            });
+
+            // Send a dummy track to the server to trigger its on_track handler
+            try {
+              appendLog('Attempting to send a dummy track to the server...');
+              const dummyCanvas = document.createElement('canvas');
+              dummyCanvas.width = 100;
+              dummyCanvas.height = 100;
+              const ctx = dummyCanvas.getContext('2d');
+              if (ctx) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.01)'; // Make it nearly transparent
+                ctx.fillRect(0, 0, 1, 1); // Draw a tiny dot to ensure stream has data
+              }
+              const dummyStream = dummyCanvas.captureStream(1); // 1 frame per second
+              for (const track of dummyStream.getVideoTracks()) {
+                if (peerConnection.signalingState !== 'closed') {
+                    appendLog(`Adding dummy video track: ${track.label}`);
+                    peerConnection.addTrack(track, dummyStream);
+                } else {
+                    appendLog('Peer connection closed before dummy track could be added.');
+                    break;
+                }
+              }
+              appendLog('Dummy track sending process initiated.');
+            } catch (e) {
+              appendLog(`Error sending dummy track: ${e.message}`);
+              console.error("Error sending dummy track:", e);
+            }
+          },
+        }
+      );
+      
+      setWebRtcPc(pc); // Set pc state first
+
+      // After RTC service is obtained, get the actual microscope service through it
+      try {
+        appendLog(`Attempting to get microscope service '${simpleWebRtcServiceName}' (from '${selectedMicroscopeId}') via WebRTC PC.`);
+        const remoteMicroscopeService = await pc.getService(simpleWebRtcServiceName);
+        if (remoteMicroscopeService) {
+          appendLog(`Successfully got microscope service '${simpleWebRtcServiceName}' via WebRTC. API:`);
+          // You can store remoteMicroscopeService in a state if you need to call its methods
+          // For now, just logging its presence.
+          console.log(await remoteMicroscopeService.api());
+        } else {
+          appendLog(`Failed to get microscope service '${simpleWebRtcServiceName}' via WebRTC. Service was null.`);
+        }
+      } catch (error) {
+        appendLog(`Error getting microscope service '${simpleWebRtcServiceName}' (from '${selectedMicroscopeId}') via WebRTC: ${error.message}`);
+        console.error(`Error getting microscope service '${simpleWebRtcServiceName}' (from '${selectedMicroscopeId}') via WebRTC:`, error);
+        // Optionally, stop the stream if getting the service is critical
+        // stopWebRtcStream(); 
+        // throw error; // Re-throw if this is a fatal error for the stream
+      }
+
+      setIsWebRtcActive(true);
+      appendLog('WebRTC stream setup process completed.');
+    } catch (error) {
+      appendLog(`Error starting WebRTC stream: ${error.message}`);
+      console.error("[MicroscopeControlPanel] Error starting WebRTC stream:", error);
+      setWebRtcError(error.message);
+      setIsWebRtcActive(false);
+      if (webRtcPc) { 
+        webRtcPc.close();
+        setWebRtcPc(null);
+      } else if (pc && typeof pc.close === 'function') { 
+        pc.close();
+      }
+      // Also disconnect the dedicated server if it was connected
+      if (tempServerForRtc) {
+        appendLog('Disconnecting temporary WebRTC server due to error.');
+        await tempServerForRtc.disconnect();
+        setWebRtcDedicatedServer(null); // Clear from state if it was set before error
+      }
+    } finally {
+      setMicroscopeBusy(false);
+    }
+  };
+
+  const stopWebRtcStream = async () => { // Made async for disconnect
+    appendLog('Stopping WebRTC stream...');
+    if (webRtcPc) {
+      webRtcPc.close();
+      setWebRtcPc(null);
+    }
+    if (webRtcDedicatedServer) {
+      appendLog('Disconnecting WebRTC dedicated server...');
+      try {
+        await webRtcDedicatedServer.disconnect();
+      } catch (e) {
+        appendLog(`Error disconnecting WebRTC dedicated server: ${e.message}`);
+      }
+      setWebRtcDedicatedServer(null);
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setIsWebRtcActive(false);
+    setRemoteStream(null); // Clear the remote stream state
+    appendLog('WebRTC stream stopped.');
+  };
+
+  const toggleWebRtcStream = () => {
+    if (isWebRtcActive) {
+      stopWebRtcStream();
+    } else {
+      // Clear previous snapshot when starting live view for a cleaner display
+      setSnapshotImage(null); 
+      startWebRtcStream();
+    }
+  };
+  
+  // Effect for cleaning up WebRTC connection
+  useEffect(() => {
+    // Stop stream if microscopeId changes while active
+    if (isWebRtcActive) {
+        appendLog("Microscope ID changed, stopping active WebRTC stream.");
+        stopWebRtcStream();
+    }
+    // Cleanup on component unmount
+    return () => {
+      if (webRtcPc) { // Check webRtcPc from state directly
+        appendLog("Component unmounting, ensuring WebRTC stream is stopped.");
+        stopWebRtcStream();
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMicroscopeId]); // Rerun only if microscopeId changes. stopWebRtcStream handles webRtcPc.
+
+  // Effect to attach remote stream to video element when available
+  useEffect(() => {
+    if (isWebRtcActive && remoteStream && videoRef.current) {
+      appendLog('Attaching remote stream to video element and attempting to play.');
+      videoRef.current.srcObject = remoteStream;
+      videoRef.current.play().catch(error => {
+        appendLog(`Error playing video: ${error.message}`);
+        console.error("Error attempting to play video:", error);
+      });
+    } else if (!isWebRtcActive && videoRef.current) {
+        videoRef.current.srcObject = null; // Ensure srcObject is cleared when not active
+    }
+  }, [isWebRtcActive, remoteStream]); // videoRef.current is not a reactive dependency
 
   const moveMicroscope = async (direction, multiplier) => {
     if (!microscopeControlService) return;
@@ -257,10 +487,10 @@ const MicroscopeControlPanel = ({
       setMicroscopeBusy(true);
       appendLog('Snapping image...');
 
-      if (isLiveView) {
-        stopLiveView(); // Terminate live view first
-        // Give a moment for live view to fully stop before snapping
-        await new Promise(resolve => setTimeout(resolve, 100)); 
+      if (isWebRtcActive) { // Check if WebRTC is active
+        stopWebRtcStream(); // Terminate WebRTC stream first
+        // Give a moment for WebRTC to fully stop before snapping
+        await new Promise(resolve => setTimeout(resolve, 200)); 
       }
       
       const base64Image = await microscopeControlService.one_new_frame();
@@ -332,16 +562,6 @@ const MicroscopeControlPanel = ({
     }
   };
 
-  const startLiveView = () => {
-    appendLog('Starting live view...');
-    setIsLiveView(true);
-  };
-
-  const stopLiveView = () => {
-    appendLog('Stopping live view...');
-    setIsLiveView(false);
-  };
-
   // Toggle for SampleSelector dropdown
   const toggleSampleSelector = () => {
     setIsSampleSelectorOpen(!isSampleSelectorOpen);
@@ -358,17 +578,21 @@ const MicroscopeControlPanel = ({
         <div
           id="image-display"
           className={`w-full border ${
-            snapshotImage ? 'border-gray-300' : 'border-dotted border-gray-400'
-          } rounded flex items-center justify-center`}
+            (snapshotImage || isWebRtcActive) ? 'border-gray-300' : 'border-dotted border-gray-400'
+          } rounded flex items-center justify-center bg-black`}
         >
-          {snapshotImage ? (
+          {isWebRtcActive && !webRtcError ? (
+            <video ref={videoRef} autoPlay playsInline muted className="object-contain w-full h-full" />
+          ) : snapshotImage ? (
             <img
               src={snapshotImage}
               alt="Microscope Snapshot"
               className="object-contain w-full h-full"
             />
           ) : (
-            <p className="placeholder-text text-center">Image Display</p>
+            <p className="placeholder-text text-center text-gray-300">
+              {webRtcError ? `WebRTC Error: ${webRtcError}` : (microscopeControlService ? 'Image Display' : 'Microscope not connected')}
+            </p>
           )}
         </div>
         {/* Toggle button for the right panel */}
@@ -449,11 +673,12 @@ const MicroscopeControlPanel = ({
                 <i className="fas fa-camera icon mr-1"></i> Snap
               </button>
               <button
-                className={`control-button live-button ${isLiveView ? 'bg-red-500 hover:bg-red-600' : 'bg-purple-500 hover:bg-purple-600'} text-white w-1/5 px-1.5 py-0.5 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed`}
-                onClick={isLiveView ? stopLiveView : startLiveView}
-                disabled={!microscopeControlService || currentOperation !== null}
+                className={`control-button live-button ${isWebRtcActive ? 'bg-red-500 hover:bg-red-600' : 'bg-purple-500 hover:bg-purple-600'} text-white w-1/5 px-1.5 py-0.5 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed`}
+                onClick={toggleWebRtcStream}
+                disabled={!microscopeControlService || currentOperation !== null || !hyphaServer || microscopeBusy}
+                title={!hyphaServer ? "Hypha server not connected" : (isWebRtcActive ? "Stop Live Stream" : "Start Live Stream")}
               >
-                <i className="fas fa-video icon mr-1"></i> {isLiveView ? 'Stop' : 'Live'}
+                <i className="fas fa-video icon mr-1"></i> {isWebRtcActive ? 'Stop Live' : 'Start Live'}
               </button>
             </div>
           </div>
@@ -565,7 +790,7 @@ const MicroscopeControlPanel = ({
         {/* Bottom-Right: Chatbot */}
         <div className="mcp-chatbot-area">
           <ChatbotButton 
-            key={selectedMicroscopeId}
+            key={selectedMicroscopeId} // Use selectedMicroscopeId for the key to re-mount if it changes
             microscopeControlService={microscopeControlService} 
             appendLog={appendLog} 
           />
@@ -591,6 +816,8 @@ MicroscopeControlPanel.propTypes = {
   roboticArmService: PropTypes.object,
   currentOperation: PropTypes.string,
   setCurrentOperation: PropTypes.func,
+  hyphaServer: PropTypes.object, // General server connection (if still needed for other things)
+  hyphaAuthToken: PropTypes.string, // Added prop type for Hypha auth token
 };
 
 export default MicroscopeControlPanel; 
