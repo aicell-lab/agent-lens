@@ -34,9 +34,9 @@ const MicroscopeControlPanel = ({
   const [xPosition, setXPosition] = useState(0);
   const [yPosition, setYPosition] = useState(0);
   const [zPosition, setZPosition] = useState(0);
-  const [xMove, setXMove] = useState(1);
-  const [yMove, setYMove] = useState(1);
-  const [zMove, setZMove] = useState(0.1);
+  const [xMove, setXMove] = useState(0.1);
+  const [yMove, setYMove] = useState(0.1);
+  const [zMove, setZMove] = useState(0.01);
   const [microscopeBusy, setMicroscopeBusy] = useState(false);
 
   // State for SampleSelector dropdown
