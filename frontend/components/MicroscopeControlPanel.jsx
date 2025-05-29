@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import PropTypes from 'prop-types';
 import ControlButton from './ControlButton';
 import CameraSettings from './CameraSettings';
@@ -79,6 +79,25 @@ const MicroscopeControlPanel = ({
   useEffect(() => {
     actualCameraExposureRef.current = actualCameraExposure;
   }, [actualCameraExposure]);
+
+  // Memoized function to stop the WebRTC stream
+  const memoizedStopWebRtcStream = useCallback(() => {
+    if (!isWebRtcActive && !webRtcPc) {
+      // appendLog('memoizedStopWebRtcStream: called but stream already inactive.'); // Optional debug
+      return;
+    }
+    appendLog('Stopping WebRTC stream...');
+    if (webRtcPc) {
+      webRtcPc.close();
+      setWebRtcPc(null);
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setIsWebRtcActive(false);
+    setRemoteStream(null);
+    appendLog('WebRTC stream stopped.');
+  }, [appendLog, isWebRtcActive, webRtcPc]);
 
   const fetchStatusAndUpdateActuals = async () => {
     if (!microscopeControlService) {
@@ -344,7 +363,7 @@ const MicroscopeControlPanel = ({
         appendLog(`Error getting microscope service '${simpleWebRtcServiceName}' (from '${selectedMicroscopeId}') via WebRTC: ${error.message}`);
         console.error(`Error getting microscope service '${simpleWebRtcServiceName}' (from '${selectedMicroscopeId}') via WebRTC:`, error);
         // Optionally, stop the stream if getting the service is critical
-        // stopWebRtcStream(); 
+        // memoizedStopWebRtcStream();
         // throw error; // Re-throw if this is a fatal error for the stream
       }
 
@@ -371,24 +390,11 @@ const MicroscopeControlPanel = ({
     }
   };
 
-  const stopWebRtcStream = () => { // No longer needs to be async
-    appendLog('Stopping WebRTC stream...');
-    if (webRtcPc) {
-      webRtcPc.close();
-      setWebRtcPc(null);
-    }
-    // No dedicated server to disconnect here, HyphaManager handles server lifecycles.
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-    setIsWebRtcActive(false);
-    setRemoteStream(null); // Clear the remote stream state
-    appendLog('WebRTC stream stopped.');
-  };
+  const stopWebRtcStream = memoizedStopWebRtcStream;
 
   const toggleWebRtcStream = () => {
     if (isWebRtcActive) {
-      stopWebRtcStream();
+      memoizedStopWebRtcStream();
     } else {
       // Clear previous snapshot when starting live view for a cleaner display
       setSnapshotImage(null); 
@@ -396,22 +402,17 @@ const MicroscopeControlPanel = ({
     }
   };
   
-  // Effect for cleaning up WebRTC connection
+  // Effect for cleaning up WebRTC connection on ID change or component unmount
   useEffect(() => {
-    // Stop stream if microscopeId changes while active
-    if (isWebRtcActive) {
-        appendLog("Microscope ID changed, stopping active WebRTC stream.");
-        stopWebRtcStream();
-    }
-    // Cleanup on component unmount
+    // This effect returns a cleanup function that will be called when:
     return () => {
-      if (webRtcPc) { // Check webRtcPc from state directly
-        appendLog("Component unmounting, ensuring WebRTC stream is stopped.");
-        stopWebRtcStream();
+      // Check `isWebRtcActive` from the closure of the render that defined this cleanup.
+      if (isWebRtcActive) {
+        appendLog(`Auto-stopping WebRTC stream for ${selectedMicroscopeId} (ID change/unmount).`);
+        memoizedStopWebRtcStream();
       }
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedMicroscopeId]); // Rerun only if microscopeId changes. stopWebRtcStream handles webRtcPc.
+  }, [selectedMicroscopeId, isWebRtcActive, memoizedStopWebRtcStream, appendLog]);
 
   // Effect to attach remote stream to video element when available
   useEffect(() => {
@@ -477,7 +478,7 @@ const MicroscopeControlPanel = ({
       appendLog('Snapping image...');
 
       if (isWebRtcActive) { // Check if WebRTC is active
-        stopWebRtcStream(); // Terminate WebRTC stream first
+        memoizedStopWebRtcStream(); // Terminate WebRTC stream first
         // Give a moment for WebRTC to fully stop before snapping
         await new Promise(resolve => setTimeout(resolve, 200)); 
       }
