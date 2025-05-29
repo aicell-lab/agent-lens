@@ -39,6 +39,11 @@ const MicroscopeControlPanel = ({
   const [zMove, setZMove] = useState(0.01);
   const [microscopeBusy, setMicroscopeBusy] = useState(false);
 
+  // String states for input fields to allow smooth float input
+  const [xMoveStr, setXMoveStr] = useState(xMove.toString());
+  const [yMoveStr, setYMoveStr] = useState(yMove.toString());
+  const [zMoveStr, setZMoveStr] = useState(zMove.toString());
+
   // State for SampleSelector dropdown
   const [isSampleSelectorOpen, setIsSampleSelectorOpen] = useState(false);
 
@@ -681,13 +686,29 @@ const MicroscopeControlPanel = ({
                     type="number"
                     className="control-input w-1/2 p-1 border border-gray-300 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
                     placeholder={`d${axis.toUpperCase()}(mm)`}
-                    value={axis === 'x' ? xMove : axis === 'y' ? yMove : zMove}
+                    value={axis === 'x' ? xMoveStr : axis === 'y' ? yMoveStr : zMoveStr}
+                    min="0"
                     onChange={(e) => {
-                      const value = parseFloat(e.target.value);
                       if (currentOperation) return;
-                      if (axis === 'x') setXMove(value);
-                      else if (axis === 'y') setYMove(value);
-                      else setZMove(value);
+                      const newStringValue = e.target.value;
+                      let newNumericValue = parseFloat(newStringValue);
+
+                      if (axis === 'x') {
+                        setXMoveStr(newStringValue);
+                        if (!isNaN(newNumericValue)) {
+                          setXMove(newNumericValue < 0 ? 0 : newNumericValue);
+                        }
+                      } else if (axis === 'y') {
+                        setYMoveStr(newStringValue);
+                        if (!isNaN(newNumericValue)) {
+                          setYMove(newNumericValue < 0 ? 0 : newNumericValue);
+                        }
+                      } else { // Z-axis
+                        setZMoveStr(newStringValue);
+                        if (!isNaN(newNumericValue)) {
+                          setZMove(newNumericValue < 0 ? 0 : newNumericValue);
+                        }
+                      }
                     }}
                     disabled={currentOperation !== null}
                   />
