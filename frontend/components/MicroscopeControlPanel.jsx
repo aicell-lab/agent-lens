@@ -719,14 +719,14 @@ const MicroscopeControlPanel = ({
                     onClick={() => moveMicroscope(axis, -1)}
                     disabled={!microscopeControlService || currentOperation !== null}
                   >
-                    <i className={`fas fa-arrow-${axis === 'x' ? 'left' : 'down'} mr-1`}></i> {axis.toUpperCase()}-
+                    <i className={`fas fa-arrow-${axis === 'x' ? 'left' : axis === 'y' ? 'up' : 'down'} mr-1`}></i> {axis.toUpperCase()}-
                   </button>
                   <button
                     className="half-button bg-blue-500 text-white hover:bg-blue-600 w-1/2 p-1 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
                     onClick={() => moveMicroscope(axis, 1)}
                     disabled={!microscopeControlService || currentOperation !== null}
                   >
-                    {axis.toUpperCase()}+ <i className={`fas fa-arrow-${axis === 'x' ? 'right' : 'up'} ml-1`}></i>
+                    {axis.toUpperCase()}+ <i className={`fas fa-arrow-${axis === 'x' ? 'right' : axis === 'y' ? 'down' : 'up'} ml-1`}></i>
                   </button>
                 </div>
               </div>
