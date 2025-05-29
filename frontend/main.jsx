@@ -9,7 +9,8 @@ import IncubatorControl from './components/IncubatorControl';
 import MicroscopeControlPanel from './components/MicroscopeControlPanel';
 import Sidebar from './components/Sidebar';
 import ImageViewBrowser from './components/ImageViewBrowser';
-import { login, initializeServices, getServer, tryGetService } from './utils';
+import Notification from './components/Notification';
+import { login, initializeServices, getServer, tryGetService, HyphaServerManager } from './utils';
 import 'ol/ol.css';
 import './main.css';
 
@@ -45,15 +46,34 @@ const MicroscopeControl = () => {
   const [loginError, setLoginError] = useState(null);
   const [selectedMicroscopeId, setSelectedMicroscopeId] = useState("squid-control/squid-control-reef");
   const [currentOperation, setCurrentOperation] = useState(null);
+  const [hyphaManager, setHyphaManager] = useState(null);
+  
+  // Notification state
+  const [notification, setNotification] = useState({ message: '', type: 'error' });
 
   const appendLog = useCallback((message) => {
     setLog((prevLog) => prevLog + message + '\n');
   }, []);
 
+  // Function to show notifications
+  const showNotification = useCallback((message, type = 'error') => {
+    setNotification({ message, type });
+  }, []);
+
+  // Function to dismiss notifications
+  const dismissNotification = useCallback(() => {
+    setNotification({ message: '', type: 'error' });
+  }, []);
+
   useEffect(() => {
     const checkTokenAndInit = async () => {
-      if (localStorage.getItem("token")) {
-        await handleLogin(selectedMicroscopeId);
+      const token = localStorage.getItem("token");
+      if (token) {
+        const manager = new HyphaServerManager(token);
+        setHyphaManager(manager);
+        await handleLogin(selectedMicroscopeId, manager);
+      } else {
+        // No token, user needs to log in, LoginPrompt will be shown
       }
     }
 
@@ -66,32 +86,29 @@ const MicroscopeControl = () => {
     }
 
     checkTokenAndInit();
+    
+    // Cleanup manager on component unmount
+    return () => {
+      if (hyphaManager) {
+        console.log("[Main Unmount] Disconnecting all Hypha servers via manager.");
+        hyphaManager.disconnectAll();
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (isAuthenticated) {
-      const reinitializeMicroscope = async () => {
-        console.log(`[Effect Hook] Attempting to switch microscope. Selected ID: ${selectedMicroscopeId}`);
+    if (isAuthenticated && hyphaManager) {
+      const reinitializeMicroscopeServiceOnly = async () => {
+        console.log(`[Effect Hook] Attempting to reinitialize microscope service for: ${selectedMicroscopeId}`);
         appendLog(`Switching microscope to: ${selectedMicroscopeId}`);
         try {
-          const token = localStorage.getItem("token");
-          if (!token) {
-            console.error("[Effect Hook] No token found for re-initialization");
-            throw new Error("No token found for re-initialization");
-          }
-          console.log("[Effect Hook] Token found. Getting server...");
-          const server = await getServer(token);
-          console.log("[Effect Hook] Server object obtained:", server);
-          
-          const remoteId = selectedMicroscopeId;
-          const localIdToUse = selectedMicroscopeId === "squid-control/squid-control-reef" ? null : selectedMicroscopeId;
-          console.log(`[Effect Hook] Calling tryGetService with server, name: "Microscope Control", remoteId: ${remoteId}, localId: ${localIdToUse}`);
-
+          const microscopeLocalId = selectedMicroscopeId.startsWith("squid-control/") ? null : selectedMicroscopeId;
           const newMicroscopeService = await tryGetService(
-            server,
+            hyphaManager,
             "Microscope Control",
-            remoteId,
-            localIdToUse,
+            selectedMicroscopeId, 
+            microscopeLocalId,    
             (msg) => { console.log(`[tryGetService in Effect]: ${msg}`); appendLog(msg); }
           );
           
@@ -99,39 +116,39 @@ const MicroscopeControl = () => {
             console.log("[Effect Hook] Successfully obtained new microscope service:", newMicroscopeService);
             setMicroscopeControlService(newMicroscopeService);
             appendLog("Microscope service switched successfully.");
-            console.log("[Effect Hook] Microscope service state updated.");
-            
-            // Add a small delay to ensure the service is fully updated in the component tree
-            await new Promise(resolve => setTimeout(resolve, 100));
-            console.log("[Effect Hook] Microscope service initialization complete.");
           } else {
-            console.error("[Effect Hook] Failed to obtain new microscope service. tryGetService returned null.");
+            console.error("[Effect Hook] Failed to obtain new microscope service.");
             appendLog("Failed to switch microscope service. Service object was null.");
           }
         } catch (error) {
-          console.error("[Effect Hook] Error during microscope switch:", error);
-          appendLog(`Error switching microscope: ${error.message}`);
+          console.error("[Effect Hook] Error during microscope service switch:", error);
+          appendLog(`Error switching microscope service: ${error.message}`);
         }
       };
-      reinitializeMicroscope();
+      reinitializeMicroscopeServiceOnly();
     }
-  }, [selectedMicroscopeId, isAuthenticated]);
+  }, [selectedMicroscopeId, isAuthenticated, hyphaManager, appendLog]);
 
-  const handleLogin = async (microscopeIdToUse) => {
+  const handleLogin = async (microscopeIdToUse, existingManager = null) => {
     console.log(`[handleLogin] Attempting login. Initial microscope ID to use: ${microscopeIdToUse}`);
+    let managerToUse = existingManager;
     try {
       setLoginError(null);
       const token = await login();
       console.log("[handleLogin] Login successful, token obtained:", token);
-      const server = await getServer(token);
-      console.log("[handleLogin] Server object obtained:", server);
+
+      if (!managerToUse) {
+        managerToUse = new HyphaServerManager(token);
+        setHyphaManager(managerToUse); 
+      }
       
       console.log(`[handleLogin] Calling initializeServices with microscopeIdToUse: ${microscopeIdToUse}`);
-      await initializeServices(server,
+      await initializeServices(managerToUse,
         setMicroscopeControlService, setSimilarityService, setSegmentService,
         setIncubatorControlService, setRoboticArmService,
         (msg) => { console.log(`[initializeServices in Login]: ${msg}`); appendLog(msg); },
-        microscopeIdToUse
+        microscopeIdToUse,
+        showNotification
       );
       appendLog("Logged in.");
       setIsAuthenticated(true);
@@ -197,6 +214,7 @@ const MicroscopeControl = () => {
         return (
           <div className="control-view">
             <MicroscopeControlPanel
+              key={selectedMicroscopeId}
               microscopeControlService={microscopeControlService}
               appendLog={appendLog}
               map={currentMap}
@@ -211,6 +229,8 @@ const MicroscopeControl = () => {
               roboticArmService={roboticArmService}
               currentOperation={currentOperation}
               setCurrentOperation={setCurrentOperation}
+              hyphaManager={hyphaManager}
+              showNotification={showNotification}
               onClose={() => {}}
             />
           </div>
@@ -255,6 +275,12 @@ const MicroscopeControl = () => {
             <div className="content-area">
               {renderContent()}
             </div>
+            {/* Notification popup */}
+            <Notification 
+              message={notification.message}
+              type={notification.type}
+              onDismiss={dismissNotification}
+            />
           </div>
         )}
       </div>

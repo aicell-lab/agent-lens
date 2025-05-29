@@ -97,6 +97,38 @@
 .microscope-options-dropdown {
   /* Inherits from .sidebar-submenu but we can add specific overrides if needed */
   background-color: #f0f0f0; /* Slightly different background for distinction */
+  /* Base styles for transition */
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  margin-top: 0; 
+  margin-bottom: 0;
+  padding-top: 0;    /* Collapse padding as well */
+  padding-bottom: 0; /* Collapse padding as well */
+  transition: max-height 0.3s ease-in-out, 
+              opacity 0.3s ease-in-out, 
+              margin-top 0.3s ease-in-out, 
+              margin-bottom 0.3s ease-in-out,
+              padding-top 0.3s ease-in-out, 
+              padding-bottom 0.3s ease-in-out;
+}
+
+/* Styles when the dropdown is open */
+.microscope-options-dropdown.open {
+  max-height: 200px; /* Adjust as needed to fit content */
+  opacity: 1;
+  margin-top: 0.25rem;  /* Restore original margin from .sidebar-submenu */
+  margin-bottom: 0.25rem;/* Restore original margin from .sidebar-submenu */
+  padding-top: 0; /* .sidebar-submenu itself doesn't have padding, items do */
+  padding-bottom: 0; /* .sidebar-submenu itself doesn't have padding, items do */
+  /* Ensure children (buttons) are visible */
+  overflow: visible; 
+}
+
+/* Reduce font size for microscope selection buttons */
+.microscope-options-dropdown .sidebar-submenu-tab {
+  font-size: 0.85em; /* Slightly smaller than general submenu tabs */
+  padding: 0.4rem 0.8rem; /* Adjusted padding for smaller font */
 }
 
 .sidebar-divider {
@@ -152,7 +184,15 @@
   font-size: 0.9em;
 }
 
-.sidebar-submenu-tab:hover {
+.sidebar-submenu-tab:disabled {
+  background-color: #f8f9fa; /* Lighter when disabled */
+  border-color: #e9ecef;
+  color: #adb5bd;
+  cursor: not-allowed;
+  opacity: 0.75;
+}
+
+.sidebar-submenu-tab:hover:not(:disabled) {
   background-color: #e0e0e0;
 }
 

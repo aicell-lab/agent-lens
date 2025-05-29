@@ -247,15 +247,18 @@ const Sidebar = ({
             {!isMainSidebarCollapsed && <span>Microscopes</span>}
             {!isMainSidebarCollapsed && <i className={`fas ${isMicroscopeDropdownOpen ? 'fa-chevron-down' : 'fa-chevron-right'} microscope-toggle-icon`}></i>}
           </button>
-          {/* Microscope Dropdown Submenu */}
-          {activeTab === 'microscope' && isMicroscopeDropdownOpen && !isMainSidebarCollapsed && (
-            <div className="sidebar-submenu microscope-options-dropdown">
+          {/* Microscope Dropdown Submenu - Modified for CSS transition */}
+          {activeTab === 'microscope' && !isMainSidebarCollapsed && (
+            <div 
+              className={`sidebar-submenu microscope-options-dropdown ${isMicroscopeDropdownOpen ? 'open' : ''}`}
+            >
               <button
                 className={`sidebar-submenu-tab ${selectedMicroscopeId === 'squid-control/squid-control-reef' ? 'active' : ''}`}
                 onClick={() => {
                   onMicroscopeSelect('squid-control/squid-control-reef');
                   // setIsMicroscopeDropdownOpen(false); // Optional: close dropdown on selection
                 }}
+                disabled={!!currentOperation}
               >
                 <i className="fas fa-desktop"></i> {/* Changed icon for simulated */}
                 <span>Simulated Microscope</span>
@@ -266,6 +269,7 @@ const Sidebar = ({
                   onMicroscopeSelect('reef-imaging/mirror-microscope-control-squid-1');
                   // setIsMicroscopeDropdownOpen(false); // Optional: close dropdown on selection
                 }}
+                disabled={!!currentOperation}
               >
                 <i className="fas fa-microscope"></i>
                 <span>Real Microscope 1</span>
@@ -276,6 +280,7 @@ const Sidebar = ({
                   onMicroscopeSelect('reef-imaging/mirror-microscope-control-squid-2');
                   // setIsMicroscopeDropdownOpen(false); // Optional: close dropdown on selection
                 }}
+                disabled={!!currentOperation}
               >
                 <i className="fas fa-microscope"></i>
                 <span>Real Microscope 2</span>
