@@ -428,6 +428,14 @@ const MicroscopeControlPanel = ({
     }
   }, [isWebRtcActive, remoteStream]); // videoRef.current is not a reactive dependency
 
+  // Effect to stop WebRTC stream if a sample operation starts
+  useEffect(() => {
+    if (currentOperation && isWebRtcActive) {
+      appendLog(`Sample operation '${currentOperation}' started, stopping WebRTC stream.`);
+      memoizedStopWebRtcStream();
+    }
+  }, [currentOperation, isWebRtcActive, memoizedStopWebRtcStream, appendLog]);
+
   const moveMicroscope = async (direction, multiplier) => {
     if (!microscopeControlService) return;
     try {
@@ -665,7 +673,7 @@ const MicroscopeControlPanel = ({
               <button
                 className={`control-button live-button ${isWebRtcActive ? 'bg-red-500 hover:bg-red-600' : 'bg-purple-500 hover:bg-purple-600'} text-white w-1/5 px-1.5 py-0.5 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed`}
                 onClick={toggleWebRtcStream}
-                disabled={!microscopeControlService || currentOperation !== null || !hyphaManager}
+                disabled={!microscopeControlService || currentOperation !== null || !hyphaManager || microscopeBusy}
                 title={!hyphaManager ? "HyphaManager not connected" : (isWebRtcActive ? "Stop Live Stream" : "Start Live Stream")}
               >
                 <i className="fas fa-video icon mr-1"></i> {isWebRtcActive ? 'Stop Live' : 'Start Live'}
