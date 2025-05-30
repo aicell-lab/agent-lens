@@ -665,7 +665,7 @@ const MicroscopeControlPanel = ({
               <button
                 className={`control-button live-button ${isWebRtcActive ? 'bg-red-500 hover:bg-red-600' : 'bg-purple-500 hover:bg-purple-600'} text-white w-1/5 px-1.5 py-0.5 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed`}
                 onClick={toggleWebRtcStream}
-                disabled={!microscopeControlService || currentOperation !== null || !hyphaManager || microscopeBusy}
+                disabled={!microscopeControlService || currentOperation !== null || !hyphaManager}
                 title={!hyphaManager ? "HyphaManager not connected" : (isWebRtcActive ? "Stop Live Stream" : "Start Live Stream")}
               >
                 <i className="fas fa-video icon mr-1"></i> {isWebRtcActive ? 'Stop Live' : 'Start Live'}
