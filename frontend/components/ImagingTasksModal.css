@@ -60,10 +60,10 @@
 .modal-input {
   width: 100%;
   padding: 0.5rem;
-  border: 1px solid #ced4da; /* Tailwind: border-gray-300 */
-  border-radius: 0.25rem; /* Tailwind: rounded-md */
-  font-size: 0.875rem; /* Tailwind: text-sm */
-  transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  margin-bottom: 0.5rem; /* Add some space below inputs */
 }
 
 .modal-input:focus {
@@ -152,4 +152,77 @@ textarea.modal-input {
 
 .imaging-tasks-modal-footer .action-button + .action-button {
     margin-left: 0.5rem; /* Tailwind: ml-2 if using space-x utilities on parent is not feasible */
+}
+
+/* Styles for the Well Plate Grid */
+.well-plate-grid-container {
+  margin-bottom: 1rem;
+  user-select: none; /* Prevent text selection while dragging */
+}
+
+.well-plate-grid {
+  display: grid;
+  /* 1fr for row labels, 12 * 1fr for cells */
+  grid-template-columns: minmax(20px, auto) repeat(12, 1fr);
+  grid-template-rows: minmax(20px, auto) repeat(8, 1fr); /* 1fr for col labels, 8 * 1fr for cells */
+  border: 1px solid #ccc;
+  width: fit-content; /* Adjust width to content */
+  min-width: 300px; /* Minimum width to ensure it doesn't get too squished */
+  max-width: 100%;
+}
+
+.grid-row {
+  display: contents; /* Allows cells to be direct children of the grid for layout */
+}
+
+.grid-col-labels {
+    display: contents; /* Allows labels to be direct children of the grid */
+}
+
+.grid-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: bold;
+  color: #555;
+  background-color: #f0f0f0;
+  border: 1px solid #ddd;
+  padding: 2px;
+  min-width: 20px; /* Ensure labels have some width */
+  min-height: 20px; /* Ensure labels have some height */
+}
+
+.grid-cell {
+  border: 1px solid #eee;
+  background-color: #fff;
+  cursor: pointer;
+  aspect-ratio: 1 / 1; /* Make cells square */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.6rem; /* For any text inside cells, if needed */
+  transition: background-color 0.1s ease-in-out;
+  min-width: 20px; /* Minimum cell width */
+  min-height: 20px; /* Minimum cell height */
+}
+
+.grid-cell:hover {
+  background-color: #e0e0e0;
+}
+
+.grid-cell.selected {
+  background-color: #77b5fe; /* A nice blue for selection */
+  border-color: #5c99db;
+}
+
+/* Ensure the first cell (top-left corner for labels) is styled like a label */
+.well-plate-grid > .grid-col-labels > div:first-child {
+    background-color: #f0f0f0; /* Match label background */
+    border: 1px solid #ddd; /* Match label border */
+}
+
+/* Ensure select also uses modal-input styles or has its own */
+select.modal-input {
+  height: auto; /* Adjust if padding makes it too tall */
 } 

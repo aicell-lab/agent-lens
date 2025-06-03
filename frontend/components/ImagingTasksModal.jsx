@@ -1,6 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import PropTypes from 'prop-types';
 import './ImagingTasksModal.css'; // We will create this CSS file
+
+const ROW_LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+const COL_LABELS = Array.from({ length: 12 }, (_, i) => i + 1);
 
 const ImagingTasksModal = ({
   isOpen,
@@ -11,15 +14,25 @@ const ImagingTasksModal = ({
   showNotification,
   selectedMicroscopeId,
   onTaskChange, // Callback to refresh tasks in parent
+  incubatorControlService, // New prop
 }) => {
   // State for new task form fields
   const [taskName, setTaskName] = useState('');
-  const [incubatorSlot, setIncubatorSlot] = useState('1'); // Default to 1
+  const [incubatorSlot, setIncubatorSlot] = useState(''); // Default to empty, will be populated
+  const [availableSlots, setAvailableSlots] = useState([]);
+  const [slotsLoading, setSlotsLoading] = useState(false);
+  const [slotsError, setSlotsError] = useState(null);
+
   const [illuminationChannels, setIlluminationChannels] = useState(['BF LED matrix full']);
   const [nx, setNx] = useState('1');
   const [ny, setNy] = useState('1');
   const [doReflectionAf, setDoReflectionAf] = useState(true);
-  const [imagingZone, setImagingZone] = useState('[[0,0],[0,0]]'); // Default to A1
+  
+  // State for visual imaging zone selection
+  const [imagingZoneString, setImagingZoneString] = useState('[[0,0],[0,0]]'); // Keep this for the final JSON string
+  const [selectionStartCell, setSelectionStartCell] = useState(null); // [rowIdx, colIdx]
+  const [selectionEndCell, setSelectionEndCell] = useState(null); // [rowIdx, colIdx]
+  const [isDragging, setIsDragging] = useState(false);
 
   // State for time point generation
   const [minDateTime, setMinDateTime] = useState('');
@@ -28,37 +41,144 @@ const ImagingTasksModal = ({
   const [intervalMinutes, setIntervalMinutes] = useState('30'); // In minutes
   const [pendingTimePoints, setPendingTimePoints] = useState(''); // Text area for ISO strings
 
+  const fetchIncubatorSlots = useCallback(async () => {
+    if (!incubatorControlService) {
+      setSlotsError('Incubator control service not available.');
+      return;
+    }
+    setSlotsLoading(true);
+    setSlotsError(null);
+    try {
+      appendLog('Fetching incubator slot information...');
+      const allSlotInfo = await incubatorControlService.get_slot_information();
+      appendLog(`Received ${allSlotInfo.length} slot entries.`);
+      // Assuming allSlotInfo is an array of objects like {id: 'slot_1', name: 'Sample A', metadata: {occupied: true, slot_number: 1}}
+      // Or it could be simpler, like [{slot_number: 1, sample_name: 'Test'}, ...]
+      // We need to adapt this based on the actual structure of allSlotInfo
+      const processedSlots = allSlotInfo
+        .map(slot => ({
+          // Attempt to get a numeric slot_number, falling back to parsing from id or name if necessary
+          value: slot.slot_number || slot.metadata?.slot_number || parseInt(String(slot.id || slot.name).replace(/\D/g, ''), 10),
+          label: `${slot.name || `Slot ${slot.slot_number || slot.metadata?.slot_number || 'N/A'}`} ${slot.metadata?.occupied ? '(Occupied)' : '(Empty)'}`,
+          occupied: slot.metadata?.occupied || false, // Add an 'occupied' field for potential filtering or display
+        }))
+        .filter(slot => !isNaN(slot.value)) // Ensure value is a number
+        .sort((a, b) => a.value - b.value);
+
+      setAvailableSlots(processedSlots);
+      if (processedSlots.length > 0) {
+        setIncubatorSlot(String(processedSlots[0].value)); // Default to the first available slot's value
+      } else {
+        setIncubatorSlot(''); // No slots available
+        setSlotsError('No incubator slots found or could not parse slot information.');
+      }
+      appendLog(`Processed ${processedSlots.length} slots for selection.`);
+    } catch (error) {
+      appendLog(`Error fetching incubator slots: ${error.message}`);
+      showNotification(`Error fetching incubator slots: ${error.message}`, 'error');
+      setSlotsError(`Failed to fetch slots: ${error.message}`);
+      setAvailableSlots([]);
+    } finally {
+      setSlotsLoading(false);
+    }
+  }, [incubatorControlService, appendLog, showNotification]);
+
   useEffect(() => {
-    if (isOpen && !task) { // Reset form when opening for a new task
+    if (isOpen && !task) { // Reset form and fetch slots when opening for a new task
       const now = new Date();
       const offset = now.getTimezoneOffset() * 60000;
       const localISOTime = new Date(now.getTime() - offset).toISOString().slice(0, 16);
       setMinDateTime(localISOTime);
-      setStartTime(localISOTime); // Default start time to current time
+      setStartTime(localISOTime);
       setEndTime('');
-
       setTaskName('');
-      setIncubatorSlot('1');
       setIlluminationChannels(['BF LED matrix full']);
       setNx('1');
       setNy('1');
       setDoReflectionAf(true);
-      setImagingZone('[[0,0],[0,0]]'); // Default to A1, e.g. for a single well A1
       setIntervalMinutes('30');
       setPendingTimePoints('');
+      
+      // Reset imaging zone selection
+      setSelectionStartCell([0,0]); // Default to A1
+      setSelectionEndCell([0,0]); // Default to A1
+      setImagingZoneString('[[0,0],[0,0]]');
+      setIsDragging(false);
+
+      if (incubatorControlService) {
+        fetchIncubatorSlots();
+      } else {
+        setAvailableSlots([]);
+        setIncubatorSlot('');
+        // setSlotsError('Incubator service not available on open.'); // Optional: inform user
+      }
     } else if (isOpen && task) {
-      // If editing a task (though currently read-only), you might want to set minDateTime as well
-      // For now, keeping it simple as editing is not the primary focus
       const now = new Date();
       const offset = now.getTimezoneOffset() * 60000;
       const localISOTime = new Date(now.getTime() - offset).toISOString().slice(0, 16);
       setMinDateTime(localISOTime);
+      // If viewing an existing task, you might want to display its imaging zone visually too.
+      // For now, the grid is primarily for new task creation.
+      // And also fetch/set incubator slot if needed for display.
     }
-  }, [isOpen, task]);
+  }, [isOpen, task, incubatorControlService, fetchIncubatorSlots]);
+
+  // Update imagingZoneString whenever selection changes and dragging stops
+  useEffect(() => {
+    if (!isDragging && selectionStartCell && selectionEndCell) {
+      const r1 = Math.min(selectionStartCell[0], selectionEndCell[0]);
+      const c1 = Math.min(selectionStartCell[1], selectionEndCell[1]);
+      const r2 = Math.max(selectionStartCell[0], selectionEndCell[0]);
+      const c2 = Math.max(selectionStartCell[1], selectionEndCell[1]);
+      setImagingZoneString(JSON.stringify([[r1, c1], [r2, c2]]));
+    }
+  }, [selectionStartCell, selectionEndCell, isDragging]);
 
   if (!isOpen) {
     return null;
   }
+
+  const handleCellMouseDown = (rowIndex, colIndex) => {
+    setSelectionStartCell([rowIndex, colIndex]);
+    setSelectionEndCell([rowIndex, colIndex]);
+    setIsDragging(true);
+  };
+
+  const handleCellMouseEnter = (rowIndex, colIndex) => {
+    if (isDragging) {
+      setSelectionEndCell([rowIndex, colIndex]);
+    }
+  };
+
+  const handleMouseUpWindow = useCallback(() => {
+    if(isDragging) {
+        setIsDragging(false);
+        // imagingZoneString is updated by the useEffect dependent on isDragging
+    }
+  }, [isDragging]);
+
+  useEffect(() => {
+    window.addEventListener('mouseup', handleMouseUpWindow);
+    return () => {
+      window.removeEventListener('mouseup', handleMouseUpWindow);
+    };
+  }, [handleMouseUpWindow]);
+
+  const getSelectedCells = () => {
+    if (!selectionStartCell || !selectionEndCell) return {};
+    const r1 = Math.min(selectionStartCell[0], selectionEndCell[0]);
+    const c1 = Math.min(selectionStartCell[1], selectionEndCell[1]);
+    const r2 = Math.max(selectionStartCell[0], selectionEndCell[0]);
+    const c2 = Math.max(selectionStartCell[1], selectionEndCell[1]);
+    const selected = {};
+    for (let r = r1; r <= r2; r++) {
+      for (let c = c1; c <= c2; c++) {
+        selected[`${r}-${c}`] = true;
+      }
+    }
+    return selected;
+  };
+  const currentSelectedCells = getSelectedCells();
 
   const generateTimePoints = () => {
     if (!startTime || !endTime || !intervalMinutes) {
@@ -105,9 +225,9 @@ const ImagingTasksModal = ({
       showNotification('Task Name is required.', 'warning');
       return;
     }
-    if (!incubatorSlot.trim()){
-      showNotification('Incubator Slot is required.', 'warning');
-      return;
+    if (!incubatorSlot) { // Check if incubatorSlot is selected
+        showNotification('Incubator Slot is required.', 'warning');
+        return;
     }
     if (!nx.trim()){
         showNotification('Nx is required.', 'warning');
@@ -121,7 +241,7 @@ const ImagingTasksModal = ({
         showNotification('At least one Illumination Channel is required.', 'warning');
         return;
     }
-    if (!imagingZone.trim()) {
+    if (!imagingZoneString.trim()) {
         showNotification('Imaging Zone is required.', 'warning');
         return;
     }
@@ -134,7 +254,7 @@ const ImagingTasksModal = ({
 
     let parsedImagingZone;
     try {
-      parsedImagingZone = JSON.parse(imagingZone);
+      parsedImagingZone = JSON.parse(imagingZoneString);
       if (!Array.isArray(parsedImagingZone) || parsedImagingZone.length !== 2 || 
           !Array.isArray(parsedImagingZone[0]) || parsedImagingZone[0].length !== 2 ||
           !Array.isArray(parsedImagingZone[1]) || parsedImagingZone[1].length !== 2 ||
@@ -166,9 +286,8 @@ const ImagingTasksModal = ({
         imaging_zone: parsedImagingZone,
         Nx: parseInt(nx, 10),
         Ny: parseInt(ny, 10),
-        illuminate_channels: illuminationChannels, // Assuming this is already an array of strings
+        illuminate_channels: illuminationChannels,
         do_reflection_af: doReflectionAf,
-        // imaging_completed and imaging_started will be set by the server
       },
     };
 
@@ -278,28 +397,60 @@ const ImagingTasksModal = ({
 
               <div className="grid grid-cols-2 gap-4 mb-3">
                 <div className="form-group">
-                  <label htmlFor="incubatorSlot" className="block font-medium mb-1" title="The sample is located in this slot within the incubator.">
-                    Incubator Slot:<span className="text-red-500">*</span>
-                  </label>
-                  <input type="number" id="incubatorSlot" value={incubatorSlot} onChange={(e) => setIncubatorSlot(e.target.value)} min="1" className="modal-input" required />
+                  <label htmlFor="incubatorSlot" className="block font-medium mb-1">Incubator Slot:<span className="text-red-500">*</span></label>
+                  {slotsLoading && <p className="text-xs text-gray-500">Loading slots...</p>}
+                  {slotsError && <p className="text-xs text-red-500">{slotsError}</p>}
+                  {!slotsLoading && !slotsError && availableSlots.length === 0 && <p className="text-xs text-gray-500">No slots available or service not connected.</p>}
+                  {!slotsLoading && !slotsError && availableSlots.length > 0 && (
+                    <select 
+                      id="incubatorSlot" 
+                      value={incubatorSlot} 
+                      onChange={(e) => setIncubatorSlot(e.target.value)} 
+                      className="modal-input" 
+                      required
+                    >
+                      {availableSlots.map(slot => (
+                        <option key={slot.value} value={slot.value} disabled={slot.occupied}>
+                          {slot.label}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
                 <div className="form-group">
-                    <label htmlFor="imagingZone" className="block font-medium mb-1" title="Define well/region, e.g., A1 is [[0,0],[0,0]], B1 is [[1,0],[1,0]]. A1-A3 is [[0,0],[0,2]]. Uses 0-indexed [row,col].">
-                        Imaging Zone (JSON):<span className="text-red-500">*</span>
-                    </label>
-                    <input type="text" id="imagingZone" value={imagingZone} onChange={(e) => setImagingZone(e.target.value)} className="modal-input" placeholder='[[0,0],[0,0]] for A1' required />
-                </div>
-                <div className="form-group">
-                  <label htmlFor="nx" className="block font-medium mb-1" title="Number of scan FOVs for each well. Distance between FOVs is 0.9mm.">
-                    Nx:<span className="text-red-500">*</span>
-                    </label>
+                  <label htmlFor="nx" className="block font-medium mb-1">Nx:<span className="text-red-500">*</span></label>
                   <input type="number" id="nx" value={nx} onChange={(e) => setNx(e.target.value)} min="1" className="modal-input" required />
                 </div>
                 <div className="form-group">
-                  <label htmlFor="ny" className="block font-medium mb-1" title="Number of scan FOVs for each well. Distance between FOVs is 0.9mm.">
-                    Ny:<span className="text-red-500">*</span>
-                    </label>
+                  <label htmlFor="ny" className="block font-medium mb-1">Ny:<span className="text-red-500">*</span></label>
                   <input type="number" id="ny" value={ny} onChange={(e) => setNy(e.target.value)} min="1" className="modal-input" required />
+                </div>
+              </div>
+              
+              <div className="form-group mb-3">
+                <label className="block font-medium mb-1">Imaging Zone:<span className="text-red-500">*</span> <span className='text-xs text-gray-500'> (Selected: {imagingZoneString})</span></label>
+                <div className="well-plate-grid-container" onMouseLeave={() => { if (isDragging) setIsDragging(false); /* Stop drag if mouse leaves grid */ }}>
+                  <div className="well-plate-grid">
+                    <div className="grid-col-labels">{/* Empty corner */}
+                        <div></div> 
+                        {COL_LABELS.map(label => <div key={`col-${label}`} className="grid-label">{label}</div>)}
+                    </div>
+                    {ROW_LABELS.map((rowLabel, rowIndex) => (
+                      <div key={`row-${rowIndex}`} className="grid-row">
+                        <div className="grid-label">{rowLabel}</div>
+                        {COL_LABELS.map((colLabel, colIndex) => (
+                          <div 
+                            key={`cell-${rowIndex}-${colIndex}`}
+                            className={`grid-cell ${currentSelectedCells[`${rowIndex}-${colIndex}`] ? 'selected' : ''}`}
+                            onMouseDown={() => handleCellMouseDown(rowIndex, colIndex)}
+                            onMouseEnter={() => handleCellMouseEnter(rowIndex, colIndex)}
+                          >
+                            {/* Optional: display cell content or identifier */}
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
               
@@ -399,12 +550,13 @@ const ImagingTasksModal = ({
 ImagingTasksModal.propTypes = {
   isOpen: PropTypes.bool.isRequired,
   onClose: PropTypes.func.isRequired,
-  task: PropTypes.object, // The task object to manage, or null for new task
-  orchestratorManagerService: PropTypes.object, // For API calls
+  task: PropTypes.object,
+  orchestratorManagerService: PropTypes.object,
   appendLog: PropTypes.func.isRequired,
   showNotification: PropTypes.func.isRequired,
   selectedMicroscopeId: PropTypes.string.isRequired,
-  onTaskChange: PropTypes.func, // Added prop type
+  onTaskChange: PropTypes.func,
+  incubatorControlService: PropTypes.object, // Added prop type
 };
 
 export default ImagingTasksModal; 
