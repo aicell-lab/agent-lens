@@ -536,18 +536,22 @@ const MicroscopeControlPanel = ({
     }
   };
 
-  const toggleLight = async () => {
-    if (!microscopeControlService) return;
+  const setLaserReference = async () => {
+    if (!microscopeControlService) {
+      appendLog("Set Laser Reference: Microscope service not available.");
+      if (showNotification) showNotification("Microscope service not available to set laser reference.", 'warning');
+      return;
+    }
     try {
       setMicroscopeBusy(true);
-      if (!isLightOn) {
-        appendLog('Light turned on.');
-      } else {
-        appendLog('Light turned off.');
-      }
-      setIsLightOn(!isLightOn);
+      appendLog('Setting laser reference...');
+      await microscopeControlService.set_laser_reference(); 
+      appendLog('Laser reference set successfully.');
+      if (showNotification) showNotification('Laser reference set successfully.', 'success');
     } catch (error) {
-      appendLog(`Error toggling light: ${error.message}`);
+      appendLog(`Error setting laser reference: ${error.message}`);
+      if (showNotification) showNotification(`Error setting laser reference: ${error.message}`, 'error');
+      console.error("[MicroscopeControlPanel] Error setting laser reference:", error);
     } finally {
       setMicroscopeBusy(false);
     }
@@ -734,13 +738,6 @@ const MicroscopeControlPanel = ({
             <div className="horizontal-buttons flex justify-between space-x-1">
               <button
                 className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/5 px-1.5 py-0.5 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
-                onClick={toggleLight}
-                disabled={!microscopeControlService || currentOperation !== null}
-              >
-                <i className="fas fa-lightbulb icon mr-1"></i> {isLightOn ? 'Light Off' : 'Light On'}
-              </button>
-              <button
-                className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/5 px-1.5 py-0.5 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
                 onClick={contrastAutoFocus}
                 disabled={!microscopeControlService || currentOperation !== null}
               >
@@ -752,6 +749,13 @@ const MicroscopeControlPanel = ({
                 disabled={!microscopeControlService || currentOperation !== null}
               >
                 <i className="fas fa-bullseye icon mr-1"></i> Laser AF
+              </button>
+              <button
+                className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/5 px-1.5 py-0.5 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
+                onClick={setLaserReference}
+                disabled={!microscopeControlService || currentOperation !== null}
+              >
+                <i className="fas fa-bookmark icon mr-1"></i> Set Ref
               </button>
               <button
                 className="control-button snap-button bg-green-500 text-white hover:bg-green-600 w-1/5 px-1.5 py-0.5 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
