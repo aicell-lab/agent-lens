@@ -5,6 +5,15 @@ import './ImagingTasksModal.css'; // We will create this CSS file
 const ROW_LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
 const COL_LABELS = Array.from({ length: 12 }, (_, i) => i + 1);
 
+const DEFAULT_ILLUMINATION_SETTINGS = [
+  { channel: 'BF LED matrix full', intensity: 28.0, exposure_time: 20.0, enabled: true },
+  { channel: 'Fluorescence 405 nm Ex', intensity: 27.0, exposure_time: 60.0, enabled: false },
+  { channel: 'Fluorescence 488 nm Ex', intensity: 27.0, exposure_time: 60.0, enabled: true },
+  { channel: 'Fluorescence 561nm Ex', intensity: 98.0, exposure_time: 100.0, enabled: true },
+  { channel: 'Fluorescence 638nm Ex', intensity: 27.0, exposure_time: 60.0, enabled: false },
+  { channel: 'Fluorescence 730nm Ex', intensity: 27.0, exposure_time: 60.0, enabled: false }
+];
+
 const ImagingTasksModal = ({
   isOpen,
   onClose,
@@ -23,13 +32,15 @@ const ImagingTasksModal = ({
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [slotsError, setSlotsError] = useState(null);
 
-  const [illuminationChannels, setIlluminationChannels] = useState(['BF LED matrix full']);
-  const [nx, setNx] = useState('1');
-  const [ny, setNy] = useState('1');
+  const [illuminationSettings, setIlluminationSettings] = useState(DEFAULT_ILLUMINATION_SETTINGS);
+  const [nx, setNx] = useState('3');
+  const [ny, setNy] = useState('3');
+  const [doContrastAutofocus, setDoContrastAutofocus] = useState(false);
   const [doReflectionAf, setDoReflectionAf] = useState(true);
+  const [wellPlateType, setWellPlateType] = useState('96');
   
   // State for visual imaging zone selection
-  const [imagingZoneString, setImagingZoneString] = useState('[[0,0],[0,0]]'); // Keep this for the final JSON string
+  const [scanningZoneString, setScanningZoneString] = useState('[[0,0],[0,0]]'); // Keep this for the final JSON string
   const [selectionStartCell, setSelectionStartCell] = useState(null); // [rowIdx, colIdx]
   const [selectionEndCell, setSelectionEndCell] = useState(null); // [rowIdx, colIdx]
   const [isDragging, setIsDragging] = useState(false);
@@ -99,17 +110,19 @@ const ImagingTasksModal = ({
       setStartTime(localISOTime);
       setEndTime('');
       setTaskName('');
-      setIlluminationChannels(['BF LED matrix full']);
-      setNx('1');
-      setNy('1');
+      setIlluminationSettings(DEFAULT_ILLUMINATION_SETTINGS);
+      setNx('3');
+      setNy('3');
+      setDoContrastAutofocus(false);
       setDoReflectionAf(true);
+      setWellPlateType('96');
       setIntervalMinutes('30');
       setPendingTimePoints('');
       
       // Reset imaging zone selection
       setSelectionStartCell([0,0]); // Default to A1
       setSelectionEndCell([0,0]); // Default to A1
-      setImagingZoneString('[[0,0],[0,0]]');
+      setScanningZoneString('[[0,0],[0,0]]');
       setIsDragging(false);
 
       if (incubatorControlService) {
@@ -137,7 +150,7 @@ const ImagingTasksModal = ({
       const c1 = Math.min(selectionStartCell[1], selectionEndCell[1]);
       const r2 = Math.max(selectionStartCell[0], selectionEndCell[0]);
       const c2 = Math.max(selectionStartCell[1], selectionEndCell[1]);
-      setImagingZoneString(JSON.stringify([[r1, c1], [r2, c2]]));
+      setScanningZoneString(JSON.stringify([[r1, c1], [r2, c2]]));
     }
   }, [selectionStartCell, selectionEndCell, isDragging]);
 
@@ -186,6 +199,14 @@ const ImagingTasksModal = ({
     return selected;
   };
   const currentSelectedCells = getSelectedCells();
+
+  const handleIlluminationSettingChange = (index, field, value) => {
+    setIlluminationSettings(prev => {
+      const newSettings = [...prev];
+      newSettings[index] = { ...newSettings[index], [field]: value };
+      return newSettings;
+    });
+  };
 
   const generateTimePoints = () => {
     if (!startTime || !endTime || !intervalMinutes) {
@@ -244,42 +265,37 @@ const ImagingTasksModal = ({
         showNotification('Ny is required.', 'warning');
         return;
     }
-    if (illuminationChannels.length === 0) {
-        showNotification('At least one Illumination Channel is required.', 'warning');
-        return;
+    
+    const enabledIlluminationSettings = illuminationSettings.filter(setting => setting.enabled);
+    if (enabledIlluminationSettings.length === 0) { 
+      showNotification('At least one Illumination Channel must be enabled.', 'warning'); 
+      return; 
     }
-    if (!imagingZoneString.trim()) {
-        showNotification('Imaging Zone is required.', 'warning');
-        return;
-    }
-
+    
+    if (!scanningZoneString.trim()) { showNotification('Scanning Zone is required.', 'warning'); return; }
+    
     const timePointsArray = pendingTimePoints.split('\n').map(tp => tp.trim()).filter(tp => tp);
-    if (timePointsArray.length === 0) {
-        showNotification('At least one Pending Time Point is required.', 'warning');
-        return;
-    }
+    if (timePointsArray.length === 0) { showNotification('At least one Pending Time Point is required.', 'warning'); return; }
 
-    let parsedImagingZone;
+    let parsedScanningZone;
     try {
-      parsedImagingZone = JSON.parse(imagingZoneString);
-      if (!Array.isArray(parsedImagingZone) || parsedImagingZone.length !== 2 || 
-          !Array.isArray(parsedImagingZone[0]) || parsedImagingZone[0].length !== 2 ||
-          !Array.isArray(parsedImagingZone[1]) || parsedImagingZone[1].length !== 2 ||
-          !parsedImagingZone.every(p => p.every(coord => typeof coord === 'number'))){
-        throw new Error('Imaging zone must be an array of two [row,col] index pairs, e.g., [[0,0],[0,0]] for A1 or [[0,0],[2,2]] for A1-C3 region.');
+      parsedScanningZone = JSON.parse(scanningZoneString);
+      if (!Array.isArray(parsedScanningZone) || parsedScanningZone.length !== 2 || 
+          !Array.isArray(parsedScanningZone[0]) || parsedScanningZone[0].length !== 2 ||
+          !Array.isArray(parsedScanningZone[1]) || parsedScanningZone[1].length !== 2 ||
+          !parsedScanningZone.every(p => p.every(coord => typeof coord === 'number'))){
+        throw new Error('Scanning zone must be an array of two [row,col] index pairs.');
       }
     } catch (e) {
-      showNotification(`Invalid Imaging Zone format: ${e.message}`, 'error');
-      return;
+      showNotification(`Invalid Scanning Zone format: ${e.message}`, 'error'); return;
     }
 
-    // Basic validation for ISO format of each time point (server will do more thorough validation)
-    for (const tp of timePointsArray) {
-        if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(tp)) {
-            showNotification(`Invalid time point format: ${tp}. Expected YYYY-MM-DDTHH:mm:ss (naive local time).`, 'error');
-            return;
-        }
-    }
+    // Format illumination settings for the new API
+    const formattedIlluminationSettings = enabledIlluminationSettings.map(setting => ({
+      channel: setting.channel,
+      intensity: parseFloat(setting.intensity),
+      exposure_time: parseFloat(setting.exposure_time)
+    }));
 
     const taskDefinition = {
       name: taskName.trim(),
@@ -289,12 +305,15 @@ const ImagingTasksModal = ({
           ? `microscope-control-squid-${selectedMicroscopeId.endsWith('1') ? '1' : '2'}`
           : null,
         pending_time_points: timePointsArray,
-        imaged_time_points: [], // Always empty for new tasks
-        imaging_zone: parsedImagingZone,
+        imaged_time_points: [],
+        well_plate_type: wellPlateType,
+        illumination_settings: formattedIlluminationSettings,
+        do_contrast_autofocus: doContrastAutofocus,
+        do_reflection_af: doReflectionAf,
+        imaging_zone: parsedScanningZone,
         Nx: parseInt(nx, 10),
         Ny: parseInt(ny, 10),
-        illuminate_channels: illuminationChannels,
-        do_reflection_af: doReflectionAf,
+        action_ID: taskName.trim(),
       },
     };
 
@@ -341,23 +360,6 @@ const ImagingTasksModal = ({
     }
   };
 
-  const handleChannelChange = (channelName) => {
-    setIlluminationChannels(prev => 
-      prev.includes(channelName) 
-        ? prev.filter(c => c !== channelName) 
-        : [...prev, channelName]
-    );
-  };
-
-  const availableChannels = [
-    "BF LED matrix full", 
-    "Fluorescence 405 nm Ex", 
-    "Fluorescence 488 nm Ex", 
-    "Fluorescence 561nm Ex", 
-    "Fluorescence 638nm Ex", 
-    "Fluorescence 730nm Ex"
-  ];
-
   return (
     <div className="imaging-tasks-modal-overlay">
       <div className="imaging-tasks-modal-content">
@@ -376,11 +378,14 @@ const ImagingTasksModal = ({
               <p><strong>Status:</strong> {task.operational_state?.status || 'N/A'}</p>
               <p><strong>Allocated Microscope:</strong> {task.settings?.allocated_microscope || 'N/A'}</p>
               <p><strong>Incubator Slot:</strong> {task.settings?.incubator_slot || 'N/A'}</p>
+              <p><strong>Well Plate Type:</strong> {task.settings?.well_plate_type || 'N/A'}</p>
+              <p><strong>Action ID:</strong> {task.settings?.action_ID || 'N/A'}</p>
               <p><strong>Imaging Started:</strong> {task.settings?.imaging_started ? 'Yes' : 'No'}</p>
               <p><strong>Imaging Completed:</strong> {task.settings?.imaging_completed ? 'Yes' : 'No'}</p>
-              <p><strong>Illumination Channels:</strong> {task.settings?.illuminate_channels?.join(', ') || 'N/A'}</p>
+              <p><strong>Illumination Settings:</strong> {task.settings?.illumination_settings ? JSON.stringify(task.settings.illumination_settings) : 'N/A'}</p>
               <p><strong>Nx, Ny:</strong> {task.settings?.Nx}, {task.settings?.Ny}</p>
-              <p><strong>Imaging Zone:</strong> {JSON.stringify(task.settings?.imaging_zone)}</p>
+              <p><strong>Imaging Zone:</strong> {JSON.stringify(task.settings?.imaging_zone || task.settings?.scanning_zone)}</p>
+              <p><strong>Contrast AF:</strong> {task.settings?.do_contrast_autofocus ? 'Yes' : 'No'}</p>
               <p><strong>Reflection AF:</strong> {task.settings?.do_reflection_af ? 'Yes' : 'No'}</p>
               <p><strong>Pending Time Points:</strong> {task.settings?.pending_time_points?.length || 0}</p>
               <ul className="list-disc pl-5 max-h-20 overflow-y-auto">
@@ -395,7 +400,7 @@ const ImagingTasksModal = ({
             // Form for creating a new task
             <div className="new-task-form text-sm">
               <p className="text-xs text-gray-600 mb-3 italic">
-                Configure a new time-lapse imaging task. Currently supports glass bottom 96 well plates.
+                Configure a new time-lapse imaging task using the updated scan_well_plate API.
               </p>
               <div className="form-group mb-3">
                 <label htmlFor="taskName" className="block font-medium mb-1">Task Name:<span className="text-red-500">*</span></label>
@@ -435,7 +440,7 @@ const ImagingTasksModal = ({
               </div>
               
               <div className="form-group mb-3">
-                <label className="block font-medium mb-1">Imaging Zone:<span className="text-red-500">*</span> <span className='text-xs text-gray-500'> (Selected: {imagingZoneString})</span></label>
+                <label className="block font-medium mb-1">Imaging Zone:<span className="text-red-500">*</span> <span className='text-xs text-gray-500'> (Selected: {scanningZoneString})</span></label>
                 <div className="well-plate-grid-container" onMouseLeave={() => { if (isDragging) setIsDragging(false); /* Stop drag if mouse leaves grid */ }}>
                   <div className="well-plate-grid">
                     <div className="grid-col-labels">{/* Empty corner */}
@@ -462,23 +467,55 @@ const ImagingTasksModal = ({
               </div>
               
               <div className="form-group mb-3">
-                <label className="block font-medium mb-1">Illumination Channels:<span className="text-red-500">*</span></label>
-                <div className="channel-checkboxes grid grid-cols-2 gap-x-4 gap-y-1">
-                  {availableChannels.map(channel => (
-                    <label key={channel} className="flex items-center space-x-2">
+                <label className="block font-medium mb-1">Illumination Settings:<span className="text-red-500">*</span></label>
+                <div className="illumination-settings-grid">
+                  {illuminationSettings.map((setting, index) => (
+                    <div key={setting.channel} className="illumination-setting-row flex items-center gap-2 mb-2 p-2 border rounded">
                       <input 
                         type="checkbox" 
-                        checked={illuminationChannels.includes(channel)}
-                        onChange={() => handleChannelChange(channel)}
-                        className="form-checkbox h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                        checked={setting.enabled}
+                        onChange={(e) => handleIlluminationSettingChange(index, 'enabled', e.target.checked)}
+                        className="form-checkbox h-4 w-4 text-blue-600"
                       />
-                      <span>{channel}</span>
-                    </label>
+                      <span className="text-xs font-medium w-32">{setting.channel}</span>
+                      <div className="flex gap-1">
+                        <label className="text-xs">Intensity:</label>
+                        <input 
+                          type="number" 
+                          value={setting.intensity}
+                          onChange={(e) => handleIlluminationSettingChange(index, 'intensity', parseFloat(e.target.value) || 0)}
+                          min="0" max="100" step="0.1"
+                          className="w-16 px-1 py-0.5 text-xs border rounded"
+                          disabled={!setting.enabled}
+                        />
+                      </div>
+                      <div className="flex gap-1">
+                        <label className="text-xs">Exposure:</label>
+                        <input 
+                          type="number" 
+                          value={setting.exposure_time}
+                          onChange={(e) => handleIlluminationSettingChange(index, 'exposure_time', parseFloat(e.target.value) || 0)}
+                          min="0" step="0.1"
+                          className="w-16 px-1 py-0.5 text-xs border rounded"
+                          disabled={!setting.enabled}
+                        />
+                        <span className="text-xs text-gray-500">ms</span>
+                      </div>
+                    </div>
                   ))}
                 </div>
               </div>
 
-              <div className="form-group mb-4">
+              <div className="form-group mb-4 flex gap-4">
+                <label className="flex items-center space-x-2">
+                  <input 
+                    type="checkbox" 
+                    checked={doContrastAutofocus} 
+                    onChange={(e) => setDoContrastAutofocus(e.target.checked)} 
+                    className="form-checkbox h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                  />
+                  <span>Do Contrast Autofocus</span>
+                </label>
                 <label className="flex items-center space-x-2">
                   <input 
                     type="checkbox" 
