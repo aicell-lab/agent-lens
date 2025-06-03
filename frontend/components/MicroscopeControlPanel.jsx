@@ -604,15 +604,17 @@ const MicroscopeControlPanel = ({
       const tasks = await orchestratorManagerService.get_all_imaging_tasks();
       appendLog(`Fetched ${tasks.length} imaging tasks.`);
       
-      const microscopeNumber = selectedMicroscopeId.endsWith("1") ? "1" : selectedMicroscopeId.endsWith("2") ? "2" : null;
+      // Extract microscope identifier from the full service ID
+      const microscopeIdentifier = selectedMicroscopeId.includes('microscope-control-squid') 
+        ? `microscope-control-squid-${selectedMicroscopeId.endsWith('1') ? '1' : '2'}`
+        : null;
       
       const relevantTasks = tasks.filter(task => 
-        task.settings && task.settings.allocated_microscope === microscopeNumber
+        task.settings && task.settings.allocated_microscope === microscopeIdentifier
       );
       setImagingTasks(relevantTasks);
 
       // A task is considered active if its status is anything other than 'completed' or 'failed'
-      // (assuming 'failed' tasks don't necessarily keep the microscope continuously busy for new operations).
       const activeTask = relevantTasks.find(task => 
         task.operational_state && 
         task.operational_state.status !== "completed" && 
@@ -626,8 +628,6 @@ const MicroscopeControlPanel = ({
           showNotification(`Microscope has an unfinished imaging task: ${activeTask.name}. Controls may be limited.`, 'info');
         }
         setMicroscopeBusy(true); // CRITICAL: Set busy if an active task for this scope is found
-      } else {
-
       }
 
     } catch (error) {
@@ -953,6 +953,7 @@ const MicroscopeControlPanel = ({
           showNotification={showNotification}
           selectedMicroscopeId={selectedMicroscopeId}
           onTaskChange={fetchImagingTasks}
+          incubatorControlService={incubatorControlService}
           // TODO: Add other necessary props like hyphaManager if needed for API calls within modal
         />
       )}

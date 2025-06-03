@@ -178,7 +178,7 @@ export const initializeServices = async (
   );
   setRoboticArmService(roboticArmService);
 
-  const orchestratorManagerServiceIdFull = "reef-imaging/orchestrator-manager-simulation";
+  const orchestratorManagerServiceIdFull = "reef-imaging/orchestrator-manager";
   const orchestratorManagerService = await tryGetService(
     hyphaManager,
     "Orchestrator Manager",

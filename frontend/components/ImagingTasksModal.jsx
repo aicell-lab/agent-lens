@@ -132,12 +132,6 @@ const ImagingTasksModal = ({
         return;
     }
 
-    const microscopeNumber = selectedMicroscopeId.endsWith("1") ? "1" : selectedMicroscopeId.endsWith("2") ? "2" : null;
-    if (!microscopeNumber) {
-      showNotification('Could not determine allocated microscope from selected ID.', 'error');
-      return;
-    }
-
     let parsedImagingZone;
     try {
       parsedImagingZone = JSON.parse(imagingZone);
@@ -164,7 +158,9 @@ const ImagingTasksModal = ({
       name: taskName.trim(),
       settings: {
         incubator_slot: parseInt(incubatorSlot, 10),
-        allocated_microscope: microscopeNumber,
+        allocated_microscope: selectedMicroscopeId.includes('microscope-control-squid')
+          ? `microscope-control-squid-${selectedMicroscopeId.endsWith('1') ? '1' : '2'}`
+          : null,
         pending_time_points: timePointsArray,
         imaged_time_points: [], // Always empty for new tasks
         imaging_zone: parsedImagingZone,
