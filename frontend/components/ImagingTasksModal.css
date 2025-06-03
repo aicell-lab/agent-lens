@@ -1,0 +1,155 @@
+.imaging-tasks-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1050; /* Ensure it's above other content, adjust if needed */
+}
+
+.imaging-tasks-modal-content {
+  background-color: white;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+  width: 90%;
+  max-width: 600px; /* Max width for the modal */
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden; /* Prevents content from spilling out before scroll is active */
+}
+
+.imaging-tasks-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #e9ecef;
+  padding-bottom: 10px;
+  margin-bottom: 15px;
+}
+
+.imaging-tasks-modal-header h3 {
+  margin: 0;
+  font-size: 1.25rem; /* Tailwind: text-xl */
+}
+
+.modal-close-button {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  color: #6c757d; /* Tailwind: text-gray-500 */
+}
+.modal-close-button:hover {
+    color: #343a40; /* Tailwind: text-gray-800 */
+}
+
+.imaging-tasks-modal-body {
+  flex-grow: 1;
+  overflow-y: auto; /* Allows scrolling for long content */
+  padding-right: 10px; /* Add some padding for the scrollbar */
+}
+
+/* Styles for form elements within the modal */
+.modal-input {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid #ced4da; /* Tailwind: border-gray-300 */
+  border-radius: 0.25rem; /* Tailwind: rounded-md */
+  font-size: 0.875rem; /* Tailwind: text-sm */
+  transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+}
+
+.modal-input:focus {
+  border-color: #80bdff; /* Tailwind: focus:border-blue-500 (approx) */
+  outline: 0;
+  box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25); /* Tailwind: focus:ring-2 focus:ring-blue-200 (approx) */
+}
+
+.modal-input.text-xs {
+    font-size: 0.75rem; /* Tailwind: text-xs */
+}
+
+textarea.modal-input {
+    min-height: 80px;
+}
+
+.form-checkbox {
+  /* Using Tailwind classes directly in JSX for checkboxes as they are simple and effective */
+  /* Example: className="form-checkbox h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500" */
+  /* This class can be kept for any specific overrides if Tailwind is not enough or for non-Tailwind projects */
+}
+
+.channel-checkboxes label span {
+    font-size: 0.8rem; /* Smaller font for channel names */
+}
+
+.task-details p {
+    margin-bottom: 0.5rem; /* Tailwind: mb-2 */
+}
+
+.imaging-tasks-modal-footer {
+  border-top: 1px solid #e9ecef;
+  padding-top: 15px;
+  margin-top: 20px;
+  display: flex;
+  justify-content: flex-end; /* Align buttons to the right */
+}
+
+/* Using classes similar to main.css for buttons for consistency */
+.imaging-tasks-modal-footer .action-button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem; /* Smaller padding for modal buttons */
+  border: none;
+  border-radius: 0.3rem; /* Tailwind: rounded-md */
+  cursor: pointer;
+  font-size: 0.875rem; /* Tailwind: text-sm */
+  font-weight: 500;
+  text-decoration: none;
+  transition: all 0.2s ease;
+  min-width: 100px; /* Min width for buttons */
+  justify-content: center;
+}
+
+.imaging-tasks-modal-footer .action-button.primary {
+  background-color: #007bff; /* Tailwind: bg-blue-500 */
+  color: white;
+}
+.imaging-tasks-modal-footer .action-button.primary:hover:not(:disabled) {
+  background-color: #0056b3; /* Tailwind: hover:bg-blue-700 */
+}
+
+.imaging-tasks-modal-footer .action-button.secondary {
+  background-color: #6c757d; /* Tailwind: bg-gray-500 */
+  color: white;
+}
+.imaging-tasks-modal-footer .action-button.secondary:hover:not(:disabled) {
+  background-color: #5a6268; /* Tailwind: hover:bg-gray-600 */
+}
+
+.imaging-tasks-modal-footer .action-button.danger {
+  background-color: #dc3545; /* Tailwind: bg-red-500 */
+  color: white;
+}
+.imaging-tasks-modal-footer .action-button.danger:hover:not(:disabled) {
+  background-color: #c82333; /* Tailwind: hover:bg-red-600 */
+}
+
+.imaging-tasks-modal-footer .action-button:disabled {
+  background-color: #e9ecef; /* Tailwind: bg-gray-200 */
+  color: #6c757d; /* Tailwind: text-gray-400 */
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.imaging-tasks-modal-footer .action-button + .action-button {
+    margin-left: 0.5rem; /* Tailwind: ml-2 if using space-x utilities on parent is not feasible */
+} 

@@ -4,6 +4,7 @@ import ControlButton from './ControlButton';
 import CameraSettings from './CameraSettings';
 import ChatbotButton from './ChatbotButton';
 import SampleSelector from './SampleSelector';
+import ImagingTasksModal from './ImagingTasksModal';
 
 const WEBRTC_SERVICE_IDS = {
   "squid-control/squid-control-reef": "squid-control/video-track-squid-control-reef",
@@ -29,6 +30,7 @@ const MicroscopeControlPanel = ({
   setCurrentOperation,
   hyphaManager, // Changed from hyphaServer and hyphaAuthToken
   showNotification = null, // New prop for showing notifications
+  orchestratorManagerService, // New prop for orchestrator service
 }) => {
   const [isLightOn, setIsLightOn] = useState(false);
   const [xPosition, setXPosition] = useState(0);
@@ -71,6 +73,11 @@ const MicroscopeControlPanel = ({
   // Refs to hold the latest actual values for use in debounced effects
   const actualIlluminationIntensityRef = useRef(actualIlluminationIntensity);
   const actualCameraExposureRef = useRef(actualCameraExposure);
+
+  // New states for imaging tasks
+  const [imagingTasks, setImagingTasks] = useState([]);
+  const [isImagingModalOpen, setIsImagingModalOpen] = useState(false);
+  const [selectedTaskForModal, setSelectedTaskForModal] = useState(null);
 
   useEffect(() => {
     actualIlluminationIntensityRef.current = actualIlluminationIntensity;
@@ -569,6 +576,116 @@ const MicroscopeControlPanel = ({
     setIsRightPanelCollapsed(!isRightPanelCollapsed);
   };
 
+  // Effect to fetch imaging tasks
+  useEffect(() => {
+    if (!orchestratorManagerService || !selectedMicroscopeId) {
+      setImagingTasks([]); // Clear tasks if service or microscope ID is not available
+      return;
+    }
+
+    const fetchImagingTasks = async () => {
+      if (selectedMicroscopeId === "squid-control/squid-control-reef") {
+        appendLog("Time-lapse imaging not supported for simulated microscope.");
+        setImagingTasks([]);
+        // Do not set microscopeBusy here, as it's just not supported, not necessarily busy with a task
+        return;
+      }
+
+      try {
+        setMicroscopeBusy(true); // Assume busy while fetching/checking tasks
+        appendLog("Fetching imaging tasks...");
+        const tasks = await orchestratorManagerService.get_all_imaging_tasks();
+        appendLog(`Fetched ${tasks.length} imaging tasks.`);
+        
+        const microscopeNumber = selectedMicroscopeId.endsWith("1") ? "1" : selectedMicroscopeId.endsWith("2") ? "2" : null;
+        
+        const relevantTasks = tasks.filter(task => {
+          return task.settings && task.settings.allocated_microscope === microscopeNumber;
+        });
+        setImagingTasks(relevantTasks);
+
+        const activeTaskForThisMicroscope = relevantTasks.find(
+          (task) => task.operational_state && task.operational_state.status !== "completed"
+        );
+
+        if (activeTaskForThisMicroscope) {
+          appendLog(`Microscope ${selectedMicroscopeId} has an active imaging task: ${activeTaskForThisMicroscope.name}. Status: ${activeTaskForThisMicroscope.operational_state.status}`);
+          if (showNotification) {
+            showNotification(`Microscope has an unfinished imaging task: ${activeTaskForThisMicroscope.name}. Controls may be limited.`, 'info');
+          }
+          // Keep microscopeBusy true, as it was set at the start of this block if an active task is found.
+          // Note: Other operations in this component also setMicroscopeBusy. This effect primarily informs the user
+          // and ensures the busy state reflects ongoing tasks.
+        } else {
+          // No active task for *this* microscope, but we set it busy at the start.
+          // We need to be careful not to interfere with other operations setting microscopeBusy.
+          // If no other operation is making it busy, then this fetch indicates it's not busy due to tasks.
+          // For simplicity, let's only explicitly set it to false if no task makes it busy.
+          // Other operations will toggle it as needed.
+          // appendLog(`No active imaging tasks for ${selectedMicroscopeId} or all are completed.`);
+          // setMicroscopeBusy(false); // Only set to false if NO OTHER reason to be busy. This is tricky.
+          // The finally block below will set it to false if no task-related error occurs during fetch.
+        }
+
+      } catch (error) {
+        appendLog(`Error fetching imaging tasks: ${error.message}`);
+        console.error("[MicroscopeControlPanel] Error fetching imaging tasks:", error);
+        setImagingTasks([]);
+        // setMicroscopeBusy(false); // Error occurred, maybe not busy due to tasks.
+      } finally {
+        // Set microscopeBusy to false ONLY if no active task was found for THIS microscope
+        // AND no other operation is currently setting it to true.
+        // This is complex because microscopeBusy is a shared state.
+        // A simpler approach: if fetching tasks itself is an operation, it sets busy true at start and false at end (unless an active task dictates otherwise).
+        const microscopeNumber = selectedMicroscopeId.endsWith("1") ? "1" : selectedMicroscopeId.endsWith("2") ? "2" : null;
+        if (orchestratorManagerService && microscopeNumber) {
+            const tasks = await orchestratorManagerService.get_all_imaging_tasks().catch(() => []);
+            const activeTaskFound = tasks.some(task => 
+                task.settings && task.settings.allocated_microscope === microscopeNumber &&
+                task.operational_state && task.operational_state.status !== "completed"
+            );
+            if (!activeTaskFound) {
+                // Only set to false if no active task for this microscope.
+                // Other operations (like move, snap) will manage their own busy states.
+                // This might cause a flicker if another operation just finished.
+                // Consider a more robust busy state management if this becomes an issue.
+                 setMicroscopeBusy(false); 
+            } else {
+                 setMicroscopeBusy(true); // Ensure it's true if an active task for this scope exists
+            }
+        } else if (selectedMicroscopeId === "squid-control/squid-control-reef"){
+            setMicroscopeBusy(false); // Simulated scope is not busy with tasks
+        }
+        // If orchestratorManagerService is null, it means we are not managing tasks here, so don't change busy state.
+      }
+    };
+
+    fetchImagingTasks();
+    // Adding a polling mechanism for tasks might be useful but is omitted for now for simplicity.
+    // const taskInterval = setInterval(fetchImagingTasks, 5000); // Poll every 5 seconds
+    // return () => clearInterval(taskInterval);
+
+  }, [orchestratorManagerService, selectedMicroscopeId, appendLog, showNotification]);
+
+  const openImagingTaskModal = (task) => {
+    if (selectedMicroscopeId === "squid-control/squid-control-reef") {
+      appendLog("Time-lapse imaging management not supported for simulated microscope.");
+      if(showNotification) showNotification("Time-lapse imaging not supported for simulated microscope.", "info");
+      return;
+    }
+    setSelectedTaskForModal(task); // if task is null, it's for creating a new task
+    setIsImagingModalOpen(true);
+    appendLog(task ? `Opening modal to manage task: ${task.name}` : "Opening modal to create new imaging task.");
+  };
+
+  const closeImagingTaskModal = () => {
+    setIsImagingModalOpen(false);
+    setSelectedTaskForModal(null);
+    appendLog("Closed imaging task modal.");
+    // Optionally re-fetch tasks here if changes might have occurred
+    // fetchImagingTasks(); // if orchestratorManagerService.get_all_imaging_tasks was called inside modal.
+  };
+
   return (
     <div className="microscope-control-panel-container new-mcp-layout bg-white bg-opacity-95 p-4 rounded-lg shadow-lg border-l border-gray-300 box-border">
       {/* Left Side: Image Display */}
@@ -801,6 +918,44 @@ const MicroscopeControlPanel = ({
           </div>
         </div>
 
+        {/* Imaging Tasks Section - Moved here, above chatbot */}
+        {selectedMicroscopeId !== "squid-control/squid-control-reef" && orchestratorManagerService && (
+          <div className="imaging-tasks-section mb-3 p-3 border border-gray-300 rounded-lg">
+            <div className="flex justify-between items-center mb-2">
+              <h4 className="text-sm font-medium">Time-Lapse Imaging Tasks</h4>
+              <button
+                className="control-button bg-green-500 text-white hover:bg-green-600 px-2 py-1 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
+                onClick={() => openImagingTaskModal(null)} // null for new task
+                disabled={currentOperation !== null || microscopeBusy}
+                title="Create New Imaging Task"
+              >
+                <i className="fas fa-plus mr-1"></i> New Task
+              </button>
+            </div>
+            {imagingTasks.length === 0 && selectedMicroscopeId !== "squid-control/squid-control-reef" && (
+              <p className="text-xs text-gray-500">No imaging tasks found for this microscope.</p>
+            )}
+            {imagingTasks.length > 0 && (
+              <ul className="list-disc pl-5 space-y-1 text-xs">
+                {imagingTasks.map(task => (
+                  <li 
+                    key={task.name} 
+                    className={`cursor-pointer hover:text-blue-600 ${task.operational_state?.status !== 'completed' ? 'font-semibold text-blue-700' : 'text-gray-600'}`}
+                    onClick={() => openImagingTaskModal(task)}
+                    title={`Status: ${task.operational_state?.status || 'Unknown'}. Click to manage.`}
+                  >
+                    {task.name} ({task.operational_state?.status || 'Unknown'})
+                    {task.operational_state?.status !== 'completed' && <i className="fas fa-spinner fa-spin ml-2 text-blue-500"></i>}
+                  </li>
+                ))}
+              </ul>
+            )}
+             {selectedMicroscopeId === "squid-control/squid-control-reef" && (
+              <p className="text-xs text-gray-500 italic">Time-lapse imaging is not supported on the simulated microscope.</p>
+            )}
+          </div>
+        )}
+
         {/* Bottom-Right: Chatbot */}
         <div className="mcp-chatbot-area">
           <ChatbotButton 
@@ -810,6 +965,19 @@ const MicroscopeControlPanel = ({
           />
         </div>
       </div>
+
+      {isImagingModalOpen && (
+        <ImagingTasksModal
+          isOpen={isImagingModalOpen}
+          onClose={closeImagingTaskModal}
+          task={selectedTaskForModal}
+          orchestratorManagerService={orchestratorManagerService}
+          appendLog={appendLog}
+          showNotification={showNotification}
+          selectedMicroscopeId={selectedMicroscopeId}
+          // TODO: Add other necessary props like hyphaManager if needed for API calls within modal
+        />
+      )}
     </div>
   );
 };
@@ -832,6 +1000,7 @@ MicroscopeControlPanel.propTypes = {
   setCurrentOperation: PropTypes.func,
   hyphaManager: PropTypes.object, // Changed prop type
   showNotification: PropTypes.func, // Added prop type for notification function
+  orchestratorManagerService: PropTypes.object, // Added prop type
 };
 
 export default MicroscopeControlPanel; 

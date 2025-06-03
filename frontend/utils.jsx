@@ -110,6 +110,7 @@ export const initializeServices = async (
   setSegmentService,
   setIncubatorControlService,
   setRoboticArmService,
+  setOrchestratorManagerService, // Added new service setter
   appendLog,
   selectedMicroscopeId, // This is the full ID like "workspace/service-name"
   showNotification = null // New optional parameter for showing notifications
@@ -176,6 +177,17 @@ export const initializeServices = async (
     showNotification
   );
   setRoboticArmService(roboticArmService);
+
+  const orchestratorManagerServiceIdFull = "reef-imaging/orchestrator-manager-simulation";
+  const orchestratorManagerService = await tryGetService(
+    hyphaManager,
+    "Orchestrator Manager",
+    orchestratorManagerServiceIdFull,
+    null, // Assuming no special local ID, always remote via manager
+    appendLog,
+    showNotification
+  );
+  setOrchestratorManagerService(orchestratorManagerService);
 
   console.log("[initializeServices] Finished.");
 };
