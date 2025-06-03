@@ -44,6 +44,7 @@ const ImagingTasksModal = ({
   const fetchIncubatorSlots = useCallback(async () => {
     if (!incubatorControlService) {
       setSlotsError('Incubator control service not available.');
+      setAvailableSlots([]);
       return;
     }
     setSlotsLoading(true);
@@ -51,28 +52,34 @@ const ImagingTasksModal = ({
     try {
       appendLog('Fetching incubator slot information...');
       const allSlotInfo = await incubatorControlService.get_slot_information();
-      appendLog(`Received ${allSlotInfo.length} slot entries.`);
-      // Assuming allSlotInfo is an array of objects like {id: 'slot_1', name: 'Sample A', metadata: {occupied: true, slot_number: 1}}
-      // Or it could be simpler, like [{slot_number: 1, sample_name: 'Test'}, ...]
-      // We need to adapt this based on the actual structure of allSlotInfo
+      appendLog(`Received slot information for ${allSlotInfo.length} slots.`);
+      
       const processedSlots = allSlotInfo
-        .map(slot => ({
-          // Attempt to get a numeric slot_number, falling back to parsing from id or name if necessary
-          value: slot.slot_number || slot.metadata?.slot_number || parseInt(String(slot.id || slot.name).replace(/\D/g, ''), 10),
-          label: `${slot.name || `Slot ${slot.slot_number || slot.metadata?.slot_number || 'N/A'}`} ${slot.metadata?.occupied ? '(Occupied)' : '(Empty)'}`,
-          occupied: slot.metadata?.occupied || false, // Add an 'occupied' field for potential filtering or display
-        }))
-        .filter(slot => !isNaN(slot.value)) // Ensure value is a number
-        .sort((a, b) => a.value - b.value);
+        .filter(slot => slot.name && slot.name.trim() !== '') // Only include slots with a non-empty name
+        .map(slot => {
+          const slotNumber = slot.incubator_slot;
+          const isOccupied = slot.metadata?.occupied || false;
+          const sampleName = slot.name; // Name is guaranteed to be non-empty here
+
+          return {
+            value: String(slotNumber),
+            label: `Slot ${slotNumber}: ${sampleName} (${isOccupied ? 'Occupied' : 'Free'})`,
+            occupied: isOccupied,
+            slotNumber: slotNumber,
+          };
+        })
+        .filter(slot => slot.slotNumber !== undefined && !isNaN(slot.slotNumber))
+        .sort((a, b) => a.slotNumber - b.slotNumber);
 
       setAvailableSlots(processedSlots);
       if (processedSlots.length > 0) {
-        setIncubatorSlot(String(processedSlots[0].value)); // Default to the first available slot's value
+        const firstFreeSlot = processedSlots.find(s => !s.occupied);
+        setIncubatorSlot(firstFreeSlot ? firstFreeSlot.value : processedSlots[0].value);
       } else {
-        setIncubatorSlot(''); // No slots available
-        setSlotsError('No incubator slots found or could not parse slot information.');
+        setIncubatorSlot('');
+        setSlotsError('No named samples found in incubator slots or service issue.');
       }
-      appendLog(`Processed ${processedSlots.length} slots for selection.`);
+      appendLog(`Processed ${processedSlots.length} named slots for selection dropdown.`);
     } catch (error) {
       appendLog(`Error fetching incubator slots: ${error.message}`);
       showNotification(`Error fetching incubator slots: ${error.message}`, 'error');
@@ -226,7 +233,7 @@ const ImagingTasksModal = ({
       return;
     }
     if (!incubatorSlot) { // Check if incubatorSlot is selected
-        showNotification('Incubator Slot is required.', 'warning');
+        showNotification('A Sample/Slot selection is required.', 'warning');
         return;
     }
     if (!nx.trim()){
@@ -397,10 +404,10 @@ const ImagingTasksModal = ({
 
               <div className="grid grid-cols-2 gap-4 mb-3">
                 <div className="form-group">
-                  <label htmlFor="incubatorSlot" className="block font-medium mb-1">Incubator Slot:<span className="text-red-500">*</span></label>
+                  <label htmlFor="incubatorSlot" className="block font-medium mb-1">Select Sample:<span className="text-red-500">*</span></label>
                   {slotsLoading && <p className="text-xs text-gray-500">Loading slots...</p>}
                   {slotsError && <p className="text-xs text-red-500">{slotsError}</p>}
-                  {!slotsLoading && !slotsError && availableSlots.length === 0 && <p className="text-xs text-gray-500">No slots available or service not connected.</p>}
+                  {!slotsLoading && !slotsError && availableSlots.length === 0 && <p className="text-xs text-gray-500">No named samples found in incubator slots or service issue.</p>}
                   {!slotsLoading && !slotsError && availableSlots.length > 0 && (
                     <select 
                       id="incubatorSlot" 
