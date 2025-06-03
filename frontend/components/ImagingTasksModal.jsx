@@ -10,6 +10,7 @@ const ImagingTasksModal = ({
   appendLog,
   showNotification,
   selectedMicroscopeId,
+  onTaskChange, // Callback to refresh tasks in parent
 }) => {
   // State for new task form fields
   const [taskName, setTaskName] = useState('');
@@ -21,6 +22,7 @@ const ImagingTasksModal = ({
   const [imagingZone, setImagingZone] = useState('[[0,0],[0,0]]'); // Default to A1
 
   // State for time point generation
+  const [minDateTime, setMinDateTime] = useState('');
   const [startTime, setStartTime] = useState(''); // ISO string e.g., 2024-07-01T10:00:00
   const [endTime, setEndTime] = useState('');   // ISO string e.g., 2024-07-01T12:00:00
   const [intervalMinutes, setIntervalMinutes] = useState('30'); // In minutes
@@ -28,6 +30,13 @@ const ImagingTasksModal = ({
 
   useEffect(() => {
     if (isOpen && !task) { // Reset form when opening for a new task
+      const now = new Date();
+      const offset = now.getTimezoneOffset() * 60000;
+      const localISOTime = new Date(now.getTime() - offset).toISOString().slice(0, 16);
+      setMinDateTime(localISOTime);
+      setStartTime(localISOTime); // Default start time to current time
+      setEndTime('');
+
       setTaskName('');
       setIncubatorSlot('1');
       setIlluminationChannels(['BF LED matrix full']);
@@ -35,10 +44,15 @@ const ImagingTasksModal = ({
       setNy('1');
       setDoReflectionAf(true);
       setImagingZone('[[0,0],[0,0]]'); // Default to A1, e.g. for a single well A1
-      setStartTime('');
-      setEndTime('');
       setIntervalMinutes('30');
       setPendingTimePoints('');
+    } else if (isOpen && task) {
+      // If editing a task (though currently read-only), you might want to set minDateTime as well
+      // For now, keeping it simple as editing is not the primary focus
+      const now = new Date();
+      const offset = now.getTimezoneOffset() * 60000;
+      const localISOTime = new Date(now.getTime() - offset).toISOString().slice(0, 16);
+      setMinDateTime(localISOTime);
     }
   }, [isOpen, task]);
 
@@ -169,7 +183,7 @@ const ImagingTasksModal = ({
         showNotification(`Task '${taskDefinition.name}' created successfully.`, 'success');
         appendLog(`Task '${taskDefinition.name}' created: ${result.message}`);
         onClose(); // Close modal after action
-        // Optionally trigger a refresh of tasks in the parent component here
+        if(onTaskChange) onTaskChange(); // Refresh tasks in parent
       } else {
         showNotification(`Failed to create task: ${result ? result.message : 'Unknown error'}`, 'error');
         appendLog(`Failed to create task '${taskDefinition.name}': ${result ? result.message : 'Unknown error'}`);
@@ -190,7 +204,7 @@ const ImagingTasksModal = ({
           showNotification(`Task '${task.name}' deleted successfully.`, 'success');
           appendLog(`Task '${task.name}' deleted: ${result.message}`);
           onClose();
-          // Optionally trigger a refresh of tasks in the parent component here
+          if(onTaskChange) onTaskChange(); // Refresh tasks in parent
         } else {
           showNotification(`Failed to delete task '${task.name}': ${result ? result.message : 'Unknown error'}`, 'error');
           appendLog(`Failed to delete task '${task.name}': ${result ? result.message : 'Unknown error'}`);
@@ -327,12 +341,12 @@ const ImagingTasksModal = ({
                  <p className="text-xs text-gray-500 mb-2 italic">Enter start time, end time (local, YYYY-MM-DDTHH:mm:ss), and interval to generate points. Or paste points directly below.</p>
                 <div className="grid grid-cols-3 gap-2 mb-2">
                     <div>
-                        <label htmlFor="startTime" className="block text-xs font-medium mb-0.5">Start (YYYY-MM-DDTHH:mm:ss)</label>
-                        <input type="text" id="startTime" value={startTime} onChange={e => setStartTime(e.target.value)} className="modal-input text-xs" placeholder="2024-07-01T10:00:00" />
+                        <label htmlFor="startTime" className="block text-xs font-medium mb-0.5">Start Time</label>
+                        <input type="datetime-local" id="startTime" value={startTime} min={minDateTime} onChange={e => setStartTime(e.target.value)} className="modal-input text-xs" />
                     </div>
                     <div>
-                        <label htmlFor="endTime" className="block text-xs font-medium mb-0.5">End (YYYY-MM-DDTHH:mm:ss)</label>
-                        <input type="text" id="endTime" value={endTime} onChange={e => setEndTime(e.target.value)} className="modal-input text-xs" placeholder="2024-07-01T12:00:00" />
+                        <label htmlFor="endTime" className="block text-xs font-medium mb-0.5">End Time</label>
+                        <input type="datetime-local" id="endTime" value={endTime} min={startTime || minDateTime} onChange={e => setEndTime(e.target.value)} className="modal-input text-xs" />
                     </div>
                     <div>
                         <label htmlFor="intervalMinutes" className="block text-xs font-medium mb-0.5">Interval (minutes)</label>
@@ -394,6 +408,7 @@ ImagingTasksModal.propTypes = {
   appendLog: PropTypes.func.isRequired,
   showNotification: PropTypes.func.isRequired,
   selectedMicroscopeId: PropTypes.string.isRequired,
+  onTaskChange: PropTypes.func, // Added prop type
 };
 
 export default ImagingTasksModal; 
