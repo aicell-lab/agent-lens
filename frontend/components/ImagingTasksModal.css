@@ -1,0 +1,445 @@
+.imaging-tasks-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1050; /* Ensure it's above other content, adjust if needed */
+}
+
+.imaging-tasks-modal-content {
+  background-color: white;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+  width: 90%;
+  max-width: 600px; /* Max width for the modal */
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: visible;
+}
+
+.imaging-tasks-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #e9ecef;
+  padding-bottom: 10px;
+  margin-bottom: 15px;
+}
+
+.imaging-tasks-modal-header h3 {
+  margin: 0;
+  font-size: 1.25rem; /* Tailwind: text-xl */
+}
+
+.modal-close-button {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  color: #6c757d; /* Tailwind: text-gray-500 */
+}
+.modal-close-button:hover {
+    color: #343a40; /* Tailwind: text-gray-800 */
+}
+
+.imaging-tasks-modal-body {
+  flex-grow: 1;
+  overflow-y: auto; /* Allows scrolling for long content */
+  padding-right: 10px; /* Add some padding for the scrollbar */
+}
+
+/* Styles for form elements within the modal */
+.modal-input {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  margin-bottom: 0.5rem; /* Add some space below inputs */
+}
+
+.modal-input:focus {
+  border-color: #80bdff; /* Tailwind: focus:border-blue-500 (approx) */
+  outline: 0;
+  box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25); /* Tailwind: focus:ring-2 focus:ring-blue-200 (approx) */
+}
+
+.modal-input.text-xs {
+    font-size: 0.75rem; /* Tailwind: text-xs */
+}
+
+textarea.modal-input {
+    min-height: 80px;
+}
+
+/* Disabled styles for all form elements - following patterns from main.css and Sidebar.css */
+.modal-input:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled,
+button:disabled {
+  cursor: not-allowed !important;
+  opacity: 0.75 !important;
+}
+
+/* Specific disabled styles for modal inputs */
+.modal-input:disabled {
+  background-color: #f8f9fa; /* Light gray background when disabled */
+  border-color: #e9ecef; /* Lighter border when disabled */
+  color: #6c757d; /* Muted text color when disabled */
+}
+
+/* Disabled styles for select elements */
+select.modal-input:disabled {
+  background-color: #f8f9fa;
+  border-color: #e9ecef;
+  color: #6c757d;
+  cursor: not-allowed !important;
+  opacity: 0.75;
+}
+
+/* Disabled styles for number inputs */
+input[type="number"]:disabled {
+  background-color: #f8f9fa;
+  border-color: #e9ecef;
+  color: #6c757d;
+  cursor: not-allowed !important;
+  opacity: 0.75;
+}
+
+/* Disabled styles for datetime-local inputs */
+input[type="datetime-local"]:disabled {
+  background-color: #f8f9fa;
+  border-color: #e9ecef;
+  color: #6c757d;
+  cursor: not-allowed !important;
+  opacity: 0.75;
+}
+
+/* Disabled styles for checkboxes */
+input[type="checkbox"]:disabled {
+  cursor: not-allowed !important;
+  opacity: 0.6;
+}
+
+/* Disabled styles for checkbox labels when checkbox is disabled */
+input[type="checkbox"]:disabled + span,
+input[type="checkbox"]:disabled ~ span {
+  color: #6c757d;
+  cursor: not-allowed !important;
+  opacity: 0.75;
+}
+
+.form-checkbox {
+  /* Using Tailwind classes directly in JSX for checkboxes as they are simple and effective */
+  /* Example: className="form-checkbox h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500" */
+  /* This class can be kept for any specific overrides if Tailwind is not enough or for non-Tailwind projects */
+}
+
+/* Disabled styles for form checkbox elements */
+.form-checkbox:disabled {
+  cursor: not-allowed !important;
+  opacity: 0.6;
+}
+
+.channel-checkboxes label span {
+    font-size: 0.8rem; /* Smaller font for channel names */
+}
+
+.task-details p {
+    margin-bottom: 0.5rem; /* Tailwind: mb-2 */
+}
+
+.imaging-tasks-modal-footer {
+  border-top: 1px solid #e9ecef;
+  padding-top: 15px;
+  margin-top: 20px;
+  display: flex;
+  justify-content: flex-end; /* Align buttons to the right */
+}
+
+/* Using classes similar to main.css for buttons for consistency */
+.imaging-tasks-modal-footer .action-button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem; /* Smaller padding for modal buttons */
+  border: none;
+  border-radius: 0.3rem; /* Tailwind: rounded-md */
+  cursor: pointer;
+  font-size: 0.875rem; /* Tailwind: text-sm */
+  font-weight: 500;
+  text-decoration: none;
+  transition: all 0.2s ease;
+  min-width: 100px; /* Min width for buttons */
+  justify-content: center;
+}
+
+.imaging-tasks-modal-footer .action-button.primary {
+  background-color: #007bff; /* Tailwind: bg-blue-500 */
+  color: white;
+}
+.imaging-tasks-modal-footer .action-button.primary:hover:not(:disabled) {
+  background-color: #0056b3; /* Tailwind: hover:bg-blue-700 */
+}
+
+.imaging-tasks-modal-footer .action-button.secondary {
+  background-color: #6c757d; /* Tailwind: bg-gray-500 */
+  color: white;
+}
+.imaging-tasks-modal-footer .action-button.secondary:hover:not(:disabled) {
+  background-color: #5a6268; /* Tailwind: hover:bg-gray-600 */
+}
+
+.imaging-tasks-modal-footer .action-button.danger {
+  background-color: #dc3545; /* Tailwind: bg-red-500 */
+  color: white;
+}
+.imaging-tasks-modal-footer .action-button.danger:hover:not(:disabled) {
+  background-color: #c82333; /* Tailwind: hover:bg-red-700 */
+}
+
+/* Enhanced disabled styles for action buttons - following main.css pattern */
+.imaging-tasks-modal-footer .action-button:disabled {
+  background-color: #e9ecef; /* Tailwind: bg-gray-200 */
+  color: #6c757d; /* Tailwind: text-gray-500 */
+  cursor: not-allowed;
+}
+
+.imaging-tasks-modal-footer .action-button + .action-button {
+  margin-left: 0.5rem; /* Tailwind: ml-2 */
+}
+
+/* Styles for the Well Plate Grid */
+.well-plate-grid-container {
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+  user-select: none; /* Prevent text selection while dragging */
+}
+
+.well-plate-grid {
+  display: grid;
+  grid-template-columns: auto repeat(12, 1fr); /* Row labels + 12 columns */
+  gap: 2px;
+  border: 1px solid #ccc;
+  padding: 5px;
+  background-color: #f9f9f9;
+  width: fit-content; /* Adjust width to content */
+}
+
+.grid-row {
+  display: contents; /* Makes child elements participate in the grid layout */
+}
+
+.grid-col-labels {
+  display: contents; /* For the top column labels to be part of the grid */
+}
+
+.grid-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  font-size: 0.75rem;
+  font-weight: bold;
+  background-color: #e9ecef;
+  color: #495057;
+  min-width: 20px; /* Ensure labels have some width */
+  text-align: center;
+}
+
+.grid-cell {
+  padding: 8px;
+  border: 1px solid #ddd;
+  background-color: white;
+  text-align: center;
+  cursor: pointer;
+  font-size: 0.7rem; /* Smaller text for cell content if any */
+  transition: background-color 0.2s;
+  min-width: 20px; /* Ensure cells have some width */
+  min-height: 20px; /* Ensure cells have some height */
+}
+
+.grid-cell:hover {
+  background-color: #e9ecef;
+}
+
+.grid-cell.selected {
+  background-color: #007bff; /* Blue for selected */
+  color: white;
+  border-color: #0056b3;
+}
+
+.grid-cell:disabled {
+  background-color: #f8f9fa;
+  cursor: not-allowed;
+  color: #adb5bd;
+}
+
+/* Ensure the first cell in the column labels row (top-left empty cell) is styled like other labels */
+.well-plate-grid > .grid-col-labels > div:first-child {
+    background-color: #e9ecef;
+    border: none; /* Or style as needed */
+}
+
+/* Styles for specific select inputs if needed */
+select.modal-input {
+    /* Add specific styles if default .modal-input is not enough */
+}
+
+/* Fix for disabled illumination number inputs */
+.illumination-setting-row input:disabled {
+    background-color: #f8f9fa !important;
+    color: #6c757d !important;
+    border-color: #e9ecef !important;
+    cursor: not-allowed !important;
+    opacity: 0.75 !important;
+}
+
+.illumination-setting-row input[type="checkbox"]:disabled + span {
+    color: #6c757d !important;
+    cursor: not-allowed !important;
+    opacity: 0.75 !important;
+}
+
+/* Tutorial Tooltip Styles */
+/* Updated for Portal-based Tooltip */
+
+.tooltip-icon-container { /* Renamed from tooltip-container */
+  position: relative; /* Still useful if icon itself needs relative positioning for some reason, but less critical for portal */
+  display: inline-flex; /* To align icon nicely if it were alongside other inline elements */
+  align-items: center;
+  margin-left: 8px; /* Space between label and tooltip icon */
+  vertical-align: middle; /* Align icon with text */
+}
+
+.tooltip-icon {
+  width: 16px;
+  height: 16px;
+  background-color: #007bff; /* Blue background */
+  color: white;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: bold;
+  cursor: help;
+  transition: background-color 0.2s;
+}
+
+.tooltip-icon:hover {
+  background-color: #0056b3; /* Darker blue on hover */
+}
+
+.tooltip-text {
+  /* Positioning is now handled by inline styles (position: fixed, top, left, transform) */
+  /* Visibility and opacity are also handled by inline styles */
+  width: 250px; /* Adjust as needed */
+  background-color: #333; /* Dark background for tooltip */
+  color: #fff;
+  text-align: left;
+  border-radius: 6px;
+  padding: 8px 10px;
+  /* z-index is set inline */
+  font-size: 0.8rem;
+  line-height: 1.4;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+  /* Remove CSS transition for visibility/opacity if fully JS controlled, or keep for CSS effect */
+  transition: opacity 0.2s ease-out, transform 0.2s ease-out; /* Example: can transition opacity and transform if desired */
+  /* Ensure it doesn't get display:none from other general rules if any */
+  display: block; 
+}
+
+/* Remove old hover-based visibility rule */
+/* .tooltip-icon-container:hover .tooltip-text { ... } */
+
+/* Style for fieldset and legend to group sections */
+.modal-fieldset {
+  border: 1px solid #ced4da;
+  border-radius: 0.25rem;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.modal-legend {
+  width: auto; /* Fit content */
+  padding: 0 0.5rem;
+  margin-left: 0.5rem; /* Indent legend slightly */
+  font-weight: 600;
+  color: #495057;
+}
+
+/* Ensure label and input/select are on the same line with tooltip */
+.form-group label, .form-group .form-label {
+  display: flex; /* Changed to flex to align tooltip icon */
+  align-items: center; /* Vertically align items in label */
+  margin-bottom: 0.25rem; /* Reduced bottom margin for label */
+  font-size: 0.9rem;
+  color: #333;
+}
+
+/* Adjust form groups for better layout */
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 1rem;
+}
+
+.form-group {
+  margin-bottom: 0.75rem; /* Consistent bottom margin for form groups */
+}
+
+/* Illumination Settings Row specific styles */
+.illumination-setting-row {
+  display: flex;
+  align-items: center; /* Vertically align items in the row */
+  justify-content: space-between; /* Puts space between label group and input group */
+  padding: 0.5rem 0; /* Add some padding for visual separation */
+  border-bottom: 1px solid #f0f0f0; /* Light border for each row */
+}
+
+.illumination-setting-row:last-child {
+  border-bottom: none;
+}
+
+.illumination-channel-label-container {
+  display: flex;
+  align-items: center;
+  flex-grow: 1; /* Allows this container to take up available space */
+  margin-right: 1rem; /* Space before the input fields start */
+  min-width: 0; /* Important for flex-grow in a flex container to prevent overflow */
+}
+
+.illumination-channel-label-container .channel-name-text {
+  white-space: normal; /* Allow long channel names to wrap */
+  word-break: break-word; /* Break long words if necessary */
+  margin-right: 0.5rem; /* Space between channel name and tooltip */
+  flex-shrink: 1; /* Allow text to shrink if needed */
+}
+
+.illumination-inputs-container {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem; /* Space between intensity and exposure input groups */
+}
+
+.illumination-input-group {
+  display: flex;
+  flex-direction: column; /* Stack label (if visible) and input vertically */
+  margin-bottom: 0 !important; /* Override default form-group margin */
+}
+
+.illumination-input {
+  width: 70px !important; /* Significantly shorter input boxes */
+  padding: 0.25rem 0.4rem !important; /* Adjust padding for smaller size */
+  font-size: 0.75rem !important; /* Ensure text size is small */
+} 

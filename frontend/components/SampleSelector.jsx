@@ -12,7 +12,8 @@ const SampleSelector = ({
   incubatorControlService,
   roboticArmService,
   currentOperation,
-  setCurrentOperation
+  setCurrentOperation,
+  onSampleLoadStatusChange,
 }) => {
   const [selectedSampleId, setSelectedSampleId] = useState(null);
   const [incubatorSlots, setIncubatorSlots] = useState([]);
@@ -35,6 +36,19 @@ const SampleSelector = ({
   const isSimulatedMicroscopeSelected = selectedMicroscopeId === 'squid-control/squid-control-reef';
   const currentMicroscopeNumber = selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 1 : 
                                  selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2' ? 2 : 0;
+
+  // Notify parent when sample load status changes
+  useEffect(() => {
+    if (onSampleLoadStatusChange) {
+      onSampleLoadStatusChange({
+        isSampleLoaded,
+        loadedSampleOnMicroscope,
+        selectedSampleId,
+        isRealMicroscope: isRealMicroscopeSelected,
+        isSimulatedMicroscope: isSimulatedMicroscopeSelected
+      });
+    }
+  }, [isSampleLoaded, loadedSampleOnMicroscope, selectedSampleId, isRealMicroscopeSelected, isSimulatedMicroscopeSelected, onSampleLoadStatusChange]);
 
   // Helper function to add workflow messages
   const addWorkflowMessage = (message) => {
@@ -96,7 +110,7 @@ const SampleSelector = ({
         } catch (error) {
           console.error("Failed to connect to robotic arm service:", error);
           setLoadingStatus("Failed to connect to robotic arm. Please try again.");
-          setTimeout(() => setLoadingStatus(''), 3000);
+          setTimeout(() => setLoadingStatus(''), 6000);
         }
       }
     };
@@ -604,7 +618,8 @@ SampleSelector.propTypes = {
   incubatorControlService: PropTypes.object,
   roboticArmService: PropTypes.object,
   currentOperation: PropTypes.string,
-  setCurrentOperation: PropTypes.func
+  setCurrentOperation: PropTypes.func,
+  onSampleLoadStatusChange: PropTypes.func
 };
 
 export default SampleSelector; 

@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import PropTypes from 'prop-types';
 
-const Notification = ({ message, type = 'error', onDismiss, duration = 3000 }) => {
+const Notification = ({ message, type = 'error', onDismiss, duration = 6000 }) => {
   useEffect(() => {
     if (message && onDismiss) {
       const timer = setTimeout(() => {

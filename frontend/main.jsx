@@ -47,6 +47,7 @@ const MicroscopeControl = () => {
   const [selectedMicroscopeId, setSelectedMicroscopeId] = useState("squid-control/squid-control-reef");
   const [currentOperation, setCurrentOperation] = useState(null);
   const [hyphaManager, setHyphaManager] = useState(null);
+  const [orchestratorManagerService, setOrchestratorManagerService] = useState(null);
   
   // Notification state
   const [notification, setNotification] = useState({ message: '', type: 'error' });
@@ -145,7 +146,7 @@ const MicroscopeControl = () => {
       console.log(`[handleLogin] Calling initializeServices with microscopeIdToUse: ${microscopeIdToUse}`);
       await initializeServices(managerToUse,
         setMicroscopeControlService, setSimilarityService, setSegmentService,
-        setIncubatorControlService, setRoboticArmService,
+        setIncubatorControlService, setRoboticArmService, setOrchestratorManagerService,
         (msg) => { console.log(`[initializeServices in Login]: ${msg}`); appendLog(msg); },
         microscopeIdToUse,
         showNotification
@@ -227,6 +228,7 @@ const MicroscopeControl = () => {
               selectedMicroscopeId={selectedMicroscopeId}
               incubatorControlService={incubatorControlService}
               roboticArmService={roboticArmService}
+              orchestratorManagerService={orchestratorManagerService}
               currentOperation={currentOperation}
               setCurrentOperation={setCurrentOperation}
               hyphaManager={hyphaManager}

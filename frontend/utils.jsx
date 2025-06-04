@@ -49,9 +49,6 @@ export class HyphaServerManager {
     }
 
     if (this.serverConnections[workspace]) {
-      // TODO: Add a check here if the server is still connected, if hypha-client exposes such a method.
-      // For now, we assume if it's in serverConnections, it's good or will be re-established by hypha-rpc internals if needed on call.
-      // Alternatively, always return the promise from this.servers to let hypha-rpc handle re-connection implicitly.
       console.log(`[HyphaServerManager] Returning existing connection for workspace: ${workspace}`);
       return this.serverConnections[workspace];
     }
@@ -60,9 +57,8 @@ export class HyphaServerManager {
       console.log(`[HyphaServerManager] Creating new connection promise for workspace: ${workspace}`);
       this.servers[workspace] = window.hyphaWebsocketClient.connectToServer({
         server_url: this.defaultServerUrl,
-        token: this.token,
-        workspace: workspace,
-        name: `${this.defaultClientNamePrefix}-${workspace}`,
+        token: workspace === 'agent-lens' ? null : this.token,
+        workspace: workspace === 'agent-lens' ? null : workspace,
         method_timeout: 30000, // Increased timeout slightly
       }).then(server => {
         this.serverConnections[workspace] = server; // Cache the resolved server object
@@ -114,6 +110,7 @@ export const initializeServices = async (
   setSegmentService,
   setIncubatorControlService,
   setRoboticArmService,
+  setOrchestratorManagerService, // Added new service setter
   appendLog,
   selectedMicroscopeId, // This is the full ID like "workspace/service-name"
   showNotification = null // New optional parameter for showing notifications
@@ -180,6 +177,17 @@ export const initializeServices = async (
     showNotification
   );
   setRoboticArmService(roboticArmService);
+
+  const orchestratorManagerServiceIdFull = "reef-imaging/orchestrator-manager";
+  const orchestratorManagerService = await tryGetService(
+    hyphaManager,
+    "Orchestrator Manager",
+    orchestratorManagerServiceIdFull,
+    null, // Assuming no special local ID, always remote via manager
+    appendLog,
+    showNotification
+  );
+  setOrchestratorManagerService(orchestratorManagerService);
 
   console.log("[initializeServices] Finished.");
 };
