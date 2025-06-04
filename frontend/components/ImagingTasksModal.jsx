@@ -14,6 +14,16 @@ const DEFAULT_ILLUMINATION_SETTINGS = [
   { channel: 'Fluorescence 730nm Ex', intensity: 27.0, exposure_time: 60.0, enabled: false }
 ];
 
+// Channel mapping from channel names to microscope channel IDs
+const CHANNEL_MAPPING = {
+  'BF LED matrix full': '0',
+  'Fluorescence 405 nm Ex': '11', 
+  'Fluorescence 488 nm Ex': '12',
+  'Fluorescence 561nm Ex': '14',
+  'Fluorescence 638nm Ex': '13',
+  'Fluorescence 730nm Ex': '15'
+};
+
 const ImagingTasksModal = ({
   isOpen,
   onClose,
@@ -24,6 +34,7 @@ const ImagingTasksModal = ({
   selectedMicroscopeId,
   onTaskChange, // Callback to refresh tasks in parent
   incubatorControlService, // New prop
+  microscopeControlService, // New prop
 }) => {
   // State for new task form fields
   const [taskName, setTaskName] = useState('');
@@ -33,6 +44,7 @@ const ImagingTasksModal = ({
   const [slotsError, setSlotsError] = useState(null);
 
   const [illuminationSettings, setIlluminationSettings] = useState(DEFAULT_ILLUMINATION_SETTINGS);
+  const [illuminationLoading, setIlluminationLoading] = useState(false);
   const [nx, setNx] = useState('3');
   const [ny, setNy] = useState('3');
   const [doContrastAutofocus, setDoContrastAutofocus] = useState(false);
@@ -51,6 +63,56 @@ const ImagingTasksModal = ({
   const [endTime, setEndTime] = useState('');   // ISO string e.g., 2024-07-01T12:00:00
   const [intervalMinutes, setIntervalMinutes] = useState('30'); // In minutes
   const [pendingTimePoints, setPendingTimePoints] = useState(''); // Text area for ISO strings
+
+  const fetchCurrentIlluminationSettings = useCallback(async () => {
+    if (!microscopeControlService) {
+      appendLog('Microscope service not available, using default illumination settings.');
+      return DEFAULT_ILLUMINATION_SETTINGS;
+    }
+
+    setIlluminationLoading(true);
+    try {
+      appendLog('Fetching current illumination settings from microscope...');
+      const status = await microscopeControlService.get_status();
+      
+      const updatedSettings = DEFAULT_ILLUMINATION_SETTINGS.map(setting => {
+        const channelId = CHANNEL_MAPPING[setting.channel];
+        let intensityExposurePair;
+        
+        switch (channelId) {
+          case '0': intensityExposurePair = status.BF_intensity_exposure; break;
+          case '11': intensityExposurePair = status.F405_intensity_exposure; break;
+          case '12': intensityExposurePair = status.F488_intensity_exposure; break;
+          case '14': intensityExposurePair = status.F561_intensity_exposure; break;
+          case '13': intensityExposurePair = status.F638_intensity_exposure; break;
+          case '15': intensityExposurePair = status.F730_intensity_exposure; break;
+          default:
+            console.warn(`[ImagingTasksModal] Unknown channel mapping: ${setting.channel} -> ${channelId}`);
+            intensityExposurePair = [setting.intensity, setting.exposure_time];
+        }
+
+        if (intensityExposurePair && intensityExposurePair.length === 2) {
+          return {
+            ...setting,
+            intensity: intensityExposurePair[0],
+            exposure_time: intensityExposurePair[1]
+          };
+        } else {
+          console.warn(`[ImagingTasksModal] Could not parse intensity/exposure for ${setting.channel}, using defaults`);
+          return setting;
+        }
+      });
+
+      appendLog(`Successfully fetched illumination settings from microscope.`);
+      return updatedSettings;
+    } catch (error) {
+      appendLog(`Error fetching illumination settings: ${error.message}. Using defaults.`);
+      console.error('[ImagingTasksModal] Error fetching illumination settings:', error);
+      return DEFAULT_ILLUMINATION_SETTINGS;
+    } finally {
+      setIlluminationLoading(false);
+    }
+  }, [microscopeControlService, appendLog]);
 
   const fetchIncubatorSlots = useCallback(async () => {
     if (!incubatorControlService) {
@@ -110,7 +172,6 @@ const ImagingTasksModal = ({
       setStartTime(localISOTime);
       setEndTime('');
       setTaskName('');
-      setIlluminationSettings(DEFAULT_ILLUMINATION_SETTINGS);
       setNx('3');
       setNy('3');
       setDoContrastAutofocus(false);
@@ -124,6 +185,13 @@ const ImagingTasksModal = ({
       setSelectionEndCell([0,0]); // Default to A1
       setScanningZoneString('[[0,0],[0,0]]');
       setIsDragging(false);
+
+      // Fetch current illumination settings from microscope
+      const loadIlluminationSettings = async () => {
+        const currentSettings = await fetchCurrentIlluminationSettings();
+        setIlluminationSettings(currentSettings);
+      };
+      loadIlluminationSettings();
 
       if (incubatorControlService) {
         fetchIncubatorSlots();
@@ -141,7 +209,7 @@ const ImagingTasksModal = ({
       // For now, the grid is primarily for new task creation.
       // And also fetch/set incubator slot if needed for display.
     }
-  }, [isOpen, task, incubatorControlService, fetchIncubatorSlots]);
+  }, [isOpen, task, incubatorControlService, fetchIncubatorSlots, fetchCurrentIlluminationSettings]);
 
   // Update imagingZoneString whenever selection changes and dragging stops
   useEffect(() => {
@@ -467,7 +535,10 @@ const ImagingTasksModal = ({
               </div>
               
               <div className="form-group mb-3">
-                <label className="block font-medium mb-1">Illumination Settings:<span className="text-red-500">*</span></label>
+                <label className="block font-medium mb-1">
+                  Illumination Settings:<span className="text-red-500">*</span>
+                  {illuminationLoading && <span className="text-xs text-gray-500 ml-2">(Loading current settings...)</span>}
+                </label>
                 <div className="illumination-settings-grid">
                   {illuminationSettings.map((setting, index) => (
                     <div key={setting.channel} className="illumination-setting-row flex items-center gap-2 mb-2 p-2 border rounded">
@@ -601,6 +672,7 @@ ImagingTasksModal.propTypes = {
   selectedMicroscopeId: PropTypes.string.isRequired,
   onTaskChange: PropTypes.func,
   incubatorControlService: PropTypes.object, // Added prop type
+  microscopeControlService: PropTypes.object, // Added prop type
 };
 
 export default ImagingTasksModal; 

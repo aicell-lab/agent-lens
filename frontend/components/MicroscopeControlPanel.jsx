@@ -895,43 +895,56 @@ const MicroscopeControlPanel = ({
           </div>
         </div>
 
-        {/* Imaging Tasks Section - Moved here, above chatbot */}
-        {selectedMicroscopeId !== "squid-control/squid-control-reef" && orchestratorManagerService && (
-          <div className="imaging-tasks-section mb-3 p-3 border border-gray-300 rounded-lg">
-            <div className="flex justify-between items-center mb-2">
-              <h4 className="text-sm font-medium">Time-Lapse Imaging Tasks</h4>
-              <button
-                className="control-button bg-green-500 text-white hover:bg-green-600 px-2 py-1 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
-                onClick={() => openImagingTaskModal(null)} // null for new task
-                disabled={currentOperation !== null || microscopeBusy || imagingTasks.some(t => t.operational_state?.status !== 'completed')}
-                title={imagingTasks.some(t => t.operational_state?.status !== 'completed') ? "Microscope has an active/pending task. Cannot create new task." : "Create New Imaging Task"}
-              >
-                <i className="fas fa-plus mr-1"></i> New Task
-              </button>
-            </div>
-            {imagingTasks.length === 0 && selectedMicroscopeId !== "squid-control/squid-control-reef" && (
-              <p className="text-xs text-gray-500">No imaging tasks found for this microscope.</p>
-            )}
-            {imagingTasks.length > 0 && (
-              <ul className="list-disc pl-5 space-y-1 text-xs">
-                {imagingTasks.map(task => (
-                  <li 
-                    key={task.name} 
-                    className={`cursor-pointer hover:text-blue-600 ${task.operational_state?.status !== 'completed' ? 'font-semibold text-blue-700' : 'text-gray-600'}`}
-                    onClick={() => openImagingTaskModal(task)}
-                    title={`Status: ${task.operational_state?.status || 'Unknown'}. Click to manage.`}
-                  >
-                    {task.name} ({task.operational_state?.status || 'Unknown'})
-                    {task.operational_state?.status !== 'completed' && <i className="fas fa-spinner fa-spin ml-2 text-blue-500"></i>}
-                  </li>
-                ))}
-              </ul>
-            )}
-             {selectedMicroscopeId === "squid-control/squid-control-reef" && (
-              <p className="text-xs text-gray-500 italic">Time-lapse imaging is not supported on the simulated microscope.</p>
-            )}
+        {/* Imaging Tasks Section - Always show, but with different states based on availability */}
+        <div className="imaging-tasks-section mb-3 p-3 border border-gray-300 rounded-lg">
+          <div className="flex justify-between items-center mb-2">
+            <h4 className="text-sm font-medium">Time-Lapse Imaging Tasks</h4>
+            <button
+              className="control-button bg-green-500 text-white hover:bg-green-600 px-2 py-1 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
+              onClick={() => openImagingTaskModal(null)} // null for new task
+              disabled={
+                selectedMicroscopeId === "squid-control/squid-control-reef" || 
+                !orchestratorManagerService || 
+                currentOperation !== null || 
+                microscopeBusy || 
+                imagingTasks.some(t => t.operational_state?.status !== 'completed')
+              }
+              title={
+                selectedMicroscopeId === "squid-control/squid-control-reef" 
+                  ? "Time-lapse imaging not supported on simulated microscope"
+                  : !orchestratorManagerService 
+                    ? "Orchestrator service not available (check reef-imaging workspace access)"
+                    : imagingTasks.some(t => t.operational_state?.status !== 'completed')
+                      ? "Microscope has an active/pending task. Cannot create new task."
+                      : "Create New Imaging Task"
+              }
+            >
+              <i className="fas fa-plus mr-1"></i> New Task
+            </button>
           </div>
-        )}
+          
+          {selectedMicroscopeId === "squid-control/squid-control-reef" ? (
+            <p className="text-xs text-gray-500 italic">Time-lapse imaging is not supported on the simulated microscope.</p>
+          ) : !orchestratorManagerService ? (
+            <p className="text-xs text-gray-500 italic">Time-lapse imaging not available (orchestrator service not accessible - check reef-imaging workspace access).</p>
+          ) : imagingTasks.length === 0 ? (
+            <p className="text-xs text-gray-500">No imaging tasks found for this microscope.</p>
+          ) : (
+            <ul className="list-disc pl-5 space-y-1 text-xs">
+              {imagingTasks.map(task => (
+                <li 
+                  key={task.name} 
+                  className={`cursor-pointer hover:text-blue-600 ${task.operational_state?.status !== 'completed' ? 'font-semibold text-blue-700' : 'text-gray-600'}`}
+                  onClick={() => openImagingTaskModal(task)}
+                  title={`Status: ${task.operational_state?.status || 'Unknown'}. Click to manage.`}
+                >
+                  {task.name} ({task.operational_state?.status || 'Unknown'})
+                  {task.operational_state?.status !== 'completed' && <i className="fas fa-spinner fa-spin ml-2 text-blue-500"></i>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
 
         {/* Bottom-Right: Chatbot */}
         <div className="mcp-chatbot-area">
@@ -954,7 +967,7 @@ const MicroscopeControlPanel = ({
           selectedMicroscopeId={selectedMicroscopeId}
           onTaskChange={fetchImagingTasks}
           incubatorControlService={incubatorControlService}
-          // TODO: Add other necessary props like hyphaManager if needed for API calls within modal
+          microscopeControlService={microscopeControlService}
         />
       )}
     </div>

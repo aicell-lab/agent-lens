@@ -80,10 +80,74 @@ textarea.modal-input {
     min-height: 80px;
 }
 
+/* Disabled styles for all form elements - following patterns from main.css and Sidebar.css */
+.modal-input:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled,
+button:disabled {
+  cursor: not-allowed !important;
+  opacity: 0.75 !important;
+}
+
+/* Specific disabled styles for modal inputs */
+.modal-input:disabled {
+  background-color: #f8f9fa; /* Light gray background when disabled */
+  border-color: #e9ecef; /* Lighter border when disabled */
+  color: #6c757d; /* Muted text color when disabled */
+}
+
+/* Disabled styles for select elements */
+select.modal-input:disabled {
+  background-color: #f8f9fa;
+  border-color: #e9ecef;
+  color: #6c757d;
+  cursor: not-allowed !important;
+  opacity: 0.75;
+}
+
+/* Disabled styles for number inputs */
+input[type="number"]:disabled {
+  background-color: #f8f9fa;
+  border-color: #e9ecef;
+  color: #6c757d;
+  cursor: not-allowed !important;
+  opacity: 0.75;
+}
+
+/* Disabled styles for datetime-local inputs */
+input[type="datetime-local"]:disabled {
+  background-color: #f8f9fa;
+  border-color: #e9ecef;
+  color: #6c757d;
+  cursor: not-allowed !important;
+  opacity: 0.75;
+}
+
+/* Disabled styles for checkboxes */
+input[type="checkbox"]:disabled {
+  cursor: not-allowed !important;
+  opacity: 0.6;
+}
+
+/* Disabled styles for checkbox labels when checkbox is disabled */
+input[type="checkbox"]:disabled + span,
+input[type="checkbox"]:disabled ~ span {
+  color: #6c757d;
+  cursor: not-allowed !important;
+  opacity: 0.75;
+}
+
 .form-checkbox {
   /* Using Tailwind classes directly in JSX for checkboxes as they are simple and effective */
   /* Example: className="form-checkbox h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500" */
   /* This class can be kept for any specific overrides if Tailwind is not enough or for non-Tailwind projects */
+}
+
+/* Disabled styles for form checkbox elements */
+.form-checkbox:disabled {
+  cursor: not-allowed !important;
+  opacity: 0.6;
 }
 
 .channel-checkboxes label span {
@@ -143,11 +207,13 @@ textarea.modal-input {
   background-color: #c82333; /* Tailwind: hover:bg-red-600 */
 }
 
+/* Enhanced disabled styles for action buttons - following main.css pattern */
 .imaging-tasks-modal-footer .action-button:disabled {
-  background-color: #e9ecef; /* Tailwind: bg-gray-200 */
-  color: #6c757d; /* Tailwind: text-gray-400 */
-  cursor: not-allowed;
-  opacity: 0.7;
+  background-color: #e9ecef !important; /* Tailwind: bg-gray-200 */
+  color: #6c757d !important; /* Tailwind: text-gray-400 */
+  cursor: not-allowed !important;
+  opacity: 0.7 !important;
+  border-color: #e9ecef !important; /* Ensure border also changes */
 }
 
 .imaging-tasks-modal-footer .action-button + .action-button {
@@ -216,6 +282,13 @@ textarea.modal-input {
   border-color: #5c99db;
 }
 
+/* Disabled styles for grid cells if needed */
+.grid-cell:disabled {
+  cursor: not-allowed !important;
+  opacity: 0.5;
+  background-color: #f8f9fa;
+}
+
 /* Ensure the first cell (top-left corner for labels) is styled like a label */
 .well-plate-grid > .grid-col-labels > div:first-child {
     background-color: #f0f0f0; /* Match label background */
@@ -225,4 +298,19 @@ textarea.modal-input {
 /* Ensure select also uses modal-input styles or has its own */
 select.modal-input {
   height: auto; /* Adjust if padding makes it too tall */
+}
+
+/* Additional disabled styles for illumination settings inputs */
+.illumination-setting-row input:disabled {
+  background-color: #f8f9fa;
+  border-color: #e9ecef;
+  color: #6c757d;
+  cursor: not-allowed !important;
+  opacity: 0.75;
+}
+
+/* Disabled styles for illumination setting checkboxes and their labels */
+.illumination-setting-row input[type="checkbox"]:disabled + span {
+  color: #6c757d;
+  opacity: 0.75;
 } 
