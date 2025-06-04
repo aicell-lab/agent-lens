@@ -79,6 +79,20 @@ const MicroscopeControlPanel = ({
   const [isImagingModalOpen, setIsImagingModalOpen] = useState(false);
   const [selectedTaskForModal, setSelectedTaskForModal] = useState(null);
 
+  // State to track sample loading status from SampleSelector
+  const [sampleLoadStatus, setSampleLoadStatus] = useState({
+    isSampleLoaded: false,
+    loadedSampleOnMicroscope: null,
+    selectedSampleId: null,
+    isRealMicroscope: false,
+    isSimulatedMicroscope: false
+  });
+
+  // Callback to receive sample load status updates from SampleSelector
+  const handleSampleLoadStatusChange = useCallback((status) => {
+    setSampleLoadStatus(status);
+  }, []);
+
   useEffect(() => {
     actualIlluminationIntensityRef.current = actualIlluminationIntensity;
   }, [actualIlluminationIntensity]);
@@ -650,6 +664,18 @@ const MicroscopeControlPanel = ({
       if(showNotification) showNotification("Time-lapse imaging not supported for simulated microscope.", "info");
       return;
     }
+
+    // Check if a sample is already loaded on the microscope
+    if (!task && sampleLoadStatus.isSampleLoaded) {
+      const warningMessage = sampleLoadStatus.isRealMicroscope 
+        ? `The microscope is occupied by a sample (${sampleLoadStatus.loadedSampleOnMicroscope || 'unknown sample'}). Please go to 'Select Samples' and put the sample back to incubator first.`
+        : `The simulated microscope has a sample loaded (${sampleLoadStatus.selectedSampleId || 'unknown sample'}). Please go to 'Select Samples' and unload the current sample first before creating a new imaging task.`;
+      
+      appendLog(`Cannot create new imaging task: ${warningMessage}`);
+      if(showNotification) showNotification(warningMessage, "warning");
+      return;
+    }
+
     setSelectedTaskForModal(task); // if task is null, it's for creating a new task
     setIsImagingModalOpen(true);
     appendLog(task ? `Opening modal to manage task: ${task.name}` : "Opening modal to create new imaging task.");
@@ -710,6 +736,7 @@ const MicroscopeControlPanel = ({
             roboticArmService={roboticArmService}
             currentOperation={currentOperation}
             setCurrentOperation={setCurrentOperation}
+            onSampleLoadStatusChange={handleSampleLoadStatusChange}
           />
 
           <div className="flex justify-between items-center mb-4">
@@ -914,9 +941,11 @@ const MicroscopeControlPanel = ({
                   ? "Time-lapse imaging not supported on simulated microscope"
                   : !orchestratorManagerService 
                     ? "Orchestrator service not available (check reef-imaging workspace access)"
-                    : imagingTasks.some(t => t.operational_state?.status !== 'completed')
-                      ? "Microscope has an active/pending task. Cannot create new task."
-                      : "Create New Imaging Task"
+                    : sampleLoadStatus.isSampleLoaded
+                      ? "Microscope is occupied. Unload current sample first via 'Select Samples'"
+                      : imagingTasks.some(t => t.operational_state?.status !== 'completed')
+                        ? "Microscope has an active/pending task. Cannot create new task."
+                        : "Create New Imaging Task"
               }
             >
               <i className="fas fa-plus mr-1"></i> New Task
