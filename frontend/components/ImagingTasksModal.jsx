@@ -189,23 +189,46 @@ const ImagingTasksModal = ({
         .filter(slot => slot.name && slot.name.trim() !== '') // Only include slots with a non-empty name
         .map(slot => {
           const slotNumber = slot.incubator_slot;
-          const isOccupied = slot.metadata?.occupied || false;
           const sampleName = slot.name; // Name is guaranteed to be non-empty here
+          const currentLocation = slot.location; // e.g., 'incubator_slot', 'microscope1', 'robotic_arm'
+          // const originalOccupied = slot.metadata?.occupied || false; // Original occupied flag
+
+          let displayLabel;
+          const isActuallyInIncubator = currentLocation === 'incubator_slot';
+
+          if (isActuallyInIncubator) {
+            displayLabel = `Slot ${slotNumber}: ${sampleName} (In Incubator)`;
+          } else {
+            displayLabel = `Slot ${slotNumber}: ${sampleName} (Not Available - Location: ${currentLocation || 'Unknown'})`;
+          }
 
           return {
             value: String(slotNumber),
-            label: `Slot ${slotNumber}: ${sampleName} (${isOccupied ? 'Occupied' : 'Free'})`,
-            occupied: isOccupied,
+            label: displayLabel,
+            isAvailableForTask: isActuallyInIncubator,
+            // originalOccupied: originalOccupied, // Kept for reference, but not used in new disabling logic
             slotNumber: slotNumber,
+            currentLocation: currentLocation,
           };
         })
         .filter(slot => slot.slotNumber !== undefined && !isNaN(slot.slotNumber))
         .sort((a, b) => a.slotNumber - b.slotNumber);
 
       setAvailableSlots(processedSlots);
+
       if (processedSlots.length > 0) {
-        const firstFreeSlot = processedSlots.find(s => !s.occupied);
-        setIncubatorSlot(firstFreeSlot ? firstFreeSlot.value : processedSlots[0].value);
+        const firstTaskReadySlot = processedSlots.find(s => s.isAvailableForTask);
+        if (firstTaskReadySlot) {
+          setIncubatorSlot(firstTaskReadySlot.value);
+          setSlotsError(null); // Clear error if a suitable default is found
+        } else {
+          setIncubatorSlot(''); // Don't pre-select a non-viable option
+          if (processedSlots.some(s => !s.isAvailableForTask)) {
+            setSlotsError('No samples currently in an incubator slot. Samples must be in the incubator to be selected for a new task.');
+          } else { // Should imply no named slots if this branch is hit, but check allSlotInfo
+            setSlotsError('No named samples found in incubator slots or all are unavailable.');
+          }
+        }
       } else {
         setIncubatorSlot('');
         setSlotsError('No named samples found in incubator slots or service issue.');
@@ -381,6 +404,12 @@ const ImagingTasksModal = ({
     }
     if (!incubatorSlot) { // Check if incubatorSlot is selected
         showNotification('A Sample/Slot selection is required.', 'warning');
+        return;
+    }
+    // NEW CHECK: ensure the selected incubatorSlot is actually available.
+    const selectedSlotData = availableSlots.find(s => s.value === incubatorSlot);
+    if (!selectedSlotData || !selectedSlotData.isAvailableForTask) {
+        showNotification('The selected sample is not available in the incubator. Please choose an available sample from an incubator slot.', 'warning');
         return;
     }
     if (!nx.trim()){
@@ -560,7 +589,7 @@ const ImagingTasksModal = ({
                       {slotsLoading ? 'Loading samples...' : (availableSlots.length === 0 ? 'No named samples available' : 'Select a sample')}
                     </option>
                     {availableSlots.map(slot => (
-                      <option key={slot.value} value={slot.value} disabled={slot.occupied && String(slot.value) !== incubatorSlot}>
+                      <option key={slot.value} value={slot.value} disabled={!slot.isAvailableForTask}>
                         {slot.label}
                       </option>
                     ))}
