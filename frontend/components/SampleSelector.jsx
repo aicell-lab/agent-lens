@@ -14,6 +14,7 @@ const SampleSelector = ({
   currentOperation,
   setCurrentOperation,
   onSampleLoadStatusChange,
+  microscopeBusy,
 }) => {
   const [selectedSampleId, setSelectedSampleId] = useState(null);
   const [incubatorSlots, setIncubatorSlots] = useState([]);
@@ -540,13 +541,13 @@ const SampleSelector = ({
           <button 
             className={`unload-sample-button ${currentOperation /* Should be null here */ ? 'processing' : ''}`}
             onClick={handleUnloadSample}
-            disabled={currentOperation !== null || 
-                       (isSimulatedMicroscopeSelected && selectedSampleId === null) || 
-                       (isRealMicroscopeSelected && loadedSampleOnMicroscope === null)
+            disabled={currentOperation !== null || microscopeBusy || 
+                        (isSimulatedMicroscopeSelected && selectedSampleId === null) || 
+                        (isRealMicroscopeSelected && loadedSampleOnMicroscope === null)
             }
           >
             <div className="button-content">
-              {currentOperation === 'unloading' /* Should be false here */ ? (
+              {currentOperation === 'unloading' ? (
                 <>
                   <i className="fas fa-spinner fa-spin"></i>
                   <span>Unloading Sample...</span>
@@ -563,7 +564,7 @@ const SampleSelector = ({
           <button 
             className={`load-sample-button ${currentOperation /* Should be null here */ ? 'processing' : ''}`}
             onClick={handleLoadSample}
-            disabled={!selectedSampleId || currentOperation !== null || 
+            disabled={!selectedSampleId || currentOperation !== null || microscopeBusy ||
                         (isRealMicroscopeSelected && incubatorSlots.find(s=>s.id === selectedSampleId)?.location !== 'incubator_slot')
             }
           >
@@ -613,13 +614,14 @@ const SampleSelector = ({
 
 SampleSelector.propTypes = {
   isVisible: PropTypes.bool.isRequired,
-  selectedMicroscopeId: PropTypes.string,
+  selectedMicroscopeId: PropTypes.string.isRequired,
   microscopeControlService: PropTypes.object,
   incubatorControlService: PropTypes.object,
   roboticArmService: PropTypes.object,
   currentOperation: PropTypes.string,
-  setCurrentOperation: PropTypes.func,
-  onSampleLoadStatusChange: PropTypes.func
+  setCurrentOperation: PropTypes.func.isRequired,
+  onSampleLoadStatusChange: PropTypes.func.isRequired,
+  microscopeBusy: PropTypes.bool,
 };
 
 export default SampleSelector; 

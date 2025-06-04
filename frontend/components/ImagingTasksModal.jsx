@@ -398,6 +398,7 @@ const ImagingTasksModal = ({
   };
 
   const handleCreateTask = async () => {
+    console.log('[ImagingTasksModal] handleCreateTask started.'); // DIAGNOSTIC LOG
     if (!taskName.trim()) {
       showNotification('Task Name is required.', 'warning');
       return;
@@ -553,7 +554,15 @@ const ImagingTasksModal = ({
             </div>
           ) : (
             // Form for creating a new task
-            <form onSubmit={(e) => { e.preventDefault(); handleCreateTask(); }}>
+            <form 
+              onSubmit={(e) => { 
+                console.log('[ImagingTasksModal] Form onSubmit triggered. Event:', e); // DIAGNOSTIC LOG
+                e.preventDefault(); 
+                console.log('[ImagingTasksModal] Calling handleCreateTask...'); // DIAGNOSTIC LOG
+                handleCreateTask(); 
+              }}
+              id="imaging-tasks-modal-form"
+            >
               <fieldset className="modal-fieldset">
                 <legend className="modal-legend">Task Setup</legend>
                 <div className="form-group">
