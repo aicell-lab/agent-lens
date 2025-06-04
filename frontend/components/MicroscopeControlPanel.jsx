@@ -224,7 +224,6 @@ const MicroscopeControlPanel = ({
 
     const handler = setTimeout(async () => {
       try {
-        setMicroscopeBusy(true);
         appendLog(`Setting illumination (debounced) to channel ${illuminationChannel}, intensity ${desiredIlluminationIntensity}%`);
         await microscopeControlService.set_illumination(parseInt(illuminationChannel, 10), desiredIlluminationIntensity);
         // fetchStatusAndUpdateActuals will be called in finally
@@ -235,7 +234,6 @@ const MicroscopeControlPanel = ({
         // Crucial: fetch status AFTER the operation, then clear the flag and busy state.
         await fetchStatusAndUpdateActuals();
         channelSetByUIFlagRef.current = false;
-        setMicroscopeBusy(false);
       }
     }, 300); // 300ms debounce
 
@@ -248,7 +246,6 @@ const MicroscopeControlPanel = ({
 
     const handler = setTimeout(async () => {
       try {
-        setMicroscopeBusy(true);
         appendLog(`Setting camera exposure (debounced) for channel ${illuminationChannel} to ${desiredCameraExposure}ms`);
         await microscopeControlService.set_camera_exposure(parseInt(illuminationChannel, 10), desiredCameraExposure);
         await fetchStatusAndUpdateActuals(); // Update UI after successful set
@@ -257,7 +254,6 @@ const MicroscopeControlPanel = ({
         appendLog(`Error setting camera exposure (debounced): ${error.message}`);
         console.error("[MicroscopeControlPanel] Error setting camera exposure (debounced):", error);
       } finally {
-        setMicroscopeBusy(false);
       }
     }, 300); // 300ms debounce
 
