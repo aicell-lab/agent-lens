@@ -681,6 +681,13 @@ const MicroscopeControlPanel = ({
           showNotification(`Microscope has an unfinished imaging task: ${activeTask.name}. Controls may be limited.`, 'info');
         }
         setMicroscopeBusy(true); // CRITICAL: Set busy if an active task for this scope is found
+      } else {
+        // If no active task is found for this REAL microscope, it's not busy due to tasks.
+        // (Simulated scope and no orchestrator handled at the start of the function)
+        if (selectedMicroscopeId !== "squid-control/squid-control-reef" && orchestratorManagerService) {
+            appendLog(`No active imaging tasks found for ${selectedMicroscopeId}. Setting microscope to not busy.`);
+            setMicroscopeBusy(false);
+        }
       }
 
     } catch (error) {
@@ -1154,6 +1161,7 @@ const MicroscopeControlPanel = ({
             key={selectedMicroscopeId}
             microscopeControlService={microscopeControlService} 
             appendLog={appendLog} 
+            microscopeBusy={microscopeBusy}
           />
         </div>
       </div>
