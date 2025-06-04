@@ -21,7 +21,7 @@
   max-height: 90vh;
   display: flex;
   flex-direction: column;
-  overflow: hidden; /* Prevents content from spilling out before scroll is active */
+  overflow: visible;
 }
 
 .imaging-tasks-modal-header {
@@ -204,113 +204,242 @@ input[type="checkbox"]:disabled ~ span {
   color: white;
 }
 .imaging-tasks-modal-footer .action-button.danger:hover:not(:disabled) {
-  background-color: #c82333; /* Tailwind: hover:bg-red-600 */
+  background-color: #c82333; /* Tailwind: hover:bg-red-700 */
 }
 
 /* Enhanced disabled styles for action buttons - following main.css pattern */
 .imaging-tasks-modal-footer .action-button:disabled {
-  background-color: #e9ecef !important; /* Tailwind: bg-gray-200 */
-  color: #6c757d !important; /* Tailwind: text-gray-400 */
-  cursor: not-allowed !important;
-  opacity: 0.7 !important;
-  border-color: #e9ecef !important; /* Ensure border also changes */
+  background-color: #e9ecef; /* Tailwind: bg-gray-200 */
+  color: #6c757d; /* Tailwind: text-gray-500 */
+  cursor: not-allowed;
 }
 
 .imaging-tasks-modal-footer .action-button + .action-button {
-    margin-left: 0.5rem; /* Tailwind: ml-2 if using space-x utilities on parent is not feasible */
+  margin-left: 0.5rem; /* Tailwind: ml-2 */
 }
 
 /* Styles for the Well Plate Grid */
 .well-plate-grid-container {
+  margin-top: 1rem;
   margin-bottom: 1rem;
   user-select: none; /* Prevent text selection while dragging */
 }
 
 .well-plate-grid {
   display: grid;
-  /* 1fr for row labels, 12 * 1fr for cells */
-  grid-template-columns: minmax(20px, auto) repeat(12, 1fr);
-  grid-template-rows: minmax(20px, auto) repeat(8, 1fr); /* 1fr for col labels, 8 * 1fr for cells */
+  grid-template-columns: auto repeat(12, 1fr); /* Row labels + 12 columns */
+  gap: 2px;
   border: 1px solid #ccc;
+  padding: 5px;
+  background-color: #f9f9f9;
   width: fit-content; /* Adjust width to content */
-  min-width: 300px; /* Minimum width to ensure it doesn't get too squished */
-  max-width: 100%;
 }
 
 .grid-row {
-  display: contents; /* Allows cells to be direct children of the grid for layout */
+  display: contents; /* Makes child elements participate in the grid layout */
 }
 
 .grid-col-labels {
-    display: contents; /* Allows labels to be direct children of the grid */
+  display: contents; /* For the top column labels to be part of the grid */
 }
 
 .grid-label {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.7rem;
+  padding: 4px;
+  font-size: 0.75rem;
   font-weight: bold;
-  color: #555;
-  background-color: #f0f0f0;
-  border: 1px solid #ddd;
-  padding: 2px;
+  background-color: #e9ecef;
+  color: #495057;
   min-width: 20px; /* Ensure labels have some width */
-  min-height: 20px; /* Ensure labels have some height */
+  text-align: center;
 }
 
 .grid-cell {
-  border: 1px solid #eee;
-  background-color: #fff;
+  padding: 8px;
+  border: 1px solid #ddd;
+  background-color: white;
+  text-align: center;
   cursor: pointer;
-  aspect-ratio: 1 / 1; /* Make cells square */
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.6rem; /* For any text inside cells, if needed */
-  transition: background-color 0.1s ease-in-out;
-  min-width: 20px; /* Minimum cell width */
-  min-height: 20px; /* Minimum cell height */
+  font-size: 0.7rem; /* Smaller text for cell content if any */
+  transition: background-color 0.2s;
+  min-width: 20px; /* Ensure cells have some width */
+  min-height: 20px; /* Ensure cells have some height */
 }
 
 .grid-cell:hover {
-  background-color: #e0e0e0;
+  background-color: #e9ecef;
 }
 
 .grid-cell.selected {
-  background-color: #77b5fe; /* A nice blue for selection */
-  border-color: #5c99db;
+  background-color: #007bff; /* Blue for selected */
+  color: white;
+  border-color: #0056b3;
 }
 
-/* Disabled styles for grid cells if needed */
 .grid-cell:disabled {
-  cursor: not-allowed !important;
-  opacity: 0.5;
   background-color: #f8f9fa;
+  cursor: not-allowed;
+  color: #adb5bd;
 }
 
-/* Ensure the first cell (top-left corner for labels) is styled like a label */
+/* Ensure the first cell in the column labels row (top-left empty cell) is styled like other labels */
 .well-plate-grid > .grid-col-labels > div:first-child {
-    background-color: #f0f0f0; /* Match label background */
-    border: 1px solid #ddd; /* Match label border */
+    background-color: #e9ecef;
+    border: none; /* Or style as needed */
 }
 
-/* Ensure select also uses modal-input styles or has its own */
+/* Styles for specific select inputs if needed */
 select.modal-input {
-  height: auto; /* Adjust if padding makes it too tall */
+    /* Add specific styles if default .modal-input is not enough */
 }
 
-/* Additional disabled styles for illumination settings inputs */
+/* Fix for disabled illumination number inputs */
 .illumination-setting-row input:disabled {
-  background-color: #f8f9fa;
-  border-color: #e9ecef;
-  color: #6c757d;
-  cursor: not-allowed !important;
-  opacity: 0.75;
+    background-color: #f8f9fa !important;
+    color: #6c757d !important;
+    border-color: #e9ecef !important;
+    cursor: not-allowed !important;
+    opacity: 0.75 !important;
 }
 
-/* Disabled styles for illumination setting checkboxes and their labels */
 .illumination-setting-row input[type="checkbox"]:disabled + span {
-  color: #6c757d;
-  opacity: 0.75;
+    color: #6c757d !important;
+    cursor: not-allowed !important;
+    opacity: 0.75 !important;
+}
+
+/* Tutorial Tooltip Styles */
+/* Updated for Portal-based Tooltip */
+
+.tooltip-icon-container { /* Renamed from tooltip-container */
+  position: relative; /* Still useful if icon itself needs relative positioning for some reason, but less critical for portal */
+  display: inline-flex; /* To align icon nicely if it were alongside other inline elements */
+  align-items: center;
+  margin-left: 8px; /* Space between label and tooltip icon */
+  vertical-align: middle; /* Align icon with text */
+}
+
+.tooltip-icon {
+  width: 16px;
+  height: 16px;
+  background-color: #007bff; /* Blue background */
+  color: white;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: bold;
+  cursor: help;
+  transition: background-color 0.2s;
+}
+
+.tooltip-icon:hover {
+  background-color: #0056b3; /* Darker blue on hover */
+}
+
+.tooltip-text {
+  /* Positioning is now handled by inline styles (position: fixed, top, left, transform) */
+  /* Visibility and opacity are also handled by inline styles */
+  width: 250px; /* Adjust as needed */
+  background-color: #333; /* Dark background for tooltip */
+  color: #fff;
+  text-align: left;
+  border-radius: 6px;
+  padding: 8px 10px;
+  /* z-index is set inline */
+  font-size: 0.8rem;
+  line-height: 1.4;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+  /* Remove CSS transition for visibility/opacity if fully JS controlled, or keep for CSS effect */
+  transition: opacity 0.2s ease-out, transform 0.2s ease-out; /* Example: can transition opacity and transform if desired */
+  /* Ensure it doesn't get display:none from other general rules if any */
+  display: block; 
+}
+
+/* Remove old hover-based visibility rule */
+/* .tooltip-icon-container:hover .tooltip-text { ... } */
+
+/* Style for fieldset and legend to group sections */
+.modal-fieldset {
+  border: 1px solid #ced4da;
+  border-radius: 0.25rem;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.modal-legend {
+  width: auto; /* Fit content */
+  padding: 0 0.5rem;
+  margin-left: 0.5rem; /* Indent legend slightly */
+  font-weight: 600;
+  color: #495057;
+}
+
+/* Ensure label and input/select are on the same line with tooltip */
+.form-group label, .form-group .form-label {
+  display: flex; /* Changed to flex to align tooltip icon */
+  align-items: center; /* Vertically align items in label */
+  margin-bottom: 0.25rem; /* Reduced bottom margin for label */
+  font-size: 0.9rem;
+  color: #333;
+}
+
+/* Adjust form groups for better layout */
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 1rem;
+}
+
+.form-group {
+  margin-bottom: 0.75rem; /* Consistent bottom margin for form groups */
+}
+
+/* Illumination Settings Row specific styles */
+.illumination-setting-row {
+  display: flex;
+  align-items: center; /* Vertically align items in the row */
+  justify-content: space-between; /* Puts space between label group and input group */
+  padding: 0.5rem 0; /* Add some padding for visual separation */
+  border-bottom: 1px solid #f0f0f0; /* Light border for each row */
+}
+
+.illumination-setting-row:last-child {
+  border-bottom: none;
+}
+
+.illumination-channel-label-container {
+  display: flex;
+  align-items: center;
+  flex-grow: 1; /* Allows this container to take up available space */
+  margin-right: 1rem; /* Space before the input fields start */
+  min-width: 0; /* Important for flex-grow in a flex container to prevent overflow */
+}
+
+.illumination-channel-label-container .channel-name-text {
+  white-space: normal; /* Allow long channel names to wrap */
+  word-break: break-word; /* Break long words if necessary */
+  margin-right: 0.5rem; /* Space between channel name and tooltip */
+  flex-shrink: 1; /* Allow text to shrink if needed */
+}
+
+.illumination-inputs-container {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem; /* Space between intensity and exposure input groups */
+}
+
+.illumination-input-group {
+  display: flex;
+  flex-direction: column; /* Stack label (if visible) and input vertically */
+  margin-bottom: 0 !important; /* Override default form-group margin */
+}
+
+.illumination-input {
+  width: 70px !important; /* Significantly shorter input boxes */
+  padding: 0.25rem 0.4rem !important; /* Adjust padding for smaller size */
+  font-size: 0.75rem !important; /* Ensure text size is small */
 } 
