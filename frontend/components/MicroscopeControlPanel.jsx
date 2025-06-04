@@ -75,6 +75,9 @@ const MicroscopeControlPanel = ({
   const canvasRef = useRef(null);
   const videoRef = useRef(null);
 
+  // Ref to track if the illumination channel change was initiated by the UI
+  const channelSetByUIFlagRef = useRef(false);
+
   // WebRTC State
   const [isWebRtcActive, setIsWebRtcActive] = useState(false);
   const [webRtcPc, setWebRtcPc] = useState(null);
@@ -134,9 +137,24 @@ const MicroscopeControlPanel = ({
     appendLog('WebRTC stream stopped.');
   }, [appendLog, isWebRtcActive, webRtcPc]);
 
+  // Helper function to get intensity/exposure pair from status object
+  const getIntensityExposurePairFromStatus = (status, channel) => {
+    if (!status || channel === null || channel === undefined) return null;
+    switch (channel.toString()) {
+      case "0": return status.BF_intensity_exposure;
+      case "11": return status.F405_intensity_exposure;
+      case "12": return status.F488_intensity_exposure;
+      case "14": return status.F561_intensity_exposure;
+      case "13": return status.F638_intensity_exposure;
+      case "15": return status.F730_intensity_exposure;
+      default: return null;
+    }
+  };
+
   const fetchStatusAndUpdateActuals = async () => {
     if (!microscopeControlService) {
-      return { intensity: actualIlluminationIntensity, exposure: actualCameraExposure }; // Return current actuals if no service
+      // Return current desired values if no service, as initAndSyncValues uses these to set desired states
+      return { intensity: desiredIlluminationIntensity, exposure: desiredCameraExposure };
     }
     try {
       const status = await microscopeControlService.get_status();
@@ -145,35 +163,43 @@ const MicroscopeControlPanel = ({
       setZPosition(status.current_z);
       setIsLightOn(status.is_illumination_on);
 
-      let fetchedIntensity = actualIlluminationIntensity;
-      let fetchedExposure = actualCameraExposure;
+      const hardwareChannel = status.current_channel?.toString();
 
-      let intensityExposurePair;
-      switch (illuminationChannel) {
-        case "0": intensityExposurePair = status.BF_intensity_exposure; break;
-        case "11": intensityExposurePair = status.F405_intensity_exposure; break;
-        case "12": intensityExposurePair = status.F488_intensity_exposure; break;
-        case "14": intensityExposurePair = status.F561_intensity_exposure; break;
-        case "13": intensityExposurePair = status.F638_intensity_exposure; break;
-        case "15": intensityExposurePair = status.F730_intensity_exposure; break;
-        default:
-          console.warn(`[MicroscopeControlPanel] Unknown illumination channel in fetchStatus: ${illuminationChannel}`);
-          intensityExposurePair = [actualIlluminationIntensity, actualCameraExposure]; // Fallback to current actuals
+      // If a UI-initiated channel change is NOT pending, and hardware channel differs from UI, sync UI.
+      if (hardwareChannel && !channelSetByUIFlagRef.current && illuminationChannel !== hardwareChannel) {
+        setIlluminationChannel(hardwareChannel);
       }
 
-      if (intensityExposurePair && intensityExposurePair.length === 2) {
-        fetchedIntensity = intensityExposurePair[0];
-        fetchedExposure = intensityExposurePair[1];
-        setActualIlluminationIntensity(fetchedIntensity);
-        setActualCameraExposure(fetchedExposure);
-      } else {
-        console.warn(`[MicroscopeControlPanel] Could not find or parse intensity/exposure for channel ${illuminationChannel} from status:`, status);
+      // Update "Actual" display values based on the true hardware channel
+      let actualIntensityForDisplay = actualIlluminationIntensity; // Default to current state
+      let actualExposureForDisplay = actualCameraExposure;   // Default to current state
+      if (hardwareChannel) {
+        const pair = getIntensityExposurePairFromStatus(status, hardwareChannel);
+        if (pair) {
+          actualIntensityForDisplay = pair[0];
+          actualExposureForDisplay = pair[1];
+        }
       }
-      return { intensity: fetchedIntensity, exposure: fetchedExposure };
+      setActualIlluminationIntensity(actualIntensityForDisplay);
+      setActualCameraExposure(actualExposureForDisplay);
+
+      // For returning values to sync "Desired" inputs (via initAndSyncValues):
+      // Use the current `illuminationChannel` state (UI's perspective).
+      let intensityForDesiredSync = actualIntensityForDisplay; // Fallback to hardware actuals
+      let exposureForDesiredSync = actualExposureForDisplay;   // Fallback
+
+      const pairForUIScheduledChannel = getIntensityExposurePairFromStatus(status, illuminationChannel);
+      if (pairForUIScheduledChannel) {
+        intensityForDesiredSync = pairForUIScheduledChannel[0];
+        exposureForDesiredSync = pairForUIScheduledChannel[1];
+      }
+
+      return { intensity: intensityForDesiredSync, exposure: exposureForDesiredSync };
     } catch (error) {
       appendLog(`Failed to fetch status: ${error.message}`);
       console.error("[MicroscopeControlPanel] Failed to fetch status:", error);
-      return { intensity: actualIlluminationIntensity, exposure: actualCameraExposure }; // Return current actuals on error
+      // Fallback: return current desired values to avoid them being reset by error
+      return { intensity: desiredIlluminationIntensity, exposure: desiredCameraExposure };
     }
   };
 
@@ -181,7 +207,6 @@ const MicroscopeControlPanel = ({
     if (microscopeControlService) {
       const initAndSyncValues = async () => {
         const { intensity, exposure } = await fetchStatusAndUpdateActuals(); // Fetches and updates actuals, returns values
-        // Sync desired values with the freshly fetched actual values
         setDesiredIlluminationIntensity(intensity);
         setDesiredCameraExposure(exposure);
       };
@@ -202,12 +227,14 @@ const MicroscopeControlPanel = ({
         setMicroscopeBusy(true);
         appendLog(`Setting illumination (debounced) to channel ${illuminationChannel}, intensity ${desiredIlluminationIntensity}%`);
         await microscopeControlService.set_illumination(parseInt(illuminationChannel, 10), desiredIlluminationIntensity);
-        await fetchStatusAndUpdateActuals(); // Update UI after successful set
-        appendLog('Illumination updated successfully (debounced).');
+        // fetchStatusAndUpdateActuals will be called in finally
       } catch (error) {
         appendLog(`Error setting illumination (debounced): ${error.message}`);
         console.error("[MicroscopeControlPanel] Error setting illumination (debounced):", error);
       } finally {
+        // Crucial: fetch status AFTER the operation, then clear the flag and busy state.
+        await fetchStatusAndUpdateActuals();
+        channelSetByUIFlagRef.current = false;
         setMicroscopeBusy(false);
       }
     }, 300); // 300ms debounce
@@ -397,9 +424,6 @@ const MicroscopeControlPanel = ({
       } catch (error) {
         appendLog(`Error getting microscope service '${simpleWebRtcServiceName}' (from '${selectedMicroscopeId}') via WebRTC: ${error.message}`);
         console.error(`Error getting microscope service '${simpleWebRtcServiceName}' (from '${selectedMicroscopeId}') via WebRTC:`, error);
-        // Optionally, stop the stream if getting the service is critical
-        // memoizedStopWebRtcStream();
-        // throw error; // Re-throw if this is a fatal error for the stream
       }
 
       setIsWebRtcActive(true);
@@ -955,7 +979,11 @@ const MicroscopeControlPanel = ({
                   value={illuminationChannel}
                   onChange={(e) => {
                     if (currentOperation) return;
-                    setIlluminationChannel(e.target.value);
+                    const newChannel = e.target.value;
+                    if (illuminationChannel !== newChannel) { // Only if channel actually changes
+                      setIlluminationChannel(newChannel); // This triggers the set_illumination effect
+                      channelSetByUIFlagRef.current = true; // Indicate change is fresh from UI, pending hardware ack
+                    }
                   }}
                   disabled={currentOperation !== null}
                 >
