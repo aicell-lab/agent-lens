@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import PropTypes from 'prop-types';
 
-const ChatbotButton = ({ microscopeControlService, appendLog }) => {
+const ChatbotButton = ({ microscopeControlService, appendLog, microscopeBusy}) => {
     const [chatUrl, setChatUrl] = useState(null);
 
     useEffect(() => {
@@ -38,6 +38,7 @@ const ChatbotButton = ({ microscopeControlService, appendLog }) => {
             <button
                 className="control-button bg-blue-500 text-white hover:bg-blue-600 p-2 rounded mb-4"
                 onClick={openChatbot}
+                disabled={!microscopeControlService || microscopeBusy}
             >
                 <i className="fas fa-comments"></i> Open Chat
             </button>
@@ -57,6 +58,7 @@ const ChatbotButton = ({ microscopeControlService, appendLog }) => {
 ChatbotButton.propTypes = {
     microscopeControlService: PropTypes.object,
     appendLog: PropTypes.func.isRequired,
+    microscopeBusy: PropTypes.bool,
 };
 
 export default ChatbotButton;

@@ -681,6 +681,13 @@ const MicroscopeControlPanel = ({
           showNotification(`Microscope has an unfinished imaging task: ${activeTask.name}. Controls may be limited.`, 'info');
         }
         setMicroscopeBusy(true); // CRITICAL: Set busy if an active task for this scope is found
+      } else {
+        // If no active task is found for this REAL microscope, it's not busy due to tasks.
+        // (Simulated scope and no orchestrator handled at the start of the function)
+        if (selectedMicroscopeId !== "squid-control/squid-control-reef" && orchestratorManagerService) {
+            appendLog(`No active imaging tasks found for ${selectedMicroscopeId}. Setting microscope to not busy.`);
+            setMicroscopeBusy(false);
+        }
       }
 
     } catch (error) {
@@ -821,6 +828,7 @@ const MicroscopeControlPanel = ({
             currentOperation={currentOperation}
             setCurrentOperation={setCurrentOperation}
             onSampleLoadStatusChange={handleSampleLoadStatusChange}
+            microscopeBusy={microscopeBusy}
           />
 
           <div className="flex justify-between items-center mb-4">
@@ -850,28 +858,28 @@ const MicroscopeControlPanel = ({
               <button
                 className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/5 px-1.5 py-0.5 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
                 onClick={contrastAutoFocus}
-                disabled={!microscopeControlService || currentOperation !== null}
+                disabled={!microscopeControlService || currentOperation !== null || microscopeBusy}
               >
                 <i className="fas fa-crosshairs icon mr-1"></i> Contrast AF
               </button>
               <button
                 className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/5 px-1.5 py-0.5 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
                 onClick={laserAutoFocus}
-                disabled={!microscopeControlService || currentOperation !== null}
+                disabled={!microscopeControlService || currentOperation !== null || microscopeBusy}
               >
                 <i className="fas fa-bullseye icon mr-1"></i> Laser AF
               </button>
               <button
                 className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/5 px-1.5 py-0.5 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
                 onClick={setLaserReference}
-                disabled={!microscopeControlService || currentOperation !== null}
+                disabled={!microscopeControlService || currentOperation !== null || microscopeBusy}
               >
                 <i className="fas fa-bookmark icon mr-1"></i> Set Ref
               </button>
               <button
                 className="control-button snap-button bg-green-500 text-white hover:bg-green-600 w-1/5 px-1.5 py-0.5 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
                 onClick={snapImage}
-                disabled={!microscopeControlService || currentOperation !== null}
+                disabled={!microscopeControlService || currentOperation !== null || microscopeBusy}
               >
                 <i className="fas fa-camera icon mr-1"></i> Snap
               </button>
@@ -903,7 +911,7 @@ const MicroscopeControlPanel = ({
                     value={axis === 'x' ? xMoveStr : axis === 'y' ? yMoveStr : zMoveStr}
                     min="0"
                     onChange={(e) => {
-                      if (currentOperation) return;
+                      if (currentOperation || microscopeBusy) return;
                       const newStringValue = e.target.value;
                       let newNumericValue = parseFloat(newStringValue);
 
@@ -924,21 +932,21 @@ const MicroscopeControlPanel = ({
                         }
                       }
                     }}
-                    disabled={currentOperation !== null}
+                    disabled={currentOperation !== null || microscopeBusy}
                   />
                 </div>
                 <div className="aligned-buttons flex justify-between space-x-1">
                   <button
                     className="half-button bg-blue-500 text-white hover:bg-blue-600 w-1/2 p-1 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
                     onClick={() => moveMicroscope(axis, -1)}
-                    disabled={!microscopeControlService || currentOperation !== null}
+                    disabled={!microscopeControlService || currentOperation !== null || microscopeBusy}
                   >
                     <i className={`fas fa-arrow-${axis === 'x' ? 'left' : axis === 'y' ? 'up' : 'down'} mr-1`}></i> {axis.toUpperCase()}-
                   </button>
                   <button
                     className="half-button bg-blue-500 text-white hover:bg-blue-600 w-1/2 p-1 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
                     onClick={() => moveMicroscope(axis, 1)}
-                    disabled={!microscopeControlService || currentOperation !== null}
+                    disabled={!microscopeControlService || currentOperation !== null || microscopeBusy}
                   >
                     {axis.toUpperCase()}+ <i className={`fas fa-arrow-${axis === 'x' ? 'right' : axis === 'y' ? 'down' : 'up'} ml-1`}></i>
                   </button>
@@ -961,7 +969,7 @@ const MicroscopeControlPanel = ({
                   max="100"
                   value={desiredIlluminationIntensity}
                   onChange={(e) => {
-                    if (currentOperation) return;
+                    if (currentOperation || microscopeBusy) return;
                     setDesiredIlluminationIntensity(parseInt(e.target.value, 10));
                   }}
                   disabled={microscopeBusy || currentOperation !== null}
@@ -974,14 +982,14 @@ const MicroscopeControlPanel = ({
                   className="control-input w-full mt-1 p-1 border border-gray-300 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
                   value={illuminationChannel}
                   onChange={(e) => {
-                    if (currentOperation) return;
+                    if (currentOperation || microscopeBusy) return;
                     const newChannel = e.target.value;
                     if (illuminationChannel !== newChannel) { // Only if channel actually changes
                       setIlluminationChannel(newChannel); // This triggers the set_illumination effect
                       channelSetByUIFlagRef.current = true; // Indicate change is fresh from UI, pending hardware ack
                     }
                   }}
-                  disabled={currentOperation !== null}
+                  disabled={currentOperation !== null || microscopeBusy}
                 >
                   <option value="0">BF LED matrix full</option>
                   <option value="11">Fluorescence 405 nm Ex</option>
@@ -1001,10 +1009,10 @@ const MicroscopeControlPanel = ({
                 className="control-input w-full mt-1 p-1 border border-gray-300 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
                 value={desiredCameraExposure}
                 onChange={(e) => {
-                  if (currentOperation) return;
+                  if (currentOperation || microscopeBusy) return;
                   setDesiredCameraExposure(parseInt(e.target.value, 10));
                 }}
-                disabled={currentOperation !== null}
+                disabled={currentOperation !== null || microscopeBusy}
               />
             </div>
           </div>
@@ -1071,12 +1079,16 @@ const MicroscopeControlPanel = ({
                     <div
                       key={`cell-${row}-${col}`}
                       className={`grid-cell ${(!microscopeControlService || microscopeBusy || currentOperation !== null) ? 'disabled' : ''}`}
-                      onDoubleClick={() => handleWellDoubleClick(row, col)}
+                      onDoubleClick={() => {
+                        if (!microscopeControlService || microscopeBusy || currentOperation) return;
+                        handleWellDoubleClick(row, col);
+                      }}
                       title={`Well ${row}${col}`}
                       role="button"
                       tabIndex={0}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' || e.key === ' ') {
+                          if (!microscopeControlService || microscopeBusy || currentOperation) return;
                           handleWellDoubleClick(row, col);
                         }
                       }}
@@ -1102,7 +1114,7 @@ const MicroscopeControlPanel = ({
                 !orchestratorManagerService || 
                 currentOperation !== null || 
                 microscopeBusy || 
-                imagingTasks.some(t => t.operational_state?.status !== 'completed')
+                imagingTasks.some(t => t.operational_state?.status !== 'completed' && t.operational_state?.status !== 'failed')
               }
               title={
                 selectedMicroscopeId === "squid-control/squid-control-reef" 
@@ -1111,7 +1123,7 @@ const MicroscopeControlPanel = ({
                     ? "Orchestrator service not available (check reef-imaging workspace access)"
                     : sampleLoadStatus.isSampleLoaded
                       ? "Microscope is occupied. Unload current sample first via 'Select Samples'"
-                      : imagingTasks.some(t => t.operational_state?.status !== 'completed')
+                      : imagingTasks.some(t => t.operational_state?.status !== 'completed' && t.operational_state?.status !== 'failed')
                         ? "Microscope has an active/pending task. Cannot create new task."
                         : "Create New Imaging Task"
               }
@@ -1131,12 +1143,12 @@ const MicroscopeControlPanel = ({
               {imagingTasks.map(task => (
                 <li 
                   key={task.name} 
-                  className={`cursor-pointer hover:text-blue-600 ${task.operational_state?.status !== 'completed' ? 'font-semibold text-blue-700' : 'text-gray-600'}`}
+                  className={`cursor-pointer hover:text-blue-600 ${task.operational_state?.status !== 'completed' && task.operational_state?.status !== 'failed' ? 'font-semibold text-blue-700' : 'text-gray-600'}`}
                   onClick={() => openImagingTaskModal(task)}
                   title={`Status: ${task.operational_state?.status || 'Unknown'}. Click to manage.`}
                 >
                   {task.name} ({task.operational_state?.status || 'Unknown'})
-                  {task.operational_state?.status !== 'completed' && <i className="fas fa-spinner fa-spin ml-2 text-blue-500"></i>}
+                  {task.operational_state?.status !== 'completed' && task.operational_state?.status !== 'failed' && <i className="fas fa-spinner fa-spin ml-2 text-blue-500"></i>}
                 </li>
               ))}
             </ul>
@@ -1149,6 +1161,7 @@ const MicroscopeControlPanel = ({
             key={selectedMicroscopeId}
             microscopeControlService={microscopeControlService} 
             appendLog={appendLog} 
+            microscopeBusy={microscopeBusy}
           />
         </div>
       </div>
