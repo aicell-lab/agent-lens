@@ -20,3 +20,5 @@ html/
 bin/mc*
 bin/minio*
 *.log*
+
+agent_lens/faiss_data_store/

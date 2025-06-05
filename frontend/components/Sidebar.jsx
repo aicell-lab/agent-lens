@@ -298,6 +298,15 @@ const Sidebar = ({
             {!isMainSidebarCollapsed && <i className={`fas ${(activeTab === 'image-view' || activeTab === 'image-view-map') && isImageViewPanelOpen ? 'fa-chevron-left' : 'fa-chevron-right'} microscope-toggle-icon`}></i>}
           </button>
           <button 
+            className={`sidebar-tab ${activeTab === 'image-search' ? 'active' : ''}`}
+            onClick={() => onTabChange('image-search')}
+            disabled={!!currentOperation} 
+            title={currentOperation ? "Sample operation in progress" : (isMainSidebarCollapsed ? "Image Search" : "Search for similar images")}
+          >
+            <i className="fas fa-search"></i>
+            {!isMainSidebarCollapsed && <span>Image Search</span>}
+          </button>
+          <button 
             className={`sidebar-tab ${activeTab === 'incubator' ? 'active' : ''}`}
             onClick={() => onTabChange('incubator')}
             disabled={!!currentOperation} 

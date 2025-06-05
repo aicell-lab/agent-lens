@@ -144,8 +144,8 @@ export const initializeServices = async (
   );
   setMicroscopeControlService(microscopeControlService);
 
-  const similarityServiceRemoteId = "agent-lens/similarity-search";
-  const similarityServiceLocalId = "similarity-search";
+  const similarityServiceRemoteId = "agent-lens/image-text-similarity-search";
+  const similarityServiceLocalId = "image-text-similarity-search";
   const similarityService = await tryGetService(
     hyphaManager,
     "Similarity Search",
@@ -203,13 +203,22 @@ export const tryGetService = async (hyphaManager, name, remoteIdWithWorkspace, l
         console.warn(`[tryGetService] Remote ID '${remoteIdWithWorkspace}' for '${name}' does not seem to contain a workspace. Defaulting to 'agent-lens'.`);
     }
     const workspaceName = parts.length > 1 ? parts[0] : 'agent-lens'; // Default to agent-lens if no workspace in ID
-    let serviceIdToGet = parts.length > 1 ? parts.slice(1).join('/') : remoteIdWithWorkspace;
+    let serviceIdToGet; // MODIFIED: Declare serviceIdToGet; initial assignment is now conditional.
 
     const useLocal = localId && isLocal();
     if (useLocal) {
       serviceIdToGet = localId; // If local and localId provided, workspace might not be relevant for local getService
       console.log(`[tryGetService] Attempting to get LOCAL service '${serviceIdToGet}' in workspace '${workspaceName}' for '${name}'`);
     } else {
+      // MODIFIED: Logic for remote service ID determination based on workspaceName.
+      if (workspaceName === 'agent-lens') {
+        // For 'agent-lens', use the full remoteIdWithWorkspace, as per user's request for getService.
+        // This ensures "agent-lens/service-name" is passed if remoteIdWithWorkspace is such.
+        serviceIdToGet = remoteIdWithWorkspace;
+      } else {
+        // For other remote workspaces, strip the workspace prefix.
+        serviceIdToGet = parts.length > 1 ? parts.slice(1).join('/') : remoteIdWithWorkspace;
+      }
       console.log(`[tryGetService] Attempting to get REMOTE service '${serviceIdToGet}' in workspace '${workspaceName}' for '${name}'`);
     }
 
