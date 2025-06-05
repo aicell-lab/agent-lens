@@ -144,8 +144,8 @@ export const initializeServices = async (
   );
   setMicroscopeControlService(microscopeControlService);
 
-  const similarityServiceRemoteId = "agent-lens/image-embedding-similarity-search";
-  const similarityServiceLocalId = "image-embedding-similarity-search";
+  const similarityServiceRemoteId = "agent-lens/image-text-similarity-search";
+  const similarityServiceLocalId = "image-text-similarity-search";
   const similarityService = await tryGetService(
     hyphaManager,
     "Similarity Search",

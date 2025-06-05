@@ -1,6 +1,5 @@
 import asyncio
 from hypha_rpc import connect_to_server, login
-import sqlite3
 import numpy as np
 import clip
 import torch
@@ -12,366 +11,471 @@ import os
 import base64
 from datetime import datetime
 import uuid
+import json
 from dotenv import find_dotenv, load_dotenv
 ENV_FILE = find_dotenv()
 if ENV_FILE:
     load_dotenv(ENV_FILE)
 
-#This code defines a service for performing image similarity searches using CLIP embeddings, FAISS indexing, and a Hypha server connection. 
-# The key steps include loading vectors from an SQLite database, separating the vectors by fluorescent channel, building FAISS indices for each channel, and registering a Hypha service to handle similarity search requests. 
+# This code defines a service for performing image and text similarity searches 
+# using CLIP embeddings, FAISS indexing (loaded from/saved to files), 
+# and a Hypha server connection.
 
 # Load the CLIP model
 device = "cuda" if torch.cuda.is_available() else "cpu"
 model, preprocess = clip.load("ViT-B/32", device=device)
 
-# Connect to the SQLite database
-def get_db_connection():
-    conn = sqlite3.connect('cell_vectors_db.db')
-    # Create table if it doesn't exist
-    conn.execute('''
-        CREATE TABLE IF NOT EXISTS images (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            vector BLOB NOT NULL,
-            image_path TEXT NOT NULL,
-            fluorescent_channel TEXT
-        )
-    ''')
-    return conn, conn.cursor()
+# --- BEGIN File-based data storage setup ---
+FAISS_DATA_DIR = "faiss_data_store"
+IMAGE_STORE_SUBDIR = "images"
+CELL_STORE_SUBDIR = "cell_images"
 
-def get_cell_db_connection():
-  conn = sqlite3.connect('cell_vectors_db.db')
-  # Create table if it doesn't exist
-  conn.execute('''
-      CREATE TABLE IF NOT EXISTS cell_images (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          file_name TEXT NOT NULL,
-          vector BLOB NOT NULL,
-          annotation TEXT,
-          timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-  ''')
-  return conn, conn.cursor()
+IMAGE_FAISS_FILENAME = "image_index.faiss"
+IMAGE_METADATA_FILENAME = "image_metadata.json"
+CELL_FAISS_FILENAME = "cell_index.faiss"
+CELL_METADATA_FILENAME = "cell_metadata.json"
 
-def load_vectors_from_db(channel=None):
-    conn, c = get_db_connection()
-    query = 'SELECT id, vector, image_path, fluorescent_channel FROM images'
-    if channel:
-        query += f" WHERE fluorescent_channel = '{channel}'"
-    c.execute(query)
-    rows = c.fetchall()
-    conn.close()
+VECTOR_DIMENSION = 512  # For ViT-B/32 CLIP model
 
-    image_ids = []
-    image_vectors = []
-    image_paths = {}
-    image_channels = {}
+# In-memory data stores
+image_index = None
+# List of dicts: {"id": "unique_id", "file_path": "path/to/image.png", "text_description": "...", "channel": "..."}
+image_metadata = []  
+cell_index = None
+# List of dicts: {"id": "unique_id", "file_path": "path/to/cell.png", "text_description": "...", "annotation": "..."}
+cell_metadata = []   
 
-    for row in rows:
-        img_id, img_vector, img_path, img_channel = row
-        img_vector = np.frombuffer(img_vector, dtype=np.float32)
-        image_ids.append(img_id)
-        image_vectors.append(img_vector)
-        image_paths[img_id] = img_path
-        image_channels[img_id] = img_channel
+def _ensure_dir(path):
+    os.makedirs(path, exist_ok=True)
+
+def _get_full_path(filename):
+    return os.path.join(FAISS_DATA_DIR, filename)
+
+def _get_image_store_path():
+    return os.path.join(FAISS_DATA_DIR, IMAGE_STORE_SUBDIR)
+
+def _get_cell_store_path():
+    return os.path.join(FAISS_DATA_DIR, CELL_STORE_SUBDIR)
+
+def _normalize_features(features):
+    if features.ndim == 1:
+        features = np.expand_dims(features, axis=0)
+    norm = np.linalg.norm(features, axis=1, keepdims=True)
+    return features / norm
+
+def initialize_data_stores():
+    global image_index, image_metadata, cell_index, cell_metadata
     
-    print(f"Loaded {len(image_ids)} image vectors")
-    if len(image_vectors) > 0:
-        print(f"Image vector shape: {image_vectors[0].shape}")
-    else:
-        print("No images found in database")
+    _ensure_dir(FAISS_DATA_DIR)
+    _ensure_dir(_get_image_store_path())
+    _ensure_dir(_get_cell_store_path())
+
+    # Image data
+    image_faiss_path = _get_full_path(IMAGE_FAISS_FILENAME)
+    image_metadata_path = _get_full_path(IMAGE_METADATA_FILENAME)
     
-    return image_ids, np.array(image_vectors) if image_vectors else np.array([]), image_paths, image_channels
-
-def load_cell_vectors_from_db():
-    conn, c = get_cell_db_connection()
-    c.execute('SELECT id, vector, file_name, annotation FROM cell_images')
-    rows = c.fetchall()
-    conn.close()
-
-    cell_ids = []
-    cell_vectors = []
-    cell_paths = {}
-    cell_annotations = {}
-
-    for row in rows:
-        cell_id, cell_vector, file_name, annotation = row
-        cell_vector = np.frombuffer(cell_vector, dtype=np.float32)
-        cell_ids.append(cell_id)
-        cell_vectors.append(cell_vector)
-        cell_paths[cell_id] = os.path.join('cell_vectors_db', file_name)
-        cell_annotations[cell_id] = annotation
-    print(f"Loaded {len(cell_ids)} cell vectors")
-    print(f"Cell vector shape: {cell_vectors[0].shape}")
-    return cell_ids, np.array(cell_vectors) if cell_vectors else None, cell_paths, cell_annotations
-
-def build_faiss_index(vectors):
-    if len(vectors) == 0:
-        # Return an empty index with the expected dimension (512 for ViT-B/32)
-        d = 512
-        print(f"Creating empty FAISS index with dimension {d}")
-        return faiss.IndexFlatL2(d)
-    
-    d = vectors.shape[1]  # dimension
-    print(f"Building FAISS index with {len(vectors)} vectors of dimension {d}")
-    index = faiss.IndexFlatL2(d)
-    index.add(vectors.astype(np.float32))
-    return index
-
-# Load vectors and build FAISS index based on the channel
-image_ids, image_vectors, image_paths, image_channels = load_vectors_from_db()
-print(f"Loaded {len(image_ids)} image vectors")
-if len(image_vectors) > 0:
-    print(f"Image vector shape: {image_vectors[0].shape}")
-else:
-    print("No images found in database")
-
-# Initialize FAISS index
-index = build_faiss_index(image_vectors)
-
-"""
-Precompute separate FAISS indices for each channel at the time of building the indices.
-Use the appropriate index based on the channel extracted from the input image name.
-"""
-
-def separate_indices_by_channel(image_vectors, image_channels):
-    indices = {}
-    if len(image_vectors) == 0:
-        print("No vectors to build channel indices")
-        return indices
-        
-    image_channel_info = image_channels.values()
-    for channel in set(image_channel_info):
-        channel_vectors = [image_vectors[i] for i, c in enumerate(image_channel_info) if c == channel]
-        if len(channel_vectors) > 0:
-            indices[channel] = build_faiss_index(np.array(channel_vectors))
-            print(f"Built index for channel: {channel}, the length of channel_vectors is {len(channel_vectors)}")
-    return indices
-
-channel_indices = separate_indices_by_channel(image_vectors, image_channels)
-
-def find_similar_images(input_image,image_data, top_k=5, index=index):
-    input_image_name=image_data['name']
     try:
-        channel = None
-        if '-' in input_image_name:
-            'image-green.png'
-            ['image','green.png']
-            'green.png'
-            ['green', 'png']
-            'green'
-             
-            channel = input_image_name.split('-')[1].split('.')[0]
+        if os.path.exists(image_faiss_path):
+            image_index = faiss.read_index(image_faiss_path)
+            print(f"Loaded image FAISS index from {image_faiss_path}, ntotal: {image_index.ntotal}")
+        else:
+            image_index = faiss.IndexFlatL2(VECTOR_DIMENSION)
+            print(f"Created new empty image FAISS index (dim: {VECTOR_DIMENSION})")
+    except Exception as e:
+        print(f"Error loading/creating image FAISS index: {e}. Creating new index.")
+        image_index = faiss.IndexFlatL2(VECTOR_DIMENSION)
 
-        # Convert input bytes to an image
-        image = Image.open(io.BytesIO(input_image)).convert("RGB")
+    try:
+        if os.path.exists(image_metadata_path):
+            with open(image_metadata_path, 'r') as f:
+                image_metadata = json.load(f)
+            print(f"Loaded {len(image_metadata)} image metadata entries from {image_metadata_path}")
+        else:
+            image_metadata = []
+            print("Initialized empty image metadata list.")
+    except Exception as e:
+        print(f"Error loading image metadata: {e}. Initializing empty list.")
+        image_metadata = []
 
-        # Process the image
-        image_input = preprocess(image).unsqueeze(0).to(device)
-        with torch.no_grad():
-            query_vector = model.encode_image(image_input).cpu().numpy().flatten()
+    # Cell data
+    cell_faiss_path = _get_full_path(CELL_FAISS_FILENAME)
+    cell_metadata_path = _get_full_path(CELL_METADATA_FILENAME)
 
-        print(f"Query vector shape: {query_vector.shape}")
+    try:
+        if os.path.exists(cell_faiss_path):
+            cell_index = faiss.read_index(cell_faiss_path)
+            print(f"Loaded cell FAISS index from {cell_faiss_path}, ntotal: {cell_index.ntotal}")
+        else:
+            cell_index = faiss.IndexFlatL2(VECTOR_DIMENSION)
+            print(f"Created new empty cell FAISS index (dim: {VECTOR_DIMENSION})")
+    except Exception as e:
+        print(f"Error loading/creating cell FAISS index: {e}. Creating new index.")
+        cell_index = faiss.IndexFlatL2(VECTOR_DIMENSION)
         
-        query_vector = np.expand_dims(query_vector, axis=0).astype(np.float32)
+    try:
+        if os.path.exists(cell_metadata_path):
+            with open(cell_metadata_path, 'r') as f:
+                cell_metadata = json.load(f)
+            print(f"Loaded {len(cell_metadata)} cell metadata entries from {cell_metadata_path}")
+        else:
+            cell_metadata = []
+            print("Initialized empty cell metadata list.")
+    except Exception as e:
+        print(f"Error loading cell metadata: {e}. Initializing empty list.")
+        cell_metadata = []
 
+    if image_index and image_index.ntotal > 0 and image_index.ntotal != len(image_metadata):
+        print(f"Warning: Image FAISS index size ({image_index.ntotal}) != metadata size ({len(image_metadata)}). Rebuilding index from metadata if possible, or clearing.")
+        # Basic reconciliation: if metadata exists but index is mismatched, prefer metadata.
+        if image_metadata:
+             # Attempt to rebuild, or clear and start fresh if rebuilding is too complex here
+            print("Attempting to clear and rebuild image index from metadata is not implemented yet. Clearing index.")
+            image_index = faiss.IndexFlatL2(VECTOR_DIMENSION) # Create new empty index
 
-        distances, indices = index.search(query_vector, len(image_ids))  # Search all images
+    if cell_index and cell_index.ntotal > 0 and cell_index.ntotal != len(cell_metadata):
+        print(f"Warning: Cell FAISS index size ({cell_index.ntotal}) != metadata size ({len(cell_metadata)}). Clearing index.")
+        cell_index = faiss.IndexFlatL2(VECTOR_DIMENSION) # Similar to above for cells
 
-        # Collect and sort results
+# Call initialization at startup
+initialize_data_stores()
+
+def find_similar_images(query_input, top_k=5):
+    """
+    Finds similar images based on either an input image or a text query.
+
+    Args:
+        query_input (bytes or str): The input query, either image bytes or a text description.
+        top_k (int): The number of similar images to return.
+
+    Returns:
+        list: A list of dictionaries, each representing a similar image with its
+              metadata (file_path, text_description, similarity).
+              Returns empty list on error or if no images are indexed.
+    """
+    global image_index, image_metadata
+    try:
+        if image_index is None or image_index.ntotal == 0:
+            print("Image index is not initialized or empty.")
+            return []
+
+        if isinstance(query_input, bytes): # Image query
+            image = Image.open(io.BytesIO(query_input)).convert("RGB")
+            image_input_processed = preprocess(image).unsqueeze(0).to(device)
+            with torch.no_grad():
+                query_features = model.encode_image(image_input_processed).cpu().numpy()
+        elif isinstance(query_input, str): # Text query
+            text_tokens = clip.tokenize([query_input]).to(device)
+            with torch.no_grad():
+                query_features = model.encode_text(text_tokens).cpu().numpy()
+        else:
+            raise ValueError("query_input must be image bytes or a text string.")
+
+        query_features_normalized = _normalize_features(query_features)
+        
+        num_to_search = min(image_index.ntotal, top_k * 5) 
+        if num_to_search == 0: return []
+
+        distances, indices = image_index.search(query_features_normalized.astype(np.float32), num_to_search)
+
         results = []
+        returned_ids = set()
+
         for i, idx in enumerate(indices[0]):
-            img_id = image_ids[idx]
+            if idx < 0 or idx >= len(image_metadata): 
+                print(f"Warning: Invalid index {idx} from FAISS image search.")
+                continue
+            
+            meta = image_metadata[idx]
+            if meta['id'] in returned_ids: # Avoid duplicates if search returns same item multiple times
+                continue
+
             distance = distances[0][i]
-            sim = 1 - distance  # Convert distance to similarity
-            print(f"ID: {img_id}, Score: {sim:.2f}")
-            print(f"Image path: {image_paths[img_id]}")
-            print(f"Fluorescent channel: {image_channels[img_id]}")
-            print("---")
+            similarity_score = 1 - (distance / 2) # Assuming 'distance' is squared L2
+
+            print(f"Image ID: {meta['id']}, Score: {similarity_score:.4f}, Path: {meta['file_path']}, Desc: {meta['text_description']}")
             
-            # Open the image, resize it, and convert to base64
-            with Image.open(image_paths[img_id]) as img:
-                img.thumbnail((512, 512))  # Resize image to max 512x512 while maintaining aspect ratio
-                buffered = io.BytesIO()
-                img.save(buffered, format="JPEG")
-                img_str = base64.b64encode(buffered.getvalue()).decode()
-            
-            results.append({
-                'image': img_str,
-                'image_path': image_paths[img_id],
-                'fluorescent_channel': image_channels[img_id],
-                'similarity': float(sim)
-            })
+            try:
+                with Image.open(meta['file_path']) as img:
+                    img.thumbnail((512, 512))
+                    buffered = io.BytesIO()
+                    img_format = "PNG" if meta['file_path'].lower().endswith(".png") else "JPEG"
+                    img.save(buffered, format=img_format) 
+                    img_str = base64.b64encode(buffered.getvalue()).decode()
+                
+                results.append({
+                    'id': meta['id'],
+                    'image_base64': img_str,
+                    'file_path': meta['file_path'], 
+                    'text_description': meta['text_description'],
+                    'similarity': float(similarity_score)
+                })
+                returned_ids.add(meta['id'])
+            except FileNotFoundError:
+                print(f"Error: Image file not found at {meta['file_path']}")
+            except Exception as e_img:
+                print(f"Error processing image {meta['file_path']}: {e_img}")
+
             if len(results) >= top_k:
                 break
         
+        # Sort by similarity before returning
+        results.sort(key=lambda x: x['similarity'], reverse=True)
         return results
     except Exception as e:
-        print(f"Error processing image: {e}")
+        print(f"Error in find_similar_images: {e}")
         traceback.print_exc()
         return []
   
-def find_similar_cells(input_cell_image, original_filename=None, top_k=5):
-  try:
-      cell_ids, cell_vectors, cell_paths, cell_annotations = load_cell_vectors_from_db()
-      
-      if cell_vectors is None:
-          return {"status": "error", "message": "No cells in database yet"}
-      
-      # Process input cell image
-      image = Image.open(io.BytesIO(input_cell_image)).convert("RGB")
-      image_input = preprocess(image).unsqueeze(0).to(device)
-      
-      with torch.no_grad():
-          query_vector = model.encode_image(image_input).cpu().numpy().flatten()
-          
-      query_vector = query_vector.reshape(1, -1).astype(np.float32)
-      
-      if query_vector.shape[1] != cell_vectors.shape[1]:
-          raise ValueError(f"Dimension mismatch: query vector dim={query_vector.shape[1]}, index dim={cell_vectors.shape[1]}")
-      
-      cell_index = build_faiss_index(cell_vectors)
-      distances, indices = cell_index.search(query_vector, min(top_k + 1, len(cell_ids)))
+def find_similar_cells(query_input, top_k=5, text_description_to_skip=None):
+    """
+    Finds similar cells based on either an input cell image or a text query.
 
-      results = []
-      for i, idx in enumerate(indices[0]):
-          cell_id = cell_ids[idx]
-          
-          # Skip if this is the same image we're searching with
-          if original_filename and os.path.basename(cell_paths[cell_id]) == original_filename:
-              continue
+    Args:
+        query_input (bytes or str): The input query, either cell image bytes or a text description.
+        top_k (int): The number of similar cells to return.
+        text_description_to_skip (str, optional): If the query was an image identified by this
+                                                 description, skip this item in results.
+
+    Returns:
+        list or dict: A list of dictionaries, each representing a similar cell with its
+                      metadata (file_path, text_description, annotation, similarity).
+                      Returns a dict with "status": "error" on issues.
+    """
+    global cell_index, cell_metadata
+    try:
+        if cell_index is None or cell_index.ntotal == 0:
+            return {"status": "info", "message": "No cell data available or index not initialized."}
+      
+        if isinstance(query_input, bytes): # Image query
+            image = Image.open(io.BytesIO(query_input)).convert("RGB")
+            image_input_processed = preprocess(image).unsqueeze(0).to(device)
+            with torch.no_grad():
+                query_features = model.encode_image(image_input_processed).cpu().numpy()
+        elif isinstance(query_input, str): # Text query
+            text_tokens = clip.tokenize([query_input]).to(device)
+            with torch.no_grad():
+                query_features = model.encode_text(text_tokens).cpu().numpy()
+        else:
+            raise ValueError("query_input must be image bytes or a text string.")
+            
+        query_features_normalized = _normalize_features(query_features)
+
+        if query_features_normalized.shape[1] != cell_index.d: # cell_index.d is dimension
+            raise ValueError(f"Dimension mismatch: query vector dim={query_features_normalized.shape[1]}, index dim={cell_index.d}")
+      
+        num_to_search = min(cell_index.ntotal, top_k + 5) 
+        if num_to_search == 0: return []
+        
+        distances, indices = cell_index.search(query_features_normalized.astype(np.float32), num_to_search)
+
+        results = []
+        returned_ids = set()
+
+        for i, idx in enumerate(indices[0]):
+            if idx < 0 or idx >= len(cell_metadata):
+                print(f"Warning: Invalid index {idx} from FAISS cell search.")
+                continue
+
+            meta = cell_metadata[idx]
+
+            if meta['id'] in returned_ids:
+                continue
+            
+            if text_description_to_skip and meta.get('text_description') == text_description_to_skip:
+                continue
               
-          distance = distances[0][i]
-          similarity = 1 - distance
+            distance = distances[0][i]
+            similarity_score = 1 - (distance / 2) # Assuming 'distance' is squared L2 from FAISS
 
-          with Image.open(cell_paths[cell_id]) as img:
-              img.thumbnail((256, 256))
-              buffered = io.BytesIO()
-              img.save(buffered, format="PNG")
-              img_str = base64.b64encode(buffered.getvalue()).decode()
+            print(f"Cell ID: {meta['id']}, Score: {similarity_score:.4f}, Path: {meta['file_path']}, Desc: {meta['text_description']}, Anno: {meta.get('annotation')}")
 
-          results.append({
-              'image': img_str,
-              'annotation': cell_annotations[cell_id],
-              'similarity': float(similarity)
-          })
-          
-          if len(results) >= top_k:
-              break
+            try:
+                with Image.open(meta['file_path']) as img:
+                    img.thumbnail((256, 256))
+                    buffered = io.BytesIO()
+                    img_format = "PNG" if meta['file_path'].lower().endswith(".png") else "JPEG"
+                    img.save(buffered, format=img_format)
+                    img_str = base64.b64encode(buffered.getvalue()).decode()
 
-      return results
+                results.append({
+                    'id': meta['id'],
+                    'image_base64': img_str,
+                    'text_description': meta['text_description'],
+                    'annotation': meta.get('annotation'),
+                    'similarity': float(similarity_score),
+                    'file_path': meta['file_path']
+                })
+                returned_ids.add(meta['id'])
+            except FileNotFoundError:
+                print(f"Error: Cell image file not found at {meta['file_path']}")
+            except Exception as e_img:
+                print(f"Error processing cell image {meta['file_path']}: {e_img}")
 
-  except Exception as e:
-      print(f"Error in find_similar_cells: {e}")
-      traceback.print_exc()
-      return {"status": "error", "message": str(e)}
+            if len(results) >= top_k:
+                break
+        
+        results.sort(key=lambda x: x['similarity'], reverse=True)
+        return results
+    except Exception as e:
+        print(f"Error in find_similar_cells: {e}")
+        traceback.print_exc()
+        return {"status": "error", "message": str(e)}
   
-def add_image_to_db(image_bytes, image_name, image_channel, image_folder='images'):
-  try:
-      # Ensure the image folder exists
-      os.makedirs(image_folder, exist_ok=True)
+def add_image_file_and_update_index(image_bytes, text_description, original_file_extension='.png'):
+    """
+    Adds an image to the system: saves it, computes its embedding, and updates the FAISS index and metadata.
 
-      # Save the image to the specified folder
-      image_path = os.path.join(image_folder, image_name)
-      with open(image_path, 'wb') as f:
-          f.write(image_bytes)
+    Args:
+        image_bytes (bytes): The image data in bytes.
+        text_description (str): A textual description of the image (including channel info if applicable).
+        original_file_extension (str, optional): Original file extension (e.g. '.png', '.jpg')
+                                                  to preserve it. Defaults to '.png'.
 
-      # Open and preprocess the image
-      image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-      image_input = preprocess(image).unsqueeze(0).to(device)
+    Returns:
+        dict: A status dictionary indicating success or failure, including the new image's ID.
+    """
+    global image_index, image_metadata
+    try:
+        _ensure_dir(_get_image_store_path())
+        
+        image_id = str(uuid.uuid4())
+        stored_image_filename = f"{image_id}{original_file_extension}"
+        stored_image_path = os.path.join(_get_image_store_path(), stored_image_filename)
 
-      # Compute the image embedding
-      with torch.no_grad():
-          image_vector = model.encode_image(image_input).cpu().numpy().flatten()
+        with open(stored_image_path, 'wb') as f:
+            f.write(image_bytes)
 
-      # Connect to the database and insert the new image data
-      conn, c = get_db_connection()
-      c.execute(
-          'INSERT INTO images (vector, image_path, fluorescent_channel) VALUES (?, ?, ?)',
-          (image_vector.tobytes(), image_path, image_channel)
-      )
-      conn.commit()
-      conn.close()
+        pil_image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        image_input_processed = preprocess(pil_image).unsqueeze(0).to(device)
+        with torch.no_grad():
+            image_features = model.encode_image(image_input_processed).cpu().numpy()
+        
+        image_features_normalized = _normalize_features(image_features)
 
-      # Update the FAISS index
-      global image_ids, image_vectors, image_paths, image_channels, index, channel_indices
-      image_ids.append(c.lastrowid)
-      image_vectors = np.vstack([image_vectors, image_vector])
-      image_paths[c.lastrowid] = image_path
-      image_channels[c.lastrowid] = image_channel
+        if image_index is None:
+             image_index = faiss.IndexFlatL2(VECTOR_DIMENSION)
 
-      # Rebuild the FAISS index
-      index = build_faiss_index(image_vectors)
-      channel_indices = separate_indices_by_channel(image_vectors, image_channels)
+        image_index.add(image_features_normalized.astype(np.float32))
+        
+        new_metadata_entry = {
+            "id": image_id,
+            "file_path": stored_image_path,
+            "text_description": text_description,
+            "timestamp": datetime.now().isoformat()
+        }
+        image_metadata.append(new_metadata_entry)
 
-      print(f"Image {image_name} added successfully.")
-      return {"status": "success", "message": f"Image {image_name} added successfully."}
-  except Exception as e:
-      print(f"Error adding image: {e}")
-      traceback.print_exc()
-      return {"status": "error", "message": str(e)}
+        faiss.write_index(image_index, _get_full_path(IMAGE_FAISS_FILENAME))
+        with open(_get_full_path(IMAGE_METADATA_FILENAME), 'w') as f:
+            json.dump(image_metadata, f, indent=2)
 
-def save_cell_image(cell_image, mask=None, annotation=""):
-  try:
+        print(f"Image '{text_description}' (ID: {image_id}, stored as {stored_image_filename}) added. Index size: {image_index.ntotal}")
+        return {"status": "success", "message": "Image added.", "id": image_id, "stored_path": stored_image_path}
+    except Exception as e:
+        print(f"Error adding image: {e}")
+        traceback.print_exc()
+        return {"status": "error", "message": str(e)}
 
-      # Generate unique filename with timestamp
-      timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-      unique_id = str(uuid.uuid4())[:8]
-      filename = f"cell_{timestamp}_{unique_id}.png"
-      
-      # Save image file
-      os.makedirs('cell_vectors_db', exist_ok=True)
-      file_path = os.path.join('cell_vectors_db', filename)
-      with open(file_path, 'wb') as f:
-          f.write(cell_image)
+def add_cell_file_and_update_index(cell_image_bytes, text_description, annotation="", original_file_extension='.png'):
+    """
+    Adds a cell image to the system: saves it, computes its embedding, and updates the FAISS index and metadata.
 
-      # Generate vector from image
-      image = Image.open(io.BytesIO(cell_image)).convert("RGB")
-      image_input = preprocess(image).unsqueeze(0).to(device)
-      with torch.no_grad():
-          vector = model.encode_image(image_input).cpu().numpy().flatten()
+    Args:
+        cell_image_bytes (bytes): The cell image data in bytes.
+        text_description (str): A textual description of the cell image.
+        annotation (str, optional): Any annotation for the cell image.
+        original_file_extension (str, optional): Original file extension (e.g. '.png', '.jpg')
+                                                  to preserve it. Defaults to '.png'.
+    Returns:
+        dict: A status dictionary indicating success or failure, including the new cell's ID.
+    """
+    global cell_index, cell_metadata
+    try:
+        _ensure_dir(_get_cell_store_path())
 
-      # Save to database
-      conn, c = get_cell_db_connection()
-      c.execute(
-          'INSERT INTO cell_images (file_name, vector, annotation) VALUES (?, ?, ?)',
-          (filename, vector.astype(np.float32).tobytes(), annotation)
-      )
-      conn.commit()
-      conn.close()
+        cell_id = str(uuid.uuid4())
+        stored_cell_filename = f"{cell_id}{original_file_extension}"
+        stored_cell_path = os.path.join(_get_cell_store_path(), stored_cell_filename)
+        
+        with open(stored_cell_path, 'wb') as f:
+            f.write(cell_image_bytes)
 
-      return {"status": "success", "filename": filename}
+        pil_image = Image.open(io.BytesIO(cell_image_bytes)).convert("RGB")
+        image_input_processed = preprocess(pil_image).unsqueeze(0).to(device)
+        with torch.no_grad():
+            cell_features = model.encode_image(image_input_processed).cpu().numpy()
 
-  except Exception as e:
-      print(f"Error saving cell image: {e}")
-      traceback.print_exc()
-      return {"status": "error", "message": str(e)}
+        cell_features_normalized = _normalize_features(cell_features)
+            
+        if cell_index is None:
+            cell_index = faiss.IndexFlatL2(VECTOR_DIMENSION)
+            
+        cell_index.add(cell_features_normalized.astype(np.float32))
+
+        new_metadata_entry = {
+            "id": cell_id,
+            "file_path": stored_cell_path,
+            "text_description": text_description, 
+            "annotation": annotation,
+            "timestamp": datetime.now().isoformat()
+        }
+        cell_metadata.append(new_metadata_entry)
+
+        faiss.write_index(cell_index, _get_full_path(CELL_FAISS_FILENAME))
+        with open(_get_full_path(CELL_METADATA_FILENAME), 'w') as f:
+            json.dump(cell_metadata, f, indent=2)
+
+        print(f"Cell image '{text_description}' (ID: {cell_id}, stored as {stored_cell_filename}) added. Index size: {cell_index.ntotal}")
+        return {"status": "success", "id": cell_id, "stored_path": stored_cell_path}
+    except Exception as e:
+        print(f"Error saving cell image: {e}")
+        traceback.print_exc()
+        return {"status": "error", "message": str(e)}
     
 async def start_hypha_service(server):
-    await server.register_service(
-        {
-            "id": "image-embedding-similarity-search",
-            "config":{
-                "visibility": "public",
-                "run_in_executor": True,
-                "require_context": False,   
-            },
-            "type": "echo",
-            "find_similar_images": find_similar_images,
-            "add_image_to_db": add_image_to_db,
-            "find_similar_cells": find_similar_cells,
-            "save_cell_image": save_cell_image,
+    service_config = {
+        "id": "image-text-similarity-search", # Updated service ID for clarity
+        "config": {
+            "visibility": "public",
+            "run_in_executor": True,
+            "require_context": False, 
         },
-    )
+        # Exposing functions with names that reflect their dual capability or primary input
+        "find_similar_images": find_similar_images, 
+        "add_image": add_image_file_and_update_index, 
+        "find_similar_cells": find_similar_cells,
+        "add_cell": add_cell_file_and_update_index, 
+    }
+    await server.register_service(service_config)
+
 
 async def setup():
-    server_url = "https://hypha.aicell.io"
+    server_url = os.getenv("HYPHA_SERVER_URL", "https://hypha.aicell.io")
     token = os.getenv("AGENT_LENS_WORKSPACE_TOKEN")
-    server = await connect_to_server({"server_url": server_url, "token": token, "workspace": "agent-lens"})
+    workspace_name = os.getenv("HYPHA_WORKSPACE", "agent-lens") 
+
+    if not token:
+        print("Error: AGENT_LENS_WORKSPACE_TOKEN environment variable not set.")
+        return
+        
+    server = await connect_to_server({
+        "server_url": server_url, 
+        "token": token, 
+        "workspace": workspace_name
+    })
+    
     await start_hypha_service(server)
-    print(f"Image embedding and similarity search service registered at workspace: {server.config.workspace}")
-    print(f"Test it with the HTTP proxy: {server_url}/{server.config.workspace}/services/image-embedding-similarity-search")
+    print(f"Image and Text Similarity Search service registered at workspace: {server.config.workspace}")
+    print(f"Test it with the HTTP proxy: {server_url}/{server.config.workspace}/services/image-text-similarity-search/<method_name>")
  
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
-    loop.create_task(setup())
-    loop.run_forever()
+    try:
+        loop.create_task(setup())
+        loop.run_forever()
+    except KeyboardInterrupt:
+        print("Service shutting down...")
+    finally:
+        if not loop.is_closed():
+             loop.close()
+        print("Asyncio loop closed.")
