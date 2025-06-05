@@ -463,8 +463,19 @@ async def setup():
         "token": token, 
         "workspace": workspace_name
     })
+
+    local_server_url = "http://localhost:9527"
+    local_token = os.getenv("REEF_LOCAL_TOKEN")
+    local_workspace_name = os.getenv("REEF_LOCAL_WORKSPACE")
+
+    local_server = await connect_to_server({
+        "server_url": local_server_url, 
+        "token": local_token, 
+        "workspace": local_workspace_name
+    })
     
     await start_hypha_service(server)
+    await start_hypha_service(local_server)
     print(f"Image and Text Similarity Search service registered at workspace: {server.config.workspace}")
     print(f"Test it with the HTTP proxy: {server_url}/{server.config.workspace}/services/image-text-similarity-search/<method_name>")
  
