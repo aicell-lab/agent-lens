@@ -324,6 +324,15 @@ const Sidebar = ({
             <i className="fas fa-tachometer-alt"></i>
             {!isMainSidebarCollapsed && <span>Dashboard</span>}
           </button>
+          <button 
+            className={`sidebar-tab ${activeTab === 'imagej' ? 'active' : ''}`}
+            onClick={() => onTabChange('imagej')}
+            disabled={!!currentOperation} 
+            title={currentOperation ? "Sample operation in progress" : (isMainSidebarCollapsed ? "ImageJ" : "ImageJ.js for image processing")}
+          >
+            <i className="fas fa-magic"></i>
+            {!isMainSidebarCollapsed && <span>ImageJ</span>}
+          </button>
         </div>
         {/* Collapse/Expand button for the main sidebar */}
         <div className="main-sidebar-toggle-container">

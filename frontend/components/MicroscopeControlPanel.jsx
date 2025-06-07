@@ -39,6 +39,8 @@ const MicroscopeControlPanel = ({
   hyphaManager, // Changed from hyphaServer and hyphaAuthToken
   showNotification = null, // New prop for showing notifications
   orchestratorManagerService, // New prop for orchestrator service
+  onOpenImageJ = null, // New prop for opening image in ImageJ
+  imjoyApi = null, // New prop for ImJoy API
 }) => {
   const [isLightOn, setIsLightOn] = useState(false);
   const [xPosition, setXPosition] = useState(0);
@@ -788,16 +790,33 @@ const MicroscopeControlPanel = ({
           id="image-display"
           className={`w-full border ${
             (snapshotImage || isWebRtcActive) ? 'border-gray-300' : 'border-dotted border-gray-400'
-          } rounded flex items-center justify-center bg-black`}
+          } rounded flex items-center justify-center bg-black relative`}
         >
           {isWebRtcActive && !webRtcError ? (
             <video ref={videoRef} autoPlay playsInline muted className="object-contain w-full h-full" />
           ) : snapshotImage ? (
-            <img
-              src={snapshotImage}
-              alt="Microscope Snapshot"
-              className="object-contain w-full h-full"
-            />
+            <>
+              <img
+                src={snapshotImage}
+                alt="Microscope Snapshot"
+                className="object-contain w-full h-full"
+              />
+              {/* ImageJ.js Badge */}
+              {onOpenImageJ && (
+                <button
+                  onClick={() => onOpenImageJ(snapshotImage)}
+                  className="imagej-badge absolute top-2 right-2 p-1 bg-white bg-opacity-90 hover:bg-opacity-100 rounded shadow-md transition-all duration-200 flex items-center gap-1 text-xs font-medium text-gray-700 hover:text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={imjoyApi ? "Open in ImageJ.js" : "ImageJ.js integration is loading..."}
+                  disabled={!imjoyApi}
+                >
+                  <img 
+                    src="https://ij.imjoy.io/assets/badge/open-in-imagej-js-badge.svg" 
+                    alt="Open in ImageJ.js" 
+                    className="h-4"
+                  />
+                </button>
+              )}
+            </>
           ) : (
             <p className="placeholder-text text-center text-gray-300">
               {webRtcError ? `WebRTC Error: ${webRtcError}` : (microscopeControlService ? 'Image Display' : 'Microscope not connected')}
@@ -1203,6 +1222,8 @@ MicroscopeControlPanel.propTypes = {
   hyphaManager: PropTypes.object, // Changed prop type
   showNotification: PropTypes.func, // Added prop type for notification function
   orchestratorManagerService: PropTypes.object, // Added prop type
+  onOpenImageJ: PropTypes.func, // Added prop type for ImageJ integration
+  imjoyApi: PropTypes.object, // Added prop type for ImJoy API
 };
 
 export default MicroscopeControlPanel; 

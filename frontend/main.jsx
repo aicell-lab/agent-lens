@@ -11,7 +11,8 @@ import Sidebar from './components/Sidebar';
 import ImageViewBrowser from './components/ImageViewBrowser';
 import ImageSearchPanel from './components/ImageSearchPanel';
 import Notification from './components/Notification';
-import { login, initializeServices, getServer, tryGetService, HyphaServerManager } from './utils';
+import ImageJPanel from './components/ImageJPanel';
+import { login, initializeServices, tryGetService, HyphaServerManager } from './utils';
 import 'ol/ol.css';
 import './main.css';
 
@@ -50,6 +51,11 @@ const MicroscopeControl = () => {
   const [hyphaManager, setHyphaManager] = useState(null);
   const [orchestratorManagerService, setOrchestratorManagerService] = useState(null);
   
+  // ImageJ state
+  const [isImageJPanelOpen, setIsImageJPanelOpen] = useState(false);
+  const [imageForImageJ, setImageForImageJ] = useState(null);
+  const [imjoyApi, setImjoyApi] = useState(null);
+  
   // Notification state
   const [notification, setNotification] = useState({ message: '', type: 'error' });
 
@@ -66,6 +72,25 @@ const MicroscopeControl = () => {
   const dismissNotification = useCallback(() => {
     setNotification({ message: '', type: 'error' });
   }, []);
+
+  useEffect(() => {
+    const initializeImJoy = async () => {
+      if (!window.loadImJoyCore || imjoyApi) return;
+      try {
+        appendLog('Initializing ImJoy Core for ImageJ.js...');
+        const imjoyCore = await window.loadImJoyCore();
+        const imjoy = new imjoyCore.ImJoy({ imjoy_api: {} });
+        await imjoy.start({ workspace: 'default' });
+        setImjoyApi(imjoy.api);
+        appendLog('ImJoy Core for ImageJ.js initialized successfully.');
+      } catch (err) {
+        console.error('Error initializing ImJoy Core:', err);
+        appendLog(`Error initializing ImJoy Core: ${err.message}`);
+        showNotification(`Failed to initialize ImageJ.js integration: ${err.message}`, 'error');
+      }
+    };
+    initializeImJoy();
+  }, []); // Run only once
 
   useEffect(() => {
     const checkTokenAndInit = async () => {
@@ -191,6 +216,13 @@ const MicroscopeControl = () => {
     }
   };
 
+  const handleOpenImageJ = useCallback((imageData) => {
+    setImageForImageJ(imageData);
+    setActiveTab('imagej');
+    setIsImageJPanelOpen(true);
+    appendLog('Opening image in ImageJ.js...');
+  }, [setActiveTab]);
+
   const renderContent = () => {
     switch (activeTab) {
       case 'image-view':
@@ -244,6 +276,8 @@ const MicroscopeControl = () => {
               setCurrentOperation={setCurrentOperation}
               hyphaManager={hyphaManager}
               showNotification={showNotification}
+              onOpenImageJ={handleOpenImageJ}
+              imjoyApi={imjoyApi}
               onClose={() => {}}
             />
           </div>
@@ -261,6 +295,21 @@ const MicroscopeControl = () => {
         return (
           <div className="control-view">
             <LogSection log={log} />
+          </div>
+        );
+      case 'imagej':
+        return (
+          <div className="control-view">
+            <ImageJPanel
+              isOpen={isImageJPanelOpen}
+              image={imageForImageJ}
+              imjoyApi={imjoyApi}
+              onClose={() => {
+                setIsImageJPanelOpen(false);
+                setActiveTab('microscope'); // Return to microscope tab
+              }}
+              appendLog={appendLog}
+            />
           </div>
         );
       default:

@@ -963,4 +963,33 @@
     opacity: 0;
     transform: translateX(100%);
   }
+}
+
+/* ImageJ Badge Styles */
+.imagej-badge {
+  z-index: 10;
+  backdrop-filter: blur(4px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.imagej-badge:hover {
+  transform: scale(1.05);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* ImageJ Panel Styles */
+.imagej-panel {
+  min-height: 100vh;
+}
+
+.imagej-panel-header {
+  flex-shrink: 0;
+}
+
+.imagej-container {
+  overflow: hidden;
+}
+
+.imagej-instructions {
+  flex-shrink: 0;
 } 
