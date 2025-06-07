@@ -133,6 +133,10 @@ const MicroscopeControlPanel = ({
   // State for collapsing the right panel - THIS WAS ACCIDENTALLY REMOVED, ADDING IT BACK
   const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false);
 
+  // New state for video contrast adjustment
+  const [videoContrastMin, setVideoContrastMin] = useState(0);
+  const [videoContrastMax, setVideoContrastMax] = useState(255);
+
   // Refs to hold the latest actual values for use in debounced effects
   const actualIlluminationIntensityRef = useRef(actualIlluminationIntensity);
   const actualCameraExposureRef = useRef(actualCameraExposure);
@@ -305,6 +309,29 @@ const MicroscopeControlPanel = ({
 
     return () => clearTimeout(handler);
   }, [desiredCameraExposure, illuminationChannel, microscopeControlService, appendLog]);
+
+  // Effect to adjust video frame contrast
+  useEffect(() => {
+    if (!microscopeControlService || !isWebRtcActive) return;
+
+    // Basic validation to ensure min is not greater than max
+    if (videoContrastMin >= videoContrastMax) {
+      return;
+    }
+
+    const handler = setTimeout(async () => {
+      try {
+        appendLog(`Adjusting video contrast: min=${videoContrastMin}, max=${videoContrastMax}`);
+        await microscopeControlService.adjust_video_frame(videoContrastMin, videoContrastMax);
+        appendLog('Video contrast adjusted successfully.');
+      } catch (error) {
+        appendLog(`Error adjusting video contrast: ${error.message}`);
+        console.error("[MicroscopeControlPanel] Error adjusting video contrast:", error);
+      }
+    }, 200); // 200ms debounce
+
+    return () => clearTimeout(handler);
+  }, [videoContrastMin, videoContrastMax, microscopeControlService, isWebRtcActive, appendLog]);
 
   useEffect(() => {
     if (!snapshotImage || !canvasRef.current || isWebRtcActive) return;
@@ -876,6 +903,48 @@ const MicroscopeControlPanel = ({
             </p>
           )}
         </div>
+        {/* Video Contrast Controls */}
+        {isWebRtcActive && (
+          <div className="video-contrast-controls mt-2 p-2 border border-gray-300 rounded-lg bg-white bg-opacity-90">
+            <div className="text-xs font-medium text-gray-700 mb-1">Video Frame Adjustment</div>
+            <div className="flex items-center space-x-2">
+              <label htmlFor="min-contrast" className="text-xs text-gray-600 w-16 shrink-0">Min: {videoContrastMin}</label>
+              <input
+                id="min-contrast"
+                type="range"
+                min="0"
+                max="255"
+                value={videoContrastMin}
+                onChange={(e) => {
+                  const newMin = parseInt(e.target.value, 10);
+                  if (newMin < videoContrastMax) {
+                    setVideoContrastMin(newMin);
+                  }
+                }}
+                className="w-full"
+                title={`Min value: ${videoContrastMin}`}
+              />
+            </div>
+            <div className="flex items-center space-x-2 mt-1">
+              <label htmlFor="max-contrast" className="text-xs text-gray-600 w-16 shrink-0">Max: {videoContrastMax}</label>
+              <input
+                id="max-contrast"
+                type="range"
+                min="0"
+                max="255"
+                value={videoContrastMax}
+                onChange={(e) => {
+                  const newMax = parseInt(e.target.value, 10);
+                  if (newMax > videoContrastMin) {
+                    setVideoContrastMax(newMax);
+                  }
+                }}
+                className="w-full"
+                title={`Max value: ${videoContrastMax}`}
+              />
+            </div>
+          </div>
+        )}
         {/* Toggle button for the right panel */}
         <button 
           onClick={toggleRightPanel}
