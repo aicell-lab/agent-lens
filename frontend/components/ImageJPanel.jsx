@@ -48,7 +48,7 @@ const ImageJPanel = ({ isOpen, image, onClose, appendLog, imjoyApi }) => {
 
       try {
         setIsLoading(true);
-        appendLog('Loading image into ImageJ.js...');
+        appendLog('Loading new image into ImageJ.js...');
 
         // Convert base64 data URL to format ImageJ can understand
         const base64Data = image.split(',')[1]; // Remove "data:image/png;base64," prefix
@@ -58,9 +58,13 @@ const ImageJPanel = ({ isOpen, image, onClose, appendLog, imjoyApi }) => {
           bytes[i] = binaryString.charCodeAt(i);
         }
 
+        // Generate unique name with timestamp to avoid overwriting previous images
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const imageName = `microscope-snapshot-${timestamp}.png`;
+
         // Load the image into ImageJ
-        await ijInstance.viewImage(bytes.buffer, { name: "microscope-snapshot.png" });
-        appendLog('Image loaded into ImageJ.js successfully.');
+        await ijInstance.viewImage(bytes.buffer, { name: imageName });
+        appendLog(`Image '${imageName}' loaded into ImageJ.js successfully.`);
         setIsLoading(false);
       } catch (err) {
         console.error('Error loading image to ImageJ:', err);

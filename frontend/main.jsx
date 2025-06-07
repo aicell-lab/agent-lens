@@ -205,6 +205,12 @@ const MicroscopeControl = () => {
       }
     }
     
+    // If switching to ImageJ tab, initialize the panel
+    if (tab === 'imagej' && !isImageJPanelOpen) {
+      setIsImageJPanelOpen(true);
+      appendLog('Initializing ImageJ.js panel...');
+    }
+    
     setActiveTab(tab);
   };
 
@@ -220,7 +226,7 @@ const MicroscopeControl = () => {
     setImageForImageJ(imageData);
     setActiveTab('imagej');
     setIsImageJPanelOpen(true);
-    appendLog('Opening image in ImageJ.js...');
+    appendLog('Sending image to ImageJ.js...');
   }, [setActiveTab]);
 
   const renderContent = () => {
@@ -298,20 +304,8 @@ const MicroscopeControl = () => {
           </div>
         );
       case 'imagej':
-        return (
-          <div className="control-view">
-            <ImageJPanel
-              isOpen={isImageJPanelOpen}
-              image={imageForImageJ}
-              imjoyApi={imjoyApi}
-              onClose={() => {
-                setIsImageJPanelOpen(false);
-                setActiveTab('microscope'); // Return to microscope tab
-              }}
-              appendLog={appendLog}
-            />
-          </div>
-        );
+        // ImageJ content is now rendered separately as a persistent panel
+        return null;
       default:
         return null;
     }
@@ -336,6 +330,32 @@ const MicroscopeControl = () => {
             />
             <div className="content-area">
               {renderContent()}
+              {/* Persistent ImageJ Panel - always mounted but conditionally visible */}
+              {isImageJPanelOpen && (
+                <div 
+                  className={`imagej-persistent-panel ${activeTab === 'imagej' ? 'visible' : 'hidden'}`}
+                  style={{ 
+                    position: activeTab === 'imagej' ? 'relative' : 'absolute',
+                    top: activeTab === 'imagej' ? 'auto' : '-9999px',
+                    left: activeTab === 'imagej' ? 'auto' : '-9999px',
+                    width: activeTab === 'imagej' ? '100%' : '0',
+                    height: activeTab === 'imagej' ? '100%' : '0',
+                    overflow: 'hidden',
+                    zIndex: activeTab === 'imagej' ? 1 : -1
+                  }}
+                >
+                  <ImageJPanel
+                    isOpen={isImageJPanelOpen}
+                    image={imageForImageJ}
+                    imjoyApi={imjoyApi}
+                    onClose={() => {
+                      setIsImageJPanelOpen(false);
+                      setActiveTab('microscope'); // Return to microscope tab
+                    }}
+                    appendLog={appendLog}
+                  />
+                </div>
+              )}
             </div>
             {/* Notification popup */}
             <Notification 

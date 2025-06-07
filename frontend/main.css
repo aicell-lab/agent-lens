@@ -992,4 +992,19 @@
 
 .imagej-instructions {
   flex-shrink: 0;
+}
+
+/* Persistent ImageJ Panel Styles */
+.imagej-persistent-panel {
+  transition: none; /* Disable transitions for instant switching */
+}
+
+.imagej-persistent-panel.visible {
+  display: block;
+}
+
+.imagej-persistent-panel.hidden {
+  /* Keep mounted but hidden - ImageJ will continue running */
+  visibility: hidden;
+  pointer-events: none;
 } 
