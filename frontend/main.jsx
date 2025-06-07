@@ -9,6 +9,7 @@ import IncubatorControl from './components/IncubatorControl';
 import MicroscopeControlPanel from './components/MicroscopeControlPanel';
 import Sidebar from './components/Sidebar';
 import ImageViewBrowser from './components/ImageViewBrowser';
+import ImageSearchPanel from './components/ImageSearchPanel';
 import Notification from './components/Notification';
 import { login, initializeServices, getServer, tryGetService, HyphaServerManager } from './utils';
 import 'ol/ol.css';
@@ -210,6 +211,16 @@ const MicroscopeControl = () => {
             incubatorControlService={incubatorControlService}
             setCurrentMap={setCurrentMap}
           />
+        );
+      case 'image-search':
+        return (
+          <div className="control-view">
+            <ImageSearchPanel
+              similarityService={similarityService}
+              appendLog={appendLog}
+              showNotification={showNotification}
+            />
+          </div>
         );
       case 'microscope':
         return (
