@@ -7,6 +7,44 @@ import SampleSelector from './SampleSelector';
 import ImagingTasksModal from './ImagingTasksModal';
 import './ImagingTasksModal.css'; // Added for well plate styles
 
+// Helper function to convert a uint8 hypha-rpc numpy array to a displayable Data URL
+const numpyArrayToDataURL = (numpyArray) => {
+  if (!numpyArray || !numpyArray._rvalue) {
+    console.error("Invalid numpy array object received:", numpyArray);
+    return null;
+  }
+  const { _rvalue: buffer, _rshape: shape, _rdtype: dtype } = numpyArray;
+  
+  if (dtype !== 'uint8') {
+    console.error(`Expected dtype uint8 but received: ${dtype}. Cannot process.`);
+    return null; // Or handle appropriately
+  }
+
+  const height = shape[0];
+  const width = shape[1];
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  const imageData = ctx.createImageData(width, height);
+  const data = imageData.data; // This is a Uint8ClampedArray
+
+  const pixels = new Uint8Array(buffer);
+
+  // Directly map the grayscale uint8 pixels to RGBA
+  for (let i = 0; i < pixels.length; i++) {
+    const pixelValue = pixels[i];
+    data[i * 4] = pixelValue;     // R
+    data[i * 4 + 1] = pixelValue; // G
+    data[i * 4 + 2] = pixelValue; // B
+    data[i * 4 + 3] = 255;        // A (fully opaque)
+  }
+
+  ctx.putImageData(imageData, 0, 0);
+  return canvas.toDataURL('image/png');
+};
+
 const WEBRTC_SERVICE_IDS = {
   "squid-control/squid-control-reef": "squid-control/video-track-squid-control-reef",
   "reef-imaging/mirror-microscope-control-squid-1": "reef-imaging/video-track-microscope-control-squid-1",
@@ -55,6 +93,12 @@ const MicroscopeControlPanel = ({
   const [xMoveStr, setXMoveStr] = useState(xMove.toString());
   const [yMoveStr, setYMoveStr] = useState(yMove.toString());
   const [zMoveStr, setZMoveStr] = useState(zMove.toString());
+
+  // State for the snapped image, storing both raw numpy and display URL
+  const [snappedImageData, setSnappedImageData] = useState({
+    numpy: null,
+    url: null,
+  });
 
   // State for SampleSelector dropdown
   const [isSampleSelectorOpen, setIsSampleSelectorOpen] = useState(false);
@@ -553,10 +597,19 @@ const MicroscopeControlPanel = ({
         await new Promise(resolve => setTimeout(resolve, 200)); 
       }
       
-      const base64Image = await microscopeControlService.one_new_frame();
-      console.log('Received base64 image data of length:', base64Image.length);
-      setSnapshotImage(`data:image/png;base64,${base64Image}`);
-      appendLog('Image snapped and fetched successfully.');
+      const numpyImage = await microscopeControlService.one_new_frame();
+      console.log('Received numpy image object:', numpyImage);
+
+      const dataURL = numpyArrayToDataURL(numpyImage);
+      if (dataURL) {
+        // Store both the raw numpy object and the display URL
+        setSnappedImageData({ numpy: numpyImage, url: dataURL });
+        // Also update the snapshotImage prop for legacy display
+        setSnapshotImage(dataURL);
+        appendLog('Image snapped and converted successfully.');
+      } else {
+        appendLog('Failed to convert numpy image to displayable format.');
+      }
     } catch (error) {
       console.error('Error in snapImage:', error);
       appendLog(`Error in snapImage: ${error.message}`);
@@ -794,17 +847,17 @@ const MicroscopeControlPanel = ({
         >
           {isWebRtcActive && !webRtcError ? (
             <video ref={videoRef} autoPlay playsInline muted className="object-contain w-full h-full" />
-          ) : snapshotImage ? (
+          ) : snappedImageData.url ? (
             <>
               <img
-                src={snapshotImage}
+                src={snappedImageData.url}
                 alt="Microscope Snapshot"
                 className="object-contain w-full h-full"
               />
               {/* ImageJ.js Badge */}
               {onOpenImageJ && (
                 <button
-                  onClick={() => onOpenImageJ(snapshotImage)}
+                  onClick={() => onOpenImageJ(snappedImageData.numpy)}
                   className="imagej-badge absolute top-2 right-2 p-1 bg-white bg-opacity-90 hover:bg-opacity-100 rounded shadow-md transition-all duration-200 flex items-center gap-1 text-xs font-medium text-gray-700 hover:text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed"
                   title={imjoyApi ? "Open in ImageJ.js" : "ImageJ.js integration is loading..."}
                   disabled={!imjoyApi}

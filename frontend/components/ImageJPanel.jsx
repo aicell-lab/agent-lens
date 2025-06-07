@@ -48,22 +48,18 @@ const ImageJPanel = ({ isOpen, image, onClose, appendLog, imjoyApi }) => {
 
       try {
         setIsLoading(true);
-        appendLog('Loading new image into ImageJ.js...');
-
-        // Convert base64 data URL to format ImageJ can understand
-        const base64Data = image.split(',')[1]; // Remove "data:image/png;base64," prefix
-        const binaryString = atob(base64Data);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
-        }
-
-        // Generate unique name with timestamp to avoid overwriting previous images
+        appendLog('Loading original numpy image into ImageJ.js...');
+        
+        // The 'image' prop is the raw numpy object from hypha-rpc
+        const { _rshape: shape, _rdtype: dtype } = image;
+        
+        // Generate unique name with timestamp
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const imageName = `microscope-snapshot-${timestamp}.png`;
+        const imageName = `microscope-${shape.join('x')}-${dtype}-${timestamp}.png`;
+        
+        // Pass the entire numpy object to viewImage
+        await ijInstance.viewImage(image, { name: imageName });
 
-        // Load the image into ImageJ
-        await ijInstance.viewImage(bytes.buffer, { name: imageName });
         appendLog(`Image '${imageName}' loaded into ImageJ.js successfully.`);
         setIsLoading(false);
       } catch (err) {
@@ -152,7 +148,7 @@ const ImageJPanel = ({ isOpen, image, onClose, appendLog, imjoyApi }) => {
 
 ImageJPanel.propTypes = {
   isOpen: PropTypes.bool.isRequired,
-  image: PropTypes.string,
+  image: PropTypes.object,
   onClose: PropTypes.func.isRequired,
   appendLog: PropTypes.func.isRequired,
   imjoyApi: PropTypes.object,
