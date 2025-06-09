@@ -7,7 +7,7 @@ python-dotenv==1.0.1
 fastapi==0.106.0
 aiobotocore==2.19.0
 # artifact manager
-numcodecs==0.15.1
+numcodecs==0.13.1
 blosc==1.11.2
 aiohttp==3.11.14
 scikit-image==0.25.2
