@@ -324,20 +324,21 @@ select.modal-input {
 .tooltip-icon {
   width: 16px;
   height: 16px;
-  background-color: #007bff; /* Blue background */
-  color: white;
+  background-color: #004085; /* Darker blue for better contrast */
+  color: #FFFFFF !important; /* Explicit white and !important to override any other styles */
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
-  font-weight: bold;
+  font-size: 12px; /* Larger for visibility */
+  font-weight: bold; /* Bolder for better contrast */
   cursor: help;
   transition: background-color 0.2s;
+  text-shadow: 0 0 2px rgba(0, 0, 0, 0.7); /* Add shadow to improve text sharpness */
 }
 
 .tooltip-icon:hover {
-  background-color: #0056b3; /* Darker blue on hover */
+  background-color: #002752; /* Even darker blue on hover */
 }
 
 .tooltip-text {
