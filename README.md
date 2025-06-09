@@ -1,199 +1,283 @@
-# Agent-Lens: Smart Microscopy Web Application
+# Agent-Lens: AI-Powered Smart Microscopy Platform
 
-## Introduction
+<p align="center">
+  <strong>An intelligent web application for autonomous microscopy control and advanced image analysis</strong>
+</p>
 
-**Agent-Lens** is a web application designed for controlling a microscope and performing advanced image analysis tasks such as segmentation and similarity search. Developed using React, OpenLayers, and Bootstrap, this project provides an intuitive and efficient user interface for microscopy image capture, control, and analysis.
+<p align="center">
+  <a href="https://hypha.aicell.io/agent-lens/apps/agent-lens/">🔬 Try Agent-Lens</a> |
+  <a href="#quick-start">⚡ Quick Start</a> |
+  <a href="#features">✨ Features</a> |
+  <a href="#documentation">📖 Documentation</a>
+</p>
 
-You can try Agent Lens webapp on: [https://hypha.aicell.io/public/apps/agent-lens/](https://hypha.aicell.io/public/apps/agent-lens/)
+---
 
-## Features
+## Table of Contents
 
-- **Microscope Control**: Interface with microscope hardware to control illumination intensity, channel selection, camera exposure, and movement along X, Y, and Z axes.
-- **Image Capture**: Capture images with adjustable settings using a simulated function that currently returns a placeholder image.
-- **Image Display**: View captured images with pan and zoom capabilities using OpenLayers.
-- **Image Tagging and Storage**: Tag and store images temporarily in the browser for later retrieval.
-- **Segmentation Tools**:
-  - **Interactive Segmentation**: Use the pen tool to segment individual cells or objects in the image.
-  - **Automatic Segmentation**: Automatically segment all cells in the image using AI-powered services.
-  - **Reset Segmentation**: Reset embeddings to start a new segmentation process.
-- **Annotation Tools**:
-  - **Add Points**: Place point annotations on the image.
-  - **Add Polygons**: Draw polygon annotations on the image.
-- **Similarity Search**: Search for similar images based on the captured image data.
-- **Chatbot Integration**: Open a chatbot window for assistance or automated tasks.
-- **Logging**: View logs of actions and system messages for troubleshooting and record-keeping.
+- [Overview](#overview)
+- [Key Features](#key-features)
+- [Technology Stack](#technology-stack)
+- [Quick Start](#quick-start)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Project Structure](#project-structure)
+- [Core Components](#core-components)
+- [Development](#development)
+- [Contributing](#contributing)
+- [License](#license)
+
+## Overview
+
+**Agent-Lens** is an AI-powered smart microscopy web application that provides autonomous control of microscopy hardware with LLM-based AI agents. The platform integrates multiple microscope control, real-time image analysis, advanced data acquisition, and intelligent decision-making capabilities.
+
+Built for research laboratories, Agent-Lens combines modern web technologies with cutting-edge AI to streamline microscopy workflows and enable automated biological imaging.
+
+## Key Features
+
+### 🔬 **Microscopy Control**
+- **Multi-dimensional Control**: X, Y, Z positioning with precision movement
+- **Illumination Management**: Support for multiple channels (BF, F405, F488, F561, F638, F730)
+- **Camera Control**: Adjustable exposure time and intensity settings
+- **Autofocus**: Contrast-based and laser-based autofocus algorithms
+- **Well Plate Navigation**: Support for 96, 48, and 24-well plate formats
+
+### 🤖 **AI-Powered Analysis**
+- **Similarity Search**: Vector-based image similarity matching
+- **LLM Integration**: Natural language control and assistance
+- **Real-time Processing**: Live image analysis and feedback
+
+### 🎯 **Advanced Imaging**
+- **Time-lapse Imaging**: Automated multi-timepoint acquisition
+- **Multi-channel Acquisition**: Simultaneous fluorescence and brightfield
+- **High-resolution Display**: OpenLayers-based pan/zoom interface
+- **Annotation Tools**: Points, polygons, and custom markers
+- **Data Management**: Zarr-based efficient storage and retrieval
+
+### 🏭 **Hardware Integration**
+- **Robotic Automation**: Automated sample handling and transfer
+- **Incubator Control**: Multi-slot sample management
+- **Multi-microscope Support**: Coordinate multiple imaging systems
+- **Safety Systems**: Collision prevention and operation locking
+- **Real-time Streaming**: WebRTC video from microscope feeds
+
+### 📊 **Data & Analytics**
+- **Artifact Management**: S3-compatible storage with metadata
+- **Dataset Organization**: Hierarchical data structure
+- **Export Capabilities**: Multiple format support
+- **Logging System**: Comprehensive operation tracking
+- **Performance Monitoring**: Real-time system metrics
 
 ## Technology Stack
 
-- **React**: A JavaScript library for building user interfaces.
-- **OpenLayers**: A high-performance library for displaying map data, used here for image manipulation.
-- **Bootstrap**: A CSS framework for designing responsive web interfaces.
-- **FontAwesome**: Provides a rich set of icons for UI components.
-- **Hypha-RPC**: Enables remote procedure calls to interact with backend services.
-- **WinBox**: A modern HTML5 window manager for pop-up dialogs and chat windows.
-- **Vite**: A build tool that provides a faster and leaner development experience for modern web projects.
+### **Backend**
+- **Framework**: FastAPI with Hypha-RPC communication
+- **AI/ML**: Segment Anything Model (SAM), vector embeddings
+- **Data**: Zarr format, S3-compatible storage
+- **Languages**: Python 3.11+
+
+### **Frontend** 
+- **Framework**: React 18 with Vite
+- **Visualization**: OpenLayers for high-performance imaging
+- **UI**: Bootstrap 5 + Tailwind CSS
+- **Communication**: Hypha-RPC client
+
+### **Infrastructure**
+- **Containerization**: Docker with multi-service compose
+- **CI/CD**: GitHub Actions
+- **Deployment**: Hypha server platform
+- **Storage**: MinIO S3-compatible backend
+
+## Quick Start
+
+1. **Try Online**: Visit [Agent-Lens Demo](https://hypha.aicell.io/agent-lens/apps/agent-lens-test/)
+
+2. **Local Development**: 
+   ```bash
+   # Setup dependencies
+   bash scripts/setup_dev.sh
+   
+   # Run in connect-server mode (recommended for testing)
+   python -m agent_lens connect-server --workspace_name=agent-lens --server_url=https://hypha.aicell.io
+   ```
+
+3. **Access**: Open `https://hypha.aicell.io/agent-lens/apps/agent-lens-test/`
 
 ## Installation
 
-### Pre-requisites
+### Prerequisites
 
-- Docker
-- Conda
-- NPM
-- Python 3.10
+- **System**: macOS, Linux, or Windows with WSL2
+- **Software**: Docker, Conda, Node.js 16+, Python 3.11+
 
-### Automatic Installation
+### Automatic Setup
 
-Run the following command to install the application and its dependencies automatically:
+```bash
+# Clone repository
+git clone https://github.com/your-org/agent-lens.git
+cd agent-lens
 
-  ```bash
-  bash scripts/setup_dev.sh
-  ```
+# Run automated setup
+bash scripts/setup_dev.sh
+```
 
 ### Manual Installation
 
-If you prefer to set up the application manually, follow the steps below:
+<details>
+<summary>Click to expand manual installation steps</summary>
 
-1. **Conda environment:**
+1. **Environment Setup**
    ```bash
    conda create -n agent-lens python=3.11
    conda activate agent-lens
    ```
 
-2. **Install Python dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    pip install -e .
-    ```
+2. **Python Dependencies**
+   ```bash
+   pip install -r requirements.txt
+   pip install -e .
+   ```
 
-3. **Add the following environment variables to a `.env` file:**
+3. **Frontend Dependencies**
+   ```bash
+   npm install --prefix frontend
+   ```
 
-    ```bash
-    WORKSPACE_TOKEN=<agent-lens_workspace_token>
-    PERSONAL_TOKEN=<personal_workspace_token>
-    ```
+4. **Environment Variables**
+   Create `.env` file:
+   ```bash
+   WORKSPACE_TOKEN=<your_agent_lens_token>
+   PERSONAL_TOKEN=<your_personal_token>
+   ```
+   *Get tokens from [Hypha](https://hypha.aicell.io)*
 
-  You can get the `agent-lens_workspace_token` and `personal_workspace_token` from [Hypha](https://hypha.aicell.io).
+5. **Start Services**
+   ```bash
+   # For testing (recommended)
+   python -m agent_lens connect-server --workspace_name=agent-lens --server_url=https://hypha.aicell.io
+   
+   # Or for local development
+   bash scripts/run_dev.sh
+   ```
 
-4. **Install npm dependencies:**
-    ```bash
-    npm install --prefix frontend
-    npm install react-color
-    ```
-
-### Running the Application
-
-1a. **Start application in VSCode:**
-
-  Go to "Run and Debug" and select "Python: start-server" as the debug configuration. Press run.
-
-1b. **Start application manually:**
-
-  ```bash
-  bash scripts/run_dev.sh
-  ```
-
-2. **Access the application:**
-
-  Open the browser and navigate to `http://localhost:9527/agent-lens/apps/agent-lens`.
+</details>
 
 ## Configuration
 
-- **Microscope Control Service**: Ensure that the microscope control backend service (`agent-lens-squid-simulation`) is running and accessible.
-- **Segmentation Service**: The application connects to an AI segmentation service (`interactive-segmentation`) for image analysis.
-- **Similarity Search Service**: The application uses the `similarity-search` service to find similar images.
+### Service Configuration
+
+The application requires several backend services:
+
+- **Microscope Control**: `agent-lens-squid-simulation`
+- **AI Segmentation**: `interactive-segmentation` 
+- **Similarity Search**: `similarity-search`
+- **Orchestrator**: Task scheduling and workflow management
+
+### Environment Variables
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `WORKSPACE_TOKEN` | Agent-Lens workspace token | Yes |
+| `PERSONAL_TOKEN` | Personal workspace token | Yes |
+| `SERVER_URL` | Hypha server URL | No |
+| `LOG_LEVEL` | Logging level (DEBUG/INFO/WARN) | No |
 
 ## Project Structure
 
 ```
 agent-lens/
-├── agent_lens/
-│   ├── test/
-│   │   └── test_sam_service.py
-│   ├── artifact_manager.py
-│   ├── main.py
-│   ├── register_frontend_service.py
-│   ├── register_sam_service.py
-│   ├── register_similarity_search_service.py
-│   ├── service_utils.py
-│   └── start_server.py
-├── frontend/
-│   ├── index.html
-│   ├── main.jsx
-│   ├── package.json
-│   └── vite.config.mjs
-├── .env
-├── .gitignore
-├── pyproject.toml
-├── README.md
-└── requirements.txt
+├── 📁 agent_lens/              # Python backend package
+│   ├── 📁 tests/               # Test suite
+│   ├── 📄 artifact_manager.py  # Data storage management
+│   ├── 📄 register_*.py        # Service registration modules
+│   └── 📄 __main__.py          # CLI entry point
+├── 📁 frontend/                # React application
+│   ├── 📁 components/          # Reusable UI components
+│   ├── 📄 main.jsx             # Root component
+│   ├── 📄 utils.jsx            # Utility functions
+│   └── 📄 main.css             # Global styles
+├── 📁 docker/                  # Containerization
+│   ├── 📄 docker-compose.yml   # Service orchestration
+│   └── 📄 dockerfile           # Application container
+├── 📁 scripts/                 # Development scripts
+├── 📁 docs/                    # Documentation
+└── 📄 requirements.txt         # Python dependencies
 ```
 
-- **index.html**: The main HTML file where the React app is rendered.
-- **main.jsx**: The main JavaScript file containing the React code, including the `MicroscopeControl` component.
-- **vite.config.mjs**: Configuration file for Vite.
+## Core Components
 
-## Key Dependencies
+### **Microscope Control Interface**
+- Real-time hardware control with safety mechanisms
+- Multi-axis positioning and automated movements
+- Channel management and illumination control
 
-- **React** (`react`, `react-dom`): Core library for building the user interface.
-- **OpenLayers** (`ol`): For image display and interaction.
-- **Bootstrap**: For responsive and modern UI components.
-- **FontAwesome**: Icon library for enhancing the UI.
-- **Hypha-RPC**: Facilitates communication with backend services.
-- **WinBox**: For managing additional windows like the chatbot.
-- **Vite**: Development server and build tool.
+### **AI Segmentation Engine**
+- Multiple model support (SAM, custom models)
+- Interactive and batch processing modes
+- Vector embedding generation and management
 
-## Features in Detail
+### **Image Analysis Pipeline**
+- High-performance tile-based rendering
+- Multi-format support (uint8, uint16)
+- Real-time contrast and brightness adjustment
 
-### Microscope Control
+### **Hardware Orchestration**
+- Sample handling workflow automation
+- Multi-device coordination and scheduling
+- Error recovery and rollback procedures
 
-- **Illumination Settings**:
-  - Adjust illumination intensity and select different illumination channels (e.g., Bright Field, Fluorescence channels).
-  - Control camera exposure time.
-- **Movement Controls**:
-  - Move the microscope stage along X, Y, and Z axes.
-  - Autofocus functionality.
-- **Light Controls**:
-  - Toggle the microscope light on or off.
+## Development
 
-### Image Display and Interaction
+### Development Workflow
 
-- **OpenLayers Integration**:
-  - Display high-resolution images with zoom and pan capabilities.
-  - Overlay segmentation masks and annotations.
-- **Annotation Tools**:
-  - **Add Point**: Place markers on specific points of interest.
-  - **Add Polygon**: Draw polygons to outline areas of interest.
+1. **Start Development Server**
+   ```bash
+   # For testing with connect-server (recommended)
+   python -m agent_lens connect-server --workspace_name=agent-lens --server_url=https://hypha.aicell.io
+   
+   # Or for local development
+   bash scripts/run_dev.sh
+   ```
 
-### Segmentation and Analysis
+2. **Run Tests**
+   ```bash
+   pytest agent_lens/tests/
+   ```
 
-- **Interactive Segmentation**:
-  - Use the pen tool to click on the image and segment individual cells or objects.
-  - Supports multiple models like `vit_b_lm`, `vit_l_lm`, etc.
-- **Automatic Segmentation**:
-  - Segment all cells in the image automatically using AI services.
-- **Similarity Search**:
-  - Search for similar images based on the current image.
+3. **Build for Production**
+   ```bash
+   docker-compose -f docker/docker-compose.yml build
+   ```
 
-### BioImageChat Integration
+### Code Standards
 
-- Open a BioImage-chatbot window to assist with tasks or provide information.
+- **Python**: PEP 8, async/await patterns, type hints
+- **JavaScript**: ES6+, functional components, PropTypes
+- **Testing**: pytest for backend, React Testing Library for frontend
+- **Documentation**: Comprehensive docstrings and comments
 
-### Logging
+## Contributing
 
-- View detailed logs of all actions performed within the application for monitoring and debugging purposes.
+We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details on:
 
-## Styling
-
-- The application uses modern CSS styling techniques, including flexbox and responsive design principles.
-- Buttons and controls are styled for a consistent and intuitive user experience.
+- Code of conduct
+- Development process
+- Pull request procedures
+- Issue reporting
 
 ## License
 
-TBD.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Acknowledgments
 
-- TBD.
+- **Hypha Team**: For the RPC framework and platform
+- **OpenLayers Community**: For the mapping and visualization library
+- **SAM Team**: For the Segment Anything model
+- **Research Community**: For feedback and use cases
 
 ---
+
+<p align="center">
+  <strong>Built with ❤️ for the microscopy research community</strong>
+</p>
