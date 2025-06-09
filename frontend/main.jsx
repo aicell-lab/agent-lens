@@ -11,7 +11,8 @@ import Sidebar from './components/Sidebar';
 import ImageViewBrowser from './components/ImageViewBrowser';
 import ImageSearchPanel from './components/ImageSearchPanel';
 import Notification from './components/Notification';
-import { login, initializeServices, getServer, tryGetService, HyphaServerManager } from './utils';
+import ImageJPanel from './components/ImageJPanel';
+import { login, initializeServices, tryGetService, HyphaServerManager } from './utils';
 import 'ol/ol.css';
 import './main.css';
 
@@ -50,6 +51,11 @@ const MicroscopeControl = () => {
   const [hyphaManager, setHyphaManager] = useState(null);
   const [orchestratorManagerService, setOrchestratorManagerService] = useState(null);
   
+  // ImageJ state
+  const [isImageJPanelOpen, setIsImageJPanelOpen] = useState(false);
+  const [imageForImageJ, setImageForImageJ] = useState(null);
+  const [imjoyApi, setImjoyApi] = useState(null);
+  
   // Notification state
   const [notification, setNotification] = useState({ message: '', type: 'error' });
 
@@ -66,6 +72,25 @@ const MicroscopeControl = () => {
   const dismissNotification = useCallback(() => {
     setNotification({ message: '', type: 'error' });
   }, []);
+
+  useEffect(() => {
+    const initializeImJoy = async () => {
+      if (!window.loadImJoyCore || imjoyApi) return;
+      try {
+        appendLog('Initializing ImJoy Core for ImageJ.js...');
+        const imjoyCore = await window.loadImJoyCore();
+        const imjoy = new imjoyCore.ImJoy({ imjoy_api: {} });
+        await imjoy.start({ workspace: 'default' });
+        setImjoyApi(imjoy.api);
+        appendLog('ImJoy Core for ImageJ.js initialized successfully.');
+      } catch (err) {
+        console.error('Error initializing ImJoy Core:', err);
+        appendLog(`Error initializing ImJoy Core: ${err.message}`);
+        showNotification(`Failed to initialize ImageJ.js integration: ${err.message}`, 'error');
+      }
+    };
+    initializeImJoy();
+  }, []); // Run only once
 
   useEffect(() => {
     const checkTokenAndInit = async () => {
@@ -180,6 +205,12 @@ const MicroscopeControl = () => {
       }
     }
     
+    // If switching to ImageJ tab, initialize the panel
+    if (tab === 'imagej' && !isImageJPanelOpen) {
+      setIsImageJPanelOpen(true);
+      appendLog('Initializing ImageJ.js panel...');
+    }
+    
     setActiveTab(tab);
   };
 
@@ -190,6 +221,13 @@ const MicroscopeControl = () => {
       setSelectedMicroscopeId(microscopeId);
     }
   };
+
+  const handleOpenImageJ = useCallback((imageData) => {
+    setImageForImageJ(imageData);
+    setActiveTab('imagej');
+    setIsImageJPanelOpen(true);
+    appendLog('Sending image to ImageJ.js...');
+  }, [setActiveTab]);
 
   const renderContent = () => {
     switch (activeTab) {
@@ -244,6 +282,8 @@ const MicroscopeControl = () => {
               setCurrentOperation={setCurrentOperation}
               hyphaManager={hyphaManager}
               showNotification={showNotification}
+              onOpenImageJ={handleOpenImageJ}
+              imjoyApi={imjoyApi}
               onClose={() => {}}
             />
           </div>
@@ -263,6 +303,9 @@ const MicroscopeControl = () => {
             <LogSection log={log} />
           </div>
         );
+      case 'imagej':
+        // ImageJ content is now rendered separately as a persistent panel
+        return null;
       default:
         return null;
     }
@@ -287,6 +330,32 @@ const MicroscopeControl = () => {
             />
             <div className="content-area">
               {renderContent()}
+              {/* Persistent ImageJ Panel - always mounted but conditionally visible */}
+              {isImageJPanelOpen && (
+                <div 
+                  className={`imagej-persistent-panel ${activeTab === 'imagej' ? 'visible' : 'hidden'}`}
+                  style={{ 
+                    position: activeTab === 'imagej' ? 'relative' : 'absolute',
+                    top: activeTab === 'imagej' ? 'auto' : '-9999px',
+                    left: activeTab === 'imagej' ? 'auto' : '-9999px',
+                    width: activeTab === 'imagej' ? '100%' : '0',
+                    height: activeTab === 'imagej' ? '100%' : '0',
+                    overflow: 'hidden',
+                    zIndex: activeTab === 'imagej' ? 1 : -1
+                  }}
+                >
+                  <ImageJPanel
+                    isOpen={isImageJPanelOpen}
+                    image={imageForImageJ}
+                    imjoyApi={imjoyApi}
+                    onClose={() => {
+                      setIsImageJPanelOpen(false);
+                      setActiveTab('microscope'); // Return to microscope tab
+                    }}
+                    appendLog={appendLog}
+                  />
+                </div>
+              )}
             </div>
             {/* Notification popup */}
             <Notification 

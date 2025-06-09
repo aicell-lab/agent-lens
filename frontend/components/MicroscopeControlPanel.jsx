@@ -7,6 +7,44 @@ import SampleSelector from './SampleSelector';
 import ImagingTasksModal from './ImagingTasksModal';
 import './ImagingTasksModal.css'; // Added for well plate styles
 
+// Helper function to convert a uint8 hypha-rpc numpy array to a displayable Data URL
+const numpyArrayToDataURL = (numpyArray) => {
+  if (!numpyArray || !numpyArray._rvalue) {
+    console.error("Invalid numpy array object received:", numpyArray);
+    return null;
+  }
+  const { _rvalue: buffer, _rshape: shape, _rdtype: dtype } = numpyArray;
+  
+  if (dtype !== 'uint8') {
+    console.error(`Expected dtype uint8 but received: ${dtype}. Cannot process.`);
+    return null; // Or handle appropriately
+  }
+
+  const height = shape[0];
+  const width = shape[1];
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  const imageData = ctx.createImageData(width, height);
+  const data = imageData.data; // This is a Uint8ClampedArray
+
+  const pixels = new Uint8Array(buffer);
+
+  // Directly map the grayscale uint8 pixels to RGBA
+  for (let i = 0; i < pixels.length; i++) {
+    const pixelValue = pixels[i];
+    data[i * 4] = pixelValue;     // R
+    data[i * 4 + 1] = pixelValue; // G
+    data[i * 4 + 2] = pixelValue; // B
+    data[i * 4 + 3] = 255;        // A (fully opaque)
+  }
+
+  ctx.putImageData(imageData, 0, 0);
+  return canvas.toDataURL('image/png');
+};
+
 const WEBRTC_SERVICE_IDS = {
   "squid-control/squid-control-reef": "squid-control/video-track-squid-control-reef",
   "reef-imaging/mirror-microscope-control-squid-1": "reef-imaging/video-track-microscope-control-squid-1",
@@ -39,6 +77,8 @@ const MicroscopeControlPanel = ({
   hyphaManager, // Changed from hyphaServer and hyphaAuthToken
   showNotification = null, // New prop for showing notifications
   orchestratorManagerService, // New prop for orchestrator service
+  onOpenImageJ = null, // New prop for opening image in ImageJ
+  imjoyApi = null, // New prop for ImJoy API
 }) => {
   const [isLightOn, setIsLightOn] = useState(false);
   const [xPosition, setXPosition] = useState(0);
@@ -53,6 +93,12 @@ const MicroscopeControlPanel = ({
   const [xMoveStr, setXMoveStr] = useState(xMove.toString());
   const [yMoveStr, setYMoveStr] = useState(yMove.toString());
   const [zMoveStr, setZMoveStr] = useState(zMove.toString());
+
+  // State for the snapped image, storing both raw numpy and display URL
+  const [snappedImageData, setSnappedImageData] = useState({
+    numpy: null,
+    url: null,
+  });
 
   // State for SampleSelector dropdown
   const [isSampleSelectorOpen, setIsSampleSelectorOpen] = useState(false);
@@ -86,6 +132,10 @@ const MicroscopeControlPanel = ({
 
   // State for collapsing the right panel - THIS WAS ACCIDENTALLY REMOVED, ADDING IT BACK
   const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false);
+
+  // New state for video contrast adjustment
+  const [videoContrastMin, setVideoContrastMin] = useState(0);
+  const [videoContrastMax, setVideoContrastMax] = useState(255);
 
   // Refs to hold the latest actual values for use in debounced effects
   const actualIlluminationIntensityRef = useRef(actualIlluminationIntensity);
@@ -259,6 +309,29 @@ const MicroscopeControlPanel = ({
 
     return () => clearTimeout(handler);
   }, [desiredCameraExposure, illuminationChannel, microscopeControlService, appendLog]);
+
+  // Effect to adjust video frame contrast
+  useEffect(() => {
+    if (!microscopeControlService || !isWebRtcActive) return;
+
+    // Basic validation to ensure min is not greater than max
+    if (videoContrastMin >= videoContrastMax) {
+      return;
+    }
+
+    const handler = setTimeout(async () => {
+      try {
+        appendLog(`Adjusting video contrast: min=${videoContrastMin}, max=${videoContrastMax}`);
+        await microscopeControlService.adjust_video_frame(videoContrastMin, videoContrastMax);
+        appendLog('Video contrast adjusted successfully.');
+      } catch (error) {
+        appendLog(`Error adjusting video contrast: ${error.message}`);
+        console.error("[MicroscopeControlPanel] Error adjusting video contrast:", error);
+      }
+    }, 200); // 200ms debounce
+
+    return () => clearTimeout(handler);
+  }, [videoContrastMin, videoContrastMax, microscopeControlService, isWebRtcActive, appendLog]);
 
   useEffect(() => {
     if (!snapshotImage || !canvasRef.current || isWebRtcActive) return;
@@ -551,10 +624,19 @@ const MicroscopeControlPanel = ({
         await new Promise(resolve => setTimeout(resolve, 200)); 
       }
       
-      const base64Image = await microscopeControlService.one_new_frame();
-      console.log('Received base64 image data of length:', base64Image.length);
-      setSnapshotImage(`data:image/png;base64,${base64Image}`);
-      appendLog('Image snapped and fetched successfully.');
+      const numpyImage = await microscopeControlService.one_new_frame();
+      console.log('Received numpy image object:', numpyImage);
+
+      const dataURL = numpyArrayToDataURL(numpyImage);
+      if (dataURL) {
+        // Store both the raw numpy object and the display URL
+        setSnappedImageData({ numpy: numpyImage, url: dataURL });
+        // Also update the snapshotImage prop for legacy display
+        setSnapshotImage(dataURL);
+        appendLog('Image snapped and converted successfully.');
+      } else {
+        appendLog('Failed to convert numpy image to displayable format.');
+      }
     } catch (error) {
       console.error('Error in snapImage:', error);
       appendLog(`Error in snapImage: ${error.message}`);
@@ -788,22 +870,81 @@ const MicroscopeControlPanel = ({
           id="image-display"
           className={`w-full border ${
             (snapshotImage || isWebRtcActive) ? 'border-gray-300' : 'border-dotted border-gray-400'
-          } rounded flex items-center justify-center bg-black`}
+          } rounded flex items-center justify-center bg-black relative`}
         >
           {isWebRtcActive && !webRtcError ? (
             <video ref={videoRef} autoPlay playsInline muted className="object-contain w-full h-full" />
-          ) : snapshotImage ? (
-            <img
-              src={snapshotImage}
-              alt="Microscope Snapshot"
-              className="object-contain w-full h-full"
-            />
+          ) : snappedImageData.url ? (
+            <>
+              <img
+                src={snappedImageData.url}
+                alt="Microscope Snapshot"
+                className="object-contain w-full h-full"
+              />
+              {/* ImageJ.js Badge */}
+              {onOpenImageJ && (
+                <button
+                  onClick={() => onOpenImageJ(snappedImageData.numpy)}
+                  className="imagej-badge absolute top-2 right-2 p-1 bg-white bg-opacity-90 hover:bg-opacity-100 rounded shadow-md transition-all duration-200 flex items-center gap-1 text-xs font-medium text-gray-700 hover:text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={imjoyApi ? "Open in ImageJ.js" : "ImageJ.js integration is loading..."}
+                  disabled={!imjoyApi}
+                >
+                  <img 
+                    src="https://ij.imjoy.io/assets/badge/open-in-imagej-js-badge.svg" 
+                    alt="Open in ImageJ.js" 
+                    className="h-4"
+                  />
+                </button>
+              )}
+            </>
           ) : (
             <p className="placeholder-text text-center text-gray-300">
               {webRtcError ? `WebRTC Error: ${webRtcError}` : (microscopeControlService ? 'Image Display' : 'Microscope not connected')}
             </p>
           )}
         </div>
+        {/* Video Contrast Controls */}
+        {isWebRtcActive && (
+          <div className="video-contrast-controls mt-2 p-2 border border-gray-300 rounded-lg bg-white bg-opacity-90">
+            <div className="text-xs font-medium text-gray-700 mb-1">Video Frame Adjustment</div>
+            <div className="flex items-center space-x-2">
+              <label htmlFor="min-contrast" className="text-xs text-gray-600 w-16 shrink-0">Min: {videoContrastMin}</label>
+              <input
+                id="min-contrast"
+                type="range"
+                min="0"
+                max="255"
+                value={videoContrastMin}
+                onChange={(e) => {
+                  const newMin = parseInt(e.target.value, 10);
+                  if (newMin < videoContrastMax) {
+                    setVideoContrastMin(newMin);
+                  }
+                }}
+                className="w-full"
+                title={`Min value: ${videoContrastMin}`}
+              />
+            </div>
+            <div className="flex items-center space-x-2 mt-1">
+              <label htmlFor="max-contrast" className="text-xs text-gray-600 w-16 shrink-0">Max: {videoContrastMax}</label>
+              <input
+                id="max-contrast"
+                type="range"
+                min="0"
+                max="255"
+                value={videoContrastMax}
+                onChange={(e) => {
+                  const newMax = parseInt(e.target.value, 10);
+                  if (newMax > videoContrastMin) {
+                    setVideoContrastMax(newMax);
+                  }
+                }}
+                className="w-full"
+                title={`Max value: ${videoContrastMax}`}
+              />
+            </div>
+          </div>
+        )}
         {/* Toggle button for the right panel */}
         <button 
           onClick={toggleRightPanel}
@@ -1203,6 +1344,8 @@ MicroscopeControlPanel.propTypes = {
   hyphaManager: PropTypes.object, // Changed prop type
   showNotification: PropTypes.func, // Added prop type for notification function
   orchestratorManagerService: PropTypes.object, // Added prop type
+  onOpenImageJ: PropTypes.func, // Added prop type for ImageJ integration
+  imjoyApi: PropTypes.object, // Added prop type for ImJoy API
 };
 
 export default MicroscopeControlPanel; 

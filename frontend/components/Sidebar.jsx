@@ -288,6 +288,15 @@ const Sidebar = ({
             </div>
           )}
           <button 
+            className={`sidebar-tab ${activeTab === 'imagej' ? 'active' : ''}`}
+            onClick={() => onTabChange('imagej')}
+            disabled={!!currentOperation} 
+            title={currentOperation ? "Sample operation in progress" : (isMainSidebarCollapsed ? "ImageJ" : "ImageJ.js for image processing")}
+          >
+            <i className="fas fa-magic"></i>
+            {!isMainSidebarCollapsed && <span>ImageJ</span>}
+          </button>
+          <button 
             className={`sidebar-tab ${activeTab === 'image-view' || activeTab === 'image-view-map' ? 'active' : ''}`}
             onClick={handleImageViewTabClick}
             disabled={!!currentOperation} 
