@@ -342,8 +342,6 @@ select.modal-input {
 }
 
 .tooltip-text {
-  /* Positioning is now handled by inline styles (position: fixed, top, left, transform) */
-  /* Visibility and opacity are also handled by inline styles */
   width: 250px; /* Adjust as needed */
   background-color: #333; /* Dark background for tooltip */
   color: #fff;
@@ -360,8 +358,6 @@ select.modal-input {
   display: block; 
 }
 
-/* Remove old hover-based visibility rule */
-/* .tooltip-icon-container:hover .tooltip-text { ... } */
 
 /* Style for fieldset and legend to group sections */
 .modal-fieldset {
