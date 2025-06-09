@@ -5,23 +5,86 @@ on: push
 jobs:
   test:
     runs-on: ubuntu-latest
-
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+        test-type: ['fast', 'integration']
+    
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
     
-    - name: Set up Python
-      uses: actions/setup-python@v2
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
       with:
-        python-version: '3.11'
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
     
     - name: Install dependencies
       run: |
+        pip install --upgrade pip
         pip install -r requirements_test.txt
         pip install -e .
     
-    - name: Run tests
+    - name: Run ${{ matrix.test-type }} tests
       env:
-        TEST_TOKEN: ${{ secrets.TEST_TOKEN }}
+        AGENT_LENS_WORKSPACE_TOKEN: ${{ secrets.AGENT_LENS_WORKSPACE_TOKEN }}
       run: |
-        pytest ./agent_lens/tests
+        python scripts/run_tests.py --type ${{ matrix.test-type }} --coverage
+    
+    - name: Upload coverage reports
+      if: matrix.python-version == '3.11' && matrix.test-type == 'fast'
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+
+  slow-tests:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        pip install --upgrade pip
+        pip install -r requirements_test.txt
+        pip install -e .
+    
+    - name: Run slow tests (AI/ML models)
+      env:
+        AGENT_LENS_WORKSPACE_TOKEN: ${{ secrets.AGENT_LENS_WORKSPACE_TOKEN }}
+      run: |
+        python scripts/run_tests.py --type slow --coverage
+    
+    - name: Upload slow test coverage
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: slow-tests
+        name: codecov-slow
+        fail_ci_if_error: false
