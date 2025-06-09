@@ -169,11 +169,62 @@ docs/                    # Documentation and diagrams
 - Handle client disconnections gracefully
 
 ## Testing Guidelines
-- Write async tests using pytest-asyncio
-- Mock external services for unit tests
-- Test image processing functions with sample data
-- Implement integration tests for service communication
-- Test UI components with proper React testing patterns
+
+### **Test Infrastructure** (✅ Working)
+- **Framework**: pytest with asyncio support, React Testing Library
+- **Dependencies**: CLIP, FAISS-CPU, torch for vector similarity tests
+- **Test Runner**: `python scripts/run_tests.py` with multiple test types
+- **Coverage**: pytest-cov for comprehensive coverage reporting
+
+### **Test Categories**
+```bash
+# Fast unit tests (< 2 seconds, recommended for development)
+python scripts/run_tests.py --type fast
+
+# Integration tests with service communication
+python scripts/run_tests.py --type integration
+
+# Slow tests with AI models (CLIP/FAISS vector similarity)
+python scripts/run_tests.py --type slow
+
+# With coverage reporting
+python scripts/run_tests.py --coverage
+```
+
+### **Writing Tests**
+- Use async/await patterns for microscopy operations
+- Mock external services and hardware dependencies
+- Test image processing with realistic microscopy data
+- Create integration tests for service communication
+- Follow test fixtures from `conftest.py` for consistent data
+
+### **Test Patterns**
+```python
+# Unit test example
+@pytest.mark.unit
+def test_image_processing(sample_image):
+    processed = apply_contrast_enhancement(sample_image)
+    assert processed.size == sample_image.size
+
+# Integration test example  
+@pytest.mark.integration
+async def test_microscope_workflow(mock_hypha_server):
+    result = await move_stage_and_capture(x=100, y=200)
+    assert result["status"] == "success"
+
+# Slow test with AI models
+@pytest.mark.slow  
+async def test_similarity_search():
+    # Uses real CLIP/FAISS for vector similarity
+    results = await find_similar_cells(query_image, top_k=5)
+    assert len(results) <= 5
+```
+
+### **Test Status** (✅ Current)
+- **Basic Tests**: 11 tests passing, core functionality verified
+- **Similarity Service**: Working with CLIP embeddings and FAISS indexing
+- **Mock Infrastructure**: Comprehensive fixtures for microscopy simulation
+- **CI/CD Ready**: GitHub Actions integration configured
 
 ## Security & Deployment
 - Use token-based authentication for all services

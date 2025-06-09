@@ -241,7 +241,14 @@ agent-lens/
 
 2. **Run Tests**
    ```bash
-   pytest agent_lens/tests/
+   # Quick development testing
+   python scripts/run_tests.py --type fast
+   
+   # Run with coverage
+   python scripts/run_tests.py --coverage
+   
+   # Run all tests including AI models
+   python scripts/run_tests.py --type slow
    ```
 
 3. **Build for Production**
@@ -249,11 +256,28 @@ agent-lens/
    docker-compose -f docker/docker-compose.yml build
    ```
 
+### Testing Infrastructure
+
+Agent-Lens has a comprehensive testing setup with:
+
+- **✅ 11+ passing tests** covering core functionality
+- **Vector similarity testing** with CLIP and FAISS
+- **Async microscopy simulation** with mock hardware
+- **React component testing** with Testing Library
+- **CI/CD integration** with GitHub Actions
+
+**Test Categories:**
+- `--type fast`: Unit tests (< 2 seconds)
+- `--type integration`: Service integration tests  
+- `--type slow`: AI models and large datasets
+- `--coverage`: Generate coverage reports
+
 ### Code Standards
 
 - **Python**: PEP 8, async/await patterns, type hints
 - **JavaScript**: ES6+, functional components, PropTypes
 - **Testing**: pytest for backend, React Testing Library for frontend
+- **AI Testing**: CLIP/FAISS similarity search, vector embeddings
 - **Documentation**: Comprehensive docstrings and comments
 
 ## Contributing
