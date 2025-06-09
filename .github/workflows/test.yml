@@ -3,21 +3,17 @@ name: Run Tests
 on: push
 
 jobs:
-  test:
+  fast-tests:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ['3.10', '3.11', '3.12']
-        test-type: ['fast', 'integration']
     
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
     
-    - name: Set up Python ${{ matrix.python-version }}
+    - name: Set up Python 3.11
       uses: actions/setup-python@v4
       with:
-        python-version: ${{ matrix.python-version }}
+        python-version: '3.11'
     
     - name: Set up Node.js
       uses: actions/setup-node@v4
@@ -50,23 +46,81 @@ jobs:
       run: |
         cd frontend && npm install
     
-    - name: Run ${{ matrix.test-type }} tests
+    - name: Run fast tests
       env:
         AGENT_LENS_WORKSPACE_TOKEN: ${{ secrets.AGENT_LENS_WORKSPACE_TOKEN }}
       run: |
-        python scripts/run_tests.py --type ${{ matrix.test-type }} --coverage
+        python scripts/run_tests.py --type fast --coverage
     
     - name: Upload coverage reports
-      if: matrix.python-version == '3.11' && matrix.test-type == 'fast'
       uses: codecov/codecov-action@v3
       with:
         file: ./coverage.xml
-        flags: unittests
-        name: codecov-umbrella
+        flags: fast-tests
+        name: codecov-fast
+        fail_ci_if_error: false
+
+  integration-tests:
+    runs-on: ubuntu-latest
+    needs: fast-tests
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+    
+    - name: Cache node modules
+      uses: actions/cache@v3
+      with:
+        path: ~/.npm
+        key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-node-
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install Python dependencies
+      run: |
+        pip install --upgrade pip
+        pip install -r requirements_test.txt
+        pip install -e .
+    
+    - name: Install frontend dependencies
+      run: |
+        cd frontend && npm install
+    
+    - name: Run integration tests
+      env:
+        AGENT_LENS_WORKSPACE_TOKEN: ${{ secrets.AGENT_LENS_WORKSPACE_TOKEN }}
+      run: |
+        python scripts/run_tests.py --type integration --coverage
+    
+    - name: Upload coverage reports
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: integration-tests
+        name: codecov-integration
         fail_ci_if_error: false
 
   slow-tests:
     runs-on: ubuntu-latest
+    needs: integration-tests
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     
     steps:
