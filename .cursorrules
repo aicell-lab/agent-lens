@@ -1,0 +1,280 @@
+# Agent-Lens Smart Microscopy Platform - Cursor Rules
+
+## Project Overview
+Agent-Lens is an AI-powered smart microscopy web application that provides autonomous control of microscopy hardware with LLM-based AI agents. The platform integrates multiple microscope control, real-time image analysis, advanced data acquisition, and intelligent decision-making.
+
+## Technology Stack & Architecture
+
+### Backend (Python)
+- **Framework**: FastAPI with Hypha-RPC for service communication
+- **Core Services**: 
+  - Frontend service (`register_frontend_service.py`)
+  - Similarity search service (`register_similarity_search_service.py`)
+- **Data Management**: 
+  - Zarr format for efficient tile-based image storage
+  - AgentLensArtifactManager for artifact and vector management
+  - ZarrTileManager for high-performance tile serving
+- **Key Libraries**: numpy, pillow, scikit-image, zarr, aiohttp, fastapi
+- **Testing**: pytest with async support
+
+### Frontend (React)
+- **Framework**: React 18 with Vite build system
+- **Key Libraries**: 
+  - OpenLayers for high-performance image display and interaction
+  - Bootstrap 5 for responsive UI components
+  - FontAwesome for icons
+  - Hypha-RPC for backend communication
+  - WinBox for window management
+  - React Color for color picking
+- **Styling**: CSS modules + Tailwind CSS + Bootstrap hybrid approach
+
+### Infrastructure
+- **Containerization**: Docker with multi-service compose setup
+- **CI/CD**: GitHub Actions with automatic Docker publishing
+- **Storage**: S3-compatible artifact storage with MinIO
+- **Deployment**: Hypha server platform with token-based authentication
+
+## Coding Standards & Best Practices
+
+### Python Code Standards
+- Use async/await patterns consistently for all I/O operations
+- Implement proper error handling with try/catch blocks and logging
+- Use type hints for function parameters and return values
+- Follow PEP 8 naming conventions (snake_case for functions/variables)
+- Create rotating file handlers for logging with configurable levels
+- Use dataclasses or Pydantic models for structured data
+- Implement proper resource cleanup with context managers
+- Use f-strings for string formatting
+
+### React Code Standards  
+- Use functional components with hooks (useState, useEffect, useCallback)
+- Implement proper prop validation with PropTypes
+- Use camelCase for JavaScript variables and functions
+- Create reusable components in the `/components` directory
+- Implement proper cleanup in useEffect hooks
+- Use async/await for API calls with error handling
+- Optimize re-renders with useCallback and useMemo
+- Follow React best practices for state management
+
+### File Organization
+```
+agent_lens/                 # Main Python package
+├── __main__.py            # Entry point with CLI argument parsing
+├── artifact_manager.py    # Data storage and Zarr tile management
+├── register_*_service.py  # Service registration modules
+└── tests/                 # Pytest test files
+
+frontend/                  # React application
+├── main.jsx              # Root React component
+├── components/           # Reusable UI components
+├── utils.jsx            # Utility functions and service connections
+└── main.css             # Global styles
+
+docker/                   # Containerization
+├── docker-compose-*.yml  # Multi-service configurations
+├── dockerfile           # Main application container
+└── healthcheck.sh       # Health monitoring
+
+scripts/                  # Development and deployment scripts
+docs/                    # Documentation and diagrams
+```
+
+## Development Guidelines
+
+### Microscopy Domain Knowledge
+- Understand multi-dimensional acquisition (X, Y, Z, time, channels)
+- Handle different illumination channels (BF, fluorescence: F405, F488, F561, F638, F730)
+- Implement proper camera exposure and intensity control
+- Support autofocus algorithms (contrast-based and laser-based)
+- Handle well plate navigation (96, 48, 24-well formats)
+- Implement WebRTC for real-time video streaming from microscopes
+
+### AI Integration Patterns
+- Use vector embeddings for image similarity search
+- Use LLM agents for microscopy control code generation
+- Implement proper embedding reset and management
+- Support chatbot integration for user assistance
+
+### Hardware Management & Sample Handling
+- **Lab Setup**: One automated incubator with multiple slots, one robotic arm, two real microscopes
+- **Sample Management**: SampleSelector component handles sample loading/unloading workflows
+- **Conflict Prevention**: Implement proper scheduling and state management to avoid hardware collisions
+- **Workflow Orchestration**: Coordinate between incubator, robotic arm, and microscope services
+- **State Tracking**: Monitor sample locations and hardware status across all devices
+- **Real vs Simulated**: Support both real hardware and simulated microscope modes
+- **Operation Sequencing**: Ensure proper order of operations (home stage → arm transport → placement)
+
+### Performance Optimization
+- Use Zarr format for efficient large image data handling
+- Implement tile-based image serving with LRU caching
+- Use async/await patterns for non-blocking I/O operations
+- Implement request queuing and priority-based tile loading
+- Use compression for image data transfer (WebP/PNG)
+- Implement proper memory management for large datasets
+
+### UI/UX Patterns
+- Create responsive layouts that work on different screen sizes
+- Implement collapsible panels for space optimization
+- Use OpenLayers for smooth pan/zoom image interaction
+- Provide real-time feedback for long-running operations
+- Implement proper loading states and error handling
+- Support keyboard shortcuts for common operations
+- Use notification system for user feedback
+
+## Specific Implementation Notes
+
+### Service Communication
+- All services communicate via Hypha-RPC protocol
+- Use workspace tokens for authentication
+- Implement proper service discovery and connection handling
+- Handle service timeouts and reconnection logic
+- Use the HyphaServerManager for connection management
+
+### Time-Lapse Imaging & Orchestration
+- **Orchestrator Service**: Manages complex time-lapse imaging workflows and task scheduling
+- **Local Hypha-RPC Setup**: Lab devices run on local hypha-rpc infrastructure for stability
+- **Network Reliability**: Local setup reduces network issues and ensures consistent device communication
+- **Task Management**: ImagingTasksModal component interfaces with orchestrator for task CRUD operations
+- **Scheduling System**: Handles pending time points, imaging zones, and multi-device coordination
+- **Real-Time Control**: Local orchestrator provides immediate response for hardware operations
+
+### Hardware Coordination & Safety
+- **Multi-Microscope Support**: Handle reef-imaging/mirror-microscope-control-squid-1 and squid-2
+- **Robotic Arm Integration**: Coordinate sample transport with reef-imaging/mirror-robotic-arm-control
+- **Incubator Management**: Track sample slots and locations in automated incubator system
+- **Operation Locking**: Prevent concurrent operations that could cause hardware conflicts
+- **State Synchronization**: Maintain consistent state across incubator, arm, and microscope services
+- **Error Recovery**: Implement rollback procedures for failed sample transfer operations
+- **Sample Tracking**: Monitor sample locations (incubator_slot, robotic_arm, microscope1/2)
+
+### Image Processing Pipeline
+- Support multiple image formats (uint8, uint16)
+- Implement contrast/brightness adjustment
+- Support multi-channel image composition
+- Handle image annotations (points, polygons)
+- Implement proper color mapping for fluorescence channels
+
+### Data Storage Architecture
+- Use artifact manager for persistent storage
+- Implement dataset and gallery management
+- Support time-lapse data organization
+- Handle large file uploads/downloads with progress tracking
+- Implement proper metadata management
+
+### Error Handling & Logging
+- Use structured logging with timestamps and severity levels
+- Implement proper exception handling for service calls
+- Provide user-friendly error messages
+- Log performance metrics for optimization
+- Handle client disconnections gracefully
+
+## Testing Guidelines
+- Write async tests using pytest-asyncio
+- Mock external services for unit tests
+- Test image processing functions with sample data
+- Implement integration tests for service communication
+- Test UI components with proper React testing patterns
+
+## Security & Deployment
+- Use token-based authentication for all services
+- Implement proper CORS handling for cross-origin requests
+- Use security headers and rate limiting
+- Follow Docker security best practices (non-root user, minimal privileges)
+- Implement health checks for service monitoring
+
+## Code Review Checklist
+- [ ] Async/await patterns used correctly
+- [ ] Proper error handling and logging
+- [ ] Type hints for Python functions
+- [ ] PropTypes for React components
+- [ ] Resource cleanup implemented
+- [ ] Performance considerations addressed
+- [ ] Security best practices followed
+- [ ] Tests included for new functionality
+- [ ] Documentation updated if needed
+
+## Common Patterns to Follow
+
+### Service Registration Pattern
+```python
+async def setup_service(server, server_id="service-name"):
+    # Service configuration and registration
+    await server.register_service(service_config)
+```
+
+### React Component Pattern
+```jsx
+const ComponentName = ({ prop1, prop2, onCallback }) => {
+  const [state, setState] = useState(initialValue);
+  
+  useEffect(() => {
+    // Setup and cleanup logic
+    return () => {
+      // Cleanup
+    };
+  }, [dependencies]);
+  
+  return <div>Component JSX</div>;
+};
+
+ComponentName.propTypes = {
+  prop1: PropTypes.string.isRequired,
+  prop2: PropTypes.number,
+  onCallback: PropTypes.func.isRequired
+};
+```
+
+### Hardware Operation Pattern
+```jsx
+// Sample handling with proper state management and conflict prevention
+const handleSampleOperation = async () => {
+  if (currentOperation !== null || microscopeBusy) return;
+  
+  setCurrentOperation('loading'); // Prevent concurrent operations
+  clearWorkflowMessages();
+  
+  try {
+    addWorkflowMessage("Starting operation...");
+    await validateHardwareState();
+    await coordinateWithServices();
+    addWorkflowMessage("Operation completed successfully");
+    setCurrentOperation(null);
+  } catch (error) {
+    addWorkflowMessage(`Error: ${error.message}`);
+    await rollbackOperation();
+    setCurrentOperation(null);
+  }
+};
+```
+
+### Async Error Handling Pattern
+```python
+try:
+    result = await some_async_operation()
+    logger.info(f"Operation successful: {result}")
+    return result
+except Exception as e:
+    logger.error(f"Operation failed: {e}", exc_info=True)
+    raise
+```
+
+## AI Agent Integration
+When implementing AI agent functionality:
+- Use structured prompts for microscopy control
+- Implement proper context management for long conversations
+- Support multi-modal inputs (text + images)
+- Provide clear feedback on AI decision-making
+- Implement safety checks for hardware control
+- Support different operating modes (autofocus, cell finding, dataset creation)
+
+## Time-Lapse Imaging Workflows
+When implementing time-lapse functionality:
+- Use the orchestrator service for task scheduling and execution
+- Leverage local hypha-rpc setup for reliable device communication
+- Implement proper time point generation and management
+- Support well plate imaging zones with configurable FOV grids
+- Handle illumination settings per channel with intensity/exposure control
+- Coordinate between incubator sample handling and imaging schedules
+- Provide real-time workflow progress feedback to users
+
+Remember: This is a research platform for autonomous microscopy. Prioritize reliability, performance, and scientific accuracy in all implementations. 
