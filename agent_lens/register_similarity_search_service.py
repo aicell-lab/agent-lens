@@ -139,6 +139,9 @@ def initialize_data_stores():
 # Call initialization at startup
 initialize_data_stores()
 
+def hello_world():
+    return "Hello world"
+
 def find_similar_images(query_input, top_k=5):
     """
     Finds similar images based on either an input image or a text query.
@@ -440,7 +443,7 @@ async def start_hypha_service(server, service_id="image-text-similarity-search")
             "run_in_executor": True,
             "require_context": False, 
         },
-        # Exposing functions with names that reflect their dual capability or primary input
+        "hello_world": hello_world,
         "find_similar_images": find_similar_images, 
         "add_image": add_image_file_and_update_index, 
         "find_similar_cells": find_similar_cells,
