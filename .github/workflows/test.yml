@@ -1,27 +1,65 @@
 name: Run Tests
 
-on: push
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 jobs:
-  test:
+  fast-tests:
     runs-on: ubuntu-latest
-
+    
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
     
-    - name: Set up Python
-      uses: actions/setup-python@v2
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
       with:
         python-version: '3.11'
     
-    - name: Install dependencies
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+    
+    - name: Cache node modules
+      uses: actions/cache@v3
+      with:
+        path: ~/.npm
+        key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-node-
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install Python dependencies
       run: |
+        pip install --upgrade pip
         pip install -r requirements_test.txt
         pip install -e .
     
-    - name: Run tests
-      env:
-        TEST_TOKEN: ${{ secrets.TEST_TOKEN }}
+    - name: Install frontend dependencies
       run: |
-        pytest ./agent_lens/tests
+        cd frontend && npm install
+    
+    - name: Run fast tests
+      env:
+        AGENT_LENS_WORKSPACE_TOKEN: ${{ secrets.AGENT_LENS_WORKSPACE_TOKEN }}
+      run: |
+        python scripts/run_tests.py --type fast --coverage
+    
+    - name: Upload coverage reports
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: fast-tests
+        name: codecov-fast
+        fail_ci_if_error: false

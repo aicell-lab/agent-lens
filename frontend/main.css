@@ -763,7 +763,7 @@
 }
 
 .mcp-microscope-controls-area {
-  flex-grow: 1; /* Microscope controls take available vertical space, pushing chatbot down */
+  flex-shrink: 0; /* Microscope controls take only the space they need */
   overflow-y: auto; /* Allow scrolling for controls if content overflows */
   padding: 1rem; /* Add some padding inside the controls area */
   border: 1px solid #e5e7eb; /* Optional: border for visual separation */
@@ -774,7 +774,7 @@
 
 .mcp-chatbot-area {
   /* Chatbot takes its natural height, or you can specify a fixed/min-height */
-  /* flex-shrink: 0; ensure it doesn't shrink if controls area is too large */
+  flex-shrink: 0; /* ensure it doesn't shrink if controls area is too large */
   padding: 0.5rem; /* Padding for the chatbot area */
   border: 1px solid #e5e7eb; /* Optional: border */
   border-radius: 0.375rem; /* Optional: rounded corners */

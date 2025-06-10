@@ -435,9 +435,9 @@ def add_cell_file_and_update_index(cell_image_bytes, text_description, annotatio
         traceback.print_exc()
         return {"status": "error", "message": str(e)}
     
-async def start_hypha_service(server):
+async def start_hypha_service(server, service_id="image-text-similarity-search"):
     service_config = {
-        "id": "image-text-similarity-search", # Updated service ID for clarity
+        "id": service_id, # Configurable service ID
         "config": {
             "visibility": "public",
             "run_in_executor": True,
@@ -449,7 +449,15 @@ async def start_hypha_service(server):
         "find_similar_cells": find_similar_cells,
         "add_cell": add_cell_file_and_update_index, 
     }
-    await server.register_service(service_config)
+    print(f"Registering service with ID: {service_id}")
+    print(f"Service config: {service_config}")
+    try:
+        service_info = await server.register_service(service_config)
+        print(f"Service registered successfully: {service_info}")
+        return service_info
+    except Exception as e:
+        print(f"Error registering service: {e}")
+        raise
 
 
 async def setup():

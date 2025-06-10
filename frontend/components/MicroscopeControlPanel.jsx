@@ -1149,9 +1149,16 @@ const MicroscopeControlPanel = ({
                 type="number"
                 className="control-input w-full mt-1 p-1 border border-gray-300 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
                 value={desiredCameraExposure}
+                max="900"
                 onChange={(e) => {
                   if (currentOperation || microscopeBusy) return;
-                  setDesiredCameraExposure(parseInt(e.target.value, 10));
+                  const value = parseInt(e.target.value, 10);
+                  if (value > 900) {
+                    if (showNotification) {
+                      showNotification('Maximum exposure time is 900ms', 'warning');
+                    }
+                  }
+                  setDesiredCameraExposure(Math.min(value, 900)); // Ensure value doesn't exceed 900ms
                 }}
                 disabled={currentOperation !== null || microscopeBusy}
               />
