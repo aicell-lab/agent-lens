@@ -59,8 +59,8 @@ def run_backend_tests(test_type="all", verbose=False, coverage=False):
     
     # Add test paths (only if they exist)
     test_paths = []
-    if Path("agent_lens/tests/").exists():
-        test_paths.append("agent_lens/tests/")
+    if Path("tests/").exists():
+        test_paths.append("tests/")
     if Path("tests/").exists():
         test_paths.append("tests/")
     
