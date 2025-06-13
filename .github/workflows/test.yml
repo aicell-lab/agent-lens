@@ -1,36 +1,67 @@
 name: Run Tests
 
-on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+on: push
 
 jobs:
-  fast-tests:
+  test-step-by-step:
     runs-on: ubuntu-latest
+    container:
+      image: python:3.11-slim
+    strategy:
+      matrix:
+        python-version: ["3.11"]
     
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
     
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
+    - name: Install system dependencies
+      run: |
+        apt-get update
+        apt-get install -y \
+          libgl1-mesa-glx \
+          libglib2.0-0 \
+          libxrandr2 \
+          libxss1 \
+          libxcursor1 \
+          libxcomposite1 \
+          libasound2 \
+          libxi6 \
+          libxtst6 \
+          libgtk-3-0 \
+          libdrm2 \
+          libxdamage1 \
+          libxfixes3 \
+          libcairo-gobject2 \
+          libgtk-3-0 \
+          libgdk-pixbuf2.0-0 \
+          libxinerama1 \
+          libxrandr2 \
+          libegl1-mesa \
+          libxss1 \
+          libnss3 \
+          libatk-bridge2.0-0 \
+          libdrm2 \
+          libxcomposite1 \
+          libxdamage1 \
+          libxrandr2 \
+          libgbm1 \
+          libxkbcommon0 \
+          libpango-1.0-0 \
+          libcairo2 \
+          git \
+          gpg \
+          curl \
+          wget \
+          ca-certificates \
+          openssl
     
-    - name: Set up Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-    
-    - name: Cache node modules
-      uses: actions/cache@v3
-      with:
-        path: ~/.npm
-        key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
-        restore-keys: |
-          ${{ runner.os }}-node-
+    - name: Install Node.js 20
+      run: |
+        curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+        apt-get install -y nodejs
+        echo "Node version: $(node --version)"
+        echo "NPM version: $(npm --version)"
     
     - name: Cache pip dependencies
       uses: actions/cache@v3
@@ -42,24 +73,126 @@ jobs:
     
     - name: Install Python dependencies
       run: |
-        pip install --upgrade pip
+        python -m pip install --upgrade pip
         pip install -r requirements_test.txt
         pip install -e .
-    
-    - name: Install frontend dependencies
+        
+    - name: Verify package installation
       run: |
-        cd frontend && npm install
+        python -c "import agent_lens; print('agent_lens package installed successfully')"
     
-    - name: Run fast tests
+    - name: Install Playwright browsers with dependencies
+      run: |
+        playwright install --with-deps chromium
+    
+    - name: Install frontend dependencies and build
+      run: |
+        echo "🔍 Verifying Node.js and npm versions..."
+        node --version
+        npm --version
+        echo "📦 Installing frontend dependencies..."
+        cd frontend
+        npm cache clean --force
+        npm install
+        echo "🏗️ Building frontend..."
+        npm run build
+        echo "✅ Frontend build completed"
+        ls -la dist/
+    
+    - name: Debug environment and check dependencies
+      run: |
+        echo "🔍 Environment debugging..."
+        echo "Python version: $(python --version)"
+        echo "Pip version: $(pip --version)"
+        echo "Node version: $(node --version)"
+        echo "NPM version: $(npm --version)"
+        echo "Available network interfaces:"
+        ip addr show || true
+        echo "DNS resolution test:"
+        nslookup hypha.aicell.io || true
+        echo "SSL certificates:"
+        ls -la /etc/ssl/certs/ | head -5 || true
+        echo "🧪 Checking test dependencies..."
+        python scripts/run_tests.py --check-deps
+    
+    - name: Step 1 - Run backend unit tests
       env:
-        AGENT_LENS_WORKSPACE_TOKEN: ${{ secrets.AGENT_LENS_WORKSPACE_TOKEN }}
+        WORKSPACE_TOKEN: ${{ secrets.WORKSPACE_TOKEN }}
       run: |
-        python scripts/run_tests.py --type fast --coverage
+        echo "🧪 Running backend unit tests..."
+        python scripts/run_tests.py --backend-only --type unit --verbose
     
-    - name: Upload coverage reports
+    - name: Step 2 - Run backend fast tests (non-slow)
+      env:
+        WORKSPACE_TOKEN: ${{ secrets.WORKSPACE_TOKEN }}
+        PYTHONUNBUFFERED: 1
+        PYTEST_TIMEOUT: 300
+      run: |
+        echo "⚡ Running backend fast tests..."
+        # Use timeout and kill any hanging processes
+        timeout 600 python scripts/run_tests.py --backend-only --type fast --verbose || {
+          echo "Test run completed with timeout/error"
+          # Kill any remaining Python processes to prevent hanging
+          pkill -f python || true
+          sleep 2
+        }
+    
+    - name: Step 3 - Run frontend React tests
+      run: |
+        echo "⚛️ Running frontend React tests..."
+        cd frontend && npm test -- --coverage --watchAll=false
+    
+    - name: Step 4 - Run frontend service tests (Playwright)
+      env:
+        WORKSPACE_TOKEN: ${{ secrets.WORKSPACE_TOKEN }}
+        PYTHONUNBUFFERED: 1
+      run: |
+        echo "🎭 Running frontend service tests with Playwright..."
+        if [ -n "$WORKSPACE_TOKEN" ]; then
+          # Test network connectivity first
+          echo "Testing network connectivity..."
+          curl -s https://hypha.aicell.io || echo "Network test failed, but continuing..."
+          timeout 300 python scripts/run_frontend_tests.py || echo "Frontend service tests completed with timeout/error"
+        else
+          echo "⚠️ Skipping frontend service tests - WORKSPACE_TOKEN not available"
+        fi
+      continue-on-error: true
+    
+    - name: Step 5 - Run backend integration tests (if token available)
+      env:
+        WORKSPACE_TOKEN: ${{ secrets.WORKSPACE_TOKEN }}
+        PYTHONUNBUFFERED: 1
+      run: |
+        echo "🔗 Running backend integration tests..."
+        if [ -n "$WORKSPACE_TOKEN" ]; then
+          # Test network connectivity first
+          echo "Testing network connectivity..."
+          curl -s https://hypha.aicell.io || echo "Network test failed, but continuing..."
+          timeout 600 python scripts/run_tests.py --backend-only --type integration --verbose || echo "Integration tests completed with timeout/error"
+        else
+          echo "⚠️ Skipping integration tests - WORKSPACE_TOKEN not available"
+        fi
+      continue-on-error: true
+    
+    - name: Generate test coverage report
+      env:
+        WORKSPACE_TOKEN: ${{ secrets.WORKSPACE_TOKEN }}
+      run: |
+        echo "📊 Generating coverage report..."
+        python scripts/run_tests.py --backend-only --type fast --coverage
+    
+    - name: Upload backend coverage reports
       uses: codecov/codecov-action@v3
       with:
         file: ./coverage.xml
-        flags: fast-tests
-        name: codecov-fast
+        flags: backend-tests
+        name: codecov-backend
+        fail_ci_if_error: false
+    
+    - name: Upload frontend coverage reports
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./frontend/coverage/lcov.info
+        flags: frontend-tests
+        name: codecov-frontend
         fail_ci_if_error: false

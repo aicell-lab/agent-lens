@@ -9,3 +9,15 @@ torch==2.5.1
 clip @ git+https://github.com/openai/CLIP.git
 aioresponses==0.7.6
 factory-boy==3.3.0
+
+# Frontend service testing with Playwright
+playwright>=1.40.0
+
+# HTTP testing
+httpx>=0.25.0
+
+# Test timeout handling
+pytest-timeout>=2.1.0
+
+# FastAPI file upload support
+python-multipart>=0.0.6
