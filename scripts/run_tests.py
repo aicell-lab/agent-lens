@@ -61,8 +61,6 @@ def run_backend_tests(test_type="all", verbose=False, coverage=False):
     test_paths = []
     if Path("tests/").exists():
         test_paths.append("tests/")
-    if Path("tests/").exists():
-        test_paths.append("tests/")
     
     if test_paths:
         cmd.extend(test_paths)
@@ -103,6 +101,26 @@ def check_dependencies(check_frontend=True):
         print(f"✗ Missing Python dependency: {e}")
         print("Run: pip install -r requirements_test.txt")
         return False
+    
+    # Check if agent_lens package is installed
+    try:
+        import agent_lens
+        print("✓ agent_lens package is available")
+    except ImportError:
+        print("⚠ agent_lens package not installed as editable package")
+        print("Installing in development mode...")
+        try:
+            result = subprocess.run(
+                ["pip", "install", "-e", "."], 
+                capture_output=True, 
+                text=True,
+                check=True
+            )
+            print("✓ agent_lens package installed in development mode")
+        except subprocess.CalledProcessError as e:
+            print(f"✗ Failed to install agent_lens package: {e}")
+            print("Please run: pip install -e .")
+            return False
     
     # Check Node dependencies (if frontend directory exists and check_frontend is True)
     if check_frontend and Path("frontend").exists():

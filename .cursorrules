@@ -62,7 +62,12 @@ agent_lens/                 # Main Python package
 ├── __main__.py            # Entry point with CLI argument parsing
 ├── artifact_manager.py    # Data storage and Zarr tile management
 ├── register_*_service.py  # Service registration modules
-└── tests/                 # Pytest test files
+
+tests/                     # Pytest test files (project root level)
+├── conftest.py           # Test configuration and fixtures
+├── test_basic.py         # Basic functionality tests
+├── test_artifact_manager.py  # Artifact manager tests
+└── test_similarity_service.py  # Similarity service tests
 
 frontend/                  # React application
 ├── main.jsx              # Root React component
@@ -193,10 +198,12 @@ python scripts/run_tests.py --coverage
 
 ### **Writing Tests**
 - Use async/await patterns for microscopy operations
-- Mock external services and hardware dependencies
+- For artifact manager tests: Use real connections without mocks for integration testing
 - Test image processing with realistic microscopy data
 - Create integration tests for service communication
 - Follow test fixtures from `conftest.py` for consistent data
+- Ensure `WORKSPACE_TOKEN` environment variable is set for integration tests
+- Install package in development mode: `pip install -e .`
 
 ### **Test Patterns**
 ```python
@@ -206,11 +213,13 @@ def test_image_processing(sample_image):
     processed = apply_contrast_enhancement(sample_image)
     assert processed.size == sample_image.size
 
-# Integration test example  
+# Integration test with real connections (artifact manager)
 @pytest.mark.integration
-async def test_microscope_workflow(mock_hypha_server):
-    result = await move_stage_and_capture(x=100, y=200)
-    assert result["status"] == "success"
+async def test_tile_manager_workflow(tile_manager):
+    # Uses real ZarrTileManager connection
+    tile_data = await tile_manager.get_tile_np_data("dataset", "channel", 0, 0, 0)
+    if tile_data is not None:
+        assert isinstance(tile_data, np.ndarray)
 
 # Slow test with AI models
 @pytest.mark.slow  
@@ -218,6 +227,14 @@ async def test_similarity_search():
     # Uses real CLIP/FAISS for vector similarity
     results = await find_similar_cells(query_image, top_k=5)
     assert len(results) <= 5
+
+# Test environment setup
+def setup_test_imports():
+    import sys
+    from pathlib import Path
+    project_root = Path(__file__).parent.parent
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
 ```
 
 ### **Test Status** (✅ Current)

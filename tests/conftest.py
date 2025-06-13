@@ -7,6 +7,7 @@ import asyncio
 import tempfile
 import shutil
 import os
+import sys
 import logging
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -16,6 +17,11 @@ from PIL import Image
 import io
 import base64
 import zarr
+
+# Add the project root to the Python path to ensure agent_lens can be imported
+project_root = Path(__file__).parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 # Configure test logging
 logging.basicConfig(level=logging.INFO)
