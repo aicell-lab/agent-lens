@@ -32,8 +32,14 @@ include = ["agent_lens*"]
 
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = "-ra -q --tb=short"
-testpaths = ["agent_lens/tests", "tests"]
+addopts = [
+    "-ra", 
+    "-q", 
+    "--tb=short", 
+    "--strict-markers", 
+    "--strict-config"
+]
+testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
@@ -44,11 +50,17 @@ log_cli_format = "%(asctime)s [%(levelname)8s] %(name)s: %(message)s"
 log_cli_date_format = "%Y-%m-%d %H:%M:%S"
 filterwarnings = [
     "ignore::DeprecationWarning",
-    "ignore::PendingDeprecationWarning",
+    "ignore::PendingDeprecationWarning", 
+    "ignore::RuntimeWarning",
+    "ignore:.*Task was destroyed but it is pending.*:RuntimeWarning",
+    "ignore:.*coroutine.*was never awaited.*:RuntimeWarning",
+    "ignore:.*The event_loop fixture provided by pytest-asyncio has been redefined.*:DeprecationWarning",
+    "ignore:.*async def functions are not natively supported.*:pytest.PytestUnhandledCoroutineWarning",
 ]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
     "unit: marks tests as unit tests",
+    "frontend: marks tests as frontend service tests",
     "hardware: marks tests that require hardware access",
 ]

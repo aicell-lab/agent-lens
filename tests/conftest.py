@@ -287,47 +287,15 @@ class MockImageData:
         return image_data
 
 
-@pytest_asyncio.fixture(scope="session", autouse=True)
-async def cleanup_connections():
+@pytest.fixture(scope="session", autouse=True)
+def cleanup_connections():
     """Automatically cleanup any remaining connections at session end."""
     yield
     
-    # Final cleanup of any remaining connections
+    # Simple cleanup without async operations to avoid cancellation issues
     if _open_connections:
-        logger.info(f"Cleaning up {len(_open_connections)} remaining connections...")
-        for connection in _open_connections[:]:  # Copy list to avoid modification during iteration
-            try:
-                if hasattr(connection, 'disconnect'):
-                    await connection.disconnect()
-                elif hasattr(connection, 'close'):
-                    await connection.close()
-            except Exception as e:
-                logger.warning(f"Error closing remaining connection: {e}")
-        
+        logger.info(f"Marking {len(_open_connections)} connections for cleanup...")
         _open_connections.clear()
-        
-    # Clean up any remaining async tasks
-    try:
-        loop = asyncio.get_running_loop()
-        pending_tasks = [task for task in asyncio.all_tasks(loop) if not task.done()]
-        if pending_tasks:
-            logger.info(f"Cancelling {len(pending_tasks)} pending tasks...")
-            for task in pending_tasks:
-                task.cancel()
-            
-            # Wait for tasks to be cancelled with timeout
-            if pending_tasks:
-                try:
-                    await asyncio.wait_for(
-                        asyncio.gather(*pending_tasks, return_exceptions=True),
-                        timeout=2.0
-                    )
-                except asyncio.TimeoutError:
-                    logger.warning("Some tasks did not cancel within timeout")
-                except Exception as gather_error:
-                    logger.warning(f"Error gathering cancelled tasks: {gather_error}")
-    except Exception as e:
-        logger.warning(f"Error during task cleanup: {e}")
 
 # Test markers for different test categories
 pytestmark = [

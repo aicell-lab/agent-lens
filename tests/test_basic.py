@@ -110,6 +110,7 @@ class TestBasicFunctionality:
         assert brighter[0, 0, 0] > 128  # Should be brighter
     
     @pytest.mark.unit
+    @pytest.mark.asyncio
     async def test_async_functionality(self):
         """Test async functionality."""
         async def mock_async_operation(delay=0.01):
