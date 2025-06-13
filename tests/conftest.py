@@ -3,6 +3,7 @@ Test configuration and fixtures for Agent-Lens microscopy platform.
 """
 
 import pytest
+import pytest_asyncio
 import asyncio
 import tempfile
 import shutil
@@ -29,38 +30,6 @@ logger = logging.getLogger(__name__)
 
 # Global list to track open connections for cleanup
 _open_connections = []
-
-
-@pytest.fixture(scope="session")
-def event_loop():
-    """Create an instance of the default event loop for the test session."""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
-    yield loop
-    
-    # Clean up any remaining tasks
-    try:
-        # Cancel all pending tasks
-        pending_tasks = [task for task in asyncio.all_tasks(loop) if not task.done()]
-        if pending_tasks:
-            logger.info(f"Cancelling {len(pending_tasks)} pending tasks...")
-            for task in pending_tasks:
-                task.cancel()
-            
-            # Wait for tasks to be cancelled with timeout
-            if pending_tasks:
-                loop.run_until_complete(
-                    asyncio.wait_for(
-                        asyncio.gather(*pending_tasks, return_exceptions=True),
-                        timeout=5.0
-                    )
-                )
-    except Exception as e:
-        logger.warning(f"Error during task cleanup: {e}")
-    finally:
-        # Close the loop
-        loop.close()
 
 
 @pytest.fixture
@@ -123,50 +92,48 @@ def sample_image_base64(sample_image):
     return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
 
-@pytest.fixture
-async def hypha_connection_manager():
-    """Manage Hypha connections with proper cleanup."""
-    connections = []
+@pytest_asyncio.fixture
+async def hypha_server():
+    """Create a managed Hypha server connection for testing."""
+    # Check for token first
+    token = os.environ.get("WORKSPACE_TOKEN")
+    if not token:
+        pytest.skip("WORKSPACE_TOKEN not set in environment")
     
-    async def get_connection(server_url, token, workspace, **kwargs):
-        """Create a Hypha connection and track it for cleanup."""
-        try:
-            from hypha_rpc import connect_to_server
+    from hypha_rpc import connect_to_server
+    
+    server = None
+    try:
+        # Create connection with minimal background tasks
+        connection_config = {
+            "server_url": "https://hypha.aicell.io",
+            "token": token,
+            "workspace": "agent-lens",
+            "ping_interval": None,  # Disable ping to avoid background tasks
+        }
+        
+        server = await connect_to_server(connection_config)
+        _open_connections.append(server)
+        
+        yield server
+        
+    except Exception as e:
+        logger.warning(f"Failed to create Hypha connection: {e}")
+        pytest.skip(f"Could not connect to Hypha: {e}")
+    finally:
+        # Cleanup
+        if server:
+            try:
+                if hasattr(server, 'disconnect'):
+                    await server.disconnect()
+                elif hasattr(server, 'close'):
+                    await server.close()
+            except Exception as e:
+                logger.warning(f"Error closing connection: {e}")
             
-            connection_config = {
-                "server_url": server_url,
-                "token": token,
-                "workspace": workspace,
-                "ping_interval": None,  # Disable ping to avoid background tasks
-                **kwargs
-            }
-            
-            # Create connection
-            server = await connect_to_server(connection_config)
-            connections.append(server)
-            _open_connections.append(server)
-            
-            return server
-        except Exception as e:
-            logger.warning(f"Failed to create Hypha connection: {e}")
-            return None
-    
-    yield get_connection
-    
-    # Cleanup all connections
-    for connection in connections:
-        try:
-            if hasattr(connection, 'disconnect'):
-                await connection.disconnect()
-            elif hasattr(connection, 'close'):
-                await connection.close()
-        except Exception as e:
-            logger.warning(f"Error closing connection: {e}")
-    
-    # Remove from global list
-    for connection in connections:
-        if connection in _open_connections:
-            _open_connections.remove(connection)
+            # Remove from global list
+            if server in _open_connections:
+                _open_connections.remove(server)
 
 @pytest.fixture
 def mock_hypha_server():
@@ -320,7 +287,7 @@ class MockImageData:
         return image_data
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest_asyncio.fixture(scope="session", autouse=True)
 async def cleanup_connections():
     """Automatically cleanup any remaining connections at session end."""
     yield
@@ -338,6 +305,29 @@ async def cleanup_connections():
                 logger.warning(f"Error closing remaining connection: {e}")
         
         _open_connections.clear()
+        
+    # Clean up any remaining async tasks
+    try:
+        loop = asyncio.get_running_loop()
+        pending_tasks = [task for task in asyncio.all_tasks(loop) if not task.done()]
+        if pending_tasks:
+            logger.info(f"Cancelling {len(pending_tasks)} pending tasks...")
+            for task in pending_tasks:
+                task.cancel()
+            
+            # Wait for tasks to be cancelled with timeout
+            if pending_tasks:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*pending_tasks, return_exceptions=True),
+                        timeout=2.0
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("Some tasks did not cancel within timeout")
+                except Exception as gather_error:
+                    logger.warning(f"Error gathering cancelled tasks: {gather_error}")
+    except Exception as e:
+        logger.warning(f"Error during task cleanup: {e}")
 
 # Test markers for different test categories
 pytestmark = [

@@ -27,29 +27,14 @@ TEST_WORKSPACE = "agent-lens"  # Using agent-lens workspace as specified in the 
 TEST_TIMEOUT = 120  # seconds
 
 @pytest_asyncio.fixture(scope="function")
-async def test_frontend_service(hypha_connection_manager):
+async def test_frontend_service(hypha_server):
     """Create a real frontend service for testing."""
-    # Check for token first
-    token = os.environ.get("WORKSPACE_TOKEN")
-    if not token:
-        pytest.skip("WORKSPACE_TOKEN not set in environment")
+    print(f"🔗 Using Hypha server connection...")
     
-    print(f"🔗 Connecting to {TEST_SERVER_URL} workspace {TEST_WORKSPACE}...")
-    
-    server = None
+    server = hypha_server
     service = None
     
     try:
-        # Use connection manager for proper cleanup
-        server = await hypha_connection_manager(
-            TEST_SERVER_URL, 
-            token, 
-            TEST_WORKSPACE
-        )
-        
-        if server is None:
-            pytest.skip("Failed to connect to Hypha server")
-        
         print("✅ Connected to server")
         
         # Create unique service ID for this test
