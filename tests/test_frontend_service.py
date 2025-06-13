@@ -27,7 +27,7 @@ TEST_WORKSPACE = "agent-lens"  # Using agent-lens workspace as specified in the 
 TEST_TIMEOUT = 120  # seconds
 
 @pytest_asyncio.fixture(scope="function")
-async def test_frontend_service():
+async def test_frontend_service(hypha_connection_manager):
     """Create a real frontend service for testing."""
     # Check for token first
     token = os.environ.get("WORKSPACE_TOKEN")
@@ -40,56 +40,59 @@ async def test_frontend_service():
     service = None
     
     try:
-        # Use context manager for proper connection handling
-        async with connect_to_server({
-            "server_url": TEST_SERVER_URL,
-            "token": token,
-            "workspace": TEST_WORKSPACE,
-            "ping_interval": None
-        }) as server:
-            print("✅ Connected to server")
+        # Use connection manager for proper cleanup
+        server = await hypha_connection_manager(
+            TEST_SERVER_URL, 
+            token, 
+            TEST_WORKSPACE
+        )
+        
+        if server is None:
+            pytest.skip("Failed to connect to Hypha server")
+        
+        print("✅ Connected to server")
+        
+        # Create unique service ID for this test
+        test_id = f"test-agent-lens-frontend-{uuid.uuid4().hex[:8]}"
+        print(f"Creating test frontend service with ID: {test_id}")
+        
+        # Register the frontend service
+        print("📝 Registering frontend service...")
+        service_start_time = time.time()
+        await setup_service(server, test_id)
+        service_time = time.time() - service_start_time
+        print(f"✅ Frontend service registration took {service_time:.1f} seconds")
+        
+        # Get the registered service to test against
+        print("🔍 Getting service reference...")
+        service = await server.get_service(test_id)
+        print("✅ Frontend service ready for testing")
+        
+        # Get the service URL for Playwright testing
+        service_url = f"{TEST_SERVER_URL}/{TEST_WORKSPACE}/apps/{test_id}"
+        print(f"🌐 Service URL: {service_url}")
+        
+        try:
+            yield service, service_url
+        finally:
+            # Cleanup
+            print(f"🧹 Starting cleanup...")
             
-            # Create unique service ID for this test
-            test_id = f"test-agent-lens-frontend-{uuid.uuid4().hex[:8]}"
-            print(f"Creating test frontend service with ID: {test_id}")
+            # Call cleanup function if it exists in server config
+            if hasattr(server, 'config') and 'cleanup' in server.config:
+                try:
+                    cleanup_func = server.config['cleanup']
+                    if asyncio.iscoroutinefunction(cleanup_func):
+                        await cleanup_func()
+                    else:
+                        cleanup_func()
+                    print("✅ Service cleanup completed")
+                except Exception as cleanup_error:
+                    print(f"Cleanup error: {cleanup_error}")
             
-            # Register the frontend service
-            print("📝 Registering frontend service...")
-            service_start_time = time.time()
-            await setup_service(server, test_id)
-            service_time = time.time() - service_start_time
-            print(f"✅ Frontend service registration took {service_time:.1f} seconds")
-            
-            # Get the registered service to test against
-            print("🔍 Getting service reference...")
-            service = await server.get_service(test_id)
-            print("✅ Frontend service ready for testing")
-            
-            # Get the service URL for Playwright testing
-            service_url = f"{TEST_SERVER_URL}/{TEST_WORKSPACE}/apps/{test_id}"
-            print(f"🌐 Service URL: {service_url}")
-            
-            try:
-                yield service, service_url
-            finally:
-                # Cleanup
-                print(f"🧹 Starting cleanup...")
-                
-                # Call cleanup function if it exists in server config
-                if hasattr(server, 'config') and 'cleanup' in server.config:
-                    try:
-                        cleanup_func = server.config['cleanup']
-                        if asyncio.iscoroutinefunction(cleanup_func):
-                            await cleanup_func()
-                        else:
-                            cleanup_func()
-                        print("✅ Service cleanup completed")
-                    except Exception as cleanup_error:
-                        print(f"Cleanup error: {cleanup_error}")
-                
-                # Give time for cleanup operations to complete
-                await asyncio.sleep(0.1)
-                print("✅ Cleanup completed")
+            # Give time for cleanup operations to complete
+            await asyncio.sleep(0.1)
+            print("✅ Cleanup completed")
         
     except Exception as e:
         pytest.fail(f"Failed to create test frontend service: {e}")

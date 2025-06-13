@@ -27,13 +27,40 @@ if str(project_root) not in sys.path:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Global list to track open connections for cleanup
+_open_connections = []
+
 
 @pytest.fixture(scope="session")
 def event_loop():
     """Create an instance of the default event loop for the test session."""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
     yield loop
-    loop.close()
+    
+    # Clean up any remaining tasks
+    try:
+        # Cancel all pending tasks
+        pending_tasks = [task for task in asyncio.all_tasks(loop) if not task.done()]
+        if pending_tasks:
+            logger.info(f"Cancelling {len(pending_tasks)} pending tasks...")
+            for task in pending_tasks:
+                task.cancel()
+            
+            # Wait for tasks to be cancelled with timeout
+            if pending_tasks:
+                loop.run_until_complete(
+                    asyncio.wait_for(
+                        asyncio.gather(*pending_tasks, return_exceptions=True),
+                        timeout=5.0
+                    )
+                )
+    except Exception as e:
+        logger.warning(f"Error during task cleanup: {e}")
+    finally:
+        # Close the loop
+        loop.close()
 
 
 @pytest.fixture
@@ -95,6 +122,51 @@ def sample_image_base64(sample_image):
     sample_image.save(buffered, format="PNG")
     return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
+
+@pytest.fixture
+async def hypha_connection_manager():
+    """Manage Hypha connections with proper cleanup."""
+    connections = []
+    
+    async def get_connection(server_url, token, workspace, **kwargs):
+        """Create a Hypha connection and track it for cleanup."""
+        try:
+            from hypha_rpc import connect_to_server
+            
+            connection_config = {
+                "server_url": server_url,
+                "token": token,
+                "workspace": workspace,
+                "ping_interval": None,  # Disable ping to avoid background tasks
+                **kwargs
+            }
+            
+            # Create connection
+            server = await connect_to_server(connection_config)
+            connections.append(server)
+            _open_connections.append(server)
+            
+            return server
+        except Exception as e:
+            logger.warning(f"Failed to create Hypha connection: {e}")
+            return None
+    
+    yield get_connection
+    
+    # Cleanup all connections
+    for connection in connections:
+        try:
+            if hasattr(connection, 'disconnect'):
+                await connection.disconnect()
+            elif hasattr(connection, 'close'):
+                await connection.close()
+        except Exception as e:
+            logger.warning(f"Error closing connection: {e}")
+    
+    # Remove from global list
+    for connection in connections:
+        if connection in _open_connections:
+            _open_connections.remove(connection)
 
 @pytest.fixture
 def mock_hypha_server():
@@ -247,6 +319,25 @@ class MockImageData:
             
         return image_data
 
+
+@pytest.fixture(scope="session", autouse=True)
+async def cleanup_connections():
+    """Automatically cleanup any remaining connections at session end."""
+    yield
+    
+    # Final cleanup of any remaining connections
+    if _open_connections:
+        logger.info(f"Cleaning up {len(_open_connections)} remaining connections...")
+        for connection in _open_connections[:]:  # Copy list to avoid modification during iteration
+            try:
+                if hasattr(connection, 'disconnect'):
+                    await connection.disconnect()
+                elif hasattr(connection, 'close'):
+                    await connection.close()
+            except Exception as e:
+                logger.warning(f"Error closing remaining connection: {e}")
+        
+        _open_connections.clear()
 
 # Test markers for different test categories
 pytestmark = [
