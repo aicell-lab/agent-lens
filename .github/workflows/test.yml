@@ -54,9 +54,14 @@ jobs:
           curl \
           wget \
           ca-certificates \
-          openssl \
-          nodejs \
-          npm
+          openssl
+    
+    - name: Install Node.js 20
+      run: |
+        curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+        apt-get install -y nodejs
+        echo "Node version: $(node --version)"
+        echo "NPM version: $(npm --version)"
     
     - name: Cache pip dependencies
       uses: actions/cache@v3
@@ -82,7 +87,17 @@ jobs:
     
     - name: Install frontend dependencies and build
       run: |
-        cd frontend && npm install && npm run build
+        echo "🔍 Verifying Node.js and npm versions..."
+        node --version
+        npm --version
+        echo "📦 Installing frontend dependencies..."
+        cd frontend
+        npm cache clean --force
+        npm install
+        echo "🏗️ Building frontend..."
+        npm run build
+        echo "✅ Frontend build completed"
+        ls -la dist/
     
     - name: Debug environment and check dependencies
       run: |
