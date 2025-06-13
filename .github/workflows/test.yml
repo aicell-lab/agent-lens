@@ -80,9 +80,9 @@ jobs:
       run: |
         playwright install --with-deps chromium
     
-    - name: Install frontend dependencies
+    - name: Install frontend dependencies and build
       run: |
-        cd frontend && npm install
+        cd frontend && npm install && npm run build
     
     - name: Debug environment and check dependencies
       run: |
@@ -111,10 +111,16 @@ jobs:
       env:
         WORKSPACE_TOKEN: ${{ secrets.WORKSPACE_TOKEN }}
         PYTHONUNBUFFERED: 1
-        ASYNCIO_DEBUG: 1
+        PYTEST_TIMEOUT: 300
       run: |
         echo "⚡ Running backend fast tests..."
-        timeout 600 python scripts/run_tests.py --backend-only --type fast --verbose || echo "Test run completed with timeout/error"
+        # Use timeout and kill any hanging processes
+        timeout 600 python scripts/run_tests.py --backend-only --type fast --verbose || {
+          echo "Test run completed with timeout/error"
+          # Kill any remaining Python processes to prevent hanging
+          pkill -f python || true
+          sleep 2
+        }
     
     - name: Step 3 - Run frontend React tests
       run: |

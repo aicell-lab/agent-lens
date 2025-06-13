@@ -176,10 +176,11 @@ docs/                    # Documentation and diagrams
 ## Testing Guidelines
 
 ### **Test Infrastructure** (✅ Working)
-- **Framework**: pytest with asyncio support, React Testing Library
-- **Dependencies**: CLIP, FAISS-CPU, torch for vector similarity tests
+- **Framework**: pytest with asyncio support, React Testing Library, Playwright for E2E
+- **Dependencies**: CLIP, FAISS-CPU, torch for vector similarity tests, Playwright for browser testing
 - **Test Runner**: `python scripts/run_tests.py` with multiple test types
 - **Coverage**: pytest-cov for comprehensive coverage reporting
+- **Frontend Testing**: Playwright integration for FastAPI service UI testing
 
 ### **Test Categories**
 ```bash
@@ -191,6 +192,9 @@ python scripts/run_tests.py --type integration
 
 # Slow tests with AI models (CLIP/FAISS vector similarity)
 python scripts/run_tests.py --type slow
+
+# Frontend service tests with Playwright
+python scripts/run_tests.py --frontend-service
 
 # With coverage reporting
 python scripts/run_tests.py --coverage
@@ -204,6 +208,24 @@ python scripts/run_tests.py --coverage
 - Follow test fixtures from `conftest.py` for consistent data
 - Ensure `WORKSPACE_TOKEN` environment variable is set for integration tests
 - Install package in development mode: `pip install -e .`
+- **Frontend Service Testing**: Use Playwright for E2E browser testing of FastAPI services
+- **Async Test Patterns**: Use `@pytest.mark.asyncio` decorator and proper fixture cleanup
+
+### **Test Configuration** (pyproject.toml)
+```toml
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests", 
+    "slow: Slow tests with AI models",
+    "frontend: Frontend service tests"
+]
+filterwarnings = [
+    "ignore:.*deprecated.*:DeprecationWarning",
+    "ignore:.*PytestUnraisableExceptionWarning.*"
+]
+```
 
 ### **Test Patterns**
 ```python
@@ -228,6 +250,38 @@ async def test_similarity_search():
     results = await find_similar_cells(query_image, top_k=5)
     assert len(results) <= 5
 
+# Frontend service test with Playwright
+@pytest.mark.frontend
+@pytest.mark.asyncio
+async def test_frontend_service_ui(frontend_service_url, playwright):
+    browser = await playwright.chromium.launch()
+    page = await browser.new_page()
+    await page.goto(frontend_service_url)
+    
+    # Test UI elements
+    title = await page.title()
+    assert "Agent-Lens" in title
+    
+    # Take screenshot for debugging
+    await page.screenshot(path="test_screenshot.png")
+    await browser.close()
+
+# Proper async fixture pattern
+@pytest.fixture
+async def hypha_server():
+    """Session-level Hypha server connection with proper cleanup"""
+    server = None
+    try:
+        server = await connect_to_server({
+            "server_url": "https://ai.imjoy.io",
+            "workspace": workspace_name,
+            "token": workspace_token
+        })
+        yield server
+    finally:
+        if server:
+            await server.disconnect()
+
 # Test environment setup
 def setup_test_imports():
     import sys
@@ -241,7 +295,40 @@ def setup_test_imports():
 - **Basic Tests**: 11 tests passing, core functionality verified
 - **Similarity Service**: Working with CLIP embeddings and FAISS indexing
 - **Mock Infrastructure**: Comprehensive fixtures for microscopy simulation
-- **CI/CD Ready**: GitHub Actions integration configured
+- **Frontend Service**: Playwright E2E testing with browser automation
+- **Async Patterns**: Proper async/await cleanup without pytest warnings
+- **CI/CD Ready**: GitHub Actions integration with container-based testing
+
+### **GitHub Actions CI/CD Patterns**
+```yaml
+# Container-based testing for reliable dependency management
+runs-on: ubuntu-latest
+container: python:3.11-slim
+
+# System dependencies for Playwright and networking
+- name: Install system dependencies
+  run: |
+    apt-get update && apt-get install -y \
+      curl wget ca-certificates \
+      libnss3 libatk-bridge2.0-0 libdrm2 libxkbcommon0 \
+      libgtk-3-0 libgbm-dev libasound2
+
+# Step-by-step test execution
+- name: Run unit tests
+  run: python scripts/run_tests.py --type unit
+- name: Run fast tests  
+  run: python scripts/run_tests.py --type fast
+- name: Run React tests
+  run: cd frontend && npm test -- --coverage --watchAll=false
+```
+
+### **Common Testing Issues & Solutions**
+- **Async Cleanup**: Don't create custom `event_loop` fixtures that conflict with pytest-asyncio
+- **Hypha Connections**: Use session-level fixtures with proper disconnect() cleanup
+- **Playwright Setup**: Install browsers automatically with `playwright install` 
+- **CI Dependencies**: Use container approach with pre-installed system libraries
+- **Test Configuration**: Use `pyproject.toml` instead of `pytest.ini` for modern pytest setup
+- **Async Decorators**: Always use `@pytest.mark.asyncio` for async test functions
 
 ## Security & Deployment
 - Use token-based authentication for all services

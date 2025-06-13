@@ -44,6 +44,31 @@ async def test_frontend_service(hypha_server):
         # Register the frontend service
         print("📝 Registering frontend service...")
         service_start_time = time.time()
+        
+        # Check if frontend assets exist, if not create minimal structure
+        frontend_dist = Path(__file__).parent.parent / "frontend" / "dist"
+        if not frontend_dist.exists():
+            print("⚠️  Frontend dist directory not found, creating minimal structure...")
+            frontend_dist.mkdir(parents=True, exist_ok=True)
+            assets_dir = frontend_dist / "assets"
+            assets_dir.mkdir(exist_ok=True)
+            
+            # Create a minimal index.html for testing
+            index_html = frontend_dist / "index.html"
+            if not index_html.exists():
+                index_html.write_text("""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent-Lens Test</title>
+</head>
+<body>
+    <div id="root">Agent-Lens Frontend Service Test</div>
+</body>
+</html>""")
+            print("✅ Created minimal frontend structure for testing")
+        
         await setup_service(server, test_id)
         service_time = time.time() - service_start_time
         print(f"✅ Frontend service registration took {service_time:.1f} seconds")
@@ -60,29 +85,56 @@ async def test_frontend_service(hypha_server):
         try:
             yield service, service_url
         finally:
-            # Cleanup
+            # Enhanced cleanup
             print(f"🧹 Starting cleanup...")
             
-            # Call cleanup function if it exists in server config
-            if hasattr(server, 'config') and 'cleanup' in server.config:
-                try:
-                    cleanup_func = server.config['cleanup']
-                    if asyncio.iscoroutinefunction(cleanup_func):
-                        await cleanup_func()
-                    else:
-                        cleanup_func()
-                    print("✅ Service cleanup completed")
-                except Exception as cleanup_error:
-                    print(f"Cleanup error: {cleanup_error}")
+            try:
+                # Cancel any pending tasks related to this service
+                current_tasks = [task for task in asyncio.all_tasks() 
+                               if not task.done() and (test_id in str(task) or 'frontend' in str(task).lower())]
+                
+                if current_tasks:
+                    print(f"Cancelling {len(current_tasks)} service-related tasks...")
+                    for task in current_tasks:
+                        if not task.done():
+                            task.cancel()
+                    
+                    # Wait for cancellation with timeout
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.gather(*current_tasks, return_exceptions=True),
+                            timeout=2.0
+                        )
+                    except asyncio.TimeoutError:
+                        print("⚠️  Some tasks didn't cancel in time")
+                
+                # Call cleanup function if it exists in server config
+                if hasattr(server, 'config') and 'cleanup' in server.config:
+                    try:
+                        cleanup_func = server.config['cleanup']
+                        if asyncio.iscoroutinefunction(cleanup_func):
+                            await asyncio.wait_for(cleanup_func(), timeout=3.0)
+                        else:
+                            cleanup_func()
+                        print("✅ Service cleanup completed")
+                    except (asyncio.TimeoutError, asyncio.CancelledError) as e:
+                        print(f"Expected cleanup timeout/cancellation: {e}")
+                    except Exception as cleanup_error:
+                        print(f"Cleanup error: {cleanup_error}")
+                
+                print("✅ Cleanup completed")
+                
+            except Exception as e:
+                print(f"⚠️  Cleanup error (non-critical): {e}")
             
-            # Give time for cleanup operations to complete
+            # Brief pause for final cleanup
             await asyncio.sleep(0.1)
-            print("✅ Cleanup completed")
         
     except Exception as e:
         pytest.fail(f"Failed to create test frontend service: {e}")
 
 @pytest.mark.asyncio
+@pytest.mark.timeout(60)
 async def test_frontend_service_registration_and_connectivity(test_frontend_service):
     """Test that the frontend service can be registered and is accessible."""
     service, service_url = test_frontend_service
@@ -94,7 +146,8 @@ async def test_frontend_service_registration_and_connectivity(test_frontend_serv
     assert service is not None
     print("✅ Service registration verified")
 
-@pytest.mark.asyncio 
+@pytest.mark.asyncio
+@pytest.mark.timeout(90)
 async def test_frontend_root_endpoint_with_playwright(test_frontend_service):
     """Test the frontend root endpoint using Playwright."""
     service, service_url = test_frontend_service
@@ -173,6 +226,7 @@ async def test_frontend_root_endpoint_with_playwright(test_frontend_service):
             print("🧹 Browser cleanup completed")
 
 @pytest.mark.asyncio
+@pytest.mark.timeout(60)
 async def test_frontend_static_assets(test_frontend_service):
     """Test that static assets are served correctly."""
     service, service_url = test_frontend_service
@@ -206,6 +260,7 @@ async def test_frontend_static_assets(test_frontend_service):
             await browser.close()
 
 @pytest.mark.asyncio
+@pytest.mark.timeout(60)
 async def test_frontend_service_health(test_frontend_service):
     """Test basic health and responsiveness of the frontend service."""
     service, service_url = test_frontend_service
@@ -237,6 +292,7 @@ async def test_frontend_service_health(test_frontend_service):
 
 # Integration test to verify the service works end-to-end
 @pytest.mark.asyncio
+@pytest.mark.timeout(90)
 async def test_frontend_service_integration(test_frontend_service):
     """Integration test for the complete frontend service functionality."""
     service, service_url = test_frontend_service

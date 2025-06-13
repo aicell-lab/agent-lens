@@ -37,7 +37,8 @@ addopts = [
     "-q", 
     "--tb=short", 
     "--strict-markers", 
-    "--strict-config"
+    "--strict-config",
+    "--timeout=120"
 ]
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]

@@ -110,6 +110,7 @@ async def hypha_server():
             "token": token,
             "workspace": "agent-lens",
             "ping_interval": None,  # Disable ping to avoid background tasks
+            "ping_timeout": None,   # Disable ping timeout
         }
         
         server = await connect_to_server(connection_config)
@@ -121,19 +122,41 @@ async def hypha_server():
         logger.warning(f"Failed to create Hypha connection: {e}")
         pytest.skip(f"Could not connect to Hypha: {e}")
     finally:
-        # Cleanup
+        # Enhanced cleanup with proper task cancellation
         if server:
             try:
+                # Cancel any pending tasks before disconnecting
+                if hasattr(server, '_websocket') and server._websocket:
+                    # Get all tasks related to this connection
+                    current_tasks = [task for task in asyncio.all_tasks() 
+                                   if not task.done() and 'websocket' in str(task.get_coro()).lower()]
+                    
+                    # Cancel websocket-related tasks
+                    for task in current_tasks:
+                        if not task.done():
+                            task.cancel()
+                    
+                    # Wait briefly for cancellation
+                    if current_tasks:
+                        await asyncio.gather(*current_tasks, return_exceptions=True)
+                
+                # Disconnect the server
                 if hasattr(server, 'disconnect'):
-                    await server.disconnect()
+                    await asyncio.wait_for(server.disconnect(), timeout=5.0)
                 elif hasattr(server, 'close'):
-                    await server.close()
+                    await asyncio.wait_for(server.close(), timeout=5.0)
+                    
+            except (asyncio.TimeoutError, asyncio.CancelledError, RuntimeError) as e:
+                logger.warning(f"Expected error during connection cleanup: {e}")
             except Exception as e:
-                logger.warning(f"Error closing connection: {e}")
+                logger.warning(f"Unexpected error closing connection: {e}")
             
             # Remove from global list
             if server in _open_connections:
                 _open_connections.remove(server)
+        
+        # Give time for cleanup to complete
+        await asyncio.sleep(0.1)
 
 @pytest.fixture
 def mock_hypha_server():
@@ -295,7 +318,21 @@ def cleanup_connections():
     # Simple cleanup without async operations to avoid cancellation issues
     if _open_connections:
         logger.info(f"Marking {len(_open_connections)} connections for cleanup...")
+        # Just clear the list - connections should be cleaned up by individual fixtures
         _open_connections.clear()
+        
+    # Cancel any remaining tasks to prevent warnings
+    try:
+        import asyncio
+        loop = asyncio.get_event_loop()
+        if loop and not loop.is_closed():
+            pending_tasks = [task for task in asyncio.all_tasks(loop) if not task.done()]
+            if pending_tasks:
+                logger.info(f"Cancelling {len(pending_tasks)} pending tasks...")
+                for task in pending_tasks:
+                    task.cancel()
+    except Exception as e:
+        logger.warning(f"Error during final cleanup: {e}")
 
 # Test markers for different test categories
 pytestmark = [
