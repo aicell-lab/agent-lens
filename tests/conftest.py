@@ -213,25 +213,6 @@ def mock_microscope_hardware():
     
     return hardware_mock
 
-
-@pytest.fixture
-def test_environment_vars(monkeypatch):
-    """Set up test environment variables."""
-    test_vars = {
-        "TEST_TOKEN": "test-hypha-token",
-        "HYPHA_SERVER_URL": "https://hypha.aicell.io",
-        "S3_ENDPOINT": "http://localhost:9000",
-        "S3_ACCESS_KEY_ID": "test-access-key",
-        "S3_SECRET_ACCESS_KEY": "test-secret-key",
-        "S3_BUCKET": "test-bucket"
-    }
-    
-    for key, value in test_vars.items():
-        monkeypatch.setenv(key, value)
-    
-    return test_vars
-
-
 class MockImageData:
     """Helper class for generating test image data."""
     

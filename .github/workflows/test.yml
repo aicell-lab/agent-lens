@@ -7,7 +7,7 @@ on:
     branches: [ main ]
 
 jobs:
-  fast-tests:
+  test-step-by-step:
     runs-on: ubuntu-latest
     
     steps:
@@ -50,20 +50,75 @@ jobs:
       run: |
         python -c "import agent_lens; print('agent_lens package installed successfully')"
     
+    - name: Install Playwright browsers
+      run: |
+        playwright install chromium
+    
     - name: Install frontend dependencies
       run: |
         cd frontend && npm install
     
-    - name: Run fast tests
-      env:
-        AGENT_LENS_WORKSPACE_TOKEN: ${{ secrets.AGENT_LENS_WORKSPACE_TOKEN }}
+    - name: Check test dependencies
       run: |
-        python scripts/run_tests.py --type fast --coverage
+        python scripts/run_tests.py --check-deps
     
-    - name: Upload coverage reports
+    - name: Step 1 - Run backend unit tests
+      env:
+        WORKSPACE_TOKEN: ${{ secrets.WORKSPACE_TOKEN }}
+      run: |
+        echo "🧪 Running backend unit tests..."
+        python scripts/run_tests.py --backend-only --type unit --verbose
+    
+    - name: Step 2 - Run backend fast tests (non-slow)
+      env:
+        WORKSPACE_TOKEN: ${{ secrets.WORKSPACE_TOKEN }}
+      run: |
+        echo "⚡ Running backend fast tests..."
+        python scripts/run_tests.py --backend-only --type fast --verbose
+    
+    - name: Step 3 - Run frontend React tests
+      run: |
+        echo "⚛️ Running frontend React tests..."
+        cd frontend && npm test -- --coverage --watchAll=false
+    
+    - name: Step 4 - Run frontend service tests (Playwright)
+      env:
+        WORKSPACE_TOKEN: ${{ secrets.WORKSPACE_TOKEN }}
+      run: |
+        echo "🎭 Running frontend service tests with Playwright..."
+        python scripts/run_frontend_tests.py
+    
+    - name: Step 5 - Run backend integration tests (if token available)
+      env:
+        WORKSPACE_TOKEN: ${{ secrets.WORKSPACE_TOKEN }}
+      run: |
+        echo "🔗 Running backend integration tests..."
+        if [ -n "$WORKSPACE_TOKEN" ]; then
+          python scripts/run_tests.py --backend-only --type integration --verbose
+        else
+          echo "⚠️ Skipping integration tests - WORKSPACE_TOKEN not available"
+        fi
+      continue-on-error: true
+    
+    - name: Generate test coverage report
+      env:
+        WORKSPACE_TOKEN: ${{ secrets.WORKSPACE_TOKEN }}
+      run: |
+        echo "📊 Generating coverage report..."
+        python scripts/run_tests.py --backend-only --type fast --coverage
+    
+    - name: Upload backend coverage reports
       uses: codecov/codecov-action@v3
       with:
         file: ./coverage.xml
-        flags: fast-tests
-        name: codecov-fast
+        flags: backend-tests
+        name: codecov-backend
+        fail_ci_if_error: false
+    
+    - name: Upload frontend coverage reports
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./frontend/coverage/lcov.info
+        flags: frontend-tests
+        name: codecov-frontend
         fail_ci_if_error: false
