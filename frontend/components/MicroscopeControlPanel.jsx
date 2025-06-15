@@ -1192,7 +1192,6 @@ const MicroscopeControlPanel = ({
                 className="control-input p-1 text-xs rounded shadow-sm border-gray-300 focus:ring-blue-500 focus:border-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white disabled:opacity-75 disabled:cursor-not-allowed"
               >
                 <option value="96">96 Well</option>
-                <option value="48">48 Well</option>
                 <option value="24">24 Well</option>
               </select>
             </div>
