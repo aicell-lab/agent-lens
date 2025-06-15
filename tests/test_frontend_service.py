@@ -11,6 +11,8 @@ import os
 import uuid
 import time
 import sys
+import json
+import shutil
 from pathlib import Path
 from playwright.async_api import async_playwright
 from hypha_rpc import connect_to_server
@@ -27,6 +29,234 @@ TEST_SERVER_URL = "https://hypha.aicell.io"
 TEST_WORKSPACE = "agent-lens"
 TEST_TIMEOUT = 120  # seconds
 WORKSPACE_TOKEN = os.getenv('WORKSPACE_TOKEN')  # Get token from environment
+
+# Coverage configuration
+COVERAGE_DIR = Path(__file__).parent.parent / "frontend" / "coverage"
+COVERAGE_ENABLED = os.getenv('PLAYWRIGHT_COVERAGE', 'true').lower() == 'true'
+
+def setup_coverage_collection():
+    """Setup coverage collection directory."""
+    if COVERAGE_ENABLED:
+        COVERAGE_DIR.mkdir(parents=True, exist_ok=True)
+        print(f"📊 Coverage collection enabled. Reports will be saved to: {COVERAGE_DIR}")
+
+async def collect_coverage(page, test_name):
+    """Collect coverage data from a Playwright page."""
+    if not COVERAGE_ENABLED:
+        return
+    
+    try:
+        # Wait a bit for coverage to be collected and try multiple times
+        coverage_data = None
+        for attempt in range(3):
+            coverage_data = await page.evaluate("""
+                () => {
+                    // Try different possible coverage object locations
+                    return window.__coverage__ || 
+                           window.top.__coverage__ || 
+                           (window.parent && window.parent.__coverage__) ||
+                           null;
+                }
+            """)
+            
+            if coverage_data:
+                break
+            
+            # Wait and try again
+            await page.wait_for_timeout(1000)
+            print(f"🔍 Coverage attempt {attempt + 1}/3 for {test_name}...")
+        
+        if coverage_data:
+            # Save coverage data for this test
+            coverage_file = COVERAGE_DIR / f"coverage-{test_name}-{uuid.uuid4().hex[:8]}.json"
+            with open(coverage_file, 'w') as f:
+                json.dump(coverage_data, f, indent=2)
+            print(f"✅ Coverage data saved: {coverage_file.name} ({len(coverage_data)} files)")
+        else:
+            print(f"⚠️  No coverage data found for test: {test_name}")
+            # Debug: check what's available on window
+            window_props = await page.evaluate("""
+                () => {
+                    const props = [];
+                    for (let prop in window) {
+                        if (prop.includes('coverage') || prop.includes('nyc') || prop.includes('istanbul')) {
+                            props.push(prop);
+                        }
+                    }
+                    return {
+                        coverage_props: props,
+                        has_coverage: !!window.__coverage__,
+                        coverage_keys: window.__coverage__ ? Object.keys(window.__coverage__) : []
+                    };
+                }
+            """)
+            print(f"🔍 Debug window properties: {window_props}")
+            
+    except Exception as e:
+        print(f"⚠️  Failed to collect coverage for {test_name}: {e}")
+
+def calculate_coverage_percentage(hit_count, total_count):
+    """Calculate coverage percentage."""
+    if total_count == 0:
+        return 100.0
+    return round((hit_count / total_count) * 100, 1)
+
+def generate_coverage_report():
+    """Generate final coverage report from collected data."""
+    if not COVERAGE_ENABLED:
+        return
+        
+    try:
+        # Check if we have coverage files
+        coverage_files = list(COVERAGE_DIR.glob("coverage-*.json"))
+        if not coverage_files:
+            print("⚠️  No coverage files found to generate report")
+            return
+            
+        print(f"📊 Found {len(coverage_files)} coverage files")
+        
+        # Merge all coverage data
+        merged_coverage = {}
+        for coverage_file in coverage_files:
+            try:
+                with open(coverage_file, 'r') as f:
+                    coverage_data = json.load(f)
+                    for file_path, file_coverage in coverage_data.items():
+                        if file_path not in merged_coverage:
+                            merged_coverage[file_path] = file_coverage
+                        else:
+                            # Merge statement counts
+                            for stmt_id, count in file_coverage.get('s', {}).items():
+                                merged_coverage[file_path]['s'][stmt_id] = merged_coverage[file_path]['s'].get(stmt_id, 0) + count
+                            # Merge function counts
+                            for func_id, count in file_coverage.get('f', {}).items():
+                                merged_coverage[file_path]['f'][func_id] = merged_coverage[file_path]['f'].get(func_id, 0) + count
+                            # Merge branch counts  
+                            for branch_id, counts in file_coverage.get('b', {}).items():
+                                if branch_id not in merged_coverage[file_path]['b']:
+                                    merged_coverage[file_path]['b'][branch_id] = counts
+                                else:
+                                    for i, count in enumerate(counts):
+                                        merged_coverage[file_path]['b'][branch_id][i] = merged_coverage[file_path]['b'][branch_id][i] + count
+            except Exception as e:
+                print(f"⚠️  Failed to read coverage file {coverage_file}: {e}")
+        
+        if merged_coverage:
+            # Save merged coverage
+            merged_file = COVERAGE_DIR / "coverage-merged.json"
+            with open(merged_file, 'w') as f:
+                json.dump(merged_coverage, f, indent=2)
+            print(f"✅ Merged coverage data saved: {merged_file}")
+            
+            # Generate prettier coverage report
+            print("\n" + "="*90)
+            print("📊 PLAYWRIGHT COVERAGE REPORT")
+            print("="*90)
+            print(f"{'File':<50} {'Stmts':<8} {'Miss':<8} {'Branch':<8} {'BrPart':<8} {'Cover':<8}")
+            print("-"*90)
+            
+            total_stmts = 0
+            total_miss_stmts = 0
+            total_branches = 0
+            total_miss_branches = 0
+            total_funcs = 0
+            total_miss_funcs = 0
+            
+            # Filter to only show our React components and main files
+            our_files = []
+            for file_path, file_coverage in merged_coverage.items():
+                if any(pattern in file_path for pattern in ['/components/', '/src/', 'main.jsx', 'utils.jsx']):
+                    our_files.append((file_path, file_coverage))
+            
+            # Sort by file name for better readability
+            our_files.sort(key=lambda x: x[0])
+            
+            for file_path, file_coverage in our_files:
+                # Calculate statement coverage
+                statements = file_coverage.get('s', {})
+                stmt_total = len(statements)
+                stmt_hit = sum(1 for count in statements.values() if count > 0)
+                stmt_miss = stmt_total - stmt_hit
+                
+                # Calculate function coverage
+                functions = file_coverage.get('f', {})
+                func_total = len(functions)
+                func_hit = sum(1 for count in functions.values() if count > 0)
+                func_miss = func_total - func_hit
+                
+                # Calculate branch coverage
+                branches = file_coverage.get('b', {})
+                branch_total = sum(len(branch_counts) for branch_counts in branches.values())
+                branch_hit = sum(
+                    sum(1 for count in branch_counts if count > 0)
+                    for branch_counts in branches.values()
+                )
+                branch_miss = branch_total - branch_hit
+                
+                # Calculate overall coverage percentage (statement-based)
+                coverage_pct = calculate_coverage_percentage(stmt_hit, stmt_total)
+                
+                # Accumulate totals
+                total_stmts += stmt_total
+                total_miss_stmts += stmt_miss
+                total_branches += branch_total
+                total_miss_branches += branch_miss
+                total_funcs += func_total
+                total_miss_funcs += func_miss
+                
+                # Format file name (show relative path)
+                rel_path = file_path.replace(str(Path(__file__).parent.parent / "frontend"), "")
+                if rel_path.startswith("/"):
+                    rel_path = rel_path[1:]
+                
+                # Truncate long file names
+                display_name = rel_path if len(rel_path) <= 48 else "..." + rel_path[-45:]
+                
+                print(f"{display_name:<50} {stmt_total:<8} {stmt_miss:<8} {branch_total:<8} {branch_miss:<8} {coverage_pct:<7.1f}%")
+            
+            print("-"*90)
+            
+            # Calculate totals
+            total_coverage = calculate_coverage_percentage(total_stmts - total_miss_stmts, total_stmts)
+            total_branch_coverage = calculate_coverage_percentage(total_branches - total_miss_branches, total_branches)
+            total_func_coverage = calculate_coverage_percentage(total_funcs - total_miss_funcs, total_funcs)
+            
+            print(f"{'TOTAL':<50} {total_stmts:<8} {total_miss_stmts:<8} {total_branches:<8} {total_miss_branches:<8} {total_coverage:<7.1f}%")
+            print("-"*90)
+            print(f"\n📈 COVERAGE SUMMARY:")
+            print(f"   Statements: {total_stmts - total_miss_stmts}/{total_stmts} ({total_coverage:.1f}%)")
+            print(f"   Branches:   {total_branches - total_miss_branches}/{total_branches} ({total_branch_coverage:.1f}%)")
+            print(f"   Functions:  {total_funcs - total_miss_funcs}/{total_funcs} ({total_func_coverage:.1f}%)")
+            print(f"   Files:      {len(our_files)} React components covered")
+            
+            # Show coverage quality assessment
+            if total_coverage >= 80:
+                quality = "🟢 Excellent"
+            elif total_coverage >= 60:
+                quality = "🟡 Good"
+            elif total_coverage >= 40:
+                quality = "🟠 Fair"
+            else:
+                quality = "🔴 Poor"
+            
+            print(f"   Quality:    {quality} coverage")
+            print("="*90)
+            
+            # Save a text report file
+            report_file = COVERAGE_DIR / "coverage-report.txt"
+            with open(report_file, 'w') as f:
+                f.write("PLAYWRIGHT COVERAGE REPORT\n")
+                f.write("="*50 + "\n")
+                f.write(f"Statements: {total_stmts - total_miss_stmts}/{total_stmts} ({total_coverage:.1f}%)\n")
+                f.write(f"Branches:   {total_branches - total_miss_branches}/{total_branches} ({total_branch_coverage:.1f}%)\n")
+                f.write(f"Functions:  {total_funcs - total_miss_funcs}/{total_funcs} ({total_func_coverage:.1f}%)\n")
+                f.write(f"Files:      {len(our_files)} React components\n")
+                f.write(f"Quality:    {quality} coverage\n")
+            
+            print(f"💾 Coverage report saved: {report_file}")
+        
+    except Exception as e:
+        print(f"❌ Failed to generate coverage report: {e}")
 
 @pytest_asyncio.fixture(scope="function")
 async def test_frontend_service(hypha_server):
@@ -47,17 +277,53 @@ async def test_frontend_service(hypha_server):
         print("📝 Registering frontend service...")
         service_start_time = time.time()
         
-        # Check if frontend assets exist, if not create minimal structure
+        # Setup coverage collection
+        setup_coverage_collection()
+        
+        # Check if frontend assets exist, if not build with coverage instrumentation
         frontend_dist = Path(__file__).parent.parent / "frontend" / "dist"
-        if not frontend_dist.exists():
-            print("⚠️  Frontend dist directory not found, creating minimal structure...")
-            frontend_dist.mkdir(parents=True, exist_ok=True)
-            assets_dir = frontend_dist / "assets"
-            assets_dir.mkdir(exist_ok=True)
-            
-            # Create a minimal index.html for testing
-            index_html = frontend_dist / "index.html"
-            if not index_html.exists():
+        if not frontend_dist.exists() or COVERAGE_ENABLED:
+            print("🏗️ Building frontend with coverage instrumentation...")
+            try:
+                import subprocess
+                frontend_dir = Path(__file__).parent.parent / "frontend"
+                
+                # Build with test mode for coverage instrumentation
+                build_cmd = ["npm", "run", "build:test"] if COVERAGE_ENABLED else ["npm", "run", "build"]
+                result = subprocess.run(build_cmd, cwd=frontend_dir, capture_output=True, text=True)
+                
+                if result.returncode == 0:
+                    print("✅ Frontend built successfully with coverage instrumentation")
+                else:
+                    print(f"⚠️ Frontend build failed: {result.stderr}")
+                    # Fall back to minimal structure
+                    frontend_dist.mkdir(parents=True, exist_ok=True)
+                    assets_dir = frontend_dist / "assets"
+                    assets_dir.mkdir(exist_ok=True)
+                    
+                    # Create a minimal index.html for testing
+                    index_html = frontend_dist / "index.html"
+                    index_html.write_text("""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent-Lens Test</title>
+</head>
+<body>
+    <div id="root">Agent-Lens Frontend Service Test</div>
+</body>
+</html>""")
+                    print("✅ Created minimal frontend structure for testing")
+                    
+            except Exception as e:
+                print(f"⚠️ Build failed, creating minimal structure: {e}")
+                frontend_dist.mkdir(parents=True, exist_ok=True)
+                assets_dir = frontend_dist / "assets"
+                assets_dir.mkdir(exist_ok=True)
+                
+                # Create a minimal index.html for testing
+                index_html = frontend_dist / "index.html"
                 index_html.write_text("""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -69,7 +335,7 @@ async def test_frontend_service(hypha_server):
     <div id="root">Agent-Lens Frontend Service Test</div>
 </body>
 </html>""")
-            print("✅ Created minimal frontend structure for testing")
+                print("✅ Created minimal frontend structure for testing")
         
         await setup_service(server, test_id)
         service_time = time.time() - service_start_time
@@ -207,6 +473,9 @@ async def test_frontend_login_flow(test_frontend_service):
             screenshot_path = f"/tmp/login_test_{uuid.uuid4().hex[:8]}.png"
             await page.screenshot(path=screenshot_path)
             print(f"📸 Login test screenshot saved to: {screenshot_path}")
+            
+            # Collect coverage data
+            await collect_coverage(page, "login_flow")
             
         finally:
             await context.close()
@@ -404,6 +673,9 @@ async def test_frontend_sidebar_navigation(test_frontend_service):
             print(f"📸 Sidebar navigation test screenshot saved to: {screenshot_path}")
             print("✅ Sidebar navigation test completed successfully")
             
+            # Collect coverage data
+            await collect_coverage(page, "sidebar_navigation")
+            
         finally:
             await context.close()
             await browser.close()
@@ -574,6 +846,9 @@ async def test_frontend_simulated_microscope_controls(test_frontend_service):
             screenshot_path = f"/tmp/microscope_test_{uuid.uuid4().hex[:8]}.png"
             await page.screenshot(path=screenshot_path)
             print(f"📸 Microscope test screenshot saved to: {screenshot_path}")
+            
+            # Collect coverage data
+            await collect_coverage(page, "microscope_controls")
             
         finally:
             await context.close()
@@ -763,6 +1038,9 @@ async def test_frontend_image_view_browser(test_frontend_service):
             print(f"📸 Image view test screenshot saved to: {screenshot_path}")
             print("✅ Image view browser test completed successfully")
             
+            # Collect coverage data
+            await collect_coverage(page, "image_view_browser")
+            
         finally:
             await context.close()
             await browser.close()
@@ -827,9 +1105,23 @@ async def test_frontend_service_health_comprehensive(test_frontend_service):
             
             print("✅ All health checks passed")
             
+            # Collect coverage data
+            await collect_coverage(page, "health_comprehensive")
+            
         finally:
             await context.close()
             await browser.close()
+
+@pytest.mark.asyncio
+@pytest.mark.timeout(30)
+async def test_generate_coverage_report():
+    """Generate final coverage report from all collected data."""
+    if COVERAGE_ENABLED:
+        print("📊 Generating final coverage report...")
+        generate_coverage_report()
+        print("✅ Coverage report generation completed")
+    else:
+        print("⚠️  Coverage collection disabled, skipping report generation")
 
 if __name__ == "__main__":
     # Run tests individually for debugging

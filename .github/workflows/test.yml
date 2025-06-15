@@ -137,23 +137,33 @@ jobs:
           sleep 2
         }
         
-    - name: Step 4 - Run frontend service tests (Playwright)
+    - name: Step 3 - Run frontend service tests (Playwright with Coverage)
       env:
         WORKSPACE_TOKEN: ${{ secrets.WORKSPACE_TOKEN }}
         PYTHONUNBUFFERED: 1
+        PLAYWRIGHT_COVERAGE: true
       run: |
-        echo "🎭 Running frontend service tests with Playwright..."
+        echo "🎭 Running frontend service tests with Playwright and coverage collection..."
         if [ -n "$WORKSPACE_TOKEN" ]; then
           # Test network connectivity first
           echo "Testing network connectivity..."
           curl -s https://hypha.aicell.io || echo "Network test failed, but continuing..."
-          timeout 300 python scripts/run_frontend_tests.py || echo "Frontend service tests completed with timeout/error"
+          # Run Playwright tests with coverage enabled
+          timeout 300 python -m pytest tests/test_frontend_service.py -v -s || echo "Frontend service tests completed with timeout/error"
         else
           echo "⚠️ Skipping frontend service tests - WORKSPACE_TOKEN not available"
         fi
       continue-on-error: true
     
-    - name: Step 5 - Run backend integration tests (if token available)
+    - name: Upload frontend Playwright coverage reports as artifacts
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: frontend-playwright-coverage-report
+        path: ./frontend/coverage/
+        retention-days: 30
+
+    - name: Step 4 - Run backend integration tests (if token available)
       env:
         WORKSPACE_TOKEN: ${{ secrets.WORKSPACE_TOKEN }}
         PYTHONUNBUFFERED: 1

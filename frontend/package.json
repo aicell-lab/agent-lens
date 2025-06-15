@@ -4,7 +4,9 @@
   "scripts": {
     "start": "vite",
     "build": "vite build",
-    "serve": "vite preview"
+    "build:test": "vite build --mode test",
+    "serve": "vite preview",
+    "coverage:report": "c8 report --reporter=html --reporter=text --reporter=lcov"
   },
   "dependencies": {
     "@fortawesome/fontawesome-free": "^6.6.0",
@@ -21,5 +23,9 @@
     "tailwindcss": "^3.4.17",
     "vite": "^5.4.10",
     "winbox": "^0.2.82"
+  },
+  "devDependencies": {
+    "vite-plugin-istanbul": "^6.0.0",
+    "c8": "^10.1.2"
   }
 }
