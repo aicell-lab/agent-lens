@@ -181,18 +181,20 @@ jobs:
         echo "📊 Generating coverage report..."
         python scripts/run_tests.py --backend-only --type fast --coverage
     
-    - name: Upload backend coverage reports
-      uses: codecov/codecov-action@v3
+    - name: Upload backend coverage reports as artifacts
+      uses: actions/upload-artifact@v4
+      if: always()
       with:
-        file: ./coverage.xml
-        flags: backend-tests
-        name: codecov-backend
-        fail_ci_if_error: false
+        name: backend-coverage-report
+        path: |
+          ./coverage.xml
+          ./htmlcov/
+        retention-days: 30
     
-    - name: Upload frontend coverage reports
-      uses: codecov/codecov-action@v3
+    - name: Upload frontend coverage reports as artifacts
+      uses: actions/upload-artifact@v4
+      if: always()
       with:
-        file: ./frontend/coverage/lcov.info
-        flags: frontend-tests
-        name: codecov-frontend
-        fail_ci_if_error: false
+        name: frontend-coverage-report
+        path: ./frontend/coverage/
+        retention-days: 30
