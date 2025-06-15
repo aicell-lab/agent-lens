@@ -253,92 +253,156 @@ async def test_frontend_sidebar_navigation(test_frontend_service):
                     continue
             
             if not main_app_loaded:
-                print("⚠️  Could not find main app selectors, taking screenshot for debugging...")
                 screenshot_path = f"/tmp/sidebar_debug_{uuid.uuid4().hex[:8]}.png"
                 await page.screenshot(path=screenshot_path)
                 print(f"📸 Debug screenshot saved to: {screenshot_path}")
-                # Continue with test anyway
+                raise AssertionError("❌ ERROR: Could not find main app selectors - main application failed to load")
             
-            # Test different sidebar tabs with more comprehensive selectors
+            # Test different sidebar tabs with correct selectors based on Sidebar.jsx
             sidebar_tabs = [
+                {
+                    'name': 'Microscopes', 
+                    'selectors': [
+                        '.sidebar-tab:has-text("Microscopes")',  # Primary selector from Sidebar.jsx
+                        'button:has-text("Microscopes")',
+                        '.sidebar-tab .fa-microscope',           # Icon-based selector
+                        '.sidebar-tab[title*="Microscopes"]'
+                    ],
+                    'required': True
+                },
+                {
+                    'name': 'ImageJ', 
+                    'selectors': [
+                        '.sidebar-tab:has-text("ImageJ")',       # Primary selector from Sidebar.jsx
+                        'button:has-text("ImageJ")',
+                        '.sidebar-tab .fa-magic',               # Icon-based selector
+                        '.sidebar-tab[title*="ImageJ"]'
+                    ],
+                    'required': True
+                },
                 {
                     'name': 'Image View', 
                     'selectors': [
-                        '[data-tab="image-view"]',
-                        '.sidebar-item:has-text("Image View")', 
+                        '.sidebar-tab:has-text("Image View")',   # Primary selector from Sidebar.jsx
                         'button:has-text("Image View")',
-                        'text="Image View"'
-                    ]
+                        '.sidebar-tab .fa-images',              # Icon-based selector
+                        '.sidebar-tab[title*="View images"]'
+                    ],
+                    'required': True
                 },
                 {
                     'name': 'Image Search', 
                     'selectors': [
-                        '[data-tab="image-search"]',
-                        '.sidebar-item:has-text("Image Search")',
+                        '.sidebar-tab:has-text("Image Search")', # Primary selector from Sidebar.jsx
                         'button:has-text("Image Search")',
-                        'text="Image Search"'
-                    ]
-                },
-                {
-                    'name': 'Microscope', 
-                    'selectors': [
-                        '[data-tab="microscope"]',
-                        '.sidebar-item:has-text("Microscope")',
-                        'button:has-text("Microscope")',
-                        'text="Microscope"',
-                        '.microscope-tab',
-                        '.microscope-control'
-                    ]
+                        '.sidebar-tab .fa-search',              # Icon-based selector
+                        '.sidebar-tab[title*="Search for similar"]'
+                    ],
+                    'required': True
                 },
                 {
                     'name': 'Incubator', 
                     'selectors': [
-                        '[data-tab="incubator"]',
-                        '.sidebar-item:has-text("Incubator")',
+                        '.sidebar-tab:has-text("Incubator")',    # Primary selector from Sidebar.jsx
                         'button:has-text("Incubator")',
-                        'text="Incubator"'
-                    ]
+                        '.sidebar-tab .fa-temperature-high',    # Icon-based selector
+                        '.sidebar-tab[title*="Control incubator"]'
+                    ],
+                    'required': True
                 },
                 {
                     'name': 'Dashboard', 
                     'selectors': [
-                        '[data-tab="dashboard"]',
-                        '.sidebar-item:has-text("Dashboard")',
+                        '.sidebar-tab:has-text("Dashboard")',    # Primary selector from Sidebar.jsx
                         'button:has-text("Dashboard")',
-                        'text="Dashboard"'
-                    ]
+                        '.sidebar-tab .fa-tachometer-alt',      # Icon-based selector
+                        '.sidebar-tab[title*="View dashboard"]'
+                    ],
+                    'required': True
                 },
             ]
+            
+            failed_tabs = []
+            successful_tabs = []
             
             for tab in sidebar_tabs:
                 print(f"🔍 Testing {tab['name']} tab...")
                 
                 found = False
+                successful_selector = None
                 try:
                     # Try each selector for this tab
                     for selector in tab['selectors']:
                         try:
                             tab_element = page.locator(selector).first
-                            if await tab_element.count() > 0:
+                            count = await tab_element.count()
+                            if count > 0:
                                 await tab_element.click()
                                 await page.wait_for_timeout(2000)  # Wait for content to load
-                                print(f"✅ Successfully navigated to {tab['name']} tab (using: {selector})")
+                                print(f"✅ Successfully navigated to {tab['name']} tab (selector: {selector}, count: {count})")
                                 found = True
+                                successful_selector = selector
+                                successful_tabs.append(f"{tab['name']} ({selector})")
                                 break
                         except Exception as selector_error:
+                            print(f"  - Selector '{selector}' failed: {selector_error}")
                             continue  # Try next selector
                     
                     if not found:
-                        print(f"⚠️  Could not find {tab['name']} tab with any selector")
+                        if tab['required']:
+                            failed_tabs.append(tab['name'])
+                            print(f"❌ ERROR: Required tab '{tab['name']}' not found with any selector")
+                        else:
+                            print(f"⚠️  Optional tab '{tab['name']}' not found")
                             
                 except Exception as e:
-                    print(f"⚠️  Error testing {tab['name']} tab: {e}")
+                    if tab['required']:
+                        failed_tabs.append(tab['name'])
+                        print(f"❌ ERROR: Exception testing {tab['name']} tab: {e}")
+                    else:
+                        print(f"⚠️  Exception testing {tab['name']} tab: {e}")
                     continue
             
+            # Check if we found the basic sidebar structure
+            print("🔍 Verifying sidebar structure...")
+            sidebar_structure_selectors = [
+                '.sidebar-container',     # Main sidebar container from Sidebar.jsx
+                '.main-sidebar',         # Main sidebar from Sidebar.jsx
+                '.sidebar-tabs',         # Tabs container from Sidebar.jsx
+                '.sidebar-tab'           # Individual tab class from Sidebar.jsx
+            ]
+            
+            structure_found = False
+            for selector in sidebar_structure_selectors:
+                try:
+                    count = await page.locator(selector).count()
+                    if count > 0:
+                        print(f"✅ Found sidebar structure (selector: {selector}, count: {count})")
+                        structure_found = True
+                        break
+                except Exception as e:
+                    print(f"  - Structure selector '{selector}' failed: {e}")
+                    continue
+            
+            if not structure_found:
+                failed_tabs.append("Sidebar Structure")
+                print("❌ ERROR: Sidebar structure not found")
+            
+            # Report results
+            if successful_tabs:
+                print(f"✅ Successfully found {len(successful_tabs)} tabs: {', '.join(successful_tabs)}")
+            
+            if failed_tabs:
+                screenshot_path = f"/tmp/sidebar_navigation_error_{uuid.uuid4().hex[:8]}.png"
+                await page.screenshot(path=screenshot_path)
+                print(f"📸 Sidebar navigation error screenshot saved to: {screenshot_path}")
+                raise AssertionError(f"❌ ERROR: Required sidebar elements not found: {', '.join(failed_tabs)}")
+            
             # Take screenshot of final state
-            screenshot_path = f"/tmp/sidebar_test_{uuid.uuid4().hex[:8]}.png"
+            screenshot_path = f"/tmp/sidebar_navigation_success_{uuid.uuid4().hex[:8]}.png"
             await page.screenshot(path=screenshot_path)
-            print(f"📸 Sidebar test screenshot saved to: {screenshot_path}")
+            print(f"📸 Sidebar navigation test screenshot saved to: {screenshot_path}")
+            print("✅ Sidebar navigation test completed successfully")
             
         finally:
             await context.close()
@@ -552,44 +616,152 @@ async def test_frontend_image_view_browser(test_frontend_service):
                     continue
             
             if not main_app_loaded:
-                print("⚠️  Could not find main app selectors, but continuing with test...")
-                # Take screenshot to help debug
                 screenshot_path = f"/tmp/imageview_debug_{uuid.uuid4().hex[:8]}.png"
                 await page.screenshot(path=screenshot_path)
                 print(f"📸 Debug screenshot saved to: {screenshot_path}")
+                raise AssertionError("❌ ERROR: Could not find main app selectors - main application failed to load")
             
-            # Navigate to image view tab
-            image_view_tab = page.locator('.sidebar-item:has-text("Image View"), [data-tab="image-view"]').first
-            if await image_view_tab.count() > 0:
-                await image_view_tab.click()
-                await page.wait_for_timeout(3000)
-                print("✅ Navigated to image view tab")
-                
-                # Look for image browser elements
-                browser_elements = [
-                    {'name': 'Gallery Selector', 'selectors': ['.gallery-selector', 'select[name="gallery"]', '.dropdown']},
-                    {'name': 'Image Grid', 'selectors': ['.image-grid', '.gallery-grid', '.image-thumbnails']},
-                    {'name': 'Browse Button', 'selectors': ['button:has-text("Browse")', '.browse-button']},
-                    {'name': 'Map View Button', 'selectors': ['button:has-text("Map")', '.map-button', 'button:has-text("View")']},
-                ]
-                
-                for element in browser_elements:
-                    found = False
-                    for selector in element['selectors']:
-                        if await page.locator(selector).count() > 0:
-                            print(f"✅ Found {element['name']}")
+            # Navigate to image view tab - Updated selectors based on actual component structure
+            print("🔍 Looking for Image View tab...")
+            image_view_selectors = [
+                '.sidebar-tab:has-text("Image View")',  # Primary selector based on Sidebar.jsx
+                'button:has-text("Image View")',        # Alternative button selector
+                '.sidebar-tab[title*="View images"]',   # Based on title attribute
+                '.sidebar-tab .fa-images'               # Icon-based selector as fallback
+            ]
+            
+            image_view_tab_found = False
+            for selector in image_view_selectors:
+                try:
+                    element = page.locator(selector).first
+                    if await element.count() > 0:
+                        await element.click()
+                        await page.wait_for_timeout(3000)  # Wait for tab switch and content load
+                        print(f"✅ Successfully navigated to Image View tab (found: {selector})")
+                        image_view_tab_found = True
+                        break
+                except Exception as e:
+                    print(f"  - Selector '{selector}' failed: {e}")
+                    continue
+            
+            if not image_view_tab_found:
+                screenshot_path = f"/tmp/image_view_tab_error_{uuid.uuid4().hex[:8]}.png"
+                await page.screenshot(path=screenshot_path)
+                print(f"📸 Image view tab error screenshot saved to: {screenshot_path}")
+                raise AssertionError("❌ ERROR: Image View tab not found - unable to navigate to image view")
+            
+            # Look for image browser elements - Updated selectors based on ImageViewBrowser.jsx and Sidebar.jsx
+            print("🔍 Checking for image browser elements...")
+            browser_elements = [
+                {
+                    'name': 'Image View Sidebar',
+                    'selectors': ['.image-view-sidebar', '.gallery-selection', '.sidebar-container .image-view-sidebar'],
+                    'required': True
+                },
+                {
+                    'name': 'Gallery Selection Panel',
+                    'selectors': ['.gallery-selection', '.gallery-options', '.gallery-option'],
+                    'required': True
+                },
+                {
+                    'name': 'Browse Data Button',
+                    'selectors': ['.browse-data-button', 'button:has-text("Browse Data")', '.gallery-actions-section button'],
+                    'required': True
+                },
+                {
+                    'name': 'View Image Data Button',
+                    'selectors': ['.view-gallery-image-data-button', 'button:has-text("View Image Data")', 'button .fa-map'],
+                    'required': False  # May not be visible initially
+                },
+                {
+                    'name': 'Main Browser Area',
+                    'selectors': ['.image-view-browser', '.browser-title', '.datasets-view'],
+                    'required': True
+                },
+                {
+                    'name': 'Gallery Title/Label',
+                    'selectors': ['.image-view-sidebar-title', 'h3:has-text("Select Image Gallery")', '.gallery-label'],
+                    'required': True
+                },
+            ]
+            
+            failed_elements = []
+            for element in browser_elements:
+                found = False
+                for selector in element['selectors']:
+                    try:
+                        count = await page.locator(selector).count()
+                        if count > 0:
+                            print(f"✅ Found {element['name']} (selector: {selector}, count: {count})")
                             found = True
                             break
-                    if not found:
-                        print(f"ℹ️  {element['name']} not found")
+                    except Exception as e:
+                        print(f"  - Selector '{selector}' for {element['name']} failed: {e}")
+                        continue
                 
-            else:
-                print("⚠️  Image view tab not found")
+                if not found:
+                    if element['required']:
+                        failed_elements.append(element['name'])
+                        print(f"❌ ERROR: Required element '{element['name']}' not found")
+                    else:
+                        print(f"⚠️  Optional element '{element['name']}' not found")
             
-            # Take screenshot
-            screenshot_path = f"/tmp/image_view_test_{uuid.uuid4().hex[:8]}.png"
+            # Check for specific gallery items that should be available
+            print("🔍 Checking for default gallery items...")
+            gallery_selectors = [
+                '.gallery-option',
+                '.gallery-select-btn',
+                'button:has-text("20250506-scan-time-lapse-gallery")',  # Default gallery from Sidebar.jsx
+                'button:has-text("hpa-sample-gallery")',                 # Alternative gallery from Sidebar.jsx
+            ]
+            
+            gallery_found = False
+            for selector in gallery_selectors:
+                try:
+                    count = await page.locator(selector).count()
+                    if count > 0:
+                        print(f"✅ Found gallery items (selector: {selector}, count: {count})")
+                        gallery_found = True
+                        break
+                except Exception as e:
+                    print(f"  - Gallery selector '{selector}' failed: {e}")
+                    continue
+            
+            if not gallery_found:
+                failed_elements.append("Gallery Items")
+                print("❌ ERROR: No gallery items found in gallery selection")
+            
+            # If any required elements failed, raise an error
+            if failed_elements:
+                screenshot_path = f"/tmp/image_view_elements_error_{uuid.uuid4().hex[:8]}.png"
+                await page.screenshot(path=screenshot_path)
+                print(f"📸 Elements error screenshot saved to: {screenshot_path}")
+                raise AssertionError(f"❌ ERROR: Required image view browser elements not found: {', '.join(failed_elements)}")
+            
+            # Test gallery interaction if possible
+            print("🔍 Testing gallery interaction...")
+            try:
+                gallery_option = page.locator('.gallery-option').first
+                if await gallery_option.count() > 0:
+                    await gallery_option.click()
+                    await page.wait_for_timeout(2000)
+                    print("✅ Successfully clicked on gallery option")
+                    
+                    # Check if browse data button becomes available/clickable
+                    browse_button = page.locator('.browse-data-button, button:has-text("Browse Data")').first
+                    if await browse_button.count() > 0:
+                        print("✅ Browse Data button available after gallery selection")
+                    else:
+                        print("⚠️  Browse Data button not found after gallery selection")
+                        
+            except Exception as e:
+                print(f"⚠️  Gallery interaction test failed: {e}")
+            
+            # Take final screenshot
+            screenshot_path = f"/tmp/image_view_success_{uuid.uuid4().hex[:8]}.png"
             await page.screenshot(path=screenshot_path)
             print(f"📸 Image view test screenshot saved to: {screenshot_path}")
+            print("✅ Image view browser test completed successfully")
             
         finally:
             await context.close()
