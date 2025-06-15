@@ -34,7 +34,7 @@ const SampleSelector = ({
   
   const isRealMicroscopeSelected = selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ||
                                 selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2';
-  const isSimulatedMicroscopeSelected = selectedMicroscopeId === 'squid-control/squid-control-reef';
+  const isSimulatedMicroscopeSelected = selectedMicroscopeId === 'agent-lens/squid-control-reef';
   const currentMicroscopeNumber = selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 1 : 
                                  selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2' ? 2 : 0;
 

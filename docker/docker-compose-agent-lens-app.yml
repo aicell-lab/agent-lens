@@ -26,7 +26,7 @@ services:
       - ALL
 
   squid-control:
-    image: ghcr.io/cccoolll/squid-control:sha-8a01343
+    image: ghcr.io/aicell-lab/squid-control:sha-1a06ab8
     container_name: squid-control
     network_mode: "host"
     ports:
@@ -43,7 +43,7 @@ services:
     volumes:
       - squid-control-cache:/app/.cache
     healthcheck:
-      test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/squid-control/services/probes/liveness-squid-control-reef | jq -e '.status == \"ok\"'"]
+      test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/agent-lens/services/squid-control-reef/is_service_healthy | jq -e '.status == \"ok\"'"]
       interval: 120s
       timeout: 30s
       retries: 1
