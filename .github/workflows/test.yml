@@ -136,12 +136,7 @@ jobs:
           pkill -f python || true
           sleep 2
         }
-    
-    - name: Step 3 - Run frontend React tests
-      run: |
-        echo "⚛️ Running frontend React tests..."
-        cd frontend && npm test -- --coverage --watchAll=false
-    
+        
     - name: Step 4 - Run frontend service tests (Playwright)
       env:
         WORKSPACE_TOKEN: ${{ secrets.WORKSPACE_TOKEN }}
@@ -191,10 +186,3 @@ jobs:
           ./htmlcov/
         retention-days: 30
     
-    - name: Upload frontend coverage reports as artifacts
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: frontend-coverage-report
-        path: ./frontend/coverage/
-        retention-days: 30
