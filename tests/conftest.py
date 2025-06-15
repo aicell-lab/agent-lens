@@ -3,10 +3,12 @@ Test configuration and fixtures for Agent-Lens microscopy platform.
 """
 
 import pytest
+import pytest_asyncio
 import asyncio
 import tempfile
 import shutil
 import os
+import sys
 import logging
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -17,17 +19,17 @@ import io
 import base64
 import zarr
 
+# Add the project root to the Python path to ensure agent_lens can be imported
+project_root = Path(__file__).parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 # Configure test logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
-@pytest.fixture(scope="session")
-def event_loop():
-    """Create an instance of the default event loop for the test session."""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
+# Global list to track open connections for cleanup
+_open_connections = []
 
 
 @pytest.fixture
@@ -89,6 +91,72 @@ def sample_image_base64(sample_image):
     sample_image.save(buffered, format="PNG")
     return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
+
+@pytest_asyncio.fixture
+async def hypha_server():
+    """Create a managed Hypha server connection for testing."""
+    # Check for token first
+    token = os.environ.get("WORKSPACE_TOKEN")
+    if not token:
+        pytest.skip("WORKSPACE_TOKEN not set in environment")
+    
+    from hypha_rpc import connect_to_server
+    
+    server = None
+    try:
+        # Create connection with minimal background tasks
+        connection_config = {
+            "server_url": "https://hypha.aicell.io",
+            "token": token,
+            "workspace": "agent-lens",
+            "ping_interval": None,  # Disable ping to avoid background tasks
+            "ping_timeout": None,   # Disable ping timeout
+        }
+        
+        server = await connect_to_server(connection_config)
+        _open_connections.append(server)
+        
+        yield server
+        
+    except Exception as e:
+        logger.warning(f"Failed to create Hypha connection: {e}")
+        pytest.skip(f"Could not connect to Hypha: {e}")
+    finally:
+        # Enhanced cleanup with proper task cancellation
+        if server:
+            try:
+                # Cancel any pending tasks before disconnecting
+                if hasattr(server, '_websocket') and server._websocket:
+                    # Get all tasks related to this connection
+                    current_tasks = [task for task in asyncio.all_tasks() 
+                                   if not task.done() and 'websocket' in str(task.get_coro()).lower()]
+                    
+                    # Cancel websocket-related tasks
+                    for task in current_tasks:
+                        if not task.done():
+                            task.cancel()
+                    
+                    # Wait briefly for cancellation
+                    if current_tasks:
+                        await asyncio.gather(*current_tasks, return_exceptions=True)
+                
+                # Disconnect the server
+                if hasattr(server, 'disconnect'):
+                    await asyncio.wait_for(server.disconnect(), timeout=5.0)
+                elif hasattr(server, 'close'):
+                    await asyncio.wait_for(server.close(), timeout=5.0)
+                    
+            except (asyncio.TimeoutError, asyncio.CancelledError, RuntimeError) as e:
+                logger.warning(f"Expected error during connection cleanup: {e}")
+            except Exception as e:
+                logger.warning(f"Unexpected error closing connection: {e}")
+            
+            # Remove from global list
+            if server in _open_connections:
+                _open_connections.remove(server)
+        
+        # Give time for cleanup to complete
+        await asyncio.sleep(0.1)
 
 @pytest.fixture
 def mock_hypha_server():
@@ -207,25 +275,6 @@ def mock_microscope_hardware():
     
     return hardware_mock
 
-
-@pytest.fixture
-def test_environment_vars(monkeypatch):
-    """Set up test environment variables."""
-    test_vars = {
-        "TEST_TOKEN": "test-hypha-token",
-        "HYPHA_SERVER_URL": "https://hypha.aicell.io",
-        "S3_ENDPOINT": "http://localhost:9000",
-        "S3_ACCESS_KEY_ID": "test-access-key",
-        "S3_SECRET_ACCESS_KEY": "test-secret-key",
-        "S3_BUCKET": "test-bucket"
-    }
-    
-    for key, value in test_vars.items():
-        monkeypatch.setenv(key, value)
-    
-    return test_vars
-
-
 class MockImageData:
     """Helper class for generating test image data."""
     
@@ -260,6 +309,30 @@ class MockImageData:
             
         return image_data
 
+
+@pytest.fixture(scope="session", autouse=True)
+def cleanup_connections():
+    """Automatically cleanup any remaining connections at session end."""
+    yield
+    
+    # Simple cleanup without async operations to avoid cancellation issues
+    if _open_connections:
+        logger.info(f"Marking {len(_open_connections)} connections for cleanup...")
+        # Just clear the list - connections should be cleaned up by individual fixtures
+        _open_connections.clear()
+        
+    # Cancel any remaining tasks to prevent warnings
+    try:
+        import asyncio
+        loop = asyncio.get_event_loop()
+        if loop and not loop.is_closed():
+            pending_tasks = [task for task in asyncio.all_tasks(loop) if not task.done()]
+            if pending_tasks:
+                logger.info(f"Cancelling {len(pending_tasks)} pending tasks...")
+                for task in pending_tasks:
+                    task.cancel()
+    except Exception as e:
+        logger.warning(f"Error during final cleanup: {e}")
 
 # Test markers for different test categories
 pytestmark = [

@@ -59,8 +59,6 @@ def run_backend_tests(test_type="all", verbose=False, coverage=False):
     
     # Add test paths (only if they exist)
     test_paths = []
-    if Path("agent_lens/tests/").exists():
-        test_paths.append("agent_lens/tests/")
     if Path("tests/").exists():
         test_paths.append("tests/")
     
@@ -81,13 +79,23 @@ def run_frontend_tests(test_type="all", verbose=False, coverage=False):
         if coverage:
             cmd = ["npm", "run", "test:coverage"]
         
-        # Set environment for CI mode
+        # Set environment for CI mode (non-interactive)
         env = os.environ.copy()
         env["CI"] = "true"
         
-        return run_command(cmd, f"Frontend tests ({test_type})")
+        # Add non-interactive flag to prevent Jest from hanging
+        cmd.extend(["--watchAll=false"])
+        
+        return run_command(cmd, f"Frontend Jest tests ({test_type})")
     finally:
         os.chdir("..")
+
+def run_frontend_service_tests(test_type="all", verbose=False, coverage=False):
+    """Run FastAPI frontend service tests with Playwright."""
+    cmd = ["python", "scripts/run_frontend_tests.py"]
+    
+    # The frontend service test runner handles its own setup
+    return run_command(cmd, f"Frontend service tests ({test_type})")
 
 def check_dependencies(check_frontend=True):
     """Check if required dependencies are installed."""
@@ -101,14 +109,56 @@ def check_dependencies(check_frontend=True):
         print("✓ Python test dependencies installed")
     except ImportError as e:
         print(f"✗ Missing Python dependency: {e}")
-        print("Run: pip install -r requirements_test.txt")
+        print("Run: pip install -r requirements-test.txt")
         return False
+    
+    # Check Playwright dependency
+    try:
+        import playwright
+        print("✓ Playwright dependency installed")
+    except ImportError:
+        print("⚠ Playwright not installed (needed for frontend service tests)")
+        print("Run: pip install playwright && playwright install chromium")
+    
+    # Check if agent_lens package is installed
+    try:
+        import agent_lens
+        print("✓ agent_lens package is available")
+    except ImportError:
+        print("⚠ agent_lens package not installed as editable package")
+        print("Installing in development mode...")
+        try:
+            result = subprocess.run(
+                ["pip", "install", "-e", "."], 
+                capture_output=True, 
+                text=True,
+                check=True
+            )
+            print("✓ agent_lens package installed in development mode")
+        except subprocess.CalledProcessError as e:
+            print(f"✗ Failed to install agent_lens package: {e}")
+            print("Please run: pip install -e .")
+            return False
     
     # Check Node dependencies (if frontend directory exists and check_frontend is True)
     if check_frontend and Path("frontend").exists():
         try:
+            # Check for package.json first
+            package_json_path = Path("frontend/package.json")
+            if not package_json_path.exists():
+                print("✗ Frontend package.json not found")
+                return False
+                
+            # Check if node_modules exists
+            node_modules_path = Path("frontend/node_modules")
+            if not node_modules_path.exists():
+                print("✗ Frontend test dependencies missing")
+                print("Run: cd frontend && npm install")
+                return False
+                
+            # Check for specific dependencies we need (Vite for building)
             result = subprocess.run(
-                ["npm", "list", "jest"], 
+                ["npm", "list", "vite"], 
                 cwd="frontend", 
                 capture_output=True, 
                 text=True
@@ -162,6 +212,11 @@ def main():
         help="Run only frontend tests"
     )
     parser.add_argument(
+        "--frontend-service", 
+        action="store_true",
+        help="Also run frontend service tests with Playwright"
+    )
+    parser.add_argument(
         "--coverage", 
         action="store_true",
         help="Generate coverage reports"
@@ -208,6 +263,12 @@ def main():
     if not args.backend_only and Path("frontend").exists():
         print(f"\nRunning frontend tests (type: {args.type})...")
         if not run_frontend_tests(args.type, args.verbose, args.coverage):
+            success = False
+    
+    # Run frontend service tests if requested
+    if args.frontend_service or (not args.backend_only and not args.frontend_only):
+        print(f"\nRunning frontend service tests (type: {args.type})...")
+        if not run_frontend_service_tests(args.type, args.verbose, args.coverage):
             success = False
     
     # Generate report

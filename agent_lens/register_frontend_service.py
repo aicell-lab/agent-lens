@@ -87,43 +87,6 @@ def get_frontend_api():
     assets_dir = os.path.join(dist_dir, "assets")
     app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
-    # Add middleware for monitoring server-side bandwidth usage
-    @app.middleware("http")
-    async def monitoring_middleware(request: Request, call_next):
-        from starlette.requests import ClientDisconnect
-        from starlette.responses import Response as StarletteResponse # Import for 499 response
-
-        start_time = time.time()
-        request_size = 0
-        response = None
-        try:
-            body = await request.body()
-            request_size = len(body)
-            response = await call_next(request)
-            process_time = time.time() - start_time
-            response.headers["X-Process-Time"] = f"{process_time:.4f}"
-            if not response.headers.get("Cache-Control") and request.url.path.startswith(("/assets", "/public")):
-                response.headers["Cache-Control"] = "public, max-age=86400"
-            if request.url.path.startswith(("/tile", "/merged-tiles", "/tile-for-timepoint")):
-                path_parts = request.url.path.split("?")[0].split("/")
-                endpoint = path_parts[-1] if path_parts else "unknown"
-                logger.info(
-                    f"METRICS: endpoint={endpoint} method={request.method} "
-                    f"path={request.url.path} processing_time={process_time:.4f}s "
-                    f"request_size={request_size} response_status={response.status_code}"
-                )
-            return response
-        except ClientDisconnect:
-            logger.warning(f"Client disconnected for {request.url.path}.")
-            if response is None: # Disconnect happened before call_next() completed or even started
-                # Return a 499 Client Closed Request response
-                return StarletteResponse(status_code=499)
-            # If response was already formed (e.g. disconnect during sending), return it.
-            # Starlette will handle the inability to send if the client is gone.
-            return response 
-        except Exception as e:
-            logger.error(f"Error in monitoring_middleware: {e}", exc_info=True)
-            raise
 
     @app.get("/", response_class=HTMLResponse)
     async def root():
