@@ -79,11 +79,14 @@ def run_frontend_tests(test_type="all", verbose=False, coverage=False):
         if coverage:
             cmd = ["npm", "run", "test:coverage"]
         
-        # Set environment for CI mode
+        # Set environment for CI mode (non-interactive)
         env = os.environ.copy()
         env["CI"] = "true"
         
-        return run_command(cmd, f"Frontend tests ({test_type})")
+        # Add non-interactive flag to prevent Jest from hanging
+        cmd.extend(["--watchAll=false"])
+        
+        return run_command(cmd, f"Frontend Jest tests ({test_type})")
     finally:
         os.chdir("..")
 
