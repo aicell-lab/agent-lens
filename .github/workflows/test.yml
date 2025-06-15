@@ -92,10 +92,38 @@ jobs:
         npm --version
         echo "📦 Installing frontend dependencies..."
         cd frontend
+        
+        # Check if package.json exists
+        if [ ! -f package.json ]; then
+          echo "❌ package.json not found in frontend directory"
+          exit 1
+        fi
+        
+        echo "📋 Package.json contents:"
+        cat package.json
+        
+        # Clean install
         npm cache clean --force
-        npm install
+        npm install --verbose
+        
+        # Verify installation
+        if [ ! -d node_modules ]; then
+          echo "❌ node_modules directory not created"
+          exit 1
+        fi
+        
+        echo "🔍 Verifying installation..."
+        ls -la node_modules/ | head -10
+        npm list --depth=0 || echo "Some packages may have peer dependency warnings"
+        
         echo "🏗️ Building frontend..."
         npm run build
+        
+        if [ ! -d dist ]; then
+          echo "❌ Frontend build failed - dist directory not created"
+          exit 1
+        fi
+        
         echo "✅ Frontend build completed"
         ls -la dist/
     
@@ -112,6 +140,11 @@ jobs:
         nslookup hypha.aicell.io || true
         echo "SSL certificates:"
         ls -la /etc/ssl/certs/ | head -5 || true
+        echo "📁 Checking current directory and frontend structure..."
+        pwd
+        ls -la
+        ls -la frontend/ || echo "Frontend directory not found"
+        ls -la frontend/node_modules/ | head -5 || echo "Frontend node_modules not found"
         echo "🧪 Checking test dependencies..."
         python scripts/run_tests.py --check-deps
     

@@ -143,8 +143,22 @@ def check_dependencies(check_frontend=True):
     # Check Node dependencies (if frontend directory exists and check_frontend is True)
     if check_frontend and Path("frontend").exists():
         try:
+            # Check for package.json first
+            package_json_path = Path("frontend/package.json")
+            if not package_json_path.exists():
+                print("✗ Frontend package.json not found")
+                return False
+                
+            # Check if node_modules exists
+            node_modules_path = Path("frontend/node_modules")
+            if not node_modules_path.exists():
+                print("✗ Frontend test dependencies missing")
+                print("Run: cd frontend && npm install")
+                return False
+                
+            # Check for specific dependencies we need (Vite for building)
             result = subprocess.run(
-                ["npm", "list", "jest"], 
+                ["npm", "list", "vite"], 
                 cwd="frontend", 
                 capture_output=True, 
                 text=True
