@@ -526,7 +526,7 @@ const ImagingTasksModal = ({
           </button>
         </div>
         <div className="imaging-tasks-modal-body">
-          {selectedMicroscopeId === 'squid-control/squid-control-reef' ? (
+          {selectedMicroscopeId === 'agent-lens/squid-control-reef' ? (
             <p>Time-lapse imaging is not supported for the simulated microscope.</p>
           ) : task ? (
             // Display existing task details (read-only view)
@@ -878,7 +878,7 @@ const ImagingTasksModal = ({
             </form>
           )}
         </div>
-        {selectedMicroscopeId !== 'squid-control/squid-control-reef' && (
+        {selectedMicroscopeId !== 'agent-lens/squid-control-reef' && (
           <div className="imaging-tasks-modal-footer">
             {!task && (
               <button 

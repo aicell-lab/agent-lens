@@ -225,7 +225,7 @@ const Sidebar = ({
 
   const isRealMicroscopeSelected = selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ||
                                  selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2';
-  const isSimulatedMicroscopeSelected = selectedMicroscopeId === 'squid-control/squid-control-reef';
+  const isSimulatedMicroscopeSelected = selectedMicroscopeId === 'agent-lens/squid-control-reef';
 
   // Toggle function for main sidebar collapse
   const toggleMainSidebarCollapse = () => {
@@ -253,9 +253,9 @@ const Sidebar = ({
               className={`sidebar-submenu microscope-options-dropdown ${isMicroscopeDropdownOpen ? 'open' : ''}`}
             >
               <button
-                className={`sidebar-submenu-tab ${selectedMicroscopeId === 'squid-control/squid-control-reef' ? 'active' : ''}`}
+                className={`sidebar-submenu-tab ${selectedMicroscopeId === 'agent-lens/squid-control-reef' ? 'active' : ''}`}
                 onClick={() => {
-                  onMicroscopeSelect('squid-control/squid-control-reef');
+                  onMicroscopeSelect('agent-lens/squid-control-reef');
                   // setIsMicroscopeDropdownOpen(false); // Optional: close dropdown on selection
                 }}
                 disabled={!!currentOperation}

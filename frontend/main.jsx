@@ -46,7 +46,7 @@ const MicroscopeControl = () => {
   const [channelNames, setChannelNames] = useState(null);
   const [vectorLayer, setVectorLayer] = useState(null);
   const [loginError, setLoginError] = useState(null);
-  const [selectedMicroscopeId, setSelectedMicroscopeId] = useState("squid-control/squid-control-reef");
+  const [selectedMicroscopeId, setSelectedMicroscopeId] = useState("agent-lens/squid-control-reef");
   const [currentOperation, setCurrentOperation] = useState(null);
   const [hyphaManager, setHyphaManager] = useState(null);
   const [orchestratorManagerService, setOrchestratorManagerService] = useState(null);
