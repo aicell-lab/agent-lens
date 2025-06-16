@@ -105,7 +105,6 @@ const ImagingTasksModal = ({
   const [illuminationLoading, setIlluminationLoading] = useState(false);
   const [doContrastAutofocus, setDoContrastAutofocus] = useState(false);
   const [doReflectionAf, setDoReflectionAf] = useState(true);
-  const [wellPlateType, setWellPlateType] = useState('96');
   
   // State for visual imaging zone selection
   const [scanningZoneString, setScanningZoneString] = useState('[[0,0],[0,0]]'); // Keep this for the final JSON string
@@ -191,6 +190,7 @@ const ImagingTasksModal = ({
           const slotNumber = slot.incubator_slot;
           const sampleName = slot.name; // Name is guaranteed to be non-empty here
           const currentLocation = slot.location; // e.g., 'incubator_slot', 'microscope1', 'robotic_arm'
+          const wellPlateType = slot.well_plate_type || '96'; // Extract well plate type from slot info
           // const originalOccupied = slot.metadata?.occupied || false; // Original occupied flag
 
           let displayLabel;
@@ -209,6 +209,7 @@ const ImagingTasksModal = ({
             // originalOccupied: originalOccupied, // Kept for reference, but not used in new disabling logic
             slotNumber: slotNumber,
             currentLocation: currentLocation,
+            wellPlateType: wellPlateType, // Store well plate type from slot
           };
         })
         .filter(slot => slot.slotNumber !== undefined && !isNaN(slot.slotNumber))
@@ -255,7 +256,6 @@ const ImagingTasksModal = ({
       setTaskName('');
       setDoContrastAutofocus(false);
       setDoReflectionAf(true);
-      setWellPlateType('96');
       setIntervalMinutes('30');
       setPendingTimePoints('');
       
@@ -446,6 +446,10 @@ const ImagingTasksModal = ({
       showNotification(`Invalid Scanning Zone format: ${e.message}`, 'error'); return;
     }
 
+    // Get well plate type from selected slot
+    const selectedSlotInfo = availableSlots.find(s => s.value === incubatorSlot);
+    const wellPlateType = selectedSlotInfo?.wellPlateType || '96';
+
     // Format illumination settings for the new API
     const formattedIlluminationSettings = enabledIlluminationSettings.map(setting => ({
       channel: setting.channel,
@@ -604,6 +608,11 @@ const ImagingTasksModal = ({
                     ))}
                   </select>
                   {slotsError && <p className="text-xs text-red-500 mt-1">{slotsError}</p>}
+                  {incubatorSlot && availableSlots.find(s => s.value === incubatorSlot) && (
+                    <p className="text-xs text-gray-600 mt-1">
+                      Well Plate Type: {availableSlots.find(s => s.value === incubatorSlot)?.wellPlateType || '96'} (from sample configuration)
+                    </p>
+                  )}
                 </div>
               </fieldset>
 
@@ -612,22 +621,6 @@ const ImagingTasksModal = ({
                       Imaging Zone & FOV
                       <TutorialTooltip text="Define the area on the well plate to be imaged and the number of fields of view (FOVs) within each selected well."/>
                   </legend>
-                  <div className="form-group">
-                      <label htmlFor="wellPlateType" className="form-label">
-                          Well Plate Type
-                          <TutorialTooltip text="Select the type of well plate being used (e.g., 96-well). This helps in visualizing the imaging area." />
-                      </label>
-                      <select
-                          id="wellPlateType"
-                          className="modal-input"
-                          value={wellPlateType}
-                          onChange={(e) => setWellPlateType(e.target.value)}
-                          disabled={slotsLoading || illuminationLoading}
-                      >
-                          <option value="96">96 Well Plate</option>
-                          {/* Add other plate types if needed */}
-                      </select>
-                  </div>
 
                   <p className="text-sm mb-2 form-label">
                       Select imaging area by clicking and dragging on the grid below.
