@@ -411,7 +411,7 @@ const MicroscopeControlPanel = ({
 
       const pc = await window.hyphaWebsocketClient.getRTCService(
         serverForRtc, // Use the server from HyphaManager
-        simpleWebRtcServiceName, 
+        fullWebRtcServiceId, // Use full service ID instead of simple name
         {
           ice_servers: iceServers,
           on_init: async (peerConnection) => {
@@ -480,19 +480,19 @@ const MicroscopeControlPanel = ({
 
       // After RTC service is obtained, get the actual microscope service through it
       try {
-        appendLog(`Attempting to get microscope service '${simpleWebRtcServiceName}' (from '${selectedMicroscopeId}') via WebRTC PC.`);
-        const remoteMicroscopeService = await pc.getService(simpleWebRtcServiceName);
-        if (remoteMicroscopeService) {
-          appendLog(`Successfully got microscope service '${simpleWebRtcServiceName}' via WebRTC. API:`);
-          // You can store remoteMicroscopeService in a state if you need to call its methods
-          // For now, just logging its presence.
-          console.log(await remoteMicroscopeService.api());
-        } else {
-          appendLog(`Failed to get microscope service '${simpleWebRtcServiceName}' via WebRTC. Service was null.`);
-        }
-      } catch (error) {
-        appendLog(`Error getting microscope service '${simpleWebRtcServiceName}' (from '${selectedMicroscopeId}') via WebRTC: ${error.message}`);
-        console.error(`Error getting microscope service '${simpleWebRtcServiceName}' (from '${selectedMicroscopeId}') via WebRTC:`, error);
+        appendLog(`Attempting to get microscope service '${selectedMicroscopeId}' via WebRTC PC.`);
+        const remoteMicroscopeService = await pc.getService(selectedMicroscopeId);
+                  if (remoteMicroscopeService) {
+            appendLog(`Successfully got microscope service '${selectedMicroscopeId}' via WebRTC. API:`);
+            // You can store remoteMicroscopeService in a state if you need to call its methods
+            // For now, just logging its presence.
+            console.log(await remoteMicroscopeService.api());
+          } else {
+            appendLog(`Failed to get microscope service '${selectedMicroscopeId}' via WebRTC. Service was null.`);
+          }
+        } catch (error) {
+          appendLog(`Error getting microscope service '${selectedMicroscopeId}' via WebRTC: ${error.message}`);
+          console.error(`Error getting microscope service '${selectedMicroscopeId}' via WebRTC:`, error);
       }
 
       setIsWebRtcActive(true);
