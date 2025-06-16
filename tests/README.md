@@ -10,7 +10,6 @@ This directory contains comprehensive tests for the Agent-Lens microscopy platfo
 - **Slow Tests**: Long-running tests (marked as slow)
 
 ### Frontend Tests
-- **React Tests**: Component and unit tests for the React frontend
 - **Frontend Service Tests**: E2E tests for the FastAPI frontend service using Playwright
 
 ## Setup

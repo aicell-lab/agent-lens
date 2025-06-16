@@ -261,7 +261,7 @@ docs/                    # Documentation and diagrams
 ## 5. Testing Strategy
 
 ### 5.1. Test Infrastructure (✅ Working)
-- **Framework**: pytest with asyncio support, React Testing Library, Playwright for E2E
+- **Framework**: pytest with asyncio support, Playwright for E2E testing
 - **Dependencies**: CLIP, FAISS-CPU, torch for vector similarity tests, Playwright for browser testing
 - **Test Runner**: `python scripts/run_tests.py` with multiple test types
 - **Coverage**: pytest-cov for comprehensive coverage reporting
@@ -339,8 +339,8 @@ container: python:3.11-slim
   run: python scripts/run_tests.py --type unit
 - name: Run fast tests  
   run: python scripts/run_tests.py --type fast
-- name: Run React tests
-  run: cd frontend && npm test -- --coverage --watchAll=false
+- name: Run frontend service tests
+  run: python scripts/run_tests.py --frontend-service
 ```
 
 ## 6. Deployment & Operations
