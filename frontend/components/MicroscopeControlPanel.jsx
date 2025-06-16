@@ -46,7 +46,7 @@ const numpyArrayToDataURL = (numpyArray) => {
 };
 
 const WEBRTC_SERVICE_IDS = {
-  "agent-lens/squid-control-reef": "squid-control/video-track-squid-control-reef",
+  "agent-lens/squid-control-reef": "agent-lens/video-track-squid-control-reef",
   "reef-imaging/mirror-microscope-control-squid-1": "reef-imaging/video-track-microscope-control-squid-1",
   "reef-imaging/mirror-microscope-control-squid-2": "reef-imaging/video-track-microscope-control-squid-2", // Assuming typo correction
 };
