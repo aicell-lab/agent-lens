@@ -7,6 +7,16 @@ import SampleSelector from './SampleSelector';
 import ImagingTasksModal from './ImagingTasksModal';
 import './ImagingTasksModal.css'; // Added for well plate styles
 
+// Add OpenLayers imports for the map view feature
+import 'ol/ol.css';
+import Map from 'ol/Map';
+import View from 'ol/View';
+import TileLayer from 'ol/layer/Tile';
+import XYZ from 'ol/source/XYZ';
+import Overlay from 'ol/Overlay';
+import { fromLonLat, toLonLat } from 'ol/proj';
+import Projection from 'ol/proj/Projection';
+
 // Helper function to convert a uint8 hypha-rpc numpy array to a displayable Data URL
 const numpyArrayToDataURL = (numpyArray) => {
   if (!numpyArray || !numpyArray._rvalue) {
@@ -159,6 +169,31 @@ const MicroscopeControlPanel = ({
   const handleSampleLoadStatusChange = useCallback((status) => {
     setSampleLoadStatus(status);
   }, []);
+
+  // New state and refs for the map view feature
+  const [microscopeMap, setMicroscopeMap] = useState(null);
+  const [mapView, setMapView] = useState(null);
+  const [videoOverlay, setVideoOverlay] = useState(null);
+  const [mapTileLayer, setMapTileLayer] = useState(null);
+  const [isMapViewEnabled, setIsMapViewEnabled] = useState(false);
+  const [currentScaleLevel, setCurrentScaleLevel] = useState(1); // Default to scale 1 (highest resolution)
+  const mapContainerRef = useRef(null);
+  const videoOverlayRef = useRef(null);
+  const mapInitializedRef = useRef(false);
+
+  // Stage limits for the microscope (in mm)
+  const stageLimits = {
+    x_positive: 120,    // mm
+    x_negative: 0,      // mm  
+    y_positive: 86,     // mm
+    y_negative: 0,      // mm
+    z_positive: 6       // mm
+  };
+
+  // Pixel size configuration (approximate based on 750x750 frame)
+  const pixelSizeUm = 0.333; // micrometers per pixel
+  const frameSize = 750; // pixels
+  const frameSizeMm = (frameSize * pixelSizeUm) / 1000; // frame size in mm
 
   useEffect(() => {
     actualIlluminationIntensityRef.current = actualIlluminationIntensity;
@@ -551,10 +586,20 @@ const MicroscopeControlPanel = ({
         appendLog(`Error playing video: ${error.message}`);
         console.error("Error attempting to play video:", error);
       });
+      
+      // If map view is enabled, ensure video overlay is visible
+      if (isMapViewEnabled && videoOverlayRef.current) {
+        videoOverlayRef.current.style.display = 'block';
+      }
     } else if (!isWebRtcActive && videoRef.current) {
         videoRef.current.srcObject = null; // Ensure srcObject is cleared when not active
+        
+        // If map view is enabled, hide video overlay
+        if (isMapViewEnabled && videoOverlayRef.current) {
+          videoOverlayRef.current.style.display = 'none';
+        }
     }
-  }, [isWebRtcActive, remoteStream]); // videoRef.current is not a reactive dependency
+  }, [isWebRtcActive, remoteStream, isMapViewEnabled]); // videoRef.current is not a reactive dependency
 
   // Effect to stop WebRTC stream if a sample operation starts
   useEffect(() => {
@@ -568,6 +613,310 @@ const MicroscopeControlPanel = ({
       }
     }
   }, [currentOperation, isWebRtcActive, memoizedStopWebRtcStream, appendLog]);
+
+  // Initialize OpenLayers map for the image browsing feature
+  useEffect(() => {
+    // Only initialize if we have a microscope service and haven't initialized yet
+    if (!microscopeControlService || mapInitializedRef.current || !mapContainerRef.current) {
+      if (!microscopeControlService) appendLog('Map view: No microscope service available');
+      if (mapInitializedRef.current) appendLog('Map view: Already initialized');
+      if (!mapContainerRef.current) appendLog('Map view: Container ref not ready');
+      return;
+    }
+
+    // Only initialize if map view is enabled
+    if (!isMapViewEnabled) {
+      return;
+    }
+
+    // Check if the service has the get_canvas_chunk method
+    if (!microscopeControlService.get_canvas_chunk) {
+      appendLog('Map view: Microscope service does not support get_canvas_chunk method');
+      appendLog(`Available methods: ${Object.keys(microscopeControlService).join(', ')}`);
+      return;
+    }
+
+    appendLog('Map view: get_canvas_chunk method found, proceeding with initialization...');
+
+    // Define a custom projection for the microscope coordinate system (in mm)
+    const microscopeProjection = new Projection({
+      code: 'MICROSCOPE',
+      units: 'mm',
+      extent: [
+        stageLimits.x_negative,
+        stageLimits.y_negative,
+        stageLimits.x_positive,
+        stageLimits.y_positive
+      ]
+    });
+
+    // Create a custom tile source that fetches chunks from the microscope service
+    const createTileSource = () => {
+      appendLog('Creating tile source for map view...');
+      
+      return new XYZ({
+        projection: microscopeProjection,
+        tileSize: 256,
+        maxZoom: 5, // scale1 to scale5
+        minZoom: 0,
+        extent: [
+          stageLimits.x_negative,
+          stageLimits.y_negative,
+          stageLimits.x_positive,
+          stageLimits.y_positive
+        ],
+        tileLoadFunction: (imageTile, src) => {
+          appendLog(`Tile load function called with src: ${src}`);
+          
+          // Handle async loading properly
+          (async () => {
+            try {
+              // Extract tile coordinates from the URL
+              const urlParts = src.split('/');
+              const z = parseInt(urlParts[1]); // OpenLayers zoom level
+              const x = parseInt(urlParts[2]);
+              const y = parseInt(urlParts[3]);
+              
+              // Convert OpenLayers zoom level to zarr scale level
+              // OpenLayers: z=0 (most zoomed out) to z=4 (most zoomed in)
+              // Zarr: scale5 (lowest resolution) to scale1 (highest resolution)
+              const scaleLevel = Math.max(1, Math.min(5, 5 - z));
+              
+              appendLog(`Loading tile: z=${z}, x=${x}, y=${y} -> scale${scaleLevel}`);
+              
+              // Convert tile coordinates to world coordinates (mm)
+              const tileSize = 256; // pixels per tile
+              const pixelSizeUm = 0.333; // micrometers per pixel
+              
+              // Calculate the scale factor for this scale level
+              // scale1 = 1x, scale2 = 4x, scale3 = 16x, scale4 = 64x, scale5 = 256x
+              const scaleFactor = Math.pow(4, scaleLevel - 1);
+              
+              // Calculate world tile size in micrometers, then convert to mm
+              const worldTileSizeUm = tileSize * pixelSizeUm * scaleFactor;
+              const worldTileSizeMm = worldTileSizeUm / 1000;
+              
+              // Calculate world coordinates for this tile center
+              // We need to offset from the current microscope position as the origin
+              const tilesPerSide = Math.pow(2, z); // Number of tiles per side at this zoom level
+              const offsetX = (x - (tilesPerSide / 2)) * worldTileSizeMm;
+              const offsetY = (y - (tilesPerSide / 2)) * worldTileSizeMm;
+              
+              const xMm = xPosition + offsetX;
+              const yMm = yPosition + offsetY;
+              
+              appendLog(`Requesting chunk at x=${xMm.toFixed(2)}mm, y=${yMm.toFixed(2)}mm, scale=${scaleLevel} (tile offset: ${offsetX.toFixed(2)}, ${offsetY.toFixed(2)})`);
+              
+              // Fetch the chunk from the microscope service
+              const result = await microscopeControlService.get_canvas_chunk(xMm, yMm, scaleLevel);
+              
+              // Log result without the base64 data to avoid cluttering logs
+              const logResult = { ...result };
+              if (logResult.data) {
+                logResult.data = `[${logResult.data.length} characters of base64 data]`;
+              }
+              appendLog(`Chunk result received: ${JSON.stringify(logResult, null, 2)}`);
+              
+              // Check for the actual response format from the service
+              if (result && result.data && result.format === 'png_base64') {
+                // Set the image source with the base64 PNG data
+                const img = imageTile.getImage();
+                img.onload = () => {
+                  appendLog(`Tile loaded successfully: z=${z}, x=${x}, y=${y}`);
+                  imageTile.setState(2); // TileState.LOADED
+                };
+                img.onerror = () => {
+                  appendLog(`Tile image load failed: z=${z}, x=${x}, y=${y}`);
+                  imageTile.setState(3); // TileState.ERROR
+                };
+                
+                // Set the source as a data URL
+                img.src = `data:image/png;base64,${result.data}`;
+                appendLog(`Tile image source set for z=${z}, x=${x}, y=${y}`);
+                
+              } else {
+                const errorMsg = result ? 
+                  `Unexpected response format. Keys: ${Object.keys(result).join(', ')}. Format: ${result.format}, Has data: ${!!result.data}` :
+                  'No data received';
+                appendLog(`Failed to load tile at x=${xMm.toFixed(2)}mm, y=${yMm.toFixed(2)}mm, scale=${scaleLevel}: ${errorMsg}`);
+                imageTile.setState(3); // TileState.ERROR
+              }
+            } catch (error) {
+              appendLog(`Error loading tile: ${error.message}`);
+              console.error('Error loading tile:', error);
+              imageTile.setState(3); // TileState.ERROR
+            }
+          })();
+        },
+        // Use a simple URL pattern that we'll parse in tileLoadFunction
+        url: '/{z}/{x}/{y}'
+      });
+    };
+
+    // Create the tile layer
+    const tileLayer = new TileLayer({
+      source: createTileSource(),
+      opacity: 1
+    });
+
+    // Create the map view centered on the current microscope position
+    const view = new View({
+      projection: microscopeProjection,
+      center: [xPosition, yPosition], // Use actual microscope position
+      zoom: 4, // Start at OpenLayers zoom 4, which corresponds to scale1 (highest resolution)
+      maxZoom: 4, // OpenLayers zoom 4 = scale1 (highest resolution)
+      minZoom: 0, // OpenLayers zoom 0 = scale5 (lowest resolution)
+      extent: [
+        stageLimits.x_negative,
+        stageLimits.y_negative,
+        stageLimits.x_positive,
+        stageLimits.y_positive
+      ]
+    });
+
+    appendLog(`Creating map view at center: [${xPosition}, ${yPosition}], starting at scale1 (highest resolution)`);
+    appendLog(`Stage limits: x=[${stageLimits.x_negative}, ${stageLimits.x_positive}], y=[${stageLimits.y_negative}, ${stageLimits.y_positive}]`);
+
+    // Create the map
+    const olMap = new Map({
+      target: mapContainerRef.current,
+      layers: [tileLayer],
+      view: view,
+      controls: [] // We'll add custom controls later if needed
+    });
+
+    // Force map to update its size after creation
+    setTimeout(() => {
+      appendLog('Updating map size...');
+      olMap.updateSize();
+      const center = view.getCenter();
+      const olZoom = view.getZoom();
+      const scaleLevel = Math.max(1, Math.min(5, 5 - Math.round(olZoom)));
+      appendLog(`Map size updated, current view center: [${center[0]}, ${center[1]}], scale: ${scaleLevel}`);
+    }, 100);
+
+    // Create video overlay for the WebRTC stream
+    const overlay = new Overlay({
+      element: videoOverlayRef.current,
+      positioning: 'center-center',
+      stopEvent: false
+    });
+    olMap.addOverlay(overlay);
+
+    // Store references
+    setMicroscopeMap(olMap);
+    setMapView(view);
+    setVideoOverlay(overlay);
+    setMapTileLayer(tileLayer);
+    setIsMapViewEnabled(true);
+    mapInitializedRef.current = true;
+
+    // Listen to zoom changes to adjust video size
+    view.on('change:resolution', () => {
+      const olZoom = view.getZoom();
+      const scaleLevel = Math.max(1, Math.min(5, 5 - Math.round(olZoom)));
+      setCurrentScaleLevel(scaleLevel);
+      
+      appendLog(`Map scale changed to: scale${scaleLevel} (OpenLayers zoom: ${olZoom.toFixed(1)})`);
+      
+      // Calculate video size based on scale level
+      if (videoOverlay && videoOverlayRef.current) {
+        // Each scale level is 1/4 the resolution of the previous one
+        // scale1 = full size (750px), scale2 = 1/4 size, scale3 = 1/16 size, etc.
+        const baseVideoSize = 750; // Full size at scale1
+        const scaleFactor = Math.pow(0.25, scaleLevel - 1); // 1/4 for each scale level
+        const videoSize = Math.max(50, baseVideoSize * scaleFactor); // Minimum 50px
+        
+        videoOverlayRef.current.style.width = `${videoSize}px`;
+        videoOverlayRef.current.style.height = `${videoSize}px`;
+        
+        appendLog(`Video overlay resized to: ${videoSize.toFixed(0)}px for scale${scaleLevel} (scale factor: ${scaleFactor.toFixed(3)})`);
+      }
+    });
+
+    appendLog('Map view initialized successfully');
+
+    // Test the tile loading mechanism
+    setTimeout(async () => {
+      try {
+        appendLog('Testing chunk loading mechanism...');
+        appendLog(`Test parameters: x=${xPosition}mm, y=${yPosition}mm, scale=2`);
+        const testResult = await microscopeControlService.get_canvas_chunk(xPosition, yPosition, 2);
+        
+        // Log result without the base64 data to avoid cluttering logs
+        const logTestResult = { ...testResult };
+        if (logTestResult.data) {
+          logTestResult.data = `[${logTestResult.data.length} characters of base64 data]`;
+        }
+        appendLog(`Test result: ${JSON.stringify(logTestResult, null, 2)}`);
+        
+        if (testResult && testResult.data && testResult.format === 'png_base64') {
+          appendLog('Test chunk loading successful!');
+        } else {
+          const errorMsg = testResult ? 
+            `Unexpected test response format. Keys: ${Object.keys(testResult).join(', ')}. Format: ${testResult.format}, Has data: ${!!testResult.data}` :
+            'No test response received';
+          appendLog(`Test chunk loading failed: ${errorMsg}`);
+        }
+      } catch (error) {
+        appendLog(`Test chunk loading error: ${error.message}`);
+      }
+    }, 500);
+
+    // Cleanup function
+    return () => {
+      if (olMap) {
+        olMap.setTarget(null);
+        olMap.dispose();
+      }
+      mapInitializedRef.current = false;
+    };
+  }, [isMapViewEnabled, microscopeControlService, selectedMicroscopeId, xPosition, yPosition, appendLog]);
+
+  // Update map center when microscope position changes
+  useEffect(() => {
+    if (!mapView || !videoOverlay || !isMapViewEnabled) return;
+
+    // Update map center to follow microscope position
+    mapView.setCenter([xPosition, yPosition]);
+    
+    // Update video overlay position
+    videoOverlay.setPosition([xPosition, yPosition]);
+  }, [xPosition, yPosition, mapView, videoOverlay, isMapViewEnabled]);
+
+  // Show/hide video overlay based on WebRTC stream status
+  useEffect(() => {
+    if (!videoOverlay || !videoOverlayRef.current) return;
+
+    if (isWebRtcActive && remoteStream) {
+      videoOverlayRef.current.style.display = 'block';
+    } else {
+      videoOverlayRef.current.style.display = 'none';
+    }
+  }, [isWebRtcActive, remoteStream, videoOverlay]);
+
+  // Function to manually initialize or destroy the map
+  const toggleMapView = () => {
+    if (isMapViewEnabled) {
+      // Disable map view
+      appendLog('Disabling map view mode');
+      if (microscopeMap) {
+        microscopeMap.setTarget(null);
+        microscopeMap.dispose();
+      }
+      setMicroscopeMap(null);
+      setMapView(null);
+      setVideoOverlay(null);
+      setMapTileLayer(null);
+      setIsMapViewEnabled(false);
+      mapInitializedRef.current = false;
+    } else {
+      // Enable map view
+      appendLog('Enabling map view mode');
+      setIsMapViewEnabled(true);
+      // The map will be initialized by the useEffect when isMapViewEnabled becomes true
+    }
+  };
 
   const moveMicroscope = async (direction, multiplier) => {
     if (!microscopeControlService) return;
@@ -869,12 +1218,17 @@ const MicroscopeControlPanel = ({
         <div
           id="image-display"
           className={`w-full border ${
-            (snapshotImage || isWebRtcActive) ? 'border-gray-300' : 'border-dotted border-gray-400'
+            (snapshotImage || isWebRtcActive || isMapViewEnabled) ? 'border-gray-300' : 'border-dotted border-gray-400'
           } rounded flex items-center justify-center bg-black relative`}
+          ref={mapContainerRef}
         >
-          {isWebRtcActive && !webRtcError ? (
-            <video ref={videoRef} autoPlay playsInline muted className="object-contain w-full h-full" />
-          ) : snappedImageData.url ? (
+          {/* Show different content based on whether map view is enabled */}
+          {!isMapViewEnabled && !isWebRtcActive && !snappedImageData.url && (
+            <p className="placeholder-text text-center text-gray-300">
+              {webRtcError ? `WebRTC Error: ${webRtcError}` : (microscopeControlService ? 'Image Display' : 'Microscope not connected')}
+            </p>
+          )}
+          {!isMapViewEnabled && !isWebRtcActive && snappedImageData.url && (
             <>
               <img
                 src={snappedImageData.url}
@@ -897,12 +1251,79 @@ const MicroscopeControlPanel = ({
                 </button>
               )}
             </>
-          ) : (
-            <p className="placeholder-text text-center text-gray-300">
-              {webRtcError ? `WebRTC Error: ${webRtcError}` : (microscopeControlService ? 'Image Display' : 'Microscope not connected')}
-            </p>
+          )}
+          {/* Legacy video display for non-map view mode */}
+          {!isMapViewEnabled && isWebRtcActive && !webRtcError && (
+            <video ref={videoRef} autoPlay playsInline muted className="object-contain w-full h-full" />
           )}
         </div>
+        
+        {/* Video overlay container for map view - positioned outside the map container */}
+        {isMapViewEnabled && (
+          <div 
+            ref={videoOverlayRef}
+            style={{
+              position: 'absolute',
+              display: 'none',
+              width: '750px',
+              height: '750px',
+              pointerEvents: 'none',
+              transform: 'translate(-50%, -50%)',
+              zIndex: 10,
+              border: '2px solid rgba(59, 130, 246, 0.5)',
+              borderRadius: '4px',
+              overflow: 'hidden'
+            }}
+          >
+            <video 
+              ref={videoRef} 
+              autoPlay 
+              playsInline 
+              muted 
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'contain'
+              }}
+            />
+          </div>
+        )}
+        
+        {/* Map zoom controls */}
+        {isMapViewEnabled && (
+          <div className="absolute top-2 left-2 z-20 flex flex-col gap-1">
+            <button
+              onClick={() => {
+                if (mapView) {
+                  const currentOlZoom = mapView.getZoom();
+                  const newOlZoom = Math.min(4, currentOlZoom + 1); // Max zoom 4 = scale1
+                  mapView.setZoom(newOlZoom);
+                }
+              }}
+              className="bg-white hover:bg-gray-100 text-gray-700 px-2 py-1 rounded shadow-md text-sm"
+              title="Higher Resolution (Scale Down)"
+            >
+              <i className="fas fa-plus"></i>
+            </button>
+            <button
+              onClick={() => {
+                if (mapView) {
+                  const currentOlZoom = mapView.getZoom();
+                  const newOlZoom = Math.max(0, currentOlZoom - 1); // Min zoom 0 = scale5
+                  mapView.setZoom(newOlZoom);
+                }
+              }}
+              className="bg-white hover:bg-gray-100 text-gray-700 px-2 py-1 rounded shadow-md text-sm"
+              title="Lower Resolution (Scale Up)"
+            >
+              <i className="fas fa-minus"></i>
+            </button>
+            <div className="bg-white text-gray-700 px-2 py-1 rounded shadow-md text-xs text-center">
+              Scale{currentScaleLevel}
+            </div>
+          </div>
+        )}
+        
         {/* Video Contrast Controls */}
         {isWebRtcActive && (
           <div className="video-contrast-controls mt-2 p-2 border border-gray-300 rounded-lg bg-white bg-opacity-90">
@@ -1033,6 +1454,18 @@ const MicroscopeControlPanel = ({
                 <i className="fas fa-video icon mr-1"></i> {isWebRtcActive ? 'Stop Live' : 'Start Live'}
               </button>
             </div>
+            {/* Map View Toggle - Available for all microscopes */}
+            {selectedMicroscopeId && (
+              <div className="mt-2">
+                <button
+                  className={`control-button ${isMapViewEnabled ? 'bg-orange-500 hover:bg-orange-600' : 'bg-gray-500 hover:bg-gray-600'} text-white w-full px-1.5 py-0.5 rounded text-xs`}
+                  onClick={toggleMapView}
+                  title="Toggle between traditional view and map browsing view"
+                >
+                  <i className="fas fa-map icon mr-1"></i> {isMapViewEnabled ? 'Disable Map View' : 'Enable Map View'}
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="coordinate-container mb-3 flex justify-between space-x-1">
