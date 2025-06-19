@@ -138,6 +138,12 @@ const MicroscopeControlPanel = ({
   const [videoContrastMax, setVideoContrastMax] = useState(255);
   const [autoContrastEnabled, setAutoContrastEnabled] = useState(false);
   const autoContrastEnabledRef = useRef(autoContrastEnabled);
+  
+  // Auto-contrast adjustment parameters
+  const [autoContrastMinAdjust, setAutoContrastMinAdjust] = useState(-60); // P5 - 30
+  const [autoContrastMaxAdjust, setAutoContrastMaxAdjust] = useState(60);  // P95 + 30
+  const autoContrastMinAdjustRef = useRef(autoContrastMinAdjust);
+  const autoContrastMaxAdjustRef = useRef(autoContrastMaxAdjust);
 
   // Refs to hold the latest actual values for use in debounced effects
   const actualIlluminationIntensityRef = useRef(actualIlluminationIntensity);
@@ -179,6 +185,15 @@ const MicroscopeControlPanel = ({
   useEffect(() => {
     autoContrastEnabledRef.current = autoContrastEnabled;
   }, [autoContrastEnabled]);
+
+  // Keep adjustment parameter refs in sync with state
+  useEffect(() => {
+    autoContrastMinAdjustRef.current = autoContrastMinAdjust;
+  }, [autoContrastMinAdjust]);
+
+  useEffect(() => {
+    autoContrastMaxAdjustRef.current = autoContrastMaxAdjust;
+  }, [autoContrastMaxAdjust]);
 
   // Memoized function to stop the WebRTC stream
   const memoizedStopWebRtcStream = useCallback(() => {
@@ -467,16 +482,23 @@ const MicroscopeControlPanel = ({
                     console.log('Received metadata via data channel:', metadata);
                     setFrameMetadata(metadata);
                     
-                    // Auto-adjust contrast range if enabled (use ref to get current value)
+                    // Auto-adjust contrast range if enabled (use refs to get current values)
                     if (autoContrastEnabledRef.current && metadata.gray_level_stats) {
                       const stats = metadata.gray_level_stats;
-                      // Auto-adjust contrast range based on 5th and 95th percentiles for better dynamic range
+                      // Auto-adjust contrast range based on percentiles with user adjustments
                       if (stats.percentiles) {
-                        const newMin = Math.round((stats.percentiles.p5 || 0) * 255 / 100);
-                        const newMax = Math.round((stats.percentiles.p95 || 100) * 255 / 100);
-                        setVideoContrastMin(Math.max(0, newMin));
-                        setVideoContrastMax(Math.min(255, newMax));
-                        console.log(`Auto-contrast continuously updated: Min=${newMin}, Max=${newMax} (P5-P95 percentiles)`);
+                        const p5Value = (stats.percentiles.p5 || 0) * 255 / 100;
+                        const p95Value = (stats.percentiles.p95 || 100) * 255 / 100;
+                        
+                        const currentMinAdjust = autoContrastMinAdjustRef.current;
+                        const currentMaxAdjust = autoContrastMaxAdjustRef.current;
+                        
+                        const newMin = Math.round(p5Value + currentMinAdjust);
+                        const newMax = Math.round(p95Value + currentMaxAdjust);
+                        
+                        setVideoContrastMin(Math.max(0, Math.min(254, newMin)));
+                        setVideoContrastMax(Math.min(255, Math.max(1, newMax)));
+                        console.log(`Auto-contrast updated: Min=${newMin} (P5${currentMinAdjust >= 0 ? '+' : ''}${currentMinAdjust}), Max=${newMax} (P95${currentMaxAdjust >= 0 ? '+' : ''}${currentMaxAdjust})`);
                       }
                     }
                     
@@ -640,16 +662,20 @@ const MicroscopeControlPanel = ({
   useEffect(() => {
     if (autoContrastEnabled && frameMetadata && frameMetadata.gray_level_stats) {
       const stats = frameMetadata.gray_level_stats;
-      // Auto-adjust contrast range based on 5th and 95th percentiles for better dynamic range
+      // Auto-adjust contrast range based on percentiles with user adjustments
       if (stats.percentiles) {
-        const newMin = Math.round((stats.percentiles.p5 || 0) * 255 / 100);
-        const newMax = Math.round((stats.percentiles.p95 || 100) * 255 / 100);
-        setVideoContrastMin(Math.max(0, newMin));
-        setVideoContrastMax(Math.min(255, newMax));
-        appendLog(`Auto-contrast applied: Min=${newMin}, Max=${newMax} (based on P5-P95 percentiles)`);
+        const p5Value = (stats.percentiles.p5 || 0) * 255 / 100;
+        const p95Value = (stats.percentiles.p95 || 100) * 255 / 100;
+        
+        const newMin = Math.round(p5Value + autoContrastMinAdjust);
+        const newMax = Math.round(p95Value + autoContrastMaxAdjust);
+        
+        setVideoContrastMin(Math.max(0, Math.min(254, newMin)));
+        setVideoContrastMax(Math.min(255, Math.max(1, newMax)));
+        appendLog(`Auto-contrast applied: Min=${newMin} (P5${autoContrastMinAdjust >= 0 ? '+' : ''}${autoContrastMinAdjust}), Max=${newMax} (P95${autoContrastMaxAdjust >= 0 ? '+' : ''}${autoContrastMaxAdjust})`);
       }
     }
-  }, [autoContrastEnabled]); // Only trigger when autoContrastEnabled changes
+  }, [autoContrastEnabled, autoContrastMinAdjust, autoContrastMaxAdjust]); // Trigger when toggle or adjustments change
 
   // Helper function to render histogram display
   const renderHistogramDisplay = () => {
@@ -1117,6 +1143,85 @@ const MicroscopeControlPanel = ({
                 {!isDataChannelConnected && ' (Channel Required)'}
               </span>
             </div>
+            
+            {/* Auto Contrast Parameters */}
+            {autoContrastEnabled && (
+              <div className="auto-contrast-params mb-2 p-2 bg-gray-50 rounded border">
+                <div className="text-xs text-gray-600 mb-1">Adjustment Parameters</div>
+                <div className="flex items-center justify-between space-x-2">
+                  {/* Min Adjustment */}
+                  <div className="flex items-center space-x-1">
+                    <label className="text-xs text-gray-600 whitespace-nowrap">P5:</label>
+                    <button
+                      type="button"
+                      className="w-5 h-5 text-xs bg-gray-200 hover:bg-gray-300 rounded flex items-center justify-center"
+                      onClick={() => setAutoContrastMinAdjust(prev => prev - 1)}
+                      disabled={!isDataChannelConnected}
+                    >
+                      <i className="fas fa-minus" style={{ fontSize: '8px' }}></i>
+                    </button>
+                    <input
+                      type="number"
+                      value={autoContrastMinAdjust}
+                      onChange={(e) => {
+                        const value = parseInt(e.target.value, 10);
+                        if (!isNaN(value)) {
+                          setAutoContrastMinAdjust(Math.max(-255, Math.min(255, value)));
+                        }
+                      }}
+                      className="w-12 px-1 py-0 text-xs text-center border border-gray-300 rounded"
+                      disabled={!isDataChannelConnected}
+                      step="1"
+                    />
+                    <button
+                      type="button"
+                      className="w-5 h-5 text-xs bg-gray-200 hover:bg-gray-300 rounded flex items-center justify-center"
+                      onClick={() => setAutoContrastMinAdjust(prev => prev + 1)}
+                      disabled={!isDataChannelConnected}
+                    >
+                      <i className="fas fa-plus" style={{ fontSize: '8px' }}></i>
+                    </button>
+                  </div>
+                  
+                  {/* Max Adjustment */}
+                  <div className="flex items-center space-x-1">
+                    <label className="text-xs text-gray-600 whitespace-nowrap">P95:</label>
+                    <button
+                      type="button"
+                      className="w-5 h-5 text-xs bg-gray-200 hover:bg-gray-300 rounded flex items-center justify-center"
+                      onClick={() => setAutoContrastMaxAdjust(prev => prev - 1)}
+                      disabled={!isDataChannelConnected}
+                    >
+                      <i className="fas fa-minus" style={{ fontSize: '8px' }}></i>
+                    </button>
+                    <input
+                      type="number"
+                      value={autoContrastMaxAdjust}
+                      onChange={(e) => {
+                        const value = parseInt(e.target.value, 10);
+                        if (!isNaN(value)) {
+                          setAutoContrastMaxAdjust(Math.max(-255, Math.min(255, value)));
+                        }
+                      }}
+                      className="w-12 px-1 py-0 text-xs text-center border border-gray-300 rounded"
+                      disabled={!isDataChannelConnected}
+                      step="1"
+                    />
+                    <button
+                      type="button"
+                      className="w-5 h-5 text-xs bg-gray-200 hover:bg-gray-300 rounded flex items-center justify-center"
+                      onClick={() => setAutoContrastMaxAdjust(prev => prev + 1)}
+                      disabled={!isDataChannelConnected}
+                    >
+                      <i className="fas fa-plus" style={{ fontSize: '8px' }}></i>
+                    </button>
+                  </div>
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  Range: P5{autoContrastMinAdjust >= 0 ? '+' : ''}{autoContrastMinAdjust} to P95{autoContrastMaxAdjust >= 0 ? '+' : ''}{autoContrastMaxAdjust} gray levels
+                </div>
+              </div>
+            )}
             
             {/* Histogram Display */}
             {frameMetadata && frameMetadata.gray_level_stats ? (
