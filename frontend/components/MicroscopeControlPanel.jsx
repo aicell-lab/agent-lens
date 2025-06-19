@@ -136,6 +136,8 @@ const MicroscopeControlPanel = ({
   // New state for video contrast adjustment
   const [videoContrastMin, setVideoContrastMin] = useState(0);
   const [videoContrastMax, setVideoContrastMax] = useState(255);
+  const [autoContrastEnabled, setAutoContrastEnabled] = useState(false);
+  const autoContrastEnabledRef = useRef(autoContrastEnabled);
 
   // Refs to hold the latest actual values for use in debounced effects
   const actualIlluminationIntensityRef = useRef(actualIlluminationIntensity);
@@ -155,6 +157,11 @@ const MicroscopeControlPanel = ({
     isSimulatedMicroscope: false
   });
 
+  // WebRTC DataChannel states for metadata
+  const [metadataDataChannel, setMetadataDataChannel] = useState(null);
+  const [frameMetadata, setFrameMetadata] = useState(null);
+  const [isDataChannelConnected, setIsDataChannelConnected] = useState(false);
+
   // Callback to receive sample load status updates from SampleSelector
   const handleSampleLoadStatusChange = useCallback((status) => {
     setSampleLoadStatus(status);
@@ -167,6 +174,11 @@ const MicroscopeControlPanel = ({
   useEffect(() => {
     actualCameraExposureRef.current = actualCameraExposure;
   }, [actualCameraExposure]);
+
+  // Keep autoContrastEnabledRef in sync with state
+  useEffect(() => {
+    autoContrastEnabledRef.current = autoContrastEnabled;
+  }, [autoContrastEnabled]);
 
   // Memoized function to stop the WebRTC stream
   const memoizedStopWebRtcStream = useCallback(() => {
@@ -184,6 +196,9 @@ const MicroscopeControlPanel = ({
     }
     setIsWebRtcActive(false);
     setRemoteStream(null);
+    setMetadataDataChannel(null);
+    setIsDataChannelConnected(false);
+    setFrameMetadata(null);
     appendLog('WebRTC stream stopped.');
   }, [appendLog, isWebRtcActive, webRtcPc]);
 
@@ -432,6 +447,58 @@ const MicroscopeControlPanel = ({
               }
             });
 
+            // Set up data channel listener for metadata
+            peerConnection.addEventListener('datachannel', (event) => {
+              const dataChannel = event.channel;
+              appendLog(`WebRTC data channel received: ${dataChannel.label}`);
+              
+              if (dataChannel.label === 'metadata') {
+                appendLog('Setting up metadata data channel...');
+                setMetadataDataChannel(dataChannel);
+                
+                dataChannel.addEventListener('open', () => {
+                  appendLog('Metadata data channel opened');
+                  setIsDataChannelConnected(true);
+                });
+                
+                dataChannel.addEventListener('message', (event) => {
+                  try {
+                    const metadata = JSON.parse(event.data);
+                    console.log('Received metadata via data channel:', metadata);
+                    setFrameMetadata(metadata);
+                    
+                    // Auto-adjust contrast range if enabled (use ref to get current value)
+                    if (autoContrastEnabledRef.current && metadata.gray_level_stats) {
+                      const stats = metadata.gray_level_stats;
+                      // Auto-adjust contrast range based on 5th and 95th percentiles for better dynamic range
+                      if (stats.percentiles) {
+                        const newMin = Math.round((stats.percentiles.p5 || 0) * 255 / 100);
+                        const newMax = Math.round((stats.percentiles.p95 || 100) * 255 / 100);
+                        setVideoContrastMin(Math.max(0, newMin));
+                        setVideoContrastMax(Math.min(255, newMax));
+                        console.log(`Auto-contrast continuously updated: Min=${newMin}, Max=${newMax} (P5-P95 percentiles)`);
+                      }
+                    }
+                    
+                  } catch (error) {
+                    appendLog(`Error parsing metadata: ${error.message}`);
+                    console.error('Error parsing metadata from data channel:', error);
+                  }
+                });
+                
+                dataChannel.addEventListener('close', () => {
+                  appendLog('Metadata data channel closed');
+                  setIsDataChannelConnected(false);
+                  setMetadataDataChannel(null);
+                });
+                
+                dataChannel.addEventListener('error', (error) => {
+                  appendLog(`Metadata data channel error: ${error}`);
+                  console.error('Metadata data channel error:', error);
+                });
+              }
+            });
+
             peerConnection.addEventListener('connectionstatechange', () => {
               appendLog(`WebRTC connection state: ${peerConnection.connectionState}`);
               if (['closed', 'failed', 'disconnected'].includes(peerConnection.connectionState)) {
@@ -568,6 +635,121 @@ const MicroscopeControlPanel = ({
       }
     }
   }, [currentOperation, isWebRtcActive, memoizedStopWebRtcStream, appendLog]);
+
+  // Effect to immediately apply auto-adjustment when toggle is turned on
+  useEffect(() => {
+    if (autoContrastEnabled && frameMetadata && frameMetadata.gray_level_stats) {
+      const stats = frameMetadata.gray_level_stats;
+      // Auto-adjust contrast range based on 5th and 95th percentiles for better dynamic range
+      if (stats.percentiles) {
+        const newMin = Math.round((stats.percentiles.p5 || 0) * 255 / 100);
+        const newMax = Math.round((stats.percentiles.p95 || 100) * 255 / 100);
+        setVideoContrastMin(Math.max(0, newMin));
+        setVideoContrastMax(Math.min(255, newMax));
+        appendLog(`Auto-contrast applied: Min=${newMin}, Max=${newMax} (based on P5-P95 percentiles)`);
+      }
+    }
+  }, [autoContrastEnabled]); // Only trigger when autoContrastEnabled changes
+
+  // Helper function to render histogram display
+  const renderHistogramDisplay = () => {
+    if (!frameMetadata || !frameMetadata.gray_level_stats || !frameMetadata.gray_level_stats.histogram) {
+      return null;
+    }
+
+    const histogram = frameMetadata.gray_level_stats.histogram;
+    const counts = histogram.counts || [];
+    const binEdges = histogram.bin_edges || [];
+    
+    if (counts.length === 0) return null;
+
+    const maxCount = Math.max(...counts);
+    const histogramWidth = 256; // Fixed width for display
+    const histogramHeight = 60;
+    
+    return (
+      <div className="histogram-display" style={{ position: 'relative', width: '100%', height: `${histogramHeight}px`, backgroundColor: '#f8f9fa', border: '1px solid #dee2e6', borderRadius: '4px' }}>
+        <svg width="100%" height={histogramHeight} style={{ display: 'block' }}>
+          {counts.map((count, index) => {
+            const x = (index / counts.length) * 100; // Convert to percentage
+            const height = (count / maxCount) * (histogramHeight - 4); // 4px padding
+            const binStart = binEdges[index] || (index * 255 / counts.length);
+            const binEnd = binEdges[index + 1] || ((index + 1) * 255 / counts.length);
+            const binCenter = (binStart + binEnd) / 2;
+            
+            return (
+              <rect
+                key={index}
+                x={`${x}%`}
+                y={histogramHeight - height - 2}
+                width={`${100 / counts.length}%`}
+                height={height}
+                fill="#6c757d"
+                title={`Bin ${binCenter.toFixed(0)}: ${count} pixels`}
+              />
+            );
+          })}
+          
+          {/* Contrast range indicators */}
+          <line
+            x1={`${(videoContrastMin / 255) * 100}%`}
+            y1="0"
+            x2={`${(videoContrastMin / 255) * 100}%`}
+            y2={histogramHeight}
+            stroke="#dc3545"
+            strokeWidth="2"
+            opacity="0.8"
+          />
+          <line
+            x1={`${(videoContrastMax / 255) * 100}%`}
+            y1="0"
+            x2={`${(videoContrastMax / 255) * 100}%`}
+            y2={histogramHeight}
+            stroke="#dc3545"
+            strokeWidth="2"
+            opacity="0.8"
+          />
+          
+          {/* Range fill */}
+          <rect
+            x={`${(videoContrastMin / 255) * 100}%`}
+            y="0"
+            width={`${((videoContrastMax - videoContrastMin) / 255) * 100}%`}
+            height={histogramHeight}
+            fill="#007bff"
+            opacity="0.2"
+          />
+        </svg>
+        
+        {/* Interactive overlay for dragging */}
+        <div 
+          style={{ 
+            position: 'absolute', 
+            top: 0, 
+            left: 0, 
+            width: '100%', 
+            height: '100%', 
+            cursor: 'crosshair' 
+          }}
+          onMouseDown={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const valueAt = Math.round((x / rect.width) * 255);
+            
+            // Determine which handle is closer
+            const distToMin = Math.abs(valueAt - videoContrastMin);
+            const distToMax = Math.abs(valueAt - videoContrastMax);
+            
+            if (distToMin < distToMax) {
+              setVideoContrastMin(Math.max(0, Math.min(valueAt, videoContrastMax - 1)));
+            } else {
+              setVideoContrastMax(Math.min(255, Math.max(valueAt, videoContrastMin + 1)));
+            }
+          }}
+        />
+      </div>
+    );
+  };
 
   const moveMicroscope = async (direction, multiplier) => {
     if (!microscopeControlService) return;
@@ -903,10 +1085,58 @@ const MicroscopeControlPanel = ({
             </p>
           )}
         </div>
-        {/* Video Contrast Controls */}
+        {/* Video Contrast Controls with Histogram */}
         {isWebRtcActive && (
           <div className="video-contrast-controls mt-2 p-2 border border-gray-300 rounded-lg bg-white bg-opacity-90">
-            <div className="text-xs font-medium text-gray-700 mb-1">Video Frame Adjustment</div>
+            <div className="text-xs font-medium text-gray-700 mb-2 flex items-center justify-between">
+              <span>Gray Level Histogram & Contrast</span>
+              <div className="flex items-center space-x-2">
+                {isDataChannelConnected && (
+                  <span className="text-green-600 text-xs">
+                    <i className="fas fa-circle text-green-500 mr-1" style={{ fontSize: '6px' }}></i>
+                    Metadata Channel
+                  </span>
+                )}
+              </div>
+            </div>
+            
+            {/* Auto Contrast Toggle */}
+            <div className="flex items-center mb-2">
+              <label className="text-xs text-gray-600 mr-2">Auto Contrast Adjustment</label>
+              <label className="auto-contrast-toggle mr-2">
+                <input
+                  type="checkbox"
+                  checked={autoContrastEnabled}
+                  onChange={(e) => setAutoContrastEnabled(e.target.checked)}
+                  disabled={!isDataChannelConnected}
+                />
+                <span className="auto-contrast-slider"></span>
+              </label>
+              <span className="text-xs text-gray-500">
+                {autoContrastEnabled ? 'ON' : 'OFF'}
+                {!isDataChannelConnected && ' (Channel Required)'}
+              </span>
+            </div>
+            
+            {/* Histogram Display */}
+            {frameMetadata && frameMetadata.gray_level_stats ? (
+              <div className="mb-2">
+                {renderHistogramDisplay()}
+                
+                {/* Statistics Display */}
+                <div className="mt-1 text-xs text-gray-600 flex justify-between">
+                  <span>Mean: {frameMetadata.gray_level_stats.mean_percent?.toFixed(1)}%</span>
+                  <span>Range: {videoContrastMin}-{videoContrastMax}</span>
+                  <span>Contrast: {frameMetadata.gray_level_stats.contrast_ratio?.toFixed(3)}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="mb-2 text-xs text-gray-500 italic">
+                {isDataChannelConnected ? 'Waiting for metadata...' : 'No histogram data available'}
+              </div>
+            )}
+            
+            {/* Manual Contrast Controls */}
             <div className="flex items-center space-x-2">
               <label htmlFor="min-contrast" className="text-xs text-gray-600 w-16 shrink-0">Min: {videoContrastMin}</label>
               <input
@@ -942,6 +1172,58 @@ const MicroscopeControlPanel = ({
                 className="w-full"
                 title={`Max value: ${videoContrastMax}`}
               />
+            </div>
+          </div>
+        )}
+
+        {/* Frame Metadata Display */}
+        {isWebRtcActive && frameMetadata && (
+          <div className="frame-metadata-display mt-2 p-2 border border-gray-300 rounded-lg bg-white bg-opacity-90">
+            <div className="text-xs font-medium text-gray-700 mb-2">Microscope Information</div>
+            <div className="text-xs text-gray-600 space-y-1">
+              {/* Stage Position */}
+              {frameMetadata.stage_position && (
+                <div>
+                  <strong>Stage Position:</strong> 
+                  X: {frameMetadata.stage_position.x_mm?.toFixed(3)}mm, 
+                  Y: {frameMetadata.stage_position.y_mm?.toFixed(3)}mm, 
+                  Z: {frameMetadata.stage_position.z_mm?.toFixed(3)}mm
+                </div>
+              )}
+              
+              {/* Channel and Exposure Info */}
+              <div>
+                <strong>Channel:</strong> {frameMetadata.channel} | 
+                <strong> Intensity:</strong> {frameMetadata.intensity}% | 
+                <strong> Exposure:</strong> {frameMetadata.exposure_time_ms}ms
+              </div>
+              
+              {/* Timestamp */}
+              {frameMetadata.timestamp && (
+                <div>
+                  <strong>Timestamp:</strong> {new Date(frameMetadata.timestamp * 1000).toLocaleString()}
+                </div>
+              )}
+              
+              {/* Exposure Quality */}
+              {frameMetadata.gray_level_stats?.exposure_quality && (
+                <div>
+                  <strong>Exposure Quality:</strong> 
+                  Well-exposed: {frameMetadata.gray_level_stats.exposure_quality.well_exposed_pixels_percent?.toFixed(1)}% | 
+                  Under: {frameMetadata.gray_level_stats.exposure_quality.underexposed_pixels_percent?.toFixed(1)}% | 
+                  Over: {frameMetadata.gray_level_stats.exposure_quality.overexposed_pixels_percent?.toFixed(1)}%
+                </div>
+              )}
+              
+              {/* Additional Stats */}
+              {frameMetadata.gray_level_stats && (
+                <div>
+                  <strong>Stats:</strong> 
+                  Std: {frameMetadata.gray_level_stats.std_percent?.toFixed(1)}% | 
+                  Dynamic Range: {frameMetadata.gray_level_stats.dynamic_range_percent?.toFixed(1)}% | 
+                  Median: {frameMetadata.gray_level_stats.median_percent?.toFixed(1)}%
+                </div>
+              )}
             </div>
           </div>
         )}
