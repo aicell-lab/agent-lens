@@ -228,7 +228,7 @@ const SampleSelector = ({
     
     if (isSimulatedMicroscopeSelected) {
       setLoadingStatus('Loading sample...');
-      setCurrentOperation('loading');
+      setCurrentOperation('loading'); // This will trigger WebRTC stream to stop in MicroscopeControlPanel
       try {
         addWorkflowMessage("Loading simulated sample...");
         const dataAlias = sampleDataAliases[selectedSampleId];
@@ -261,7 +261,7 @@ const SampleSelector = ({
       const expectedMicroscopeNumber = currentMicroscopeNumber;
       addWorkflowMessage(`Preparing to load sample on Microscope ${expectedMicroscopeNumber}`);
       setLoadingStatus('Loading sample from incubator...'); 
-      setCurrentOperation('loading');
+      setCurrentOperation('loading'); // This will trigger WebRTC stream to stop in MicroscopeControlPanel
       
       try {
         const slotMatch = selectedSampleId.match(/slot-(\d+)/);
@@ -335,7 +335,7 @@ const SampleSelector = ({
 
     if (isSimulatedMicroscopeSelected) {
       setLoadingStatus('Unloading sample...'); 
-      setCurrentOperation('unloading');
+      setCurrentOperation('unloading'); // This will trigger WebRTC stream to stop in MicroscopeControlPanel
       try {
         addWorkflowMessage("Unloading simulated sample...");
         await microscopeControlService.set_simulated_sample_data_alias('');
@@ -372,7 +372,7 @@ const SampleSelector = ({
       const expectedMicroscopeNumber = currentMicroscopeNumber;
       addWorkflowMessage(`Preparing to unload sample from Microscope ${expectedMicroscopeNumber}`);
       setLoadingStatus('Unloading sample to incubator...'); 
-      setCurrentOperation('unloading');
+      setCurrentOperation('unloading'); // This will trigger WebRTC stream to stop in MicroscopeControlPanel
       
       try {
         const slotMatch = sampleToUnloadId.match(/slot-(\d+)/);

@@ -648,8 +648,15 @@ const MicroscopeControlPanel = ({
   // Effect to stop WebRTC stream if a sample operation starts
   useEffect(() => {
     if (currentOperation && isWebRtcActive) {
-      // Only stop for operations other than navigate_to_well
-      if (currentOperation.id && !currentOperation.id.startsWith('navigate_well_')) {
+      // Handle both string operations (from SampleSelector) and object operations (from well navigation)
+      if (typeof currentOperation === 'string') {
+        // String operations like 'loading' and 'unloading' from SampleSelector should stop WebRTC
+        if (currentOperation === 'loading' || currentOperation === 'unloading') {
+          appendLog(`Sample operation '${currentOperation}' started, stopping WebRTC stream.`);
+          memoizedStopWebRtcStream();
+        }
+      } else if (currentOperation.id && !currentOperation.id.startsWith('navigate_well_')) {
+        // Object operations that are not well navigation should stop WebRTC
         appendLog(`Operation '${currentOperation.name}' started, stopping WebRTC stream.`);
         memoizedStopWebRtcStream();
       } else if (currentOperation.id && currentOperation.id.startsWith('navigate_well_')) {
@@ -1010,6 +1017,12 @@ const MicroscopeControlPanel = ({
       appendLog(`Cannot create new imaging task: ${warningMessage}`);
       if(showNotification) showNotification(warningMessage, "warning");
       return;
+    }
+
+    // Stop WebRTC stream when opening imaging task modal
+    if (isWebRtcActive) {
+      appendLog("Stopping WebRTC stream before opening imaging task modal.");
+      memoizedStopWebRtcStream();
     }
 
     setSelectedTaskForModal(task); // if task is null, it's for creating a new task
