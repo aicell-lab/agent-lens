@@ -42,6 +42,23 @@ export class HyphaServerManager {
     this.defaultClientNamePrefix = "hypha-client";
   }
 
+  // Method to update the token and clear existing connections
+  async updateToken(newToken) {
+    if (!newToken) {
+      throw new Error("updateToken requires a valid token.");
+    }
+    console.log("[HyphaServerManager] Updating token and clearing existing connections...");
+    this.token = newToken;
+    // Clear existing connections since they were made with the old token
+    try {
+      await this.disconnectAll();
+      console.log("[HyphaServerManager] Token update completed successfully");
+    } catch (error) {
+      console.error("[HyphaServerManager] Error during token update disconnect:", error);
+      // Even if disconnect fails, we still want to use the new token
+    }
+  }
+
   async getServer(workspace) {
     if (!workspace) {
       console.warn("[HyphaServerManager] Workspace cannot be null or empty. Using default 'agent-lens'.");
@@ -74,8 +91,10 @@ export class HyphaServerManager {
             errorMessage.includes('unauthorized') || 
             errorMessage.includes('forbidden') ||
             errorMessage.includes('token is not valid for workspace') || // Hypha specific
-            errorMessage.includes('no permission to access workspace')) { // Hypha specific
-          throw new Error(`Permission denied for workspace '${workspace}'. Please check your access rights.`);
+            errorMessage.includes('no permission to access workspace') || // Hypha specific
+            errorMessage.includes('token expired') ||
+            errorMessage.includes('expired token')) {
+          throw new Error(`Authentication failed for workspace '${workspace}'. This may be due to an expired or invalid token. Please try logging in again.`);
         }
         throw error; // Re-throw original or a wrapped error if not permission-specific
       });
@@ -100,6 +119,11 @@ export class HyphaServerManager {
     this.servers = {};
     this.serverConnections = {};
     console.log("[HyphaServerManager] All server connections disconnected.");
+  }
+
+  // Method to get the current token (useful for debugging)
+  getCurrentToken() {
+    return this.token;
   }
 }
 
@@ -251,9 +275,31 @@ const login_callback = (context) => {
 }
 
 const isTokenExpired = (token) => {
-  const expired = Date.now() >= (JSON.parse(atob(token.split('.')[1]))).exp * 1000;
-  console.log("[isTokenExpired] Token check. Expired:", expired);
-  return expired;
+  try {
+    if (!token || typeof token !== 'string') {
+      console.log("[isTokenExpired] Invalid token format");
+      return true;
+    }
+    
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+      console.log("[isTokenExpired] Token does not have 3 parts (invalid JWT format)");
+      return true;
+    }
+    
+    const payload = JSON.parse(atob(parts[1]));
+    if (!payload.exp) {
+      console.log("[isTokenExpired] Token has no expiration field");
+      return true;
+    }
+    
+    const expired = Date.now() >= (payload.exp * 1000);
+    console.log("[isTokenExpired] Token check. Expired:", expired);
+    return expired;
+  } catch (error) {
+    console.error("[isTokenExpired] Error parsing token:", error);
+    return true; // Treat invalid tokens as expired
+  }
 }
 
 export const login = async () => {

@@ -96,10 +96,12 @@ const MicroscopeControl = () => {
     const checkTokenAndInit = async () => {
       const token = localStorage.getItem("token");
       if (token) {
+        console.log("[checkTokenAndInit] Found token in localStorage, initializing...");
         const manager = new HyphaServerManager(token);
         setHyphaManager(manager);
         await handleLogin(selectedMicroscopeId, manager);
       } else {
+        console.log("[checkTokenAndInit] No token found, user needs to log in");
         // No token, user needs to log in, LoginPrompt will be shown
       }
     }
@@ -164,7 +166,15 @@ const MicroscopeControl = () => {
       const token = await login();
       console.log("[handleLogin] Login successful, token obtained:", token);
 
-      if (!managerToUse) {
+      // Check if we need to update the existing manager's token or create a new one
+      if (managerToUse) {
+        const currentToken = managerToUse.getCurrentToken();
+        if (currentToken !== token) {
+          console.log("[handleLogin] Token changed, updating HyphaServerManager with new token");
+          await managerToUse.updateToken(token);
+        }
+      } else {
+        console.log("[handleLogin] Creating new HyphaServerManager with fresh token");
         managerToUse = new HyphaServerManager(token);
         setHyphaManager(managerToUse); 
       }
