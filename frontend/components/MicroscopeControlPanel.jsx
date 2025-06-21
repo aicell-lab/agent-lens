@@ -103,6 +103,13 @@ const MicroscopeControlPanel = ({
   // State for SampleSelector dropdown
   const [isSampleSelectorOpen, setIsSampleSelectorOpen] = useState(false);
 
+  // Microscope configuration states
+  const [microscopeConfiguration, setMicroscopeConfiguration] = useState(null);
+  const [isConfigurationLoaded, setIsConfigurationLoaded] = useState(false);
+  const [isConfigurationLoading, setIsConfigurationLoading] = useState(false);
+  const [configurationError, setConfigurationError] = useState(null);
+  const [isConfigurationWindowOpen, setIsConfigurationWindowOpen] = useState(false);
+
   // Well Plate Navigator State
   const [selectedWellPlateType, setSelectedWellPlateType] = useState('96');
   const [currentWellPlateRows, setCurrentWellPlateRows] = useState(WELL_PLATE_CONFIGS['96'].rows);
@@ -297,6 +304,30 @@ const MicroscopeControlPanel = ({
       return () => clearInterval(interval);
     }
   }, [microscopeControlService, illuminationChannel]); // Re-run if service or channel changes to re-sync
+
+  // Effect to automatically load microscope configuration when service changes
+  useEffect(() => {
+    if (microscopeControlService && selectedMicroscopeId) {
+      // Reset configuration state when switching microscopes
+      setMicroscopeConfiguration(null);
+      setIsConfigurationLoaded(false);
+      setConfigurationError(null);
+      
+      // Only auto-load configuration if the current microscope service supports it
+      if (typeof microscopeControlService.get_microscope_configuration === 'function') {
+        appendLog(`Auto-loading configuration for selected microscope: ${selectedMicroscopeId}`);
+        loadMicroscopeConfiguration();
+      } else {
+        setConfigurationError("Configuration not supported for this microscope.");
+        appendLog(`Configuration not supported for microscope: ${selectedMicroscopeId}`);
+      }
+    } else {
+      // Clear configuration when no service or microscope selected
+      setMicroscopeConfiguration(null);
+      setIsConfigurationLoaded(false);
+      setConfigurationError("No microscope selected.");
+    }
+  }, [microscopeControlService, selectedMicroscopeId]);
 
   // Effect to update illumination when desiredIlluminationIntensity or illuminationChannel changes
   useEffect(() => {
@@ -1083,6 +1114,73 @@ const MicroscopeControlPanel = ({
     }
   };
 
+  // Function to load microscope configuration
+  const loadMicroscopeConfiguration = async () => {
+    if (!microscopeControlService) {
+      const errorMsg = "Microscope control service not available.";
+      setConfigurationError(errorMsg);
+      setIsConfigurationLoaded(false);
+      if (showNotification) showNotification(errorMsg, 'warning');
+      return;
+    }
+
+    // Check if the current microscope service supports configuration loading
+    if (typeof microscopeControlService.get_microscope_configuration !== 'function') {
+      const errorMsg = "Configuration not supported for this microscope.";
+      setConfigurationError(errorMsg);
+      setIsConfigurationLoaded(false);
+      appendLog(`Configuration loading not supported for microscope: ${selectedMicroscopeId}`);
+      return;
+    }
+
+    setIsConfigurationLoading(true);
+    setConfigurationError(null);
+    
+    try {
+      appendLog(`Loading microscope configuration for ${selectedMicroscopeId}...`);
+      const response = await microscopeControlService.get_microscope_configuration();
+      
+      if (response.success) {
+        // Store configuration without metadata
+        const configWithoutMetadata = { ...response.configuration };
+        delete configWithoutMetadata.metadata;
+        
+        setMicroscopeConfiguration(configWithoutMetadata);
+        setIsConfigurationLoaded(true);
+        appendLog(`Microscope configuration loaded successfully for ${selectedMicroscopeId}.`);
+      } else {
+        const errorMsg = "Failed to load microscope configuration.";
+        setConfigurationError(errorMsg);
+        setIsConfigurationLoaded(false);
+        appendLog(errorMsg);
+        if (showNotification) showNotification(errorMsg, 'error');
+      }
+    } catch (error) {
+      const errorMsg = `Error loading microscope configuration: ${error.message}`;
+      setConfigurationError(errorMsg);
+      setIsConfigurationLoaded(false);
+      appendLog(errorMsg);
+      if (showNotification) showNotification(errorMsg, 'error');
+      console.error("[MicroscopeControlPanel] Error loading microscope configuration:", error);
+    } finally {
+      setIsConfigurationLoading(false);
+    }
+  };
+
+  // Function to open configuration display window
+  const openConfigurationWindow = () => {
+    if (!microscopeConfiguration) {
+      if (showNotification) showNotification("No configuration loaded. Please load configuration first.", 'warning');
+      return;
+    }
+    setIsConfigurationWindowOpen(true);
+  };
+
+  // Function to close configuration display window
+  const closeConfigurationWindow = () => {
+    setIsConfigurationWindowOpen(false);
+  };
+
   return (
     <div className="microscope-control-panel-container new-mcp-layout bg-white bg-opacity-95 p-4 rounded-lg shadow-lg border-l border-gray-300 box-border">
       {/* Left Side: Image Display */}
@@ -1392,6 +1490,47 @@ const MicroscopeControlPanel = ({
                 </button>
               )}
             </div>
+            
+            {/* Configuration button in upper right corner */}
+            <div className="flex items-center space-x-2">
+              {selectedMicroscopeId && (
+                <button
+                  onClick={isConfigurationLoaded ? openConfigurationWindow : loadMicroscopeConfiguration}
+                  className={`config-button p-1 rounded shadow text-xs disabled:opacity-75 disabled:cursor-not-allowed ${
+                    isConfigurationLoading 
+                      ? 'bg-yellow-500 hover:bg-yellow-600' 
+                      : isConfigurationLoaded 
+                        ? 'bg-blue-500 hover:bg-blue-600' 
+                        : 'bg-gray-500 hover:bg-gray-600'
+                  } text-white`}
+                  title={
+                    isConfigurationLoading 
+                      ? "Loading configuration..." 
+                      : isConfigurationLoaded 
+                        ? "View microscope configuration" 
+                        : "Load microscope configuration"
+                  }
+                  disabled={!microscopeControlService}
+                >
+                  {isConfigurationLoading ? (
+                    <>
+                      <i className="fas fa-spinner fa-spin mr-1"></i>
+                      Loading...
+                    </>
+                  ) : isConfigurationLoaded ? (
+                    <>
+                      <i className="fas fa-cog mr-1"></i>
+                      Config
+                    </>
+                  ) : (
+                    <>
+                      <i className="fas fa-download mr-1"></i>
+                      Load Config
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
           </div>
           
           <div className="control-group mb-3">
@@ -1626,11 +1765,11 @@ const MicroscopeControlPanel = ({
                     <div
                       key={`cell-${row}-${col}`}
                       className={`grid-cell ${(!microscopeControlService || microscopeBusy || currentOperation !== null) ? 'disabled' : ''}`}
-                      onDoubleClick={() => {
+                      onClick={() => {
                         if (!microscopeControlService || microscopeBusy || currentOperation) return;
                         handleWellDoubleClick(row, col);
                       }}
-                      title={`Well ${row}${col}`}
+                      title={`Well ${row}${col} - Click to navigate`}
                       role="button"
                       tabIndex={0}
                       onKeyDown={(e) => {
@@ -1726,6 +1865,52 @@ const MicroscopeControlPanel = ({
           incubatorControlService={incubatorControlService}
           microscopeControlService={microscopeControlService}
         />
+      )}
+
+      {/* Configuration Display Modal */}
+      {isConfigurationWindowOpen && microscopeConfiguration && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[70vh] flex flex-col">
+            {/* Modal Header - Fixed */}
+            <div className="flex justify-between items-center p-3 border-b border-gray-200 flex-shrink-0">
+              <h2 className="text-lg font-semibold text-gray-800">
+                Microscope Configuration
+                {selectedMicroscopeId && (
+                  <span className="text-sm text-gray-600 ml-2">
+                    ({selectedMicroscopeId === 'agent-lens/squid-control-reef' ? 'Simulated' :
+                      selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 'Real Microscope 1' :
+                      selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2' ? 'Real Microscope 2' :
+                      selectedMicroscopeId})
+                  </span>
+                )}
+              </h2>
+              <button
+                onClick={closeConfigurationWindow}
+                className="text-gray-400 hover:text-gray-600 text-xl font-bold w-6 h-6 flex items-center justify-center flex-shrink-0"
+                title="Close"
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Modal Body - Scrollable */}
+            <div className="overflow-y-auto p-3" style={{ maxHeight: 'calc(70vh - 120px)' }}>
+              <pre className="bg-gray-100 p-3 rounded text-xs overflow-x-auto whitespace-pre-wrap font-mono leading-tight">
+                {JSON.stringify(microscopeConfiguration, null, 2)}
+              </pre>
+            </div>
+
+            {/* Modal Footer - Fixed */}
+            <div className="flex justify-end p-3 border-t border-gray-200 flex-shrink-0">
+              <button
+                onClick={closeConfigurationWindow}
+                className="px-3 py-1 bg-gray-500 hover:bg-gray-600 text-white rounded text-sm"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
