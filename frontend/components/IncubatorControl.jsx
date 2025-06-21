@@ -16,11 +16,14 @@ const IncubatorControl = ({ incubatorControlService, appendLog }) => {
   // Form state for sample information
   const [sampleForm, setSampleForm] = useState({
     name: '',
-    status: '',
+    status: 'IN',
     location: 'incubator_slot',
     date_to_incubator: '',
     well_plate_type: '96'
   });
+  
+  // Warning message state
+  const [warningMessage, setWarningMessage] = useState('');
 
   const updateSettings = async () => {
     if (incubatorControlService) {
@@ -92,7 +95,7 @@ const IncubatorControl = ({ incubatorControlService, appendLog }) => {
       // Reset form for empty slot
       setSampleForm({
         name: '',
-        status: '',
+        status: 'IN',
         location: 'incubator_slot',
         date_to_incubator: '',
         well_plate_type: '96'
@@ -105,6 +108,7 @@ const IncubatorControl = ({ incubatorControlService, appendLog }) => {
     setSelectedSlot(null);
     setSelectedSlotNumber(null);
     setIsEditing(false);
+    setWarningMessage(''); // Clear warning when closing sidebar
   };
 
   const handleFormChange = (field, value) => {
@@ -112,9 +116,24 @@ const IncubatorControl = ({ incubatorControlService, appendLog }) => {
       ...prev,
       [field]: value
     }));
+    // Clear warning when user starts typing
+    if (warningMessage) {
+      setWarningMessage('');
+    }
   };
 
   const handleAddSample = async () => {
+    // Validate required fields
+    const missingFields = [];
+    if (!sampleForm.name.trim()) missingFields.push('Sample Name');
+    if (!sampleForm.status.trim()) missingFields.push('Status');
+    if (!sampleForm.well_plate_type.trim()) missingFields.push('Well Plate Type');
+    
+    if (missingFields.length > 0) {
+      setWarningMessage(`Please fill in the required fields: ${missingFields.join(', ')}`);
+      return;
+    }
+
     if (!incubatorControlService) {
       appendLog('Incubator service not available');
       return;
@@ -131,6 +150,7 @@ const IncubatorControl = ({ incubatorControlService, appendLog }) => {
       );
       appendLog(result);
       await fetchSlotInformation(); // Refresh slot data
+      setWarningMessage(''); // Clear any existing warning
       closeSidebar();
     } catch (error) {
       appendLog(`Failed to add sample: ${error.message}`);
@@ -154,8 +174,20 @@ const IncubatorControl = ({ incubatorControlService, appendLog }) => {
   };
 
   const handleEditSample = async () => {
+    // Validate required fields first
+    const missingFields = [];
+    if (!sampleForm.name.trim()) missingFields.push('Sample Name');
+    if (!sampleForm.status.trim()) missingFields.push('Status');
+    if (!sampleForm.well_plate_type.trim()) missingFields.push('Well Plate Type');
+    
+    if (missingFields.length > 0) {
+      setWarningMessage(`Please fill in the required fields: ${missingFields.join(', ')}`);
+      return;
+    }
+
     // For editing, we remove the old sample and add a new one
     try {
+      setWarningMessage(''); // Clear any existing warning
       await handleRemoveSample();
       await handleAddSample();
     } catch (error) {
@@ -251,9 +283,14 @@ const IncubatorControl = ({ incubatorControlService, appendLog }) => {
             /* Add new sample form */
             <div>
               <h5 className="font-medium mb-3 text-green-600">Add New Sample</h5>
+              {warningMessage && (
+                <div className="mb-3 p-3 bg-red-100 border border-red-400 text-red-700 rounded">
+                  {warningMessage}
+                </div>
+              )}
               <div className="space-y-3">
                 <div>
-                  <label className="block text-sm font-medium mb-1">Sample Name:</label>
+                  <label className="block text-sm font-medium mb-1">Sample Name: <span className="text-red-500">*</span></label>
                   <input
                     type="text"
                     className="w-full border border-gray-300 rounded p-2"
@@ -263,13 +300,12 @@ const IncubatorControl = ({ incubatorControlService, appendLog }) => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1">Status:</label>
+                  <label className="block text-sm font-medium mb-1">Status: <span className="text-red-500">*</span></label>
                   <select
                     className="w-full border border-gray-300 rounded p-2"
                     value={sampleForm.status}
                     onChange={(e) => handleFormChange('status', e.target.value)}
                   >
-                    <option value="">Select status</option>
                     <option value="IN">IN</option>
                     <option value="OUT">OUT</option>
                     <option value="Not Available">Not Available</option>
@@ -285,7 +321,7 @@ const IncubatorControl = ({ incubatorControlService, appendLog }) => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1">Well Plate Type:</label>
+                  <label className="block text-sm font-medium mb-1">Well Plate Type: <span className="text-red-500">*</span></label>
                   <select
                     className="w-full border border-gray-300 rounded p-2"
                     value={sampleForm.well_plate_type}
@@ -300,7 +336,6 @@ const IncubatorControl = ({ incubatorControlService, appendLog }) => {
                 <button
                   onClick={handleAddSample}
                   className="w-full bg-green-500 text-white p-2 rounded hover:bg-green-600"
-                  disabled={!sampleForm.name.trim()}
                 >
                   Add Sample
                 </button>
@@ -339,6 +374,11 @@ const IncubatorControl = ({ incubatorControlService, appendLog }) => {
                 /* Edit mode */
                 <div>
                   <h5 className="font-medium mb-3 text-orange-600">Edit Sample</h5>
+                  {warningMessage && (
+                    <div className="mb-3 p-3 bg-red-100 border border-red-400 text-red-700 rounded">
+                      {warningMessage}
+                    </div>
+                  )}
                   <div className="space-y-3">
                     <div>
                       <label className="block text-sm font-medium mb-1">Sample Name:</label>
@@ -388,13 +428,19 @@ const IncubatorControl = ({ incubatorControlService, appendLog }) => {
                       <button
                         onClick={handleEditSample}
                         className="w-full bg-orange-500 text-white p-2 rounded hover:bg-orange-600"
-                        disabled={!sampleForm.name.trim()}
+                        disabled={!sampleForm.name.trim() || !sampleForm.status.trim() || !sampleForm.well_plate_type.trim()}
+                        style={{ 
+                          backgroundColor: (!sampleForm.name.trim() || !sampleForm.status.trim() || !sampleForm.well_plate_type.trim()) ? '#cccccc' : '#f97316',
+                          color: 'white',
+                          opacity: (!sampleForm.name.trim() || !sampleForm.status.trim() || !sampleForm.well_plate_type.trim()) ? '0.7' : '1'
+                        }}
                       >
                         Save Changes
                       </button>
                       <button
                         onClick={() => setIsEditing(false)}
                         className="w-full bg-gray-500 text-white p-2 rounded hover:bg-gray-600"
+                        style={{ backgroundColor: '#6c757d', color: 'white' }}
                       >
                         Cancel
                       </button>

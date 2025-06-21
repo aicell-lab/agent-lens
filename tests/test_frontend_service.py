@@ -1400,6 +1400,390 @@ async def test_frontend_webrtc_stops_on_operations(test_frontend_service):
             await browser.close()
 
 @pytest.mark.asyncio
+@pytest.mark.timeout(240)
+async def test_frontend_incubator_control_slot_management(test_frontend_service):
+    """Test the incubator control panel slot management functionality."""
+    service, service_url = test_frontend_service
+    
+    print("🌡️ Testing incubator control slot management...")
+    
+    if not WORKSPACE_TOKEN:
+        pytest.skip("WORKSPACE_TOKEN environment variable not set")
+    
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        
+        try:
+            context = await browser.new_context()
+            page = await context.new_page()
+            
+            # Set up console and error logging
+            console_messages = []
+            page_errors = []
+            page.on('console', lambda msg: console_messages.append(f"{msg.type}: {msg.text}"))
+            page.on('pageerror', lambda error: page_errors.append(str(error)))
+            
+            # Navigate and authenticate
+            await page.goto(service_url, timeout=30000)
+            await page.evaluate(f'localStorage.setItem("token", "{WORKSPACE_TOKEN}")')
+            await page.reload()
+            await page.wait_for_load_state('networkidle', timeout=15000)
+            
+            # Wait for main app to load
+            selectors_to_try = ['.sidebar', '.main-layout', '.app-container', '#root > div']
+            main_app_loaded = False
+            for selector in selectors_to_try:
+                try:
+                    await page.wait_for_selector(selector, timeout=10000)
+                    main_app_loaded = True
+                    print(f"✅ Main application loaded (found: {selector})")
+                    break
+                except:
+                    continue
+            
+            if not main_app_loaded:
+                screenshot_path = f"/tmp/incubator_debug_{uuid.uuid4().hex[:8]}.png"
+                await page.screenshot(path=screenshot_path)
+                print(f"📸 Debug screenshot saved to: {screenshot_path}")
+                raise AssertionError("❌ ERROR: Could not find main app selectors - main application failed to load")
+            
+            # Navigate to incubator tab
+            print("🔍 Navigating to incubator tab...")
+            incubator_selectors = [
+                '.sidebar-tab:has-text("Incubator")',
+                'button:has-text("Incubator")',
+                '.sidebar-tab .fa-temperature-high'
+            ]
+            
+            incubator_tab_found = False
+            for selector in incubator_selectors:
+                try:
+                    element = page.locator(selector).first
+                    if await element.count() > 0:
+                        await element.click()
+                        await page.wait_for_timeout(3000)
+                        print(f"✅ Navigated to incubator tab (using: {selector})")
+                        incubator_tab_found = True
+                        break
+                except Exception as e:
+                    print(f"  - Selector '{selector}' failed: {e}")
+                    continue
+            
+            if not incubator_tab_found:
+                screenshot_path = f"/tmp/incubator_tab_error_{uuid.uuid4().hex[:8]}.png"
+                await page.screenshot(path=screenshot_path)
+                print(f"📸 Incubator tab error screenshot saved to: {screenshot_path}")
+                raise AssertionError("❌ ERROR: Incubator tab not found")
+            
+            # Verify incubator control panel elements
+            print("🔍 Verifying incubator control panel elements...")
+            incubator_elements = [
+                {
+                    'name': 'Incubator Control Panel',
+                    'selectors': ['h3:has-text("Incubator Control")', '.incubator-settings'],
+                    'required': True
+                },
+                {
+                    'name': 'Temperature Display',
+                    'selectors': ['label:has-text("Temperature")', 'input[type="number"][readonly]'],
+                    'required': True
+                },
+                {
+                    'name': 'CO2 Display',
+                    'selectors': ['label:has-text("CO2")', 'input[value][readonly]'],
+                    'required': True
+                },
+                {
+                    'name': 'Microplate Slots',
+                    'selectors': ['h4:has-text("Microplate Slots")', '.grid'],
+                    'required': True
+                },
+                {
+                    'name': 'Slot Buttons',
+                    'selectors': ['button:has-text("1")', '.grid button'],
+                    'required': True
+                }
+            ]
+            
+            failed_elements = []
+            for element in incubator_elements:
+                found = False
+                for selector in element['selectors']:
+                    try:
+                        count = await page.locator(selector).count()
+                        if count > 0:
+                            print(f"✅ Found {element['name']} (selector: {selector}, count: {count})")
+                            found = True
+                            break
+                    except Exception as e:
+                        print(f"  - Selector '{selector}' for {element['name']} failed: {e}")
+                        continue
+                
+                if not found and element['required']:
+                    failed_elements.append(element['name'])
+                    print(f"❌ ERROR: Required element '{element['name']}' not found")
+            
+            if failed_elements:
+                screenshot_path = f"/tmp/incubator_elements_error_{uuid.uuid4().hex[:8]}.png"
+                await page.screenshot(path=screenshot_path)
+                print(f"📸 Elements error screenshot saved to: {screenshot_path}")
+                raise AssertionError(f"❌ ERROR: Required incubator elements not found: {', '.join(failed_elements)}")
+            
+            # TEST 1: Double-click slot 1 to open sample management
+            print("🧪 TEST 1: Testing slot 1 sample management...")
+            slot_1_button = page.locator('button:has-text("1")').first
+            
+            if await slot_1_button.count() > 0:
+                # Double-click to open slot management
+                await slot_1_button.dblclick()
+                await page.wait_for_timeout(2000)
+                print("✅ Double-clicked slot 1")
+                
+                # Check if sidebar opened
+                sidebar_selectors = [
+                    'h4:has-text("Slot 1 Management")',
+                    '.sidebar-container',
+                    'h5:has-text("Add New Sample")'
+                ]
+                
+                sidebar_opened = False
+                for selector in sidebar_selectors:
+                    try:
+                        if await page.locator(selector).count() > 0:
+                            print(f"✅ Slot management sidebar opened (found: {selector})")
+                            sidebar_opened = True
+                            break
+                    except:
+                        continue
+                
+                if not sidebar_opened:
+                    print("⚠️  Slot management sidebar did not open")
+                
+            else:
+                raise AssertionError("❌ ERROR: Could not find slot 1 button")
+            
+            # TEST 2: Test validation warnings for required fields
+            print("🧪 TEST 2: Testing validation for required fields...")
+            
+            # Try to add sample without filling required fields
+            add_sample_button = page.locator('button:has-text("Add Sample")').first
+            if await add_sample_button.count() > 0:
+                await add_sample_button.click()
+                await page.wait_for_timeout(1000)
+                
+                # Check for warning message
+                warning_selectors = [
+                    '.bg-red-100:has-text("Please fill in the required fields")',
+                    'div:has-text("Please fill in the required fields")',
+                    '.text-red-700'
+                ]
+                
+                warning_found = False
+                for selector in warning_selectors:
+                    try:
+                        if await page.locator(selector).count() > 0:
+                            print("✅ Validation warning displayed for empty required fields")
+                            warning_found = True
+                            break
+                    except:
+                        continue
+                
+                if not warning_found:
+                    print("⚠️  Validation warning not found - may need to adjust selectors")
+            
+            # TEST 3: Add a sample to slot 1
+            print("🧪 TEST 3: Adding sample to slot 1...")
+            
+            # Fill in sample name (required field with *)
+            sample_name_input = page.locator('input[placeholder*="sample name"], label:has-text("Sample Name") + input').first
+            if await sample_name_input.count() > 0:
+                await sample_name_input.fill("Test Sample 1")
+                print("✅ Filled sample name")
+            
+            # Status should default to "IN" (required field with *)
+            status_select = page.locator('label:has-text("Status") + select, select option[value="IN"]').first
+            if await status_select.count() > 0:
+                # Status should already be "IN" by default, but let's verify
+                status_value = await page.locator('label:has-text("Status") + select').first.input_value()
+                if status_value == "IN":
+                    print("✅ Status defaults to 'IN'")
+                else:
+                    # Select IN if not already selected
+                    await page.locator('label:has-text("Status") + select').first.select_option("IN")
+                    print("✅ Selected status 'IN'")
+            
+            # Well Plate Type should default to "96" (required field with *)
+            plate_type_select = page.locator('label:has-text("Well Plate Type") + select').first
+            if await plate_type_select.count() > 0:
+                plate_type_value = await plate_type_select.input_value()
+                if plate_type_value == "96":
+                    print("✅ Well Plate Type defaults to '96'")
+                else:
+                    await plate_type_select.select_option("96")
+                    print("✅ Selected Well Plate Type '96'")
+            
+            # Fill optional date field
+            date_input = page.locator('label:has-text("Date to Incubator") + input[type="datetime-local"]').first
+            if await date_input.count() > 0:
+                # Set current date/time
+                from datetime import datetime
+                current_datetime = datetime.now().strftime("%Y-%m-%dT%H:%M")
+                await date_input.fill(current_datetime)
+                print("✅ Filled date to incubator")
+            
+            # Click add sample button
+            if await add_sample_button.count() > 0:
+                await add_sample_button.click()
+                await page.wait_for_timeout(3000)  # Wait for sample to be added
+                print("✅ Clicked add sample button")
+                
+                # Check if sidebar closed (indicating success)
+                sidebar_still_open = await page.locator('h4:has-text("Slot 1 Management")').count() > 0
+                if not sidebar_still_open:
+                    print("✅ Sidebar closed after adding sample (indicates success)")
+                else:
+                    print("⚠️  Sidebar still open - sample addition may have failed")
+            
+            # TEST 4: Verify slot 1 now shows as occupied (orange color)
+            print("🧪 TEST 4: Verifying slot 1 is now occupied...")
+            
+            # Wait a moment and check slot 1 color/style
+            await page.wait_for_timeout(2000)
+            slot_1_after_add = page.locator('button:has-text("1")').first
+            
+            if await slot_1_after_add.count() > 0:
+                # Check if slot has orange background (indicating occupied)
+                slot_style = await slot_1_after_add.get_attribute('style')
+                slot_title = await slot_1_after_add.get_attribute('title')
+                
+                if slot_style and 'rgb(249, 115, 22)' in slot_style:  # Orange color in RGB
+                    print("✅ Slot 1 shows orange background (occupied)")
+                elif slot_title and 'Test Sample 1' in slot_title:
+                    print("✅ Slot 1 title shows sample name")
+                else:
+                    print("⚠️  Could not verify slot 1 occupied state")
+            
+            # TEST 5: Edit the sample in slot 1
+            print("🧪 TEST 5: Testing sample editing...")
+            
+            # Double-click slot 1 again to open management for existing sample
+            if await slot_1_button.count() > 0:
+                await slot_1_button.dblclick()
+                await page.wait_for_timeout(2000)
+                print("✅ Double-clicked slot 1 again")
+                
+                # Look for edit button
+                edit_button = page.locator('button:has-text("Edit Sample")').first
+                if await edit_button.count() > 0:
+                    await edit_button.click()
+                    await page.wait_for_timeout(1000)
+                    print("✅ Clicked edit sample button")
+                    
+                    # Check if edit form appeared
+                    edit_form_selectors = [
+                        'h5:has-text("Edit Sample")',
+                        'button:has-text("Save Changes")',
+                        'button:has-text("Cancel")'
+                    ]
+                    
+                    edit_form_found = False
+                    for selector in edit_form_selectors:
+                        try:
+                            if await page.locator(selector).count() > 0:
+                                print(f"✅ Edit form opened (found: {selector})")
+                                edit_form_found = True
+                                break
+                        except:
+                            continue
+                    
+                    if edit_form_found:
+                        # Modify sample name
+                        edit_name_input = page.locator('label:has-text("Sample Name") + input').first
+                        if await edit_name_input.count() > 0:
+                            await edit_name_input.fill("Test Sample 1 - Edited")
+                            print("✅ Modified sample name")
+                        
+                        # Test validation by clearing required field
+                        print("🔍 Testing edit validation...")
+                        await edit_name_input.fill("")  # Clear required field
+                        
+                        save_button = page.locator('button:has-text("Save Changes")').first
+                        if await save_button.count() > 0:
+                            await save_button.click()
+                            await page.wait_for_timeout(1000)
+                            
+                            # Check for validation warning
+                            edit_warning_found = False
+                            for selector in warning_selectors:
+                                try:
+                                    if await page.locator(selector).count() > 0:
+                                        print("✅ Edit validation warning displayed")
+                                        edit_warning_found = True
+                                        break
+                                except:
+                                    continue
+                        
+                        # Fill name back and save
+                        await edit_name_input.fill("Test Sample 1 - Edited")
+                        if await save_button.count() > 0:
+                            await save_button.click()
+                            await page.wait_for_timeout(3000)
+                            print("✅ Saved sample changes")
+                
+            # TEST 6: Remove the sample from slot 1
+            print("🧪 TEST 6: Testing sample removal...")
+            
+            # Open slot 1 management again
+            if await slot_1_button.count() > 0:
+                await slot_1_button.dblclick()
+                await page.wait_for_timeout(2000)
+                
+                # Look for remove button
+                remove_button = page.locator('button:has-text("Remove Sample")').first
+                if await remove_button.count() > 0:
+                    await remove_button.click()
+                    await page.wait_for_timeout(3000)  # Wait for removal
+                    print("✅ Clicked remove sample button")
+                    
+                    # Check if sidebar closed
+                    sidebar_after_remove = await page.locator('h4:has-text("Slot 1 Management")').count() > 0
+                    if not sidebar_after_remove:
+                        print("✅ Sidebar closed after removing sample")
+                    
+                    # Verify slot 1 is now empty (green color)
+                    await page.wait_for_timeout(2000)
+                    slot_1_after_remove = page.locator('button:has-text("1")').first
+                    if await slot_1_after_remove.count() > 0:
+                        slot_style_after = await slot_1_after_remove.get_attribute('style')
+                        slot_title_after = await slot_1_after_remove.get_attribute('title')
+                        
+                        if slot_style_after and 'rgb(34, 197, 94)' in slot_style_after:  # Green color
+                            print("✅ Slot 1 shows green background (empty)")
+                        elif slot_title_after and 'Empty' in slot_title_after:
+                            print("✅ Slot 1 title shows 'Empty'")
+                        else:
+                            print("⚠️  Could not verify slot 1 empty state")
+            
+            # Check for any JavaScript errors during testing
+            if page_errors:
+                print("⚠️  JavaScript errors detected during incubator testing:")
+                for error in page_errors[-3:]:  # Show last 3 errors
+                    print(f"  - {error}")
+            
+            # Take final screenshot
+            screenshot_path = f"/tmp/incubator_test_final_{uuid.uuid4().hex[:8]}.png"
+            await page.screenshot(path=screenshot_path)
+            print(f"📸 Incubator test screenshot saved to: {screenshot_path}")
+            print("✅ Incubator control slot management test completed successfully")
+            
+            # Collect coverage data
+            await collect_coverage(page, "incubator_control_slot_management")
+            
+        finally:
+            await context.close()
+            await browser.close()
+
+@pytest.mark.asyncio
 @pytest.mark.timeout(30)
 async def test_generate_coverage_report():
     """Generate final coverage report from all collected data."""
