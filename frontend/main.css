@@ -888,11 +888,26 @@
   color: #212529;
 }
 
-/* Notification Popup Styles */
-.notification-popup {
+/* Notifications Container - for stacking multiple notifications */
+.notifications-container {
   position: fixed;
   top: 20px;
   right: 20px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none; /* Allow clicks to pass through container */
+}
+
+.notifications-container > * {
+  pointer-events: auto; /* Re-enable clicks on individual notifications */
+}
+
+/* Notification Popup Styles */
+.notification-popup {
+  position: relative; /* Changed from fixed to relative for stacking */
+  /* Remove top, right positioning since container handles it */
   min-width: 300px;
   max-width: 500px;
   border: 2px solid;
@@ -900,7 +915,6 @@
   color: white;
   font-weight: 500;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  z-index: 9999;
   animation: slideInFromRight 0.3s ease-out;
 }
 

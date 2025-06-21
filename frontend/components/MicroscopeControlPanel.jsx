@@ -1649,10 +1649,10 @@ const MicroscopeControlPanel = ({
                   max="100"
                   value={desiredIlluminationIntensity}
                   onChange={(e) => {
-                    if (currentOperation || microscopeBusy) return;
+                    if (!microscopeControlService || currentOperation || microscopeBusy) return;
                     setDesiredIlluminationIntensity(parseInt(e.target.value, 10));
                   }}
-                  disabled={microscopeBusy || currentOperation !== null}
+                  disabled={!microscopeControlService || microscopeBusy || currentOperation !== null}
                 />
               </div>
 
@@ -1662,14 +1662,14 @@ const MicroscopeControlPanel = ({
                   className="control-input w-full mt-1 p-1 border border-gray-300 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
                   value={illuminationChannel}
                   onChange={(e) => {
-                    if (currentOperation || microscopeBusy) return;
+                    if (!microscopeControlService || currentOperation || microscopeBusy) return;
                     const newChannel = e.target.value;
                     if (illuminationChannel !== newChannel) { // Only if channel actually changes
                       setIlluminationChannel(newChannel); // This triggers the set_illumination effect
                       channelSetByUIFlagRef.current = true; // Indicate change is fresh from UI, pending hardware ack
                     }
                   }}
-                  disabled={currentOperation !== null || microscopeBusy}
+                  disabled={!microscopeControlService || currentOperation !== null || microscopeBusy}
                 >
                   <option value="0">BF LED matrix full</option>
                   <option value="11">Fluorescence 405 nm Ex</option>

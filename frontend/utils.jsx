@@ -260,9 +260,14 @@ export const tryGetService = async (hyphaManager, name, remoteIdWithWorkspace, l
     appendLog(errorMessage);
     console.error(`[tryGetService] Error acquiring '${name}' (Remote: '${remoteIdWithWorkspace}', Local: '${localId}'):`, error);
     
-    // Check if this is a permission error and show notification
-    if (showNotification && error.message && error.message.includes('Permission denied for workspace')) {
-      showNotification(error.message, 'error');
+    // Show notification for all types of service acquisition errors
+    if (showNotification) {
+      if (error.message && error.message.includes('Permission denied for workspace')) {
+        showNotification(error.message, 'error');
+      } else {
+        // General service unavailability notification
+        showNotification(`${name} service is currently unavailable. Please check if the service is running.`, 'error');
+      }
     }
     
     return null;

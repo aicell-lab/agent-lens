@@ -56,21 +56,33 @@ const MicroscopeControl = () => {
   const [imageForImageJ, setImageForImageJ] = useState(null);
   const [imjoyApi, setImjoyApi] = useState(null);
   
-  // Notification state
-  const [notification, setNotification] = useState({ message: '', type: 'error' });
+  // Notification state - now supports multiple notifications
+  const [notifications, setNotifications] = useState([]);
 
   const appendLog = useCallback((message) => {
     setLog((prevLog) => prevLog + message + '\n');
   }, []);
 
-  // Function to show notifications
+  // Function to show notifications - adds new notification to the stack
   const showNotification = useCallback((message, type = 'error') => {
-    setNotification({ message, type });
+    const newNotification = { 
+      id: Date.now() + Math.random(), // Unique ID for each notification
+      message, 
+      type 
+    };
+    setNotifications(prev => {
+      const updated = [...prev, newNotification];
+      // Limit to maximum 5 notifications to prevent UI clutter
+      if (updated.length > 5) {
+        return updated.slice(-5); // Keep only the last 5 notifications
+      }
+      return updated;
+    });
   }, []);
 
-  // Function to dismiss notifications
-  const dismissNotification = useCallback(() => {
-    setNotification({ message: '', type: 'error' });
+  // Function to dismiss a specific notification by ID
+  const dismissNotification = useCallback((notificationId) => {
+    setNotifications(prev => prev.filter(n => n.id !== notificationId));
   }, []);
 
   useEffect(() => {
@@ -138,25 +150,32 @@ const MicroscopeControl = () => {
             "Microscope Control",
             selectedMicroscopeId, 
             microscopeLocalId,    
-            (msg) => { console.log(`[tryGetService in Effect]: ${msg}`); appendLog(msg); }
+            (msg) => { console.log(`[tryGetService in Effect]: ${msg}`); appendLog(msg); },
+            showNotification // Pass showNotification to display errors to user
           );
           
           if (newMicroscopeService) {
             console.log("[Effect Hook] Successfully obtained new microscope service:", newMicroscopeService);
             setMicroscopeControlService(newMicroscopeService);
             appendLog("Microscope service switched successfully.");
+            showNotification("Microscope service connected successfully.", "success");
           } else {
+            // Service failed to load - clear any previous service and show error
             console.error("[Effect Hook] Failed to obtain new microscope service.");
-            appendLog("Failed to switch microscope service. Service object was null.");
+            setMicroscopeControlService(null); // Clear previous service
+            appendLog(`Failed to connect to microscope service: ${selectedMicroscopeId}`);
+            showNotification(`Failed to connect to microscope: ${selectedMicroscopeId}. Service may be unavailable.`, "error");
           }
         } catch (error) {
           console.error("[Effect Hook] Error during microscope service switch:", error);
+          setMicroscopeControlService(null); // Clear previous service on error
           appendLog(`Error switching microscope service: ${error.message}`);
+          showNotification(`Error connecting to microscope: ${error.message}`, "error");
         }
       };
       reinitializeMicroscopeServiceOnly();
     }
-  }, [selectedMicroscopeId, isAuthenticated, hyphaManager, appendLog]);
+  }, [selectedMicroscopeId, isAuthenticated, hyphaManager, appendLog, showNotification]);
 
   const handleLogin = async (microscopeIdToUse, existingManager = null) => {
     console.log(`[handleLogin] Attempting login. Initial microscope ID to use: ${microscopeIdToUse}`);
@@ -367,12 +386,17 @@ const MicroscopeControl = () => {
                 </div>
               )}
             </div>
-            {/* Notification popup */}
-            <Notification 
-              message={notification.message}
-              type={notification.type}
-              onDismiss={dismissNotification}
-            />
+            {/* Notification popups - multiple notifications stack */}
+            <div className="notifications-container">
+              {notifications.map((notification) => (
+                <Notification 
+                  key={notification.id}
+                  message={notification.message}
+                  type={notification.type}
+                  onDismiss={() => dismissNotification(notification.id)}
+                />
+              ))}
+            </div>
           </div>
         )}
       </div>
