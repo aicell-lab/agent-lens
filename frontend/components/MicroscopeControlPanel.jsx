@@ -1359,7 +1359,7 @@ const MicroscopeControlPanel = ({
       {/* Left Side: Image Display */}
       <div className={`mcp-image-display-area ${isRightPanelCollapsed ? 'expanded' : ''}`}>
         {/* Video Display Controls */}
-        {(isWebRtcActive || snapshotImage) && (
+        {(isWebRtcActive || snapshotImage) && !isMapFullScreen && (
           <div className="video-controls-bar flex items-center justify-between p-2 bg-gray-100 border border-gray-300 rounded-t">
             <div className="flex items-center space-x-2">
               <span className="text-xs text-gray-600">Zoom:</span>
@@ -1388,60 +1388,63 @@ const MicroscopeControlPanel = ({
                 <i className="fas fa-expand-arrows-alt"></i>
               </button>
             </div>
-            <div className="flex items-center space-x-2">
-              <button
-                onClick={() => setIsMapFullScreen(true)}
-                className="px-2 py-1 text-xs bg-green-500 hover:bg-green-600 text-white rounded flex items-center"
-                title="Full Screen Map View"
-                disabled={!microscopeConfiguration}
-              >
-                <i className="fas fa-expand mr-1"></i>
-                Full Screen Map
-              </button>
-            </div>
           </div>
         )}
         
-        <div
-          ref={dragImageDisplayRef}
-          id="image-display"
-          className={`w-full border-l border-r border-b ${
-            (snapshotImage || isWebRtcActive) ? 'border-gray-300' : 'border-dotted border-gray-400'
-          } ${(snapshotImage || isWebRtcActive) ? '' : 'rounded'} flex items-center justify-center bg-black relative ${
-            (isWebRtcActive || snapshotImage) && microscopeControlService && !microscopeBusy && !currentOperation ? 'cursor-grab' : ''
-          } ${isDragging ? 'cursor-grabbing' : ''}`}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseLeave}
-          style={{
-            userSelect: 'none',
-            transition: isDragging ? 'none' : 'transform 0.3s ease-out',
-            overflow: 'hidden', // Hide content that moves outside the display window
-            height: isRightPanelCollapsed ? 'calc(100vh - 150px)' : 'calc(100vh - 350px)', // Responsive height
-            maxHeight: '80vh', // Prevent taking up entire screen
-          }}
-        >
-          {isWebRtcActive && !webRtcError ? (
-            <video 
-              ref={videoRef} 
-              autoPlay 
-              playsInline 
-              muted 
-              className="pointer-events-none"
-              style={{
-                transform: `translate(${dragTransform.x}px, ${dragTransform.y}px) scale(${videoZoom})`,
-                transition: isDragging ? 'none' : 'transform 0.3s ease-out',
-                width: '750px',
-                height: '750px',
-                objectFit: 'contain',
-              }}
+        {/* Image Display or Map Display */}
+        {isMapFullScreen ? (
+          <div
+            className="w-full border border-gray-300 bg-black relative"
+            style={{
+              height: isRightPanelCollapsed ? 'calc(100vh - 150px)' : 'calc(100vh - 350px)',
+              maxHeight: '80vh',
+              overflow: 'hidden',
+            }}
+          >
+            <MicroscopeMapDisplay
+              isOpen={true}
+              onClose={() => setIsMapFullScreen(false)}
+              microscopeConfiguration={microscopeConfiguration}
+              isWebRtcActive={isWebRtcActive}
+              videoRef={videoRef}
+              remoteStream={remoteStream}
+              frameMetadata={frameMetadata}
+              videoZoom={videoZoom}
+              snapshotImage={snapshotImage}
+              isDragging={isDragging}
+              dragTransform={dragTransform}
+              microscopeControlService={microscopeControlService}
+              appendLog={appendLog}
+              showNotification={showNotification}
             />
-          ) : snappedImageData.url ? (
-            <>
-              <img
-                src={snappedImageData.url}
-                alt="Microscope Snapshot"
+          </div>
+        ) : (
+          <div
+            ref={dragImageDisplayRef}
+            id="image-display"
+            className={`w-full border-l border-r border-b ${
+              (snapshotImage || isWebRtcActive) ? 'border-gray-300' : 'border-dotted border-gray-400'
+            } ${(snapshotImage || isWebRtcActive) ? '' : 'rounded'} flex items-center justify-center bg-black relative ${
+              (isWebRtcActive || snapshotImage) && microscopeControlService && !microscopeBusy && !currentOperation ? 'cursor-grab' : ''
+            } ${isDragging ? 'cursor-grabbing' : ''}`}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseLeave}
+            style={{
+              userSelect: 'none',
+              transition: isDragging ? 'none' : 'transform 0.3s ease-out',
+              overflow: 'hidden', // Hide content that moves outside the display window
+              height: isRightPanelCollapsed ? 'calc(100vh - 150px)' : 'calc(100vh - 350px)', // Responsive height
+              maxHeight: '80vh', // Prevent taking up entire screen
+            }}
+          >
+            {isWebRtcActive && !webRtcError ? (
+              <video 
+                ref={videoRef} 
+                autoPlay 
+                playsInline 
+                muted 
                 className="pointer-events-none"
                 style={{
                   transform: `translate(${dragTransform.x}px, ${dragTransform.y}px) scale(${videoZoom})`,
@@ -1451,45 +1454,60 @@ const MicroscopeControlPanel = ({
                   objectFit: 'contain',
                 }}
               />
-              {/* ImageJ.js Badge */}
-              {onOpenImageJ && (
-                <button
-                  onClick={() => onOpenImageJ(snappedImageData.numpy)}
-                  className="imagej-badge absolute top-2 right-2 p-1 bg-white bg-opacity-90 hover:bg-opacity-100 rounded shadow-md transition-all duration-200 flex items-center gap-1 text-xs font-medium text-gray-700 hover:text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed z-10"
-                  title={imjoyApi ? "Open in ImageJ.js" : "ImageJ.js integration is loading..."}
-                  disabled={!imjoyApi}
-                  style={{ pointerEvents: 'auto' }} // Allow the badge to be clickable even when video/image has pointer-events-none
-                >
-                  <img 
-                    src="https://ij.imjoy.io/assets/badge/open-in-imagej-js-badge.svg" 
-                    alt="Open in ImageJ.js" 
-                    className="h-4"
-                  />
-                </button>
-              )}
-            </>
-          ) : (
-            <p className="placeholder-text text-center text-gray-300">
-              {webRtcError ? `WebRTC Error: ${webRtcError}` : (microscopeControlService ? 'Image Display' : 'Microscope not connected')}
-            </p>
-          )}
-          
-          {/* Drag move instructions overlay */}
-          {(isWebRtcActive || snapshotImage) && microscopeControlService && !microscopeBusy && !currentOperation && !isDragging && (
-            <div className="absolute bottom-2 left-2 bg-black bg-opacity-60 text-white text-xs px-2 py-1 rounded pointer-events-none">
-              <i className="fas fa-hand-paper mr-1"></i>
-              Drag to move stage
-            </div>
-          )}
-          
-          {/* Visual feedback during dragging */}
-          {isDragging && (
-            <div className="absolute top-2 left-2 bg-blue-500 bg-opacity-80 text-white text-xs px-2 py-1 rounded pointer-events-none">
-              <i className="fas fa-arrows-alt mr-1"></i>
-              Moving stage...
-            </div>
-          )}
-        </div>
+            ) : snappedImageData.url ? (
+              <>
+                <img
+                  src={snappedImageData.url}
+                  alt="Microscope Snapshot"
+                  className="pointer-events-none"
+                  style={{
+                    transform: `translate(${dragTransform.x}px, ${dragTransform.y}px) scale(${videoZoom})`,
+                    transition: isDragging ? 'none' : 'transform 0.3s ease-out',
+                    width: '750px',
+                    height: '750px',
+                    objectFit: 'contain',
+                  }}
+                />
+                {/* ImageJ.js Badge */}
+                {onOpenImageJ && (
+                  <button
+                    onClick={() => onOpenImageJ(snappedImageData.numpy)}
+                    className="imagej-badge absolute top-2 right-2 p-1 bg-white bg-opacity-90 hover:bg-opacity-100 rounded shadow-md transition-all duration-200 flex items-center gap-1 text-xs font-medium text-gray-700 hover:text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed z-10"
+                    title={imjoyApi ? "Open in ImageJ.js" : "ImageJ.js integration is loading..."}
+                    disabled={!imjoyApi}
+                    style={{ pointerEvents: 'auto' }} // Allow the badge to be clickable even when video/image has pointer-events-none
+                  >
+                    <img 
+                      src="https://ij.imjoy.io/assets/badge/open-in-imagej-js-badge.svg" 
+                      alt="Open in ImageJ.js" 
+                      className="h-4"
+                    />
+                  </button>
+                )}
+              </>
+            ) : (
+              <p className="placeholder-text text-center text-gray-300">
+                {webRtcError ? `WebRTC Error: ${webRtcError}` : (microscopeControlService ? 'Image Display' : 'Microscope not connected')}
+              </p>
+            )}
+            
+            {/* Drag move instructions overlay */}
+            {(isWebRtcActive || snapshotImage) && microscopeControlService && !microscopeBusy && !currentOperation && !isDragging && (
+              <div className="absolute bottom-2 left-2 bg-black bg-opacity-60 text-white text-xs px-2 py-1 rounded pointer-events-none">
+                <i className="fas fa-hand-paper mr-1"></i>
+                Drag to move stage
+              </div>
+            )}
+            
+            {/* Visual feedback during dragging */}
+            {isDragging && (
+              <div className="absolute top-2 left-2 bg-blue-500 bg-opacity-80 text-white text-xs px-2 py-1 rounded pointer-events-none">
+                <i className="fas fa-arrows-alt mr-1"></i>
+                Moving stage...
+              </div>
+            )}
+          </div>
+        )}
         {/* Video Contrast Controls with Histogram */}
         {isWebRtcActive && (
           <div className="video-contrast-controls mt-2 p-2 border border-gray-300 rounded-lg bg-white bg-opacity-90 max-h-96 overflow-y-auto">
@@ -1721,8 +1739,8 @@ const MicroscopeControlPanel = ({
         </button>
       </div>
 
-      {/* Right Side: Controls and Chatbot */}
-      <div className={`mcp-controls-chatbot-area ${isRightPanelCollapsed ? 'collapsed' : ''}`}>
+      {/* Right Side: Controls and Chatbot - Always visible */}
+      <div className={`mcp-controls-chatbot-area ${isRightPanelCollapsed ? 'collapsed' : ''}`} style={{ display: 'block', visibility: 'visible' }}>
         {/* Top-Right: Microscope Controls */}
         <div className="mcp-microscope-controls-area">
           {/* SampleSelector is moved here for better positioning context of its dropdown */}
@@ -1838,6 +1856,19 @@ const MicroscopeControlPanel = ({
                 title={!hyphaManager ? "HyphaManager not connected" : (isWebRtcActive ? "Stop Live Stream" : "Start Live Stream")}
               >
                 <i className="fas fa-video icon mr-1"></i> {isWebRtcActive ? 'Stop Live' : 'Start Live'}
+              </button>
+            </div>
+          </div>
+
+          {/* Map View Toggle */}
+          <div className="control-group mb-3">
+            <div className="horizontal-buttons flex justify-between space-x-1">
+              <button
+                className="control-button bg-green-500 text-white hover:bg-green-600 w-1/5 px-1.5 py-0.5 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
+                onClick={() => setIsMapFullScreen(!isMapFullScreen)}
+                disabled={!microscopeConfiguration}
+              >
+                <i className="fas fa-map icon mr-1"></i> Stage Map
               </button>
             </div>
           </div>
@@ -2181,19 +2212,7 @@ const MicroscopeControlPanel = ({
         </div>
       )}
 
-      {/* Full-screen Map Display */}
-      <MicroscopeMapDisplay
-        isOpen={isMapFullScreen}
-        onClose={() => setIsMapFullScreen(false)}
-        microscopeConfiguration={microscopeConfiguration}
-        isWebRtcActive={isWebRtcActive}
-        videoRef={videoRef}
-        frameMetadata={frameMetadata}
-        videoZoom={videoZoom}
-        snapshotImage={snapshotImage}
-        isDragging={isDragging}
-        dragTransform={dragTransform}
-      />
+
     </div>
   );
 };

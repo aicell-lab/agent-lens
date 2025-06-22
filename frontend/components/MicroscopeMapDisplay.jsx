@@ -8,11 +8,15 @@ const MicroscopeMapDisplay = ({
   microscopeConfiguration,
   isWebRtcActive,
   videoRef,
+  remoteStream,
   frameMetadata,
   videoZoom,
   snapshotImage,
   isDragging,
   dragTransform,
+  microscopeControlService,
+  appendLog,
+  showNotification,
 }) => {
   const mapContainerRef = useRef(null);
   const canvasRef = useRef(null);
@@ -101,6 +105,78 @@ const MicroscopeMapDisplay = ({
     setIsPanning(false);
   };
 
+  const handleDoubleClick = async (e) => {
+    if (!microscopeControlService || !microscopeConfiguration || !stageDimensions) {
+      if (showNotification) {
+        showNotification('Cannot move stage: microscope service or configuration not available', 'warning');
+      }
+      return;
+    }
+
+    try {
+      // Get click position relative to map container
+      const rect = mapContainerRef.current.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+      const clickY = e.clientY - rect.top;
+
+      // Convert click coordinates to map coordinates (accounting for pan and scale)
+      const mapX = (clickX - mapPan.x) / mapScale;
+      const mapY = (clickY - mapPan.y) / mapScale;
+
+      // Convert from map pixels to stage coordinates (mm)
+      const stageX_mm = (mapX / pixelsPerMm) + stageDimensions.xMin;
+      const stageY_mm = (mapY / pixelsPerMm) + stageDimensions.yMin;
+
+      // Check if the coordinates are within stage limits
+      if (stageX_mm < stageDimensions.xMin || stageX_mm > stageDimensions.xMax ||
+          stageY_mm < stageDimensions.yMin || stageY_mm > stageDimensions.yMax) {
+        if (showNotification) {
+          showNotification('Target position is outside stage limits', 'warning');
+        }
+        if (appendLog) {
+          appendLog(`Target position (${stageX_mm.toFixed(3)}, ${stageY_mm.toFixed(3)}) is outside stage limits`);
+        }
+        return;
+      }
+
+      if (appendLog) {
+        appendLog(`Moving stage to clicked position: X=${stageX_mm.toFixed(3)}mm, Y=${stageY_mm.toFixed(3)}mm`);
+      }
+
+      // Get current Z position to maintain it
+      const currentZ = frameMetadata?.stage_position?.z_mm || 0;
+
+      // Move to the clicked position
+      const result = await microscopeControlService.move_to_position(stageX_mm, stageY_mm, currentZ);
+      
+      if (result.success) {
+        if (appendLog) {
+          appendLog(`Successfully moved to position: ${result.message}`);
+          appendLog(`Moved from (${result.initial_position.x.toFixed(3)}, ${result.initial_position.y.toFixed(3)}) to (${result.final_position.x.toFixed(3)}, ${result.final_position.y.toFixed(3)})`);
+        }
+        if (showNotification) {
+          showNotification(`Stage moved to (${result.final_position.x.toFixed(3)}, ${result.final_position.y.toFixed(3)})`, 'success');
+        }
+      } else {
+        if (appendLog) {
+          appendLog(`Failed to move stage: ${result.message}`);
+        }
+        if (showNotification) {
+          showNotification(`Failed to move stage: ${result.message}`, 'error');
+        }
+      }
+    } catch (error) {
+      const errorMsg = `Error moving stage: ${error.message}`;
+      if (appendLog) {
+        appendLog(errorMsg);
+      }
+      if (showNotification) {
+        showNotification(errorMsg, 'error');
+      }
+      console.error('[MicroscopeMapDisplay] Error moving stage:', error);
+    }
+  };
+
   // Helper function to zoom to a specific point
   const zoomToPoint = (newZoomLevel, newScaleLevel, pointX, pointY) => {
     const oldScale = mapScale;
@@ -144,14 +220,33 @@ const MicroscopeMapDisplay = ({
 
   // Handle video source assignment to prevent blinking
   useEffect(() => {
-    if (mapVideoRef.current && videoRef?.current && isWebRtcActive && (scaleLevel === 0 || scaleLevel === 1)) {
-      if (mapVideoRef.current.srcObject !== videoRef.current.srcObject) {
-        mapVideoRef.current.srcObject = videoRef.current.srcObject;
+    if (mapVideoRef.current && remoteStream && isWebRtcActive && (scaleLevel === 0 || scaleLevel === 1)) {
+      if (mapVideoRef.current.srcObject !== remoteStream) {
+        console.log('Setting video source for map video element');
+        mapVideoRef.current.srcObject = remoteStream;
+        mapVideoRef.current.play().catch(error => {
+          console.error('Error playing map video:', error);
+        });
       }
     } else if (mapVideoRef.current && (!isWebRtcActive || scaleLevel > 1)) {
-      mapVideoRef.current.srcObject = null;
+      if (mapVideoRef.current.srcObject) {
+        console.log('Clearing video source for map video element');
+        mapVideoRef.current.srcObject = null;
+      }
     }
-  }, [isWebRtcActive, scaleLevel, videoRef?.current?.srcObject]);
+  }, [isWebRtcActive, scaleLevel, remoteStream]);
+
+  // Debug effect to monitor video stream availability
+  useEffect(() => {
+    console.log('Map Display Debug:', {
+      isWebRtcActive,
+      scaleLevel,
+      hasVideoRef: !!videoRef?.current,
+      hasRemoteStream: !!remoteStream,
+      hasMapVideoRef: !!mapVideoRef.current,
+      showVideo: (scaleLevel === 0 || scaleLevel === 1) && isWebRtcActive && remoteStream
+    });
+  }, [isWebRtcActive, scaleLevel, remoteStream]);
 
   // Draw the map
   useEffect(() => {
@@ -284,9 +379,9 @@ const MicroscopeMapDisplay = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black">
+    <div className="relative w-full h-full bg-black">
       {/* Header controls */}
-      <div className="absolute top-0 left-0 right-0 bg-black bg-opacity-80 p-2 flex justify-between items-center">
+      <div className="absolute top-0 left-0 right-0 bg-black bg-opacity-80 p-2 flex justify-between items-center z-10">
         <div className="flex items-center space-x-4">
           <h3 className="text-white text-lg font-medium">Microscope Stage Map</h3>
                      <div className="flex items-center space-x-2">
@@ -366,13 +461,7 @@ const MicroscopeMapDisplay = ({
             Show 96-Well Plate
           </label>
         </div>
-        <button
-          onClick={onClose}
-          className="text-white hover:text-gray-300 text-2xl"
-          title="Exit Full Screen"
-        >
-          <i className="fas fa-times"></i>
-        </button>
+
       </div>
 
       {/* Map container */}
@@ -384,6 +473,7 @@ const MicroscopeMapDisplay = ({
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
         onWheel={handleWheel}
+        onDoubleClick={handleDoubleClick}
         style={{ cursor: isPanning ? 'grabbing' : 'grab' }}
       >
         <canvas ref={canvasRef} className="absolute inset-0" />
@@ -403,7 +493,7 @@ const MicroscopeMapDisplay = ({
             }}
           >
             {/* Show video stream when at high zoom levels (scale 0 or 1) */}
-            {(scaleLevel === 0 || scaleLevel === 1) && isWebRtcActive && videoRef?.current && (
+            {(scaleLevel === 0 || scaleLevel === 1) && isWebRtcActive && remoteStream && (
               <video
                 ref={mapVideoRef}
                 autoPlay
@@ -412,9 +502,16 @@ const MicroscopeMapDisplay = ({
                 className="w-full h-full object-cover"
                 style={{
                   transform: 'scaleY(-1)', // Flip video if needed to match coordinate system
+                  backgroundColor: 'transparent',
+                  border: '1px solid rgba(255, 255, 0, 0.3)', // Subtle yellow border to help debug visibility
                 }}
+                onLoadedMetadata={() => console.log('Map video metadata loaded')}
+                onCanPlay={() => console.log('Map video can play')}
+                onError={(e) => console.error('Map video error:', e)}
               />
             )}
+            
+
             <div className="absolute -top-6 left-0 text-yellow-400 text-xs whitespace-nowrap">
               X: {currentStagePosition.x.toFixed(2)}mm, Y: {currentStagePosition.y.toFixed(2)}mm
             </div>
@@ -428,6 +525,12 @@ const MicroscopeMapDisplay = ({
             <div>X: {currentStagePosition.x.toFixed(3)}mm</div>
             <div>Y: {currentStagePosition.y.toFixed(3)}mm</div>
             <div>Z: {currentStagePosition.z.toFixed(3)}mm</div>
+            {microscopeControlService && (
+              <div className="mt-1 text-xs text-gray-300 border-t border-gray-600 pt-1">
+                <i className="fas fa-mouse-pointer mr-1"></i>
+                Double-click to move stage
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -441,11 +544,15 @@ MicroscopeMapDisplay.propTypes = {
   microscopeConfiguration: PropTypes.object,
   isWebRtcActive: PropTypes.bool,
   videoRef: PropTypes.object,
+  remoteStream: PropTypes.object,
   frameMetadata: PropTypes.object,
   videoZoom: PropTypes.number,
   snapshotImage: PropTypes.string,
   isDragging: PropTypes.bool,
   dragTransform: PropTypes.object,
+  microscopeControlService: PropTypes.object,
+  appendLog: PropTypes.func,
+  showNotification: PropTypes.func,
 };
 
 export default MicroscopeMapDisplay; 
