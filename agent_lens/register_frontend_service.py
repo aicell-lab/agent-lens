@@ -1428,10 +1428,20 @@ async def setup_service(server, server_id="agent-lens"):
     # Check if we're running locally
     is_local = "--port" in cmd_args or "start-server" in cmd_args
     
-    # Only register service health probes when not running locally and not in VSCode connect-server mode
+    # Check if we're running in test mode
+    is_test_mode = (
+        "pytest" in cmd_args or 
+        "test" in cmd_args or 
+        server_id.startswith("test-") or 
+        any("test" in arg.lower() for arg in sys.argv)
+    )
+    
+    # Only register service health probes when not running locally, not in test mode, and not in VSCode connect-server mode
     # Docker mode should register probes
-    if not is_local and (is_docker or not is_connect_server):
+    if not is_local and not is_test_mode and (is_docker or not is_connect_server):
         await register_service_probes(server, server_id)
+    elif is_test_mode:
+        logger.info(f"Skipping health probe registration for test service: {server_id}")
 
     # Store the cleanup function in the server's config
     server.config["cleanup"] = tile_manager.close
