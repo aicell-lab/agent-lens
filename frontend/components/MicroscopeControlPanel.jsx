@@ -159,6 +159,9 @@ const MicroscopeControlPanel = ({
   const [dragTransform, setDragTransform] = useState({ x: 0, y: 0 });
   const dragImageDisplayRef = useRef(null);
 
+  // New states for video display and zoom functionality
+  const [videoZoom, setVideoZoom] = useState(1.0);
+
   // Refs to hold the latest actual values for use in debounced effects
   const actualIlluminationIntensityRef = useRef(actualIlluminationIntensity);
   const actualCameraExposureRef = useRef(actualCameraExposure);
@@ -1351,12 +1354,47 @@ const MicroscopeControlPanel = ({
     <div className="microscope-control-panel-container new-mcp-layout bg-white bg-opacity-95 p-4 rounded-lg shadow-lg border-l border-gray-300 box-border">
       {/* Left Side: Image Display */}
       <div className={`mcp-image-display-area ${isRightPanelCollapsed ? 'expanded' : ''}`}>
+        {/* Video Display Controls */}
+        {(isWebRtcActive || snapshotImage) && (
+          <div className="video-controls-bar flex items-center justify-between p-2 bg-gray-100 border border-gray-300 rounded-t">
+            <div className="flex items-center space-x-2">
+              <span className="text-xs text-gray-600">Zoom:</span>
+              <button
+                onClick={() => setVideoZoom(prev => Math.max(0.25, prev - 0.25))}
+                className="px-2 py-1 text-xs bg-gray-200 hover:bg-gray-300 rounded disabled:opacity-50"
+                disabled={videoZoom <= 0.25}
+                title="Zoom Out"
+              >
+                <i className="fas fa-search-minus"></i>
+              </button>
+              <span className="text-xs text-gray-700 min-w-[3rem] text-center">{Math.round(videoZoom * 100)}%</span>
+              <button
+                onClick={() => setVideoZoom(prev => Math.min(3.0, prev + 0.25))}
+                className="px-2 py-1 text-xs bg-gray-200 hover:bg-gray-300 rounded disabled:opacity-50"
+                disabled={videoZoom >= 3.0}
+                title="Zoom In"
+              >
+                <i className="fas fa-search-plus"></i>
+              </button>
+              <button
+                onClick={() => setVideoZoom(1.0)}
+                className="px-2 py-1 text-xs bg-blue-500 hover:bg-blue-600 text-white rounded"
+                title="Reset Zoom"
+              >
+                <i className="fas fa-expand-arrows-alt"></i>
+              </button>
+            </div>
+                         <div className="flex items-center space-x-2">
+             </div>
+          </div>
+        )}
+        
         <div
           ref={dragImageDisplayRef}
           id="image-display"
-          className={`w-full border ${
+          className={`w-full border-l border-r border-b ${
             (snapshotImage || isWebRtcActive) ? 'border-gray-300' : 'border-dotted border-gray-400'
-          } rounded flex items-center justify-center bg-black relative ${
+          } ${(snapshotImage || isWebRtcActive) ? '' : 'rounded'} flex items-center justify-center bg-black relative ${
             (isWebRtcActive || snapshotImage) && microscopeControlService && !microscopeBusy && !currentOperation ? 'cursor-grab' : ''
           } ${isDragging ? 'cursor-grabbing' : ''}`}
           onMouseDown={handleMouseDown}
@@ -1367,6 +1405,8 @@ const MicroscopeControlPanel = ({
             userSelect: 'none',
             transition: isDragging ? 'none' : 'transform 0.3s ease-out',
             overflow: 'hidden', // Hide content that moves outside the display window
+            height: isRightPanelCollapsed ? 'calc(100vh - 150px)' : 'calc(100vh - 350px)', // Responsive height
+            maxHeight: '80vh', // Prevent taking up entire screen
           }}
         >
           {isWebRtcActive && !webRtcError ? (
@@ -1375,10 +1415,13 @@ const MicroscopeControlPanel = ({
               autoPlay 
               playsInline 
               muted 
-              className="object-contain w-full h-full pointer-events-none"
+              className="pointer-events-none"
               style={{
-                transform: `translate(${dragTransform.x}px, ${dragTransform.y}px)`,
+                transform: `translate(${dragTransform.x}px, ${dragTransform.y}px) scale(${videoZoom})`,
                 transition: isDragging ? 'none' : 'transform 0.3s ease-out',
+                width: '750px',
+                height: '750px',
+                objectFit: 'contain',
               }}
             />
           ) : snappedImageData.url ? (
@@ -1386,10 +1429,13 @@ const MicroscopeControlPanel = ({
               <img
                 src={snappedImageData.url}
                 alt="Microscope Snapshot"
-                className="object-contain w-full h-full pointer-events-none"
+                className="pointer-events-none"
                 style={{
-                  transform: `translate(${dragTransform.x}px, ${dragTransform.y}px)`,
+                  transform: `translate(${dragTransform.x}px, ${dragTransform.y}px) scale(${videoZoom})`,
                   transition: isDragging ? 'none' : 'transform 0.3s ease-out',
+                  width: '750px',
+                  height: '750px',
+                  objectFit: 'contain',
                 }}
               />
               {/* ImageJ.js Badge */}
@@ -1433,7 +1479,7 @@ const MicroscopeControlPanel = ({
         </div>
         {/* Video Contrast Controls with Histogram */}
         {isWebRtcActive && (
-          <div className="video-contrast-controls mt-2 p-2 border border-gray-300 rounded-lg bg-white bg-opacity-90">
+          <div className="video-contrast-controls mt-2 p-2 border border-gray-300 rounded-lg bg-white bg-opacity-90 max-h-96 overflow-y-auto">
             <div className="text-xs font-medium text-gray-700 mb-2 flex items-center justify-between">
               <span>Gray Level Histogram & Contrast</span>
               <div className="flex items-center space-x-2">

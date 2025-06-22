@@ -1142,3 +1142,39 @@
 #image-display.dragging img {
   transition: none; /* Disable transition during dragging for responsive feel */
 }
+
+/* Responsive video display styles */
+.mcp-image-display-area {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0; /* Allow flex child to shrink */
+}
+
+#image-display {
+  flex: 1;
+  min-height: 300px; /* Minimum height to ensure usability */
+}
+
+/* Video controls bar styling */
+.video-controls-bar {
+  flex-shrink: 0; /* Don't shrink the controls */
+  backdrop-filter: blur(4px);
+  border-bottom: none; /* Remove bottom border as it connects to video display */
+}
+
+/* Make image display area responsive */
+.mcp-image-display-area.expanded #image-display {
+  height: calc(100vh - 120px) !important; /* Larger when expanded */
+}
+
+/* Ensure video content fits properly at different zoom levels */
+#image-display video,
+#image-display img {
+  transform-origin: center center;
+}
+
+/* Scrollable histogram section */
+.video-contrast-controls {
+  flex-shrink: 0; /* Don't let it shrink too much */
+}
