@@ -72,9 +72,9 @@ const MicroscopeControl = () => {
     };
     setNotifications(prev => {
       const updated = [...prev, newNotification];
-      // Limit to maximum 5 notifications to prevent UI clutter
-      if (updated.length > 5) {
-        return updated.slice(-5); // Keep only the last 5 notifications
+      // Limit to maximum 2 notifications to prevent UI clutter
+      if (updated.length > 2) {
+        return updated.slice(-2); // Keep only the last 5 notifications
       }
       return updated;
     });
