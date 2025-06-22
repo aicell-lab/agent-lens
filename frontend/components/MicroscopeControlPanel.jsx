@@ -5,6 +5,7 @@ import CameraSettings from './CameraSettings';
 import ChatbotButton from './ChatbotButton';
 import SampleSelector from './SampleSelector';
 import ImagingTasksModal from './ImagingTasksModal';
+import MicroscopeMapDisplay from './MicroscopeMapDisplay'; // New import
 import './ImagingTasksModal.css'; // Added for well plate styles
 
 // Helper function to convert a uint8 hypha-rpc numpy array to a displayable Data URL
@@ -161,6 +162,9 @@ const MicroscopeControlPanel = ({
 
   // New states for video display and zoom functionality
   const [videoZoom, setVideoZoom] = useState(1.0);
+  
+  // State for full-screen map display
+  const [isMapFullScreen, setIsMapFullScreen] = useState(false);
 
   // Refs to hold the latest actual values for use in debounced effects
   const actualIlluminationIntensityRef = useRef(actualIlluminationIntensity);
@@ -1384,8 +1388,17 @@ const MicroscopeControlPanel = ({
                 <i className="fas fa-expand-arrows-alt"></i>
               </button>
             </div>
-                         <div className="flex items-center space-x-2">
-             </div>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => setIsMapFullScreen(true)}
+                className="px-2 py-1 text-xs bg-green-500 hover:bg-green-600 text-white rounded flex items-center"
+                title="Full Screen Map View"
+                disabled={!microscopeConfiguration}
+              >
+                <i className="fas fa-expand mr-1"></i>
+                Full Screen Map
+              </button>
+            </div>
           </div>
         )}
         
@@ -2167,6 +2180,20 @@ const MicroscopeControlPanel = ({
           </div>
         </div>
       )}
+
+      {/* Full-screen Map Display */}
+      <MicroscopeMapDisplay
+        isOpen={isMapFullScreen}
+        onClose={() => setIsMapFullScreen(false)}
+        microscopeConfiguration={microscopeConfiguration}
+        isWebRtcActive={isWebRtcActive}
+        videoRef={videoRef}
+        frameMetadata={frameMetadata}
+        videoZoom={videoZoom}
+        snapshotImage={snapshotImage}
+        isDragging={isDragging}
+        dragTransform={dragTransform}
+      />
     </div>
   );
 };
