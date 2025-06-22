@@ -1396,8 +1396,8 @@ const MicroscopeControlPanel = ({
           <div
             className="w-full border border-gray-300 bg-black relative"
             style={{
-              height: isRightPanelCollapsed ? 'calc(100vh - 150px)' : 'calc(100vh - 350px)',
-              maxHeight: '80vh',
+              height: isRightPanelCollapsed ? 'calc(100vh - 105px)' : 'calc(100vh - 245px)',
+              maxHeight: '90vh',
               overflow: 'hidden',
             }}
           >
@@ -1435,8 +1435,8 @@ const MicroscopeControlPanel = ({
               userSelect: 'none',
               transition: isDragging ? 'none' : 'transform 0.3s ease-out',
               overflow: 'hidden', // Hide content that moves outside the display window
-              height: isRightPanelCollapsed ? 'calc(100vh - 150px)' : 'calc(100vh - 350px)', // Responsive height
-              maxHeight: '80vh', // Prevent taking up entire screen
+              height: isRightPanelCollapsed ? 'calc(100vh - 105px)' : 'calc(100vh - 245px)', // Responsive height (increased by ~30%)
+              maxHeight: '90vh', // Prevent taking up entire screen (increased from 80vh)
             }}
           >
             {isWebRtcActive && !webRtcError ? (
