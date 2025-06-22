@@ -152,6 +152,13 @@ const MicroscopeControlPanel = ({
   const autoContrastMinAdjustRef = useRef(autoContrastMinAdjust);
   const autoContrastMaxAdjustRef = useRef(autoContrastMaxAdjust);
 
+  // New states for drag move functionality
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStartPosition, setDragStartPosition] = useState({ x: 0, y: 0 });
+  const [dragCurrentPosition, setDragCurrentPosition] = useState({ x: 0, y: 0 });
+  const [dragTransform, setDragTransform] = useState({ x: 0, y: 0 });
+  const dragImageDisplayRef = useRef(null);
+
   // Refs to hold the latest actual values for use in debounced effects
   const actualIlluminationIntensityRef = useRef(actualIlluminationIntensity);
   const actualCameraExposureRef = useRef(actualCameraExposure);
@@ -1181,32 +1188,218 @@ const MicroscopeControlPanel = ({
     setIsConfigurationWindowOpen(false);
   };
 
+  // Helper function to calculate FOV size based on microscope configuration and objective
+  const calculateFOVSize = useCallback(() => {
+    if (!microscopeConfiguration || !microscopeConfiguration.optics) {
+      // Default fallback values
+      return { width_mm: 0.5, height_mm: 0.5 };
+    }
+
+    const defaultObjective = microscopeConfiguration.optics.default_objective || "40x";
+    const objectives = microscopeConfiguration.optics.objectives || {};
+    
+    // Get magnification from the objective configuration
+    const objectiveConfig = objectives[defaultObjective];
+    let magnification = 40; // Default fallback
+    
+    if (objectiveConfig && objectiveConfig.magnification) {
+      magnification = objectiveConfig.magnification;
+    } else {
+      // Try to extract magnification from objective name (e.g., "40x" -> 40)
+      const match = defaultObjective.match(/(\d+)x/);
+      if (match) {
+        magnification = parseInt(match[1], 10);
+      }
+    }
+
+    // Calculate FOV based on magnification
+    // Higher magnification = smaller FOV
+    // Base calculation: 40x = 0.5mm, 20x = 1.0mm, 10x = 2.0mm, etc.
+    const baseFOV = 20.0; // mm (40x gives 0.5mm: 20/40 = 0.5)
+    const fovSize = baseFOV / magnification;
+    
+    return { width_mm: fovSize, height_mm: fovSize };
+  }, [microscopeConfiguration]);
+
+  // Helper function to convert drag pixels to stage movement in mm
+  const convertDragToStageMovement = useCallback((dragPixels, displaySize) => {
+    const fovSize = calculateFOVSize();
+    
+    // Calculate movement in mm based on FOV and display size
+    const movementX_mm = (dragPixels.x / displaySize.width) * fovSize.width_mm;
+    const movementY_mm = (dragPixels.y / displaySize.height) * fovSize.height_mm;
+    
+    // Apply direction mapping: drag right = stage left (negative x), drag down = stage up (negative y)
+    return {
+      x: -movementX_mm, // Invert X direction
+      y: -movementY_mm  // Invert Y direction
+    };
+  }, [calculateFOVSize]);
+
+  // Mouse event handlers for drag move functionality
+  const handleMouseDown = useCallback((e) => {
+    if (!microscopeControlService || microscopeBusy || currentOperation) {
+      return;
+    }
+
+    // Only enable drag move during video streaming or when snapshot is displayed
+    if (!isWebRtcActive && !snapshotImage) {
+      return;
+    }
+
+    e.preventDefault();
+    setIsDragging(true);
+    
+    const rect = e.currentTarget.getBoundingClientRect();
+    const startPos = {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
+    };
+    
+    setDragStartPosition(startPos);
+    setDragCurrentPosition(startPos);
+    setDragTransform({ x: 0, y: 0 });
+    
+    appendLog('Started drag move operation');
+  }, [microscopeControlService, microscopeBusy, currentOperation, isWebRtcActive, snapshotImage, appendLog]);
+
+  const handleMouseMove = useCallback((e) => {
+    if (!isDragging) return;
+
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const currentPos = {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
+    };
+    
+    setDragCurrentPosition(currentPos);
+    
+    // Calculate drag offset for visual feedback
+    const dragOffset = {
+      x: currentPos.x - dragStartPosition.x,
+      y: currentPos.y - dragStartPosition.y
+    };
+    
+    setDragTransform(dragOffset);
+  }, [isDragging, dragStartPosition]);
+
+  const handleMouseUp = useCallback(async (e) => {
+    if (!isDragging || !microscopeControlService) return;
+
+    e.preventDefault();
+    setIsDragging(false);
+    
+    // Calculate final drag distance
+    const dragDistance = {
+      x: dragCurrentPosition.x - dragStartPosition.x,
+      y: dragCurrentPosition.y - dragStartPosition.y
+    };
+    
+    // Get display size for conversion calculations
+    const rect = e.currentTarget.getBoundingClientRect();
+    const displaySize = { width: rect.width, height: rect.height };
+    
+    // Convert drag distance to stage movement
+    const stageMovement = convertDragToStageMovement(dragDistance, displaySize);
+    
+    // Reset visual transform
+    setDragTransform({ x: 0, y: 0 });
+    
+    // Only move if there's significant movement (threshold to avoid accidental moves)
+    const minMovementThreshold = 0.005; // 5 micrometers
+    const totalMovement = Math.sqrt(stageMovement.x * stageMovement.x + stageMovement.y * stageMovement.y);
+    
+    if (totalMovement > minMovementThreshold) {
+      try {
+        setMicroscopeBusy(true);
+        appendLog(`Moving stage based on drag: X=${stageMovement.x.toFixed(4)}mm, Y=${stageMovement.y.toFixed(4)}mm`);
+        
+        const result = await microscopeControlService.move_by_distance(
+          stageMovement.x, 
+          stageMovement.y, 
+          0 // Z movement is always 0 for drag moves
+        );
+        
+        if (result.success) {
+          appendLog(`Drag move completed: ${result.message}`);
+          appendLog(`Stage moved from (${result.initial_position.x.toFixed(3)}, ${result.initial_position.y.toFixed(3)}) to (${result.final_position.x.toFixed(3)}, ${result.final_position.y.toFixed(3)})`);
+        } else {
+          appendLog(`Drag move failed: ${result.message}`);
+        }
+      } catch (error) {
+        appendLog(`Error in drag move: ${error.message}`);
+        console.error("[MicroscopeControlPanel] Error in drag move:", error);
+      } finally {
+        setMicroscopeBusy(false);
+      }
+    } else {
+      appendLog('Drag move canceled: movement too small');
+    }
+  }, [isDragging, dragCurrentPosition, dragStartPosition, microscopeControlService, convertDragToStageMovement, appendLog]);
+
+  // Handle mouse leave to cancel drag operation
+  const handleMouseLeave = useCallback(() => {
+    if (isDragging) {
+      setIsDragging(false);
+      setDragTransform({ x: 0, y: 0 });
+      appendLog('Drag move canceled: mouse left display area');
+    }
+  }, [isDragging, appendLog]);
+
   return (
     <div className="microscope-control-panel-container new-mcp-layout bg-white bg-opacity-95 p-4 rounded-lg shadow-lg border-l border-gray-300 box-border">
       {/* Left Side: Image Display */}
       <div className={`mcp-image-display-area ${isRightPanelCollapsed ? 'expanded' : ''}`}>
         <div
+          ref={dragImageDisplayRef}
           id="image-display"
           className={`w-full border ${
             (snapshotImage || isWebRtcActive) ? 'border-gray-300' : 'border-dotted border-gray-400'
-          } rounded flex items-center justify-center bg-black relative`}
+          } rounded flex items-center justify-center bg-black relative ${
+            (isWebRtcActive || snapshotImage) && microscopeControlService && !microscopeBusy && !currentOperation ? 'cursor-grab' : ''
+          } ${isDragging ? 'cursor-grabbing' : ''}`}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseLeave}
+          style={{
+            userSelect: 'none',
+            transition: isDragging ? 'none' : 'transform 0.3s ease-out',
+            overflow: 'hidden', // Hide content that moves outside the display window
+          }}
         >
           {isWebRtcActive && !webRtcError ? (
-            <video ref={videoRef} autoPlay playsInline muted className="object-contain w-full h-full" />
+            <video 
+              ref={videoRef} 
+              autoPlay 
+              playsInline 
+              muted 
+              className="object-contain w-full h-full pointer-events-none"
+              style={{
+                transform: `translate(${dragTransform.x}px, ${dragTransform.y}px)`,
+                transition: isDragging ? 'none' : 'transform 0.3s ease-out',
+              }}
+            />
           ) : snappedImageData.url ? (
             <>
               <img
                 src={snappedImageData.url}
                 alt="Microscope Snapshot"
-                className="object-contain w-full h-full"
+                className="object-contain w-full h-full pointer-events-none"
+                style={{
+                  transform: `translate(${dragTransform.x}px, ${dragTransform.y}px)`,
+                  transition: isDragging ? 'none' : 'transform 0.3s ease-out',
+                }}
               />
               {/* ImageJ.js Badge */}
               {onOpenImageJ && (
                 <button
                   onClick={() => onOpenImageJ(snappedImageData.numpy)}
-                  className="imagej-badge absolute top-2 right-2 p-1 bg-white bg-opacity-90 hover:bg-opacity-100 rounded shadow-md transition-all duration-200 flex items-center gap-1 text-xs font-medium text-gray-700 hover:text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="imagej-badge absolute top-2 right-2 p-1 bg-white bg-opacity-90 hover:bg-opacity-100 rounded shadow-md transition-all duration-200 flex items-center gap-1 text-xs font-medium text-gray-700 hover:text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed z-10"
                   title={imjoyApi ? "Open in ImageJ.js" : "ImageJ.js integration is loading..."}
                   disabled={!imjoyApi}
+                  style={{ pointerEvents: 'auto' }} // Allow the badge to be clickable even when video/image has pointer-events-none
                 >
                   <img 
                     src="https://ij.imjoy.io/assets/badge/open-in-imagej-js-badge.svg" 
@@ -1220,6 +1413,22 @@ const MicroscopeControlPanel = ({
             <p className="placeholder-text text-center text-gray-300">
               {webRtcError ? `WebRTC Error: ${webRtcError}` : (microscopeControlService ? 'Image Display' : 'Microscope not connected')}
             </p>
+          )}
+          
+          {/* Drag move instructions overlay */}
+          {(isWebRtcActive || snapshotImage) && microscopeControlService && !microscopeBusy && !currentOperation && !isDragging && (
+            <div className="absolute bottom-2 left-2 bg-black bg-opacity-60 text-white text-xs px-2 py-1 rounded pointer-events-none">
+              <i className="fas fa-hand-paper mr-1"></i>
+              Drag to move stage
+            </div>
+          )}
+          
+          {/* Visual feedback during dragging */}
+          {isDragging && (
+            <div className="absolute top-2 left-2 bg-blue-500 bg-opacity-80 text-white text-xs px-2 py-1 rounded pointer-events-none">
+              <i className="fas fa-arrows-alt mr-1"></i>
+              Moving stage...
+            </div>
           )}
         </div>
         {/* Video Contrast Controls with Histogram */}

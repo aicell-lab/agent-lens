@@ -1078,4 +1078,67 @@
 
 .auto-contrast-toggle input:disabled + .auto-contrast-slider:before {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-} 
+}
+
+/* Drag Move Functionality Styles */
+.drag-move-enabled {
+  cursor: grab;
+  user-select: none;
+}
+
+.drag-move-enabled:active {
+  cursor: grabbing;
+}
+
+.drag-move-active {
+  cursor: grabbing;
+}
+
+.drag-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.drag-instruction {
+  transition: opacity 0.3s ease;
+}
+
+.drag-instruction.fade-out {
+  opacity: 0;
+}
+
+.drag-feedback {
+  backdrop-filter: blur(2px);
+  animation: dragFeedback 2s infinite;
+}
+
+@keyframes dragFeedback {
+  0% { transform: scale(1); opacity: 0.8; }
+  50% { transform: scale(1.05); opacity: 1; }
+  100% { transform: scale(1); opacity: 0.8; }
+}
+
+/* Image display drag cursor states */
+#image-display.cursor-grab {
+  cursor: grab;
+}
+
+#image-display.cursor-grabbing {
+  cursor: grabbing;
+}
+
+/* Smooth transitions for drag animations */
+#image-display video,
+#image-display img {
+  transition: transform 0.3s ease-out;
+}
+
+#image-display.dragging video,
+#image-display.dragging img {
+  transition: none; /* Disable transition during dragging for responsive feel */
+}
