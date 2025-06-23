@@ -540,7 +540,6 @@ const MicroscopeMapDisplay = ({
                 playsInline
                 className="w-full h-full object-cover"
                 style={{
-                  transform: 'scaleY(-1)', // Flip video if needed to match coordinate system
                   backgroundColor: 'transparent',
                   border: '1px solid rgba(255, 255, 0, 0.3)', // Subtle yellow border to help debug visibility
                 }}
