@@ -81,4 +81,22 @@
   to {
     opacity: 1;
   }
+}
+
+.coordinate-display table tr:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Responsive styles for map header controls */
+.microscope-map-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+}
+
+@media (max-width: 1200px) {
+  .microscope-map-header > div {
+    margin-bottom: 0.5rem;
+  }
 } 
