@@ -235,14 +235,14 @@ const MicroscopeMapDisplay = ({
       // Calculate equivalent zoom level in the new scale to maintain continuity
       const equivalentZoom = (newZoomLevel * (1 / Math.pow(4, scaleLevel))) / (1 / Math.pow(4, scaleLevel - 1));
       zoomToPoint(Math.min(2.0, equivalentZoom), scaleLevel - 1, mouseX, mouseY);
-    } else if (newZoomLevel < 0.1 && scaleLevel < 3) {
+    } else if (newZoomLevel < 0.17 && scaleLevel < 3) {
       // Zoom out to lower resolution (higher scale number = more zoomed out)
       // Calculate equivalent zoom level in the new scale to maintain continuity
       const equivalentZoom = (newZoomLevel * (1 / Math.pow(4, scaleLevel))) / (1 / Math.pow(4, scaleLevel + 1));
-      zoomToPoint(Math.max(0.1, equivalentZoom), scaleLevel + 1, mouseX, mouseY);
+      zoomToPoint(Math.max(0.17, equivalentZoom), scaleLevel + 1, mouseX, mouseY);
     } else {
       // Smooth zoom within current scale level
-      newZoomLevel = Math.max(0.1, Math.min(2.0, newZoomLevel));
+      newZoomLevel = Math.max(0.17, Math.min(2.0, newZoomLevel));
       zoomToPoint(newZoomLevel, scaleLevel, mouseX, mouseY);
     }
   }, [zoomLevel, scaleLevel, zoomToPoint]);
@@ -433,17 +433,17 @@ const MicroscopeMapDisplay = ({
                  const centerX = rect.width / 2;
                  const centerY = rect.height / 2;
                  
-                 if (newZoom < 0.1 && scaleLevel < 3) {
+                 if (newZoom < 0.17 && scaleLevel < 3) {
                    // Zoom out to lower resolution (higher scale number)
-                   zoomToPoint(0.1, scaleLevel + 1, centerX, centerY);
+                   zoomToPoint(0.17, scaleLevel + 1, centerX, centerY);
                  } else {
                    // Smooth zoom within current scale level
-                   zoomToPoint(Math.max(0.1, newZoom), scaleLevel, centerX, centerY);
+                   zoomToPoint(Math.max(0.17, newZoom), scaleLevel, centerX, centerY);
                  }
                }}
                className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded disabled:opacity-50"
                title="Zoom Out"
-               disabled={scaleLevel === 3 && zoomLevel <= 0.1}
+               disabled={scaleLevel === 3 && zoomLevel <= 0.17}
              >
                <i className="fas fa-search-minus"></i>
              </button>
@@ -459,7 +459,7 @@ const MicroscopeMapDisplay = ({
                  
                  if (newZoom > 2.0 && scaleLevel > 0) {
                    // Zoom in to higher resolution (lower scale number)
-                   zoomToPoint(0.1, scaleLevel - 1, centerX, centerY);
+                   zoomToPoint(0.17, scaleLevel - 1, centerX, centerY);
                  } else {
                    // Smooth zoom within current scale level
                    zoomToPoint(Math.min(2.0, newZoom), scaleLevel, centerX, centerY);
