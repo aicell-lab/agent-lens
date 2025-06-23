@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import PropTypes from 'prop-types';
 import './MicroscopeMapDisplay.css';
 
@@ -178,7 +178,7 @@ const MicroscopeMapDisplay = ({
   };
 
   // Helper function to zoom to a specific point
-  const zoomToPoint = (newZoomLevel, newScaleLevel, pointX, pointY) => {
+  const zoomToPoint = useCallback((newZoomLevel, newScaleLevel, pointX, pointY) => {
     const oldScale = mapScale;
     const newScale = Math.pow(2, 5 - newScaleLevel) * newZoomLevel;
     
@@ -189,9 +189,9 @@ const MicroscopeMapDisplay = ({
     setScaleLevel(newScaleLevel);
     setZoomLevel(newZoomLevel);
     setMapPan({ x: newPanX, y: newPanY });
-  };
+  }, [mapPan.x, mapPan.y, mapScale]);
 
-  const handleWheel = (e) => {
+  const handleWheel = useCallback((e) => {
     e.preventDefault();
     const zoomDelta = e.deltaY > 0 ? 0.9 : 1.1;
     let newZoomLevel = zoomLevel * zoomDelta;
@@ -216,7 +216,19 @@ const MicroscopeMapDisplay = ({
       newZoomLevel = Math.max(0.5, Math.min(4.0, newZoomLevel));
       zoomToPoint(newZoomLevel, scaleLevel, mouseX, mouseY);
     }
-  };
+  }, [zoomLevel, scaleLevel, zoomToPoint]);
+
+  useEffect(() => {
+    const mapContainer = mapContainerRef.current;
+    if (isOpen && mapContainer) {
+      mapContainer.addEventListener('wheel', handleWheel, { passive: false });
+      return () => {
+        if (mapContainer) {
+            mapContainer.removeEventListener('wheel', handleWheel);
+        }
+      };
+    }
+  }, [isOpen, handleWheel]);
 
   // Handle video source assignment to prevent blinking
   useEffect(() => {
@@ -472,7 +484,6 @@ const MicroscopeMapDisplay = ({
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
-        onWheel={handleWheel}
         onDoubleClick={handleDoubleClick}
         style={{ cursor: isPanning ? 'grabbing' : 'grab' }}
       >
