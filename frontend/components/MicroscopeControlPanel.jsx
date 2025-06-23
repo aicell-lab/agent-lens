@@ -524,7 +524,7 @@ const MicroscopeControlPanel = ({
                 dataChannel.addEventListener('message', (event) => {
                   try {
                     const metadata = JSON.parse(event.data);
-                    console.log('Received metadata via data channel:', metadata);
+                    //console.log('Received metadata via data channel:', metadata);
                     setFrameMetadata(metadata);
                     
                     // Auto-adjust contrast range if enabled (use refs to get current values)
@@ -543,7 +543,7 @@ const MicroscopeControlPanel = ({
                         
                         setVideoContrastMin(Math.max(0, Math.min(254, newMin)));
                         setVideoContrastMax(Math.min(255, Math.max(1, newMax)));
-                        console.log(`Auto-contrast updated: Min=${newMin} (P5${currentMinAdjust >= 0 ? '+' : ''}${currentMinAdjust}), Max=${newMax} (P95${currentMaxAdjust >= 0 ? '+' : ''}${currentMaxAdjust})`);
+                        //console.log(`Auto-contrast updated: Min=${newMin} (P5${currentMinAdjust >= 0 ? '+' : ''}${currentMinAdjust}), Max=${newMax} (P95${currentMaxAdjust >= 0 ? '+' : ''}${currentMaxAdjust})`);
                       }
                     }
                     
@@ -1195,35 +1195,21 @@ const MicroscopeControlPanel = ({
     setIsConfigurationWindowOpen(false);
   };
 
-  // Helper function to calculate FOV size based on microscope configuration and objective
+  // Helper function to calculate FOV size based on microscope configuration
   const calculateFOVSize = useCallback(() => {
-    if (!microscopeConfiguration || !microscopeConfiguration.optics) {
+    if (!microscopeConfiguration?.optics?.calculated_pixel_size_mm || !microscopeConfiguration?.acquisition?.crop_width) {
       // Default fallback values
       return { width_mm: 0.5, height_mm: 0.5 };
     }
 
-    const defaultObjective = microscopeConfiguration.optics.default_objective || "40x";
-    const objectives = microscopeConfiguration.optics.objectives || {};
+    const calculatedPixelSizeMm = microscopeConfiguration.optics.calculated_pixel_size_mm;
+    const cropWidth = microscopeConfiguration.acquisition.crop_width;
+    const displayWidth = 750; // Video frame display size
     
-    // Get magnification from the objective configuration
-    const objectiveConfig = objectives[defaultObjective];
-    let magnification = 40; // Default fallback
-    
-    if (objectiveConfig && objectiveConfig.magnification) {
-      magnification = objectiveConfig.magnification;
-    } else {
-      // Try to extract magnification from objective name (e.g., "40x" -> 40)
-      const match = defaultObjective.match(/(\d+)x/);
-      if (match) {
-        magnification = parseInt(match[1], 10);
-      }
-    }
-
-    // Calculate FOV based on magnification
-    // Higher magnification = smaller FOV
-    // Base calculation: 40x = 0.5mm, 20x = 1.0mm, 10x = 2.0mm, etc.
-    const baseFOV = 20.0; // mm (40x gives 0.5mm: 20/40 = 0.5)
-    const fovSize = baseFOV / magnification;
+    // Calculate FOV: display_width_pixels * pixel_size_mm
+    // calculated_pixel_size_mm is for the full crop, scale it for display
+    const actualPixelSizeMm = calculatedPixelSizeMm * (cropWidth / displayWidth);
+    const fovSize = displayWidth * actualPixelSizeMm;
     
     return { width_mm: fovSize, height_mm: fovSize };
   }, [microscopeConfiguration]);

@@ -22,7 +22,7 @@ const MicroscopeMapDisplay = ({
   const canvasRef = useRef(null);
   const mapVideoRef = useRef(null);
   const [scaleLevel, setScaleLevel] = useState(5); // Discrete scale level 0-5 (start at overview)
-  const [zoomLevel, setZoomLevel] = useState(1); // Continuous zoom for smooth animation
+  const [zoomLevel, setZoomLevel] = useState(0.01); // Continuous zoom for smooth animation (start much smaller due to accurate pixel calculations)
   const [mapPan, setMapPan] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
@@ -50,8 +50,38 @@ const MicroscopeMapDisplay = ({
     };
   }, [microscopeConfiguration]);
 
-  // Convert mm to pixels for display (assuming base scale of 10 pixels per mm)
-  const pixelsPerMm = 10;
+  // Calculate pixelsPerMm from microscope configuration
+  const pixelsPerMm = useMemo(() => {
+    if (!microscopeConfiguration?.optics?.calculated_pixel_size_mm || !microscopeConfiguration?.acquisition?.crop_width) {
+      return 10; // Fallback to original hardcoded value
+    }
+    
+    const calculatedPixelSizeMm = microscopeConfiguration.optics.calculated_pixel_size_mm;
+    const cropWidth = microscopeConfiguration.acquisition.crop_width;
+    const displayWidth = 750; // Video frame display size
+    
+    // Calculate actual pixel size for the display window
+    // calculated_pixel_size_mm is for the full crop, scale it for display
+    const actualPixelSizeMm = calculatedPixelSizeMm * (cropWidth / displayWidth);
+    
+    // Convert to pixels per mm
+    return 1 / actualPixelSizeMm;
+  }, [microscopeConfiguration]);
+
+  // Calculate FOV size from microscope configuration
+  const fovSize = useMemo(() => {
+    if (!microscopeConfiguration?.optics?.calculated_pixel_size_mm || !microscopeConfiguration?.acquisition?.crop_width) {
+      return 0.5; // Fallback for 40x objective
+    }
+    
+    const calculatedPixelSizeMm = microscopeConfiguration.optics.calculated_pixel_size_mm;
+    const cropWidth = microscopeConfiguration.acquisition.crop_width;
+    const displayWidth = 750; // Video frame display size
+    
+    // Calculate FOV: display_width_pixels * pixel_size_mm
+    const actualPixelSizeMm = calculatedPixelSizeMm * (cropWidth / displayWidth);
+    return displayWidth * actualPixelSizeMm;
+  }, [microscopeConfiguration]);
 
   // Get current stage position from metadata
   const currentStagePosition = useMemo(() => {
@@ -71,9 +101,7 @@ const MicroscopeMapDisplay = ({
       return null;
     }
     
-    // Video frame is 750x750 pixels representing a certain FOV in mm
-    // This depends on the objective magnification
-    const fovSize = microscopeConfiguration?.optics?.default_objective === "40x" ? 0.5 : 1.0; // mm
+    // Video frame is 750x750 pixels representing the calculated FOV in mm
     
     // Coordinate system: (0,0) is upper-left corner
     return {
@@ -193,7 +221,7 @@ const MicroscopeMapDisplay = ({
 
   const handleWheel = useCallback((e) => {
     e.preventDefault();
-    const zoomDelta = e.deltaY > 0 ? 0.9 : 1.1;
+    const zoomDelta = e.deltaY > 0 ? 0.95 : 1.05; // Smaller steps for smoother zoom
     let newZoomLevel = zoomLevel * zoomDelta;
     
     const rect = mapContainerRef.current.getBoundingClientRect();
@@ -201,19 +229,19 @@ const MicroscopeMapDisplay = ({
     const mouseY = e.clientY - rect.top;
     
     // Check if we should change scale level (inverted: lower number = higher resolution)
-    if (newZoomLevel > 4.0 && scaleLevel > 0) {
+    if (newZoomLevel > 0.1 && scaleLevel > 0) {
       // Zoom in to higher resolution (lower scale number)
       // Calculate equivalent zoom level in the new scale to maintain continuity
       const equivalentZoom = (newZoomLevel * Math.pow(2, 5 - scaleLevel)) / Math.pow(2, 5 - (scaleLevel - 1));
-      zoomToPoint(Math.min(4.0, equivalentZoom), scaleLevel - 1, mouseX, mouseY);
-    } else if (newZoomLevel < 0.5 && scaleLevel < 5) {
+      zoomToPoint(Math.min(0.1, equivalentZoom), scaleLevel - 1, mouseX, mouseY);
+    } else if (newZoomLevel < 0.01 && scaleLevel < 5) {
       // Zoom out to lower resolution (higher scale number)
       // Calculate equivalent zoom level in the new scale to maintain continuity
       const equivalentZoom = (newZoomLevel * Math.pow(2, 5 - scaleLevel)) / Math.pow(2, 5 - (scaleLevel + 1));
-      zoomToPoint(Math.max(0.5, equivalentZoom), scaleLevel + 1, mouseX, mouseY);
+      zoomToPoint(Math.max(0.01, equivalentZoom), scaleLevel + 1, mouseX, mouseY);
     } else {
       // Smooth zoom within current scale level
-      newZoomLevel = Math.max(0.5, Math.min(4.0, newZoomLevel));
+      newZoomLevel = Math.max(0.01, Math.min(0.1, newZoomLevel));
       zoomToPoint(newZoomLevel, scaleLevel, mouseX, mouseY);
     }
   }, [zoomLevel, scaleLevel, zoomToPoint]);
@@ -399,46 +427,46 @@ const MicroscopeMapDisplay = ({
                      <div className="flex items-center space-x-2">
              <button
                onClick={(e) => {
-                 const newZoom = zoomLevel * 0.8;
+                 const newZoom = zoomLevel * 0.9; // Smaller increment for smoother transitions
                  const rect = mapContainerRef.current.getBoundingClientRect();
                  const centerX = rect.width / 2;
                  const centerY = rect.height / 2;
                  
-                 if (newZoom < 0.5 && scaleLevel < 5) {
+                 if (newZoom < 0.01 && scaleLevel < 5) {
                    // Zoom out to lower resolution (higher scale number)
-                   zoomToPoint(1.0, scaleLevel + 1, centerX, centerY);
+                   zoomToPoint(0.01, scaleLevel + 1, centerX, centerY);
                  } else {
                    // Smooth zoom within current scale level
-                   zoomToPoint(Math.max(0.5, newZoom), scaleLevel, centerX, centerY);
+                   zoomToPoint(Math.max(0.01, newZoom), scaleLevel, centerX, centerY);
                  }
                }}
                className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded disabled:opacity-50"
                title="Zoom Out"
-               disabled={scaleLevel === 5 && zoomLevel <= 0.5}
+               disabled={scaleLevel === 5 && zoomLevel <= 0.01}
              >
                <i className="fas fa-search-minus"></i>
              </button>
              <span className="text-white text-xs min-w-[8rem] text-center">
-               Scale {scaleLevel} ({Math.round(zoomLevel * 100)}%)
+               Scale {scaleLevel} ({(zoomLevel * 100).toFixed(1)}%)
              </span>
              <button
                onClick={(e) => {
-                 const newZoom = zoomLevel * 1.25;
+                 const newZoom = zoomLevel * 1.1; // Smaller increment for smoother transitions
                  const rect = mapContainerRef.current.getBoundingClientRect();
                  const centerX = rect.width / 2;
                  const centerY = rect.height / 2;
                  
-                 if (newZoom > 4.0 && scaleLevel > 0) {
+                 if (newZoom > 0.1 && scaleLevel > 0) {
                    // Zoom in to higher resolution (lower scale number)
-                   zoomToPoint(1.0, scaleLevel - 1, centerX, centerY);
+                   zoomToPoint(0.01, scaleLevel - 1, centerX, centerY);
                  } else {
                    // Smooth zoom within current scale level
-                   zoomToPoint(Math.min(4.0, newZoom), scaleLevel, centerX, centerY);
+                   zoomToPoint(Math.min(0.1, newZoom), scaleLevel, centerX, centerY);
                  }
                }}
                className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded disabled:opacity-50"
                title="Zoom In"
-               disabled={scaleLevel === 0 && zoomLevel >= 4.0}
+               disabled={scaleLevel === 0 && zoomLevel >= 0.1}
              >
                <i className="fas fa-search-plus"></i>
              </button>
@@ -449,11 +477,11 @@ const MicroscopeMapDisplay = ({
                    const centerX = rect.width / 2;
                    const centerY = rect.height / 2;
                    // Reset to overview, centered on stage
-                   zoomToPoint(1.0, 5, centerX, centerY);
+                   zoomToPoint(0.01, 5, centerX, centerY);
                  } else {
                    // Fallback if no rect available
                    setScaleLevel(5);
-                   setZoomLevel(1.0);
+                   setZoomLevel(0.01);
                    setMapPan({ x: 0, y: 0 });
                  }
                }}
