@@ -888,11 +888,26 @@
   color: #212529;
 }
 
-/* Notification Popup Styles */
-.notification-popup {
+/* Notifications Container - for stacking multiple notifications */
+.notifications-container {
   position: fixed;
   top: 20px;
   right: 20px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none; /* Allow clicks to pass through container */
+}
+
+.notifications-container > * {
+  pointer-events: auto; /* Re-enable clicks on individual notifications */
+}
+
+/* Notification Popup Styles */
+.notification-popup {
+  position: relative; /* Changed from fixed to relative for stacking */
+  /* Remove top, right positioning since container handles it */
   min-width: 300px;
   max-width: 500px;
   border: 2px solid;
@@ -900,7 +915,6 @@
   color: white;
   font-weight: 500;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  z-index: 9999;
   animation: slideInFromRight 0.3s ease-out;
 }
 
@@ -1007,4 +1021,61 @@
   /* Keep mounted but hidden - ImageJ will continue running */
   visibility: hidden;
   pointer-events: none;
+}
+
+/* Toggle Switch for Auto Contrast */
+.auto-contrast-toggle {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+}
+
+.auto-contrast-toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.auto-contrast-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ccc;
+  transition: 0.3s;
+  border-radius: 20px;
+}
+
+.auto-contrast-slider:before {
+  position: absolute;
+  content: "";
+  height: 16px;
+  width: 16px;
+  left: 2px;
+  bottom: 2px;
+  background-color: white;
+  transition: 0.3s;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.auto-contrast-toggle input:checked + .auto-contrast-slider {
+  background-color: #007bff;
+}
+
+.auto-contrast-toggle input:checked + .auto-contrast-slider:before {
+  transform: translateX(16px);
+}
+
+.auto-contrast-toggle input:disabled + .auto-contrast-slider {
+  background-color: #e9ecef;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.auto-contrast-toggle input:disabled + .auto-contrast-slider:before {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 } 

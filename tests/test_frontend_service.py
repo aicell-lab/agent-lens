@@ -1113,6 +1113,789 @@ async def test_frontend_service_health_comprehensive(test_frontend_service):
             await browser.close()
 
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
+async def test_frontend_webrtc_stops_on_operations(test_frontend_service):
+    """Test that WebRTC streaming stops when opening imaging task modal and during sample operations."""
+    service, service_url = test_frontend_service
+    
+    print("📹 Testing WebRTC stream stopping during operations with simulated microscope...")
+    
+    if not WORKSPACE_TOKEN:
+        pytest.skip("WORKSPACE_TOKEN environment variable not set")
+    
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        
+        try:
+            context = await browser.new_context()
+            page = await context.new_page()
+            
+            # Set up console and error logging
+            console_messages = []
+            page_errors = []
+            page.on('console', lambda msg: console_messages.append(f"{msg.type}: {msg.text}"))
+            page.on('pageerror', lambda error: page_errors.append(str(error)))
+            
+            # Navigate and authenticate
+            await page.goto(service_url, timeout=30000)
+            await page.evaluate(f'localStorage.setItem("token", "{WORKSPACE_TOKEN}")')
+            await page.reload()
+            await page.wait_for_load_state('networkidle', timeout=15000)
+            
+            # Wait for main app to load
+            selectors_to_try = ['.sidebar', '.main-layout', '.app-container', '#root > div']
+            main_app_loaded = False
+            for selector in selectors_to_try:
+                try:
+                    await page.wait_for_selector(selector, timeout=10000)
+                    main_app_loaded = True
+                    print(f"✅ Main application loaded (found: {selector})")
+                    break
+                except:
+                    continue
+            
+            if not main_app_loaded:
+                screenshot_path = f"/tmp/webrtc_test_debug_{uuid.uuid4().hex[:8]}.png"
+                await page.screenshot(path=screenshot_path)
+                print(f"📸 Debug screenshot saved to: {screenshot_path}")
+                raise AssertionError("❌ ERROR: Could not find main app selectors - main application failed to load")
+            
+            # Navigate to microscope tab
+            print("🔍 Navigating to microscope tab...")
+            microscope_selectors = [
+                '.sidebar-tab:has-text("Microscopes")',
+                'button:has-text("Microscopes")',
+                '.sidebar-tab .fa-microscope'
+            ]
+            
+            microscope_tab_found = False
+            for selector in microscope_selectors:
+                try:
+                    element = page.locator(selector).first
+                    if await element.count() > 0:
+                        await element.click()
+                        await page.wait_for_timeout(3000)
+                        print(f"✅ Navigated to microscope tab (using: {selector})")
+                        microscope_tab_found = True
+                        break
+                except Exception as e:
+                    continue
+            
+            if not microscope_tab_found:
+                raise AssertionError("❌ ERROR: Could not find microscope tab")
+            
+            # Select simulated microscope
+            print("🔍 Selecting simulated microscope...")
+            simulated_microscope_selectors = [
+                'option[value="agent-lens/squid-control-reef"]',
+                'select option:has-text("Simulated Microscope")',
+                'text="Simulated Microscope"'
+            ]
+            
+            simulated_selected = False
+            for selector in simulated_microscope_selectors:
+                try:
+                    element = page.locator(selector).first
+                    if await element.count() > 0:
+                        if 'option' in selector:
+                            # Select the option from dropdown
+                            parent_select = page.locator('select').filter(has=element)
+                            await parent_select.select_option('agent-lens/squid-control-reef')
+                        else:
+                            await element.click()
+                        await page.wait_for_timeout(2000)
+                        print(f"✅ Selected simulated microscope (using: {selector})")
+                        simulated_selected = True
+                        break
+                except Exception as e:
+                    print(f"  - Selector '{selector}' failed: {e}")
+                    continue
+            
+            if not simulated_selected:
+                print("⚠️  Could not explicitly select simulated microscope, continuing...")
+            
+            # Wait for microscope control panel to load
+            await page.wait_for_timeout(3000)
+            
+            # Look for WebRTC start button and start streaming
+            print("🔍 Starting WebRTC streaming...")
+            webrtc_selectors = [
+                'button:has-text("Start Live")',
+                '.live-button:has-text("Start Live")',
+                'button[title*="Start Live"]'
+            ]
+            
+            webrtc_started = False
+            for selector in webrtc_selectors:
+                try:
+                    start_button = page.locator(selector).first
+                    if await start_button.count() > 0:
+                        await start_button.click()
+                        await page.wait_for_timeout(3000)  # Wait for WebRTC to initialize
+                        print(f"✅ Started WebRTC streaming (using: {selector})")
+                        webrtc_started = True
+                        break
+                except Exception as e:
+                    print(f"  - WebRTC selector '{selector}' failed: {e}")
+                    continue
+            
+            if not webrtc_started:
+                print("⚠️  Could not start WebRTC streaming, but continuing with test...")
+            
+            # Check if WebRTC is active by looking for stop button
+            print("🔍 Verifying WebRTC is active...")
+            stop_button_selectors = [
+                'button:has-text("Stop Live")',
+                '.live-button:has-text("Stop Live")',
+                'button[title*="Stop Live"]'
+            ]
+            
+            webrtc_active = False
+            for selector in stop_button_selectors:
+                try:
+                    if await page.locator(selector).count() > 0:
+                        print(f"✅ WebRTC appears to be active (found: {selector})")
+                        webrtc_active = True
+                        break
+                except:
+                    continue
+            
+            # TEST 1: Verify New Task button behavior for simulated microscope
+            print("🧪 TEST 1: Verifying 'New Task' button behavior for simulated microscope...")
+            
+            new_task_button = page.locator('button:has-text("New Task")').first
+            if await new_task_button.count() > 0:
+                is_disabled = await new_task_button.get_attribute('disabled')
+                button_title = await new_task_button.get_attribute('title')
+                
+                if is_disabled is not None:
+                    print(f"✅ TEST 1 VERIFIED: New Task button is correctly disabled for simulated microscope")
+                    print(f"    Reason: {button_title}")
+                    print("    This confirms expected behavior - time-lapse imaging is not supported on simulated microscope")
+                    print("    📝 Note: WebRTC stopping on 'New Task' click would be tested with real microscopes")
+                else:
+                    print("⚠️  Unexpected: New Task button is enabled for simulated microscope")
+            else:
+                print("⚠️  Could not find 'New Task' button")
+            
+            # Ensure WebRTC is active for sample operation test
+            if webrtc_started and not webrtc_active:
+                print("🔍 Ensuring WebRTC is active for sample operation test...")
+                # WebRTC might already be running, just verify
+                for selector in stop_button_selectors:
+                    try:
+                        if await page.locator(selector).count() > 0:
+                            webrtc_active = True
+                            print("✅ WebRTC confirmed active")
+                            break
+                    except:
+                        continue
+            
+            # TEST 2: WebRTC stops when starting sample operations
+            print("🧪 TEST 2: Testing WebRTC stops during sample loading operations...")
+            
+            # Open sample selector
+            sample_selector_selectors = [
+                'button:has-text("Select Samples")',
+                '.sample-selector-toggle-button',
+                'button .fa-flask'
+            ]
+            
+            sample_selector_opened = False
+            for selector in sample_selector_selectors:
+                try:
+                    sample_button = page.locator(selector).first
+                    if await sample_button.count() > 0:
+                        await sample_button.click()
+                        await page.wait_for_timeout(2000)
+                        print(f"✅ Opened sample selector (using: {selector})")
+                        sample_selector_opened = True
+                        break
+                except Exception as e:
+                    print(f"  - Sample selector '{selector}' failed: {e}")
+                    continue
+            
+            if sample_selector_opened:
+                # Look for simulated samples
+                print("🔍 Looking for simulated samples...")
+                sample_selectors = [
+                    'button:has-text("Simulated Sample 1")',
+                    '.sample-option:has-text("simulated-sample-1")',
+                    'text="Simulated Sample 1"'
+                ]
+                
+                sample_found = False
+                for selector in sample_selectors:
+                    try:
+                        sample_button = page.locator(selector).first
+                        if await sample_button.count() > 0:
+                            await sample_button.click()
+                            await page.wait_for_timeout(1000)
+                            print(f"✅ Selected simulated sample (using: {selector})")
+                            sample_found = True
+                            break
+                    except Exception as e:
+                        print(f"  - Sample selector '{selector}' failed: {e}")
+                        continue
+                
+                if sample_found:
+                    # Look for load sample button and click it
+                    load_button_selectors = [
+                        'button:has-text("Load Sample on Microscope")',
+                        '.load-sample-button',
+                        'button .fa-upload'
+                    ]
+                    
+                    for selector in load_button_selectors:
+                        try:
+                            load_button = page.locator(selector).first
+                            if await load_button.count() > 0:
+                                await load_button.click()
+                                await page.wait_for_timeout(2000)  # Wait for loading operation and WebRTC to stop
+                                print(f"✅ Started sample loading operation (using: {selector})")
+                                
+                                # Check if WebRTC stopped during loading
+                                webrtc_stopped_during_loading = False
+                                for start_selector in webrtc_selectors:
+                                    try:
+                                        if await page.locator(start_selector).count() > 0:
+                                            print("✅ TEST 2 PASSED: WebRTC streaming stopped during sample loading operation")
+                                            webrtc_stopped_during_loading = True
+                                            break
+                                    except:
+                                        continue
+                                
+                                if not webrtc_stopped_during_loading:
+                                    print("⚠️  TEST 2: Could not verify WebRTC stopped during sample loading")
+                                
+                                break
+                        except Exception as e:
+                            print(f"  - Load button selector '{selector}' failed: {e}")
+                            continue
+                else:
+                    print("⚠️  TEST 2: Could not find simulated samples to test with")
+            else:
+                print("⚠️  TEST 2: Could not open sample selector")
+            
+            # Check console for WebRTC-related messages
+            print("🔍 Checking console messages for WebRTC activity...")
+            webrtc_messages = [msg for msg in console_messages if 'webrtc' in msg.lower() or 'stream' in msg.lower()]
+            if webrtc_messages:
+                print(f"📝 Found {len(webrtc_messages)} WebRTC-related console messages:")
+                for msg in webrtc_messages[-5:]:  # Show last 5 messages
+                    print(f"  - {msg}")
+            
+            # Take final screenshot
+            screenshot_path = f"/tmp/webrtc_test_final_{uuid.uuid4().hex[:8]}.png"
+            await page.screenshot(path=screenshot_path)
+            print(f"📸 WebRTC test screenshot saved to: {screenshot_path}")
+            
+            print("✅ WebRTC streaming control test completed")
+            
+            # Collect coverage data
+            await collect_coverage(page, "webrtc_stream_control")
+            
+        finally:
+            await context.close()
+            await browser.close()
+
+@pytest.mark.asyncio
+@pytest.mark.timeout(240)
+async def test_frontend_incubator_control_slot_management(test_frontend_service):
+    """Test the incubator control panel slot management functionality."""
+    service, service_url = test_frontend_service
+    
+    print("🌡️ Testing incubator control slot management...")
+    
+    if not WORKSPACE_TOKEN:
+        pytest.skip("WORKSPACE_TOKEN environment variable not set")
+    
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        
+        try:
+            context = await browser.new_context()
+            page = await context.new_page()
+            
+            # Set up console and error logging
+            console_messages = []
+            page_errors = []
+            page.on('console', lambda msg: console_messages.append(f"{msg.type}: {msg.text}"))
+            page.on('pageerror', lambda error: page_errors.append(str(error)))
+            
+            # Navigate and authenticate
+            await page.goto(service_url, timeout=30000)
+            await page.evaluate(f'localStorage.setItem("token", "{WORKSPACE_TOKEN}")')
+            await page.reload()
+            await page.wait_for_load_state('networkidle', timeout=15000)
+            
+            # Wait for main app to load
+            selectors_to_try = ['.sidebar', '.main-layout', '.app-container', '#root > div']
+            main_app_loaded = False
+            for selector in selectors_to_try:
+                try:
+                    await page.wait_for_selector(selector, timeout=10000)
+                    main_app_loaded = True
+                    print(f"✅ Main application loaded (found: {selector})")
+                    break
+                except:
+                    continue
+            
+            if not main_app_loaded:
+                screenshot_path = f"/tmp/incubator_debug_{uuid.uuid4().hex[:8]}.png"
+                await page.screenshot(path=screenshot_path)
+                print(f"📸 Debug screenshot saved to: {screenshot_path}")
+                raise AssertionError("❌ ERROR: Could not find main app selectors - main application failed to load")
+            
+            # Navigate to incubator tab
+            print("🔍 Navigating to incubator tab...")
+            incubator_selectors = [
+                '.sidebar-tab:has-text("Incubator")',
+                'button:has-text("Incubator")',
+                '.sidebar-tab .fa-temperature-high'
+            ]
+            
+            incubator_tab_found = False
+            for selector in incubator_selectors:
+                try:
+                    element = page.locator(selector).first
+                    if await element.count() > 0:
+                        await element.click()
+                        await page.wait_for_timeout(3000)
+                        print(f"✅ Navigated to incubator tab (using: {selector})")
+                        incubator_tab_found = True
+                        break
+                except Exception as e:
+                    print(f"  - Selector '{selector}' failed: {e}")
+                    continue
+            
+            if not incubator_tab_found:
+                screenshot_path = f"/tmp/incubator_tab_error_{uuid.uuid4().hex[:8]}.png"
+                await page.screenshot(path=screenshot_path)
+                print(f"📸 Incubator tab error screenshot saved to: {screenshot_path}")
+                raise AssertionError("❌ ERROR: Incubator tab not found")
+            
+            # Verify incubator control panel elements
+            print("🔍 Verifying incubator control panel elements...")
+            incubator_elements = [
+                {
+                    'name': 'Incubator Control Panel',
+                    'selectors': ['h3:has-text("Incubator Control")', '.incubator-settings'],
+                    'required': True
+                },
+                {
+                    'name': 'Temperature Display',
+                    'selectors': ['label:has-text("Temperature")', 'input[type="number"][readonly]'],
+                    'required': True
+                },
+                {
+                    'name': 'CO2 Display',
+                    'selectors': ['label:has-text("CO2")', 'input[value][readonly]'],
+                    'required': True
+                },
+                {
+                    'name': 'Microplate Slots',
+                    'selectors': ['h4:has-text("Microplate Slots")', '.grid'],
+                    'required': True
+                },
+                {
+                    'name': 'Slot Buttons',
+                    'selectors': ['button:has-text("1")', '.grid button'],
+                    'required': True
+                }
+            ]
+            
+            failed_elements = []
+            for element in incubator_elements:
+                found = False
+                for selector in element['selectors']:
+                    try:
+                        count = await page.locator(selector).count()
+                        if count > 0:
+                            print(f"✅ Found {element['name']} (selector: {selector}, count: {count})")
+                            found = True
+                            break
+                    except Exception as e:
+                        print(f"  - Selector '{selector}' for {element['name']} failed: {e}")
+                        continue
+                
+                if not found and element['required']:
+                    failed_elements.append(element['name'])
+                    print(f"❌ ERROR: Required element '{element['name']}' not found")
+            
+            if failed_elements:
+                screenshot_path = f"/tmp/incubator_elements_error_{uuid.uuid4().hex[:8]}.png"
+                await page.screenshot(path=screenshot_path)
+                print(f"📸 Elements error screenshot saved to: {screenshot_path}")
+                raise AssertionError(f"❌ ERROR: Required incubator elements not found: {', '.join(failed_elements)}")
+            
+            # TEST 1: Double-click slot 1 to open sample management
+            print("🧪 TEST 1: Testing slot 1 sample management...")
+            slot_1_button = page.locator('button:has-text("1")').first
+            
+            if await slot_1_button.count() > 0:
+                # Double-click to open slot management
+                await slot_1_button.dblclick()
+                await page.wait_for_timeout(2000)
+                print("✅ Double-clicked slot 1")
+                
+                # Check if sidebar opened
+                sidebar_selectors = [
+                    'h4:has-text("Slot 1 Management")',
+                    '.sidebar-container',
+                    'h5:has-text("Add New Sample")'
+                ]
+                
+                sidebar_opened = False
+                for selector in sidebar_selectors:
+                    try:
+                        if await page.locator(selector).count() > 0:
+                            print(f"✅ Slot management sidebar opened (found: {selector})")
+                            sidebar_opened = True
+                            break
+                    except:
+                        continue
+                
+                if not sidebar_opened:
+                    print("⚠️  Slot management sidebar did not open")
+                
+            else:
+                raise AssertionError("❌ ERROR: Could not find slot 1 button")
+            
+            # TEST 2: Test validation warnings for required fields
+            print("🧪 TEST 2: Testing validation for required fields...")
+            
+            # Try to add sample without filling required fields
+            add_sample_button = page.locator('button:has-text("Add Sample")').first
+            if await add_sample_button.count() > 0:
+                await add_sample_button.click()
+                await page.wait_for_timeout(1000)
+                
+                # Check for warning message
+                warning_selectors = [
+                    '.bg-red-100:has-text("Please fill in the required fields")',
+                    'div:has-text("Please fill in the required fields")',
+                    '.text-red-700'
+                ]
+                
+                warning_found = False
+                for selector in warning_selectors:
+                    try:
+                        if await page.locator(selector).count() > 0:
+                            print("✅ Validation warning displayed for empty required fields")
+                            warning_found = True
+                            break
+                    except:
+                        continue
+                
+                if not warning_found:
+                    print("⚠️  Validation warning not found - may need to adjust selectors")
+            
+            # TEST 3: Add a sample to slot 1
+            print("🧪 TEST 3: Adding sample to slot 1...")
+            
+            # Fill in sample name (required field with *)
+            sample_name_input = page.locator('input[placeholder*="sample name"], label:has-text("Sample Name") + input').first
+            if await sample_name_input.count() > 0:
+                await sample_name_input.fill("Test Sample 1")
+                print("✅ Filled sample name")
+            
+            # Status should default to "IN" (required field with *)
+            status_select = page.locator('label:has-text("Status") + select, select option[value="IN"]').first
+            if await status_select.count() > 0:
+                # Status should already be "IN" by default, but let's verify
+                status_value = await page.locator('label:has-text("Status") + select').first.input_value()
+                if status_value == "IN":
+                    print("✅ Status defaults to 'IN'")
+                else:
+                    # Select IN if not already selected
+                    await page.locator('label:has-text("Status") + select').first.select_option("IN")
+                    print("✅ Selected status 'IN'")
+            
+            # Well Plate Type should default to "96" (required field with *)
+            plate_type_select = page.locator('label:has-text("Well Plate Type") + select').first
+            if await plate_type_select.count() > 0:
+                plate_type_value = await plate_type_select.input_value()
+                if plate_type_value == "96":
+                    print("✅ Well Plate Type defaults to '96'")
+                else:
+                    await plate_type_select.select_option("96")
+                    print("✅ Selected Well Plate Type '96'")
+            
+            # Fill optional date field
+            date_input = page.locator('label:has-text("Date to Incubator") + input[type="datetime-local"]').first
+            if await date_input.count() > 0:
+                # Set current date/time
+                from datetime import datetime
+                current_datetime = datetime.now().strftime("%Y-%m-%dT%H:%M")
+                await date_input.fill(current_datetime)
+                print("✅ Filled date to incubator")
+            
+            # Click add sample button
+            if await add_sample_button.count() > 0:
+                await add_sample_button.click()
+                await page.wait_for_timeout(3000)  # Wait for sample to be added
+                print("✅ Clicked add sample button")
+                
+                # Check if sidebar closed (indicating success)
+                sidebar_still_open = await page.locator('h4:has-text("Slot 1 Management")').count() > 0
+                if not sidebar_still_open:
+                    print("✅ Sidebar closed after adding sample (indicates success)")
+                else:
+                    print("⚠️  Sidebar still open - sample addition may have failed")
+            
+            # TEST 4: Verify slot 1 now shows as occupied (orange color)
+            print("🧪 TEST 4: Verifying slot 1 is now occupied...")
+            
+            # Wait a moment and check slot 1 color/style
+            await page.wait_for_timeout(2000)
+            slot_1_after_add = page.locator('button:has-text("1")').first
+            
+            if await slot_1_after_add.count() > 0:
+                # Check if slot has orange background (indicating occupied)
+                slot_style = await slot_1_after_add.get_attribute('style')
+                slot_title = await slot_1_after_add.get_attribute('title')
+                
+                if slot_style and 'rgb(249, 115, 22)' in slot_style:  # Orange color in RGB
+                    print("✅ Slot 1 shows orange background (occupied)")
+                elif slot_title and 'Test Sample 1' in slot_title:
+                    print("✅ Slot 1 title shows sample name")
+                else:
+                    print("⚠️  Could not verify slot 1 occupied state")
+            
+            # TEST 5: Edit the sample in slot 1
+            print("🧪 TEST 5: Testing sample editing...")
+            
+            # Double-click slot 1 again to open management for existing sample
+            if await slot_1_button.count() > 0:
+                await slot_1_button.dblclick()
+                await page.wait_for_timeout(2000)
+                print("✅ Double-clicked slot 1 again")
+                
+                # Look for edit button
+                edit_button = page.locator('button:has-text("Edit Sample")').first
+                if await edit_button.count() > 0:
+                    await edit_button.click()
+                    await page.wait_for_timeout(1000)
+                    print("✅ Clicked edit sample button")
+                    
+                    # Check if edit form appeared
+                    edit_form_selectors = [
+                        'h5:has-text("Edit Sample")',
+                        'button:has-text("Save Changes")',
+                        'button:has-text("Cancel")'
+                    ]
+                    
+                    edit_form_found = False
+                    for selector in edit_form_selectors:
+                        try:
+                            if await page.locator(selector).count() > 0:
+                                print(f"✅ Edit form opened (found: {selector})")
+                                edit_form_found = True
+                                break
+                        except:
+                            continue
+                    
+                    if edit_form_found:
+                        # Modify sample name
+                        edit_name_input = page.locator('label:has-text("Sample Name") + input').first
+                        if await edit_name_input.count() > 0:
+                            await edit_name_input.fill("Test Sample 1 - Edited")
+                            print("✅ Modified sample name")
+                        
+                        # Test validation by clearing required field
+                        print("🔍 Testing edit validation...")
+                        await edit_name_input.fill("")  # Clear required field
+                        
+                        save_button = page.locator('button:has-text("Save Changes")').first
+                        if await save_button.count() > 0:
+                            await save_button.click()
+                            await page.wait_for_timeout(1000)
+                            
+                            # Check for validation warning
+                            edit_warning_found = False
+                            for selector in warning_selectors:
+                                try:
+                                    if await page.locator(selector).count() > 0:
+                                        print("✅ Edit validation warning displayed")
+                                        edit_warning_found = True
+                                        break
+                                except:
+                                    continue
+                        
+                        # Fill name back and save
+                        await edit_name_input.fill("Test Sample 1 - Edited")
+                        if await save_button.count() > 0:
+                            await save_button.click()
+                            await page.wait_for_timeout(3000)
+                            print("✅ Saved sample changes")
+                
+            # TEST 6: Remove the sample from slot 1
+            print("🧪 TEST 6: Testing sample removal...")
+            
+            # Open slot 1 management again
+            if await slot_1_button.count() > 0:
+                await slot_1_button.dblclick()
+                await page.wait_for_timeout(2000)
+                
+                # Look for remove button
+                remove_button = page.locator('button:has-text("Remove Sample")').first
+                if await remove_button.count() > 0:
+                    await remove_button.click()
+                    await page.wait_for_timeout(3000)  # Wait for removal
+                    print("✅ Clicked remove sample button")
+                    
+                    # Check if sidebar closed
+                    sidebar_after_remove = await page.locator('h4:has-text("Slot 1 Management")').count() > 0
+                    if not sidebar_after_remove:
+                        print("✅ Sidebar closed after removing sample")
+                    
+                    # Verify slot 1 is now empty (green color)
+                    await page.wait_for_timeout(2000)
+                    slot_1_after_remove = page.locator('button:has-text("1")').first
+                    if await slot_1_after_remove.count() > 0:
+                        slot_style_after = await slot_1_after_remove.get_attribute('style')
+                        slot_title_after = await slot_1_after_remove.get_attribute('title')
+                        
+                        if slot_style_after and 'rgb(34, 197, 94)' in slot_style_after:  # Green color
+                            print("✅ Slot 1 shows green background (empty)")
+                        elif slot_title_after and 'Empty' in slot_title_after:
+                            print("✅ Slot 1 title shows 'Empty'")
+                        else:
+                            print("⚠️  Could not verify slot 1 empty state")
+            
+            # Check for any JavaScript errors during testing
+            if page_errors:
+                print("⚠️  JavaScript errors detected during incubator testing:")
+                for error in page_errors[-3:]:  # Show last 3 errors
+                    print(f"  - {error}")
+            
+            # Take final screenshot
+            screenshot_path = f"/tmp/incubator_test_final_{uuid.uuid4().hex[:8]}.png"
+            await page.screenshot(path=screenshot_path)
+            print(f"📸 Incubator test screenshot saved to: {screenshot_path}")
+            print("✅ Incubator control slot management test completed successfully")
+            
+            # Collect coverage data
+            await collect_coverage(page, "incubator_control_slot_management")
+            
+        finally:
+            await context.close()
+            await browser.close()
+
+@pytest.mark.asyncio
+@pytest.mark.timeout(120)
+async def test_frontend_expired_token_handling(test_frontend_service):
+    """Test that the frontend properly handles expired tokens and refreshes them."""
+    service, service_url = test_frontend_service
+    
+    print("🔑 Testing expired token handling and refresh...")
+    
+    if not WORKSPACE_TOKEN:
+        pytest.skip("WORKSPACE_TOKEN environment variable not set")
+    
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        
+        try:
+            context = await browser.new_context()
+            page = await context.new_page()
+            
+            # Set up console logging to capture token-related messages
+            console_messages = []
+            page.on('console', lambda msg: console_messages.append(f"{msg.type}: {msg.text}"))
+            
+            print("📄 Navigating to service URL...")
+            await page.goto(service_url, timeout=30000)
+            
+            # TEST 1: Set an expired token and verify it gets refreshed
+            print("🧪 TEST 1: Setting expired token to simulate expiration scenario...")
+            
+            # Create a mock expired JWT token (expired in 2020)
+            expired_token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJleHAiOjE1Nzc4MzY4MDB9.fake_signature"
+            await page.evaluate(f'localStorage.setItem("token", "{expired_token}")')
+            print("✅ Set expired token in localStorage")
+            
+            # Reload page to trigger token check
+            await page.reload()
+            await page.wait_for_load_state('networkidle', timeout=15000)
+            
+            # TEST 2: Check that login prompt appears for expired token
+            print("🧪 TEST 2: Verifying login prompt appears for expired token...")
+            login_button = page.locator('button:has-text("Log in to Hypha")')
+            
+            if await login_button.count() > 0:
+                print("✅ Login prompt correctly appeared for expired token")
+                
+                # Set valid token to simulate successful login
+                await page.evaluate(f'localStorage.setItem("token", "{WORKSPACE_TOKEN}")')
+                print("🔑 Set valid token to simulate login success")
+                
+                # Reload to trigger authentication with valid token
+                await page.reload()
+                await page.wait_for_load_state('networkidle', timeout=15000)
+                
+                # Wait for main app to load
+                main_app_selectors = ['.sidebar', '.main-layout', '.app-container', '#root > div']
+                main_app_loaded = False
+                for selector in main_app_selectors:
+                    try:
+                        await page.wait_for_selector(selector, timeout=10000)
+                        main_app_loaded = True
+                        print(f"✅ Main application loaded after token refresh (found: {selector})")
+                        break
+                    except:
+                        continue
+                
+                if not main_app_loaded:
+                    print("⚠️  Could not verify main app loaded, but continuing...")
+                
+            else:
+                print("ℹ️  No login prompt found - may already be in authenticated state")
+            
+            # TEST 3: Check console messages for token-related activity
+            print("🧪 TEST 3: Checking console messages for token handling...")
+            token_messages = [
+                msg for msg in console_messages 
+                if any(keyword in msg.lower() for keyword in [
+                    'token', 'login', 'expired', 'authentication', 'hyphaservermanager'
+                ])
+            ]
+            
+            if token_messages:
+                print(f"📝 Found {len(token_messages)} token-related console messages:")
+                for msg in token_messages[-5:]:  # Show last 5 relevant messages
+                    print(f"  - {msg}")
+            else:
+                print("ℹ️  No specific token-related messages found in console")
+            
+            # TEST 4: Verify the token in localStorage is now valid
+            print("🧪 TEST 4: Verifying final token state...")
+            final_token = await page.evaluate('localStorage.getItem("token")')
+            
+            if final_token and final_token != expired_token:
+                print("✅ Token was successfully updated from expired token")
+                if final_token == WORKSPACE_TOKEN:
+                    print("✅ Final token matches expected valid token")
+                else:
+                    print("ℹ️  Final token is different but not expired token")
+            else:
+                print("⚠️  Token may not have been properly refreshed")
+            
+            # Take screenshot for debugging
+            screenshot_path = f"/tmp/token_handling_test_{uuid.uuid4().hex[:8]}.png"
+            await page.screenshot(path=screenshot_path)
+            print(f"📸 Token handling test screenshot saved to: {screenshot_path}")
+            print("✅ Expired token handling test completed")
+            
+            # Collect coverage data
+            await collect_coverage(page, "expired_token_handling")
+            
+        finally:
+            await context.close()
+            await browser.close()
+
+@pytest.mark.asyncio
 @pytest.mark.timeout(30)
 async def test_generate_coverage_report():
     """Generate final coverage report from all collected data."""

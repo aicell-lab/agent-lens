@@ -103,6 +103,13 @@ const MicroscopeControlPanel = ({
   // State for SampleSelector dropdown
   const [isSampleSelectorOpen, setIsSampleSelectorOpen] = useState(false);
 
+  // Microscope configuration states
+  const [microscopeConfiguration, setMicroscopeConfiguration] = useState(null);
+  const [isConfigurationLoaded, setIsConfigurationLoaded] = useState(false);
+  const [isConfigurationLoading, setIsConfigurationLoading] = useState(false);
+  const [configurationError, setConfigurationError] = useState(null);
+  const [isConfigurationWindowOpen, setIsConfigurationWindowOpen] = useState(false);
+
   // Well Plate Navigator State
   const [selectedWellPlateType, setSelectedWellPlateType] = useState('96');
   const [currentWellPlateRows, setCurrentWellPlateRows] = useState(WELL_PLATE_CONFIGS['96'].rows);
@@ -136,6 +143,14 @@ const MicroscopeControlPanel = ({
   // New state for video contrast adjustment
   const [videoContrastMin, setVideoContrastMin] = useState(0);
   const [videoContrastMax, setVideoContrastMax] = useState(255);
+  const [autoContrastEnabled, setAutoContrastEnabled] = useState(false);
+  const autoContrastEnabledRef = useRef(autoContrastEnabled);
+  
+  // Auto-contrast adjustment parameters
+  const [autoContrastMinAdjust, setAutoContrastMinAdjust] = useState(-60); // P5 - 30
+  const [autoContrastMaxAdjust, setAutoContrastMaxAdjust] = useState(60);  // P95 + 30
+  const autoContrastMinAdjustRef = useRef(autoContrastMinAdjust);
+  const autoContrastMaxAdjustRef = useRef(autoContrastMaxAdjust);
 
   // Refs to hold the latest actual values for use in debounced effects
   const actualIlluminationIntensityRef = useRef(actualIlluminationIntensity);
@@ -155,6 +170,11 @@ const MicroscopeControlPanel = ({
     isSimulatedMicroscope: false
   });
 
+  // WebRTC DataChannel states for metadata
+  const [metadataDataChannel, setMetadataDataChannel] = useState(null);
+  const [frameMetadata, setFrameMetadata] = useState(null);
+  const [isDataChannelConnected, setIsDataChannelConnected] = useState(false);
+
   // Callback to receive sample load status updates from SampleSelector
   const handleSampleLoadStatusChange = useCallback((status) => {
     setSampleLoadStatus(status);
@@ -167,6 +187,20 @@ const MicroscopeControlPanel = ({
   useEffect(() => {
     actualCameraExposureRef.current = actualCameraExposure;
   }, [actualCameraExposure]);
+
+  // Keep autoContrastEnabledRef in sync with state
+  useEffect(() => {
+    autoContrastEnabledRef.current = autoContrastEnabled;
+  }, [autoContrastEnabled]);
+
+  // Keep adjustment parameter refs in sync with state
+  useEffect(() => {
+    autoContrastMinAdjustRef.current = autoContrastMinAdjust;
+  }, [autoContrastMinAdjust]);
+
+  useEffect(() => {
+    autoContrastMaxAdjustRef.current = autoContrastMaxAdjust;
+  }, [autoContrastMaxAdjust]);
 
   // Memoized function to stop the WebRTC stream
   const memoizedStopWebRtcStream = useCallback(() => {
@@ -184,6 +218,9 @@ const MicroscopeControlPanel = ({
     }
     setIsWebRtcActive(false);
     setRemoteStream(null);
+    setMetadataDataChannel(null);
+    setIsDataChannelConnected(false);
+    setFrameMetadata(null);
     appendLog('WebRTC stream stopped.');
   }, [appendLog, isWebRtcActive, webRtcPc]);
 
@@ -267,6 +304,30 @@ const MicroscopeControlPanel = ({
       return () => clearInterval(interval);
     }
   }, [microscopeControlService, illuminationChannel]); // Re-run if service or channel changes to re-sync
+
+  // Effect to automatically load microscope configuration when service changes
+  useEffect(() => {
+    if (microscopeControlService && selectedMicroscopeId) {
+      // Reset configuration state when switching microscopes
+      setMicroscopeConfiguration(null);
+      setIsConfigurationLoaded(false);
+      setConfigurationError(null);
+      
+      // Only auto-load configuration if the current microscope service supports it
+      if (typeof microscopeControlService.get_microscope_configuration === 'function') {
+        appendLog(`Auto-loading configuration for selected microscope: ${selectedMicroscopeId}`);
+        loadMicroscopeConfiguration();
+      } else {
+        setConfigurationError("Configuration not supported for this microscope.");
+        appendLog(`Configuration not supported for microscope: ${selectedMicroscopeId}`);
+      }
+    } else {
+      // Clear configuration when no service or microscope selected
+      setMicroscopeConfiguration(null);
+      setIsConfigurationLoaded(false);
+      setConfigurationError("No microscope selected.");
+    }
+  }, [microscopeControlService, selectedMicroscopeId]);
 
   // Effect to update illumination when desiredIlluminationIntensity or illuminationChannel changes
   useEffect(() => {
@@ -432,6 +493,65 @@ const MicroscopeControlPanel = ({
               }
             });
 
+            // Set up data channel listener for metadata
+            peerConnection.addEventListener('datachannel', (event) => {
+              const dataChannel = event.channel;
+              appendLog(`WebRTC data channel received: ${dataChannel.label}`);
+              
+              if (dataChannel.label === 'metadata') {
+                appendLog('Setting up metadata data channel...');
+                setMetadataDataChannel(dataChannel);
+                
+                dataChannel.addEventListener('open', () => {
+                  appendLog('Metadata data channel opened');
+                  setIsDataChannelConnected(true);
+                });
+                
+                dataChannel.addEventListener('message', (event) => {
+                  try {
+                    const metadata = JSON.parse(event.data);
+                    console.log('Received metadata via data channel:', metadata);
+                    setFrameMetadata(metadata);
+                    
+                    // Auto-adjust contrast range if enabled (use refs to get current values)
+                    if (autoContrastEnabledRef.current && metadata.gray_level_stats) {
+                      const stats = metadata.gray_level_stats;
+                      // Auto-adjust contrast range based on percentiles with user adjustments
+                      if (stats.percentiles) {
+                        const p5Value = (stats.percentiles.p5 || 0) * 255 / 100;
+                        const p95Value = (stats.percentiles.p95 || 100) * 255 / 100;
+                        
+                        const currentMinAdjust = autoContrastMinAdjustRef.current;
+                        const currentMaxAdjust = autoContrastMaxAdjustRef.current;
+                        
+                        const newMin = Math.round(p5Value + currentMinAdjust);
+                        const newMax = Math.round(p95Value + currentMaxAdjust);
+                        
+                        setVideoContrastMin(Math.max(0, Math.min(254, newMin)));
+                        setVideoContrastMax(Math.min(255, Math.max(1, newMax)));
+                        console.log(`Auto-contrast updated: Min=${newMin} (P5${currentMinAdjust >= 0 ? '+' : ''}${currentMinAdjust}), Max=${newMax} (P95${currentMaxAdjust >= 0 ? '+' : ''}${currentMaxAdjust})`);
+                      }
+                    }
+                    
+                  } catch (error) {
+                    appendLog(`Error parsing metadata: ${error.message}`);
+                    console.error('Error parsing metadata from data channel:', error);
+                  }
+                });
+                
+                dataChannel.addEventListener('close', () => {
+                  appendLog('Metadata data channel closed');
+                  setIsDataChannelConnected(false);
+                  setMetadataDataChannel(null);
+                });
+                
+                dataChannel.addEventListener('error', (error) => {
+                  appendLog(`Metadata data channel error: ${error}`);
+                  console.error('Metadata data channel error:', error);
+                });
+              }
+            });
+
             peerConnection.addEventListener('connectionstatechange', () => {
               appendLog(`WebRTC connection state: ${peerConnection.connectionState}`);
               if (['closed', 'failed', 'disconnected'].includes(peerConnection.connectionState)) {
@@ -559,8 +679,15 @@ const MicroscopeControlPanel = ({
   // Effect to stop WebRTC stream if a sample operation starts
   useEffect(() => {
     if (currentOperation && isWebRtcActive) {
-      // Only stop for operations other than navigate_to_well
-      if (currentOperation.id && !currentOperation.id.startsWith('navigate_well_')) {
+      // Handle both string operations (from SampleSelector) and object operations (from well navigation)
+      if (typeof currentOperation === 'string') {
+        // String operations like 'loading' and 'unloading' from SampleSelector should stop WebRTC
+        if (currentOperation === 'loading' || currentOperation === 'unloading') {
+          appendLog(`Sample operation '${currentOperation}' started, stopping WebRTC stream.`);
+          memoizedStopWebRtcStream();
+        }
+      } else if (currentOperation.id && !currentOperation.id.startsWith('navigate_well_')) {
+        // Object operations that are not well navigation should stop WebRTC
         appendLog(`Operation '${currentOperation.name}' started, stopping WebRTC stream.`);
         memoizedStopWebRtcStream();
       } else if (currentOperation.id && currentOperation.id.startsWith('navigate_well_')) {
@@ -568,6 +695,125 @@ const MicroscopeControlPanel = ({
       }
     }
   }, [currentOperation, isWebRtcActive, memoizedStopWebRtcStream, appendLog]);
+
+  // Effect to immediately apply auto-adjustment when toggle is turned on
+  useEffect(() => {
+    if (autoContrastEnabled && frameMetadata && frameMetadata.gray_level_stats) {
+      const stats = frameMetadata.gray_level_stats;
+      // Auto-adjust contrast range based on percentiles with user adjustments
+      if (stats.percentiles) {
+        const p5Value = (stats.percentiles.p5 || 0) * 255 / 100;
+        const p95Value = (stats.percentiles.p95 || 100) * 255 / 100;
+        
+        const newMin = Math.round(p5Value + autoContrastMinAdjust);
+        const newMax = Math.round(p95Value + autoContrastMaxAdjust);
+        
+        setVideoContrastMin(Math.max(0, Math.min(254, newMin)));
+        setVideoContrastMax(Math.min(255, Math.max(1, newMax)));
+        appendLog(`Auto-contrast applied: Min=${newMin} (P5${autoContrastMinAdjust >= 0 ? '+' : ''}${autoContrastMinAdjust}), Max=${newMax} (P95${autoContrastMaxAdjust >= 0 ? '+' : ''}${autoContrastMaxAdjust})`);
+      }
+    }
+  }, [autoContrastEnabled, autoContrastMinAdjust, autoContrastMaxAdjust]); // Trigger when toggle or adjustments change
+
+  // Helper function to render histogram display
+  const renderHistogramDisplay = () => {
+    if (!frameMetadata || !frameMetadata.gray_level_stats || !frameMetadata.gray_level_stats.histogram) {
+      return null;
+    }
+
+    const histogram = frameMetadata.gray_level_stats.histogram;
+    const counts = histogram.counts || [];
+    const binEdges = histogram.bin_edges || [];
+    
+    if (counts.length === 0) return null;
+
+    const maxCount = Math.max(...counts);
+    const histogramWidth = 256; // Fixed width for display
+    const histogramHeight = 60;
+    
+    return (
+      <div className="histogram-display" style={{ position: 'relative', width: '100%', height: `${histogramHeight}px`, backgroundColor: '#f8f9fa', border: '1px solid #dee2e6', borderRadius: '4px' }}>
+        <svg width="100%" height={histogramHeight} style={{ display: 'block' }}>
+          {counts.map((count, index) => {
+            const x = (index / counts.length) * 100; // Convert to percentage
+            const height = (count / maxCount) * (histogramHeight - 4); // 4px padding
+            const binStart = binEdges[index] || (index * 255 / counts.length);
+            const binEnd = binEdges[index + 1] || ((index + 1) * 255 / counts.length);
+            const binCenter = (binStart + binEnd) / 2;
+            
+            return (
+              <rect
+                key={index}
+                x={`${x}%`}
+                y={histogramHeight - height - 2}
+                width={`${100 / counts.length}%`}
+                height={height}
+                fill="#6c757d"
+                title={`Bin ${binCenter.toFixed(0)}: ${count} pixels`}
+              />
+            );
+          })}
+          
+          {/* Contrast range indicators */}
+          <line
+            x1={`${(videoContrastMin / 255) * 100}%`}
+            y1="0"
+            x2={`${(videoContrastMin / 255) * 100}%`}
+            y2={histogramHeight}
+            stroke="#dc3545"
+            strokeWidth="2"
+            opacity="0.8"
+          />
+          <line
+            x1={`${(videoContrastMax / 255) * 100}%`}
+            y1="0"
+            x2={`${(videoContrastMax / 255) * 100}%`}
+            y2={histogramHeight}
+            stroke="#dc3545"
+            strokeWidth="2"
+            opacity="0.8"
+          />
+          
+          {/* Range fill */}
+          <rect
+            x={`${(videoContrastMin / 255) * 100}%`}
+            y="0"
+            width={`${((videoContrastMax - videoContrastMin) / 255) * 100}%`}
+            height={histogramHeight}
+            fill="#007bff"
+            opacity="0.2"
+          />
+        </svg>
+        
+        {/* Interactive overlay for dragging */}
+        <div 
+          style={{ 
+            position: 'absolute', 
+            top: 0, 
+            left: 0, 
+            width: '100%', 
+            height: '100%', 
+            cursor: 'crosshair' 
+          }}
+          onMouseDown={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const valueAt = Math.round((x / rect.width) * 255);
+            
+            // Determine which handle is closer
+            const distToMin = Math.abs(valueAt - videoContrastMin);
+            const distToMax = Math.abs(valueAt - videoContrastMax);
+            
+            if (distToMin < distToMax) {
+              setVideoContrastMin(Math.max(0, Math.min(valueAt, videoContrastMax - 1)));
+            } else {
+              setVideoContrastMax(Math.min(255, Math.max(valueAt, videoContrastMin + 1)));
+            }
+          }}
+        />
+      </div>
+    );
+  };
 
   const moveMicroscope = async (direction, multiplier) => {
     if (!microscopeControlService) return;
@@ -804,6 +1050,12 @@ const MicroscopeControlPanel = ({
       return;
     }
 
+    // Stop WebRTC stream when opening imaging task modal
+    if (isWebRtcActive) {
+      appendLog("Stopping WebRTC stream before opening imaging task modal.");
+      memoizedStopWebRtcStream();
+    }
+
     setSelectedTaskForModal(task); // if task is null, it's for creating a new task
     setIsImagingModalOpen(true);
     appendLog(task ? `Opening modal to manage task: ${task.name}` : "Opening modal to create new imaging task.");
@@ -862,6 +1114,73 @@ const MicroscopeControlPanel = ({
     }
   };
 
+  // Function to load microscope configuration
+  const loadMicroscopeConfiguration = async () => {
+    if (!microscopeControlService) {
+      const errorMsg = "Microscope control service not available.";
+      setConfigurationError(errorMsg);
+      setIsConfigurationLoaded(false);
+      if (showNotification) showNotification(errorMsg, 'warning');
+      return;
+    }
+
+    // Check if the current microscope service supports configuration loading
+    if (typeof microscopeControlService.get_microscope_configuration !== 'function') {
+      const errorMsg = "Configuration not supported for this microscope.";
+      setConfigurationError(errorMsg);
+      setIsConfigurationLoaded(false);
+      appendLog(`Configuration loading not supported for microscope: ${selectedMicroscopeId}`);
+      return;
+    }
+
+    setIsConfigurationLoading(true);
+    setConfigurationError(null);
+    
+    try {
+      appendLog(`Loading microscope configuration for ${selectedMicroscopeId}...`);
+      const response = await microscopeControlService.get_microscope_configuration();
+      
+      if (response.success) {
+        // Store configuration without metadata
+        const configWithoutMetadata = { ...response.configuration };
+        delete configWithoutMetadata.metadata;
+        
+        setMicroscopeConfiguration(configWithoutMetadata);
+        setIsConfigurationLoaded(true);
+        appendLog(`Microscope configuration loaded successfully for ${selectedMicroscopeId}.`);
+      } else {
+        const errorMsg = "Failed to load microscope configuration.";
+        setConfigurationError(errorMsg);
+        setIsConfigurationLoaded(false);
+        appendLog(errorMsg);
+        if (showNotification) showNotification(errorMsg, 'error');
+      }
+    } catch (error) {
+      const errorMsg = `Error loading microscope configuration: ${error.message}`;
+      setConfigurationError(errorMsg);
+      setIsConfigurationLoaded(false);
+      appendLog(errorMsg);
+      if (showNotification) showNotification(errorMsg, 'error');
+      console.error("[MicroscopeControlPanel] Error loading microscope configuration:", error);
+    } finally {
+      setIsConfigurationLoading(false);
+    }
+  };
+
+  // Function to open configuration display window
+  const openConfigurationWindow = () => {
+    if (!microscopeConfiguration) {
+      if (showNotification) showNotification("No configuration loaded. Please load configuration first.", 'warning');
+      return;
+    }
+    setIsConfigurationWindowOpen(true);
+  };
+
+  // Function to close configuration display window
+  const closeConfigurationWindow = () => {
+    setIsConfigurationWindowOpen(false);
+  };
+
   return (
     <div className="microscope-control-panel-container new-mcp-layout bg-white bg-opacity-95 p-4 rounded-lg shadow-lg border-l border-gray-300 box-border">
       {/* Left Side: Image Display */}
@@ -903,10 +1222,137 @@ const MicroscopeControlPanel = ({
             </p>
           )}
         </div>
-        {/* Video Contrast Controls */}
+        {/* Video Contrast Controls with Histogram */}
         {isWebRtcActive && (
           <div className="video-contrast-controls mt-2 p-2 border border-gray-300 rounded-lg bg-white bg-opacity-90">
-            <div className="text-xs font-medium text-gray-700 mb-1">Video Frame Adjustment</div>
+            <div className="text-xs font-medium text-gray-700 mb-2 flex items-center justify-between">
+              <span>Gray Level Histogram & Contrast</span>
+              <div className="flex items-center space-x-2">
+                {isDataChannelConnected && (
+                  <span className="text-green-600 text-xs">
+                    <i className="fas fa-circle text-green-500 mr-1" style={{ fontSize: '6px' }}></i>
+                    Metadata Channel
+                  </span>
+                )}
+              </div>
+            </div>
+            
+            {/* Auto Contrast Toggle */}
+            <div className="flex items-center mb-2">
+              <label className="text-xs text-gray-600 mr-2">Auto Contrast Adjustment</label>
+              <label className="auto-contrast-toggle mr-2">
+                <input
+                  type="checkbox"
+                  checked={autoContrastEnabled}
+                  onChange={(e) => setAutoContrastEnabled(e.target.checked)}
+                  disabled={!isDataChannelConnected}
+                />
+                <span className="auto-contrast-slider"></span>
+              </label>
+              <span className="text-xs text-gray-500">
+                {autoContrastEnabled ? 'ON' : 'OFF'}
+                {!isDataChannelConnected && ' (Channel Required)'}
+              </span>
+            </div>
+            
+            {/* Auto Contrast Parameters */}
+            {autoContrastEnabled && (
+              <div className="auto-contrast-params mb-2 p-2 bg-gray-50 rounded border">
+                <div className="text-xs text-gray-600 mb-1">Adjustment Parameters</div>
+                <div className="flex items-center justify-between space-x-2">
+                  {/* Min Adjustment */}
+                  <div className="flex items-center space-x-1">
+                    <label className="text-xs text-gray-600 whitespace-nowrap">P5:</label>
+                    <button
+                      type="button"
+                      className="w-5 h-5 text-xs bg-gray-200 hover:bg-gray-300 rounded flex items-center justify-center"
+                      onClick={() => setAutoContrastMinAdjust(prev => prev - 1)}
+                      disabled={!isDataChannelConnected}
+                    >
+                      <i className="fas fa-minus" style={{ fontSize: '8px' }}></i>
+                    </button>
+                    <input
+                      type="number"
+                      value={autoContrastMinAdjust}
+                      onChange={(e) => {
+                        const value = parseInt(e.target.value, 10);
+                        if (!isNaN(value)) {
+                          setAutoContrastMinAdjust(Math.max(-255, Math.min(255, value)));
+                        }
+                      }}
+                      className="w-12 px-1 py-0 text-xs text-center border border-gray-300 rounded"
+                      disabled={!isDataChannelConnected}
+                      step="1"
+                    />
+                    <button
+                      type="button"
+                      className="w-5 h-5 text-xs bg-gray-200 hover:bg-gray-300 rounded flex items-center justify-center"
+                      onClick={() => setAutoContrastMinAdjust(prev => prev + 1)}
+                      disabled={!isDataChannelConnected}
+                    >
+                      <i className="fas fa-plus" style={{ fontSize: '8px' }}></i>
+                    </button>
+                  </div>
+                  
+                  {/* Max Adjustment */}
+                  <div className="flex items-center space-x-1">
+                    <label className="text-xs text-gray-600 whitespace-nowrap">P95:</label>
+                    <button
+                      type="button"
+                      className="w-5 h-5 text-xs bg-gray-200 hover:bg-gray-300 rounded flex items-center justify-center"
+                      onClick={() => setAutoContrastMaxAdjust(prev => prev - 1)}
+                      disabled={!isDataChannelConnected}
+                    >
+                      <i className="fas fa-minus" style={{ fontSize: '8px' }}></i>
+                    </button>
+                    <input
+                      type="number"
+                      value={autoContrastMaxAdjust}
+                      onChange={(e) => {
+                        const value = parseInt(e.target.value, 10);
+                        if (!isNaN(value)) {
+                          setAutoContrastMaxAdjust(Math.max(-255, Math.min(255, value)));
+                        }
+                      }}
+                      className="w-12 px-1 py-0 text-xs text-center border border-gray-300 rounded"
+                      disabled={!isDataChannelConnected}
+                      step="1"
+                    />
+                    <button
+                      type="button"
+                      className="w-5 h-5 text-xs bg-gray-200 hover:bg-gray-300 rounded flex items-center justify-center"
+                      onClick={() => setAutoContrastMaxAdjust(prev => prev + 1)}
+                      disabled={!isDataChannelConnected}
+                    >
+                      <i className="fas fa-plus" style={{ fontSize: '8px' }}></i>
+                    </button>
+                  </div>
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  Range: P5{autoContrastMinAdjust >= 0 ? '+' : ''}{autoContrastMinAdjust} to P95{autoContrastMaxAdjust >= 0 ? '+' : ''}{autoContrastMaxAdjust} gray levels
+                </div>
+              </div>
+            )}
+            
+            {/* Histogram Display */}
+            {frameMetadata && frameMetadata.gray_level_stats ? (
+              <div className="mb-2">
+                {renderHistogramDisplay()}
+                
+                {/* Statistics Display */}
+                <div className="mt-1 text-xs text-gray-600 flex justify-between">
+                  <span>Mean: {frameMetadata.gray_level_stats.mean_percent?.toFixed(1)}%</span>
+                  <span>Range: {videoContrastMin}-{videoContrastMax}</span>
+                  <span>Contrast: {frameMetadata.gray_level_stats.contrast_ratio?.toFixed(3)}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="mb-2 text-xs text-gray-500 italic">
+                {isDataChannelConnected ? 'Waiting for metadata...' : 'No histogram data available'}
+              </div>
+            )}
+            
+            {/* Manual Contrast Controls */}
             <div className="flex items-center space-x-2">
               <label htmlFor="min-contrast" className="text-xs text-gray-600 w-16 shrink-0">Min: {videoContrastMin}</label>
               <input
@@ -942,6 +1388,58 @@ const MicroscopeControlPanel = ({
                 className="w-full"
                 title={`Max value: ${videoContrastMax}`}
               />
+            </div>
+          </div>
+        )}
+
+        {/* Frame Metadata Display */}
+        {isWebRtcActive && frameMetadata && (
+          <div className="frame-metadata-display mt-2 p-2 border border-gray-300 rounded-lg bg-white bg-opacity-90">
+            <div className="text-xs font-medium text-gray-700 mb-2">Microscope Information</div>
+            <div className="text-xs text-gray-600 space-y-1">
+              {/* Stage Position */}
+              {frameMetadata.stage_position && (
+                <div>
+                  <strong>Stage Position:</strong> 
+                  X: {frameMetadata.stage_position.x_mm?.toFixed(3)}mm, 
+                  Y: {frameMetadata.stage_position.y_mm?.toFixed(3)}mm, 
+                  Z: {frameMetadata.stage_position.z_mm?.toFixed(3)}mm
+                </div>
+              )}
+              
+              {/* Channel and Exposure Info */}
+              <div>
+                <strong>Channel:</strong> {frameMetadata.channel} | 
+                <strong> Intensity:</strong> {frameMetadata.intensity}% | 
+                <strong> Exposure:</strong> {frameMetadata.exposure_time_ms}ms
+              </div>
+              
+              {/* Timestamp */}
+              {frameMetadata.timestamp && (
+                <div>
+                  <strong>Timestamp:</strong> {new Date(frameMetadata.timestamp * 1000).toLocaleString()}
+                </div>
+              )}
+              
+              {/* Exposure Quality */}
+              {frameMetadata.gray_level_stats?.exposure_quality && (
+                <div>
+                  <strong>Exposure Quality:</strong> 
+                  Well-exposed: {frameMetadata.gray_level_stats.exposure_quality.well_exposed_pixels_percent?.toFixed(1)}% | 
+                  Under: {frameMetadata.gray_level_stats.exposure_quality.underexposed_pixels_percent?.toFixed(1)}% | 
+                  Over: {frameMetadata.gray_level_stats.exposure_quality.overexposed_pixels_percent?.toFixed(1)}%
+                </div>
+              )}
+              
+              {/* Additional Stats */}
+              {frameMetadata.gray_level_stats && (
+                <div>
+                  <strong>Stats:</strong> 
+                  Std: {frameMetadata.gray_level_stats.std_percent?.toFixed(1)}% | 
+                  Dynamic Range: {frameMetadata.gray_level_stats.dynamic_range_percent?.toFixed(1)}% | 
+                  Median: {frameMetadata.gray_level_stats.median_percent?.toFixed(1)}%
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -989,6 +1487,47 @@ const MicroscopeControlPanel = ({
                   <i className="fas fa-flask mr-1"></i>
                   Select Samples
                   <i className={`fas ${isSampleSelectorOpen ? 'fa-chevron-up' : 'fa-chevron-down'} ml-1`}></i>
+                </button>
+              )}
+            </div>
+            
+            {/* Configuration button in upper right corner */}
+            <div className="flex items-center space-x-2">
+              {selectedMicroscopeId && (
+                <button
+                  onClick={isConfigurationLoaded ? openConfigurationWindow : loadMicroscopeConfiguration}
+                  className={`config-button p-1 rounded shadow text-xs disabled:opacity-75 disabled:cursor-not-allowed ${
+                    isConfigurationLoading 
+                      ? 'bg-yellow-500 hover:bg-yellow-600' 
+                      : isConfigurationLoaded 
+                        ? 'bg-blue-500 hover:bg-blue-600' 
+                        : 'bg-gray-500 hover:bg-gray-600'
+                  } text-white`}
+                  title={
+                    isConfigurationLoading 
+                      ? "Loading configuration..." 
+                      : isConfigurationLoaded 
+                        ? "View microscope configuration" 
+                        : "Load microscope configuration"
+                  }
+                  disabled={!microscopeControlService}
+                >
+                  {isConfigurationLoading ? (
+                    <>
+                      <i className="fas fa-spinner fa-spin mr-1"></i>
+                      Loading...
+                    </>
+                  ) : isConfigurationLoaded ? (
+                    <>
+                      <i className="fas fa-cog mr-1"></i>
+                      Config
+                    </>
+                  ) : (
+                    <>
+                      <i className="fas fa-download mr-1"></i>
+                      Load Config
+                    </>
+                  )}
                 </button>
               )}
             </div>
@@ -1110,10 +1649,10 @@ const MicroscopeControlPanel = ({
                   max="100"
                   value={desiredIlluminationIntensity}
                   onChange={(e) => {
-                    if (currentOperation || microscopeBusy) return;
+                    if (!microscopeControlService || currentOperation || microscopeBusy) return;
                     setDesiredIlluminationIntensity(parseInt(e.target.value, 10));
                   }}
-                  disabled={microscopeBusy || currentOperation !== null}
+                  disabled={!microscopeControlService || microscopeBusy || currentOperation !== null}
                 />
               </div>
 
@@ -1123,14 +1662,14 @@ const MicroscopeControlPanel = ({
                   className="control-input w-full mt-1 p-1 border border-gray-300 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
                   value={illuminationChannel}
                   onChange={(e) => {
-                    if (currentOperation || microscopeBusy) return;
+                    if (!microscopeControlService || currentOperation || microscopeBusy) return;
                     const newChannel = e.target.value;
                     if (illuminationChannel !== newChannel) { // Only if channel actually changes
                       setIlluminationChannel(newChannel); // This triggers the set_illumination effect
                       channelSetByUIFlagRef.current = true; // Indicate change is fresh from UI, pending hardware ack
                     }
                   }}
-                  disabled={currentOperation !== null || microscopeBusy}
+                  disabled={!microscopeControlService || currentOperation !== null || microscopeBusy}
                 >
                   <option value="0">BF LED matrix full</option>
                   <option value="11">Fluorescence 405 nm Ex</option>
@@ -1226,11 +1765,11 @@ const MicroscopeControlPanel = ({
                     <div
                       key={`cell-${row}-${col}`}
                       className={`grid-cell ${(!microscopeControlService || microscopeBusy || currentOperation !== null) ? 'disabled' : ''}`}
-                      onDoubleClick={() => {
+                      onClick={() => {
                         if (!microscopeControlService || microscopeBusy || currentOperation) return;
                         handleWellDoubleClick(row, col);
                       }}
-                      title={`Well ${row}${col}`}
+                      title={`Well ${row}${col} - Click to navigate`}
                       role="button"
                       tabIndex={0}
                       onKeyDown={(e) => {
@@ -1326,6 +1865,52 @@ const MicroscopeControlPanel = ({
           incubatorControlService={incubatorControlService}
           microscopeControlService={microscopeControlService}
         />
+      )}
+
+      {/* Configuration Display Modal */}
+      {isConfigurationWindowOpen && microscopeConfiguration && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[70vh] flex flex-col">
+            {/* Modal Header - Fixed */}
+            <div className="flex justify-between items-center p-3 border-b border-gray-200 flex-shrink-0">
+              <h2 className="text-lg font-semibold text-gray-800">
+                Microscope Configuration
+                {selectedMicroscopeId && (
+                  <span className="text-sm text-gray-600 ml-2">
+                    ({selectedMicroscopeId === 'agent-lens/squid-control-reef' ? 'Simulated' :
+                      selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 'Real Microscope 1' :
+                      selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2' ? 'Real Microscope 2' :
+                      selectedMicroscopeId})
+                  </span>
+                )}
+              </h2>
+              <button
+                onClick={closeConfigurationWindow}
+                className="text-gray-400 hover:text-gray-600 text-xl font-bold w-6 h-6 flex items-center justify-center flex-shrink-0"
+                title="Close"
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Modal Body - Scrollable */}
+            <div className="overflow-y-auto p-3" style={{ maxHeight: 'calc(70vh - 120px)' }}>
+              <pre className="bg-gray-100 p-3 rounded text-xs overflow-x-auto whitespace-pre-wrap font-mono leading-tight">
+                {JSON.stringify(microscopeConfiguration, null, 2)}
+              </pre>
+            </div>
+
+            {/* Modal Footer - Fixed */}
+            <div className="flex justify-end p-3 border-t border-gray-200 flex-shrink-0">
+              <button
+                onClick={closeConfigurationWindow}
+                className="px-3 py-1 bg-gray-500 hover:bg-gray-600 text-white rounded text-sm"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
