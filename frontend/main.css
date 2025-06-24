@@ -12,18 +12,21 @@
 
 .content-area {
   flex: 1;
-  overflow: auto;
-  padding: 1rem;
+  overflow: hidden;
+  padding: 0.5rem;
   display: flex;
   flex-direction: column;
 }
 
 .control-view {
   flex: 1;
-  padding: 1rem;
+  padding: 0.5rem;
   background-color: white;
-  border-radius: 0.5rem;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border-radius: 0.25rem;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
 }
 
 /* Image View Placeholder Styles */
@@ -35,18 +38,19 @@
   height: 100%;
   text-align: center;
   color: #6c757d;
+  padding: 1rem;
 }
 
 .image-view-placeholder h3 {
-  margin-bottom: 1rem;
+  margin-bottom: 0.5rem;
   color: #495057;
   font-weight: 500;
 }
 
 .image-view-placeholder p {
-  font-size: 1.1rem;
+  font-size: 1rem;
   max-width: 600px;
-  line-height: 1.5;
+  line-height: 1.4;
   margin: 0;
 }
 
@@ -55,7 +59,7 @@
   height: 100%;
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: 1rem;
 }
 
 .browser-placeholder {
@@ -69,15 +73,15 @@
 }
 
 .browser-placeholder h3 {
-  margin-bottom: 1rem;
+  margin-bottom: 0.5rem;
   color: #495057;
   font-weight: 500;
 }
 
 .browser-placeholder p {
-  font-size: 1.1rem;
+  font-size: 1rem;
   max-width: 600px;
-  line-height: 1.5;
+  line-height: 1.4;
   margin: 0;
 }
 
@@ -86,13 +90,13 @@
   flex-direction: column;
   gap: 0.25rem;
   margin: 0;
-  font-size: 1.5rem;
+  font-size: 1.25rem;
   font-weight: 600;
   color: #212529;
 }
 
 .gallery-subtitle {
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   font-weight: 400;
   color: #6c757d;
 }
@@ -103,33 +107,33 @@
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  padding: 2rem;
+  padding: 1rem;
   color: #6c757d;
-  font-size: 1.1rem;
+  font-size: 1rem;
 }
 
 /* Datasets View */
 .datasets-view {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: 1rem;
   flex: 1;
 }
 
 .datasets-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 0.75rem;
   flex: 1;
 }
 
 .dataset-card {
   display: flex;
   align-items: center;
-  gap: 1rem;
-  padding: 1.5rem;
+  gap: 0.75rem;
+  padding: 1rem;
   border: 2px solid #e9ecef;
-  border-radius: 0.5rem;
+  border-radius: 0.375rem;
   background: white;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -137,18 +141,18 @@
 
 .dataset-card:hover {
   border-color: #007bff;
-  box-shadow: 0 4px 8px rgba(0, 123, 255, 0.1);
-  transform: translateY(-2px);
+  box-shadow: 0 2px 4px rgba(0, 123, 255, 0.1);
+  transform: translateY(-1px);
 }
 
 .dataset-card.selected {
   border-color: #007bff;
   background-color: #f8f9ff;
-  box-shadow: 0 4px 12px rgba(0, 123, 255, 0.15);
+  box-shadow: 0 2px 6px rgba(0, 123, 255, 0.15);
 }
 
 .dataset-icon {
-  font-size: 2rem;
+  font-size: 1.75rem;
   color: #007bff;
   flex-shrink: 0;
 }
@@ -159,7 +163,7 @@
 }
 
 .dataset-name {
-  font-size: 1.1rem;
+  font-size: 1rem;
   font-weight: 600;
   margin: 0 0 0.25rem 0;
   color: #212529;
@@ -169,7 +173,7 @@
 }
 
 .dataset-id {
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   color: #6c757d;
   margin: 0;
   overflow: hidden;
@@ -182,41 +186,41 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 1rem;
-  padding: 3rem;
+  gap: 0.75rem;
+  padding: 2rem;
   color: #6c757d;
   text-align: center;
 }
 
 .no-datasets i {
-  font-size: 3rem;
+  font-size: 2.5rem;
   opacity: 0.5;
 }
 
 .dataset-actions {
   display: flex;
-  gap: 1rem;
+  gap: 0.75rem;
   justify-content: center;
-  padding: 1rem;
+  padding: 0.75rem;
   border-top: 1px solid #e9ecef;
   background-color: #f8f9fa;
-  border-radius: 0 0 0.5rem 0.5rem;
-  margin: -1rem -1rem 0 -1rem;
+  border-radius: 0 0 0.375rem 0.375rem;
+  margin: -0.75rem -0.75rem 0 -0.75rem;
 }
 
 .action-button {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.75rem 1.5rem;
+  padding: 0.6rem 1.2rem;
   border: none;
   border-radius: 0.375rem;
   cursor: pointer;
-  font-size: 0.95rem;
+  font-size: 0.9rem;
   font-weight: 500;
   text-decoration: none;
   transition: all 0.2s ease;
-  min-width: 150px;
+  min-width: 120px;
   justify-content: center;
 }
 
@@ -228,7 +232,7 @@
 .action-button.primary:hover {
   background-color: #0056b3;
   transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(0, 123, 255, 0.25);
+  box-shadow: 0 2px 4px rgba(0, 123, 255, 0.25);
 }
 
 .action-button.secondary {
@@ -239,22 +243,22 @@
 .action-button.secondary:hover {
   background-color: #218838;
   transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(40, 167, 69, 0.25);
+  box-shadow: 0 2px 4px rgba(40, 167, 69, 0.25);
 }
 
 /* Files View */
 .files-view {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.75rem;
   flex: 1;
 }
 
 .files-header {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  padding-bottom: 1rem;
+  gap: 0.75rem;
+  padding-bottom: 0.75rem;
   border-bottom: 1px solid #e9ecef;
 }
 
@@ -262,13 +266,13 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem 1rem;
+  padding: 0.4rem 0.8rem;
   border: 1px solid #6c757d;
   background-color: transparent;
   color: #6c757d;
   border-radius: 0.375rem;
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   transition: all 0.2s ease;
   align-self: flex-start;
 }
@@ -284,16 +288,16 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 0.25rem;
-  padding: 0.75rem;
+  padding: 0.6rem;
   background-color: #f8f9fa;
   border-radius: 0.375rem;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
 }
 
 .breadcrumb-item {
   color: #007bff;
   cursor: pointer;
-  padding: 0.25rem 0.5rem;
+  padding: 0.2rem 0.4rem;
   border-radius: 0.25rem;
   transition: background-color 0.2s;
   display: flex;
@@ -323,8 +327,8 @@
 
 .files-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.75rem;
   flex: 1;
 }
 
@@ -332,8 +336,8 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.75rem;
-  padding: 1rem;
+  gap: 0.6rem;
+  padding: 0.75rem;
   border: 1px solid #e9ecef;
   border-radius: 0.375rem;
   background: white;
@@ -347,8 +351,8 @@
 
 .file-card.folder:hover {
   border-color: #ffc107;
-  box-shadow: 0 2px 8px rgba(255, 193, 7, 0.2);
-  transform: translateY(-2px);
+  box-shadow: 0 1px 4px rgba(255, 193, 7, 0.2);
+  transform: translateY(-1px);
 }
 
 .file-card.file {
@@ -356,7 +360,7 @@
 }
 
 .file-icon {
-  font-size: 2rem;
+  font-size: 1.75rem;
   flex-shrink: 0;
 }
 
@@ -371,13 +375,13 @@
 .file-info {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.2rem;
   min-width: 0;
   width: 100%;
 }
 
 .file-name {
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   font-weight: 500;
   color: #212529;
   margin: 0;
@@ -387,7 +391,7 @@
 }
 
 .file-size {
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   color: #6c757d;
   margin: 0;
 }
@@ -397,23 +401,23 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 1rem;
-  padding: 3rem;
+  gap: 0.75rem;
+  padding: 2rem;
   color: #6c757d;
   text-align: center;
 }
 
 .no-files i {
-  font-size: 3rem;
+  font-size: 2.5rem;
   opacity: 0.5;
 }
 
 .data-management-view {
   flex: 1;
-  padding: 1rem;
+  padding: 0.75rem;
   background-color: white;
-  border-radius: 0.5rem;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border-radius: 0.375rem;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
   overflow: auto;
 }
 
@@ -423,7 +427,7 @@
 }
 
 .data-management-view li {
-  padding: 0.5rem;
+  padding: 0.4rem;
   border-radius: 0.25rem;
   transition: background-color 0.2s;
 }
@@ -446,10 +450,10 @@
 
 /* Color picker related styles */
 .fallback-color-picker {
-  padding: 10px;
+  padding: 8px;
   background-color: #f9f9f9;
   border-radius: 4px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 /* Fix z-index issues for color picker */
@@ -497,29 +501,28 @@
 
 /* Styles for MicroscopeControlPanel */
 .microscope-control-panel-container {
-  position: relative; /* Needed for absolute positioning of SampleSelector dropdown */
+  position: relative;
 }
 
 /* Styles for the SampleSelector toggle button in MicroscopeControlPanel */
 .sample-selector-toggle-button {
   /* Using Tailwind classes primarily, but can add specifics here */
-  /* Example: min-width: 120px; */
 }
 
 /* Styles for the SampleSelector dropdown itself */
 .sample-selector-dropdown {
   position: absolute;
-  top: 50px; /* Example: Adjust based on the toggle button's position in the new layout */
-  left: 10px; /* Example: Adjust as needed */
-  z-index: 1000; /* Ensure it's above other content */
+  top: 40px;
+  left: 8px;
+  z-index: 1000;
   background-color: white;
   border: 1px solid #ccc;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-  padding: 1rem;
-  border-radius: 0.375rem; /* Tailwind: rounded-md */
-  width: calc(100% - 20px); /* Make it almost full width of its parent, with some padding */
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  padding: 0.75rem;
+  border-radius: 0.375rem;
+  width: calc(100% - 16px);
   box-sizing: border-box;
-  max-height: calc(100vh - 100px); /* Prevent it from being too tall */
+  max-height: calc(100vh - 80px);
   overflow-y: auto;
 }
 
@@ -528,11 +531,10 @@
 }
 
 /* Re-purposed/generic styles that SampleSelector might still use from old Sidebar.css */
-/* These were originally in Sidebar.css for SampleSelector, now generalized or moved */
-.sample-sidebar-title { /* Assuming SampleSelector still uses this class for its title */
-  font-size: 1.15rem;
+.sample-sidebar-title {
+  font-size: 1.1rem;
   font-weight: 600;
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem;
   color: #343a40;
 }
 
@@ -540,20 +542,20 @@
   /* Container for options and buttons if needed */
 }
 
-.sample-options { /* Used inside SampleSelector for the list of samples */
+.sample-options {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem; /* Tailwind: space-y-3 */
-  margin-bottom: 1rem;
+  gap: 0.6rem;
+  margin-bottom: 0.75rem;
 }
 
 .sample-option {
   display: flex;
   align-items: center;
-  gap: 0.75rem; /* Tailwind: space-x-3 */
-  padding: 0.75rem; /* Tailwind: p-3 */
-  border: 1px solid #e0e0e0; /* Tailwind: border border-gray-300 */
-  border-radius: 0.375rem; /* Tailwind: rounded-md */
+  gap: 0.6rem;
+  padding: 0.6rem;
+  border: 1px solid #e0e0e0;
+  border-radius: 0.375rem;
   background: none;
   width: 100%;
   text-align: left;
@@ -562,26 +564,25 @@
 }
 
 .sample-option:hover {
-  background-color: #f5f5f5; /* Tailwind: hover:bg-gray-100 */
-  border-color: #b0b0b0; /* Tailwind: hover:border-gray-400 */
+  background-color: #f5f5f5;
+  border-color: #b0b0b0;
 }
 
 .sample-option.active {
-  background-color: #f0f7ff; /* Example: bg-blue-50 */
-  border: 2px solid #2563eb; /* Example: border-2 border-blue-600 */
+  background-color: #f0f7ff;
+  border: 2px solid #2563eb;
   font-weight: 600;
 }
 
 /* Styles for green/orange indicators, if still used by SampleSelector */
 .sample-option.green-sample {
-  background-color: rgba(220, 252, 231, 0.5); /* Light green background */
-  border-color: #22c55e; /* Green border */
+  background-color: rgba(220, 252, 231, 0.5);
+  border-color: #22c55e;
 }
 
 .sample-option.orange-sample {
-  background-color: rgba(254, 240, 212, 0.5); /* Light orange background */
-  border-color: #f97316; /* Orange border */
-  /* cursor: not-allowed; might be handled by :disabled */
+  background-color: rgba(254, 240, 212, 0.5);
+  border-color: #f97316;
 }
 
 .sample-option:disabled {
@@ -598,25 +599,25 @@
 
 .sample-name {
   font-weight: 500;
-  margin-bottom: 0.2rem;
+  margin-bottom: 0.15rem;
 }
 
 .sample-location {
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   color: #6b7280;
   white-space: normal;
 }
 
 .load-sample-button, .unload-sample-button {
-  display: flex; /* For centering icon and text */
+  display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem; /* Space between icon and text */
-  padding: 0.75rem 1rem; /* Tailwind: py-3 px-4 */
+  gap: 0.4rem;
+  padding: 0.6rem 0.8rem;
   border: none;
-  border-radius: 0.375rem; /* Tailwind: rounded-md */
+  border-radius: 0.375rem;
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   font-weight: 500;
   text-align: center;
   transition: background-color 0.2s, opacity 0.3s ease;
@@ -624,84 +625,84 @@
 }
 
 .load-sample-button {
-  background-color: #007bff; /* Tailwind: bg-blue-500 */
+  background-color: #007bff;
   color: white;
 }
 
 .load-sample-button:hover:not(:disabled) {
-  background-color: #0056b3; /* Tailwind: hover:bg-blue-700 */
+  background-color: #0056b3;
 }
 
 .unload-sample-button {
-  background-color: #dc3545; /* Tailwind: bg-red-500 */
+  background-color: #dc3545;
   color: white;
 }
 
 .unload-sample-button:hover:not(:disabled) {
-  background-color: #c82333; /* Tailwind: hover:bg-red-700 */
+  background-color: #c82333;
 }
 
 .load-sample-button:disabled, .unload-sample-button:disabled {
-  background-color: #cccccc; /* Tailwind: bg-gray-300 */
+  background-color: #cccccc;
   cursor: not-allowed;
   opacity: 0.7;
 }
 
 .load-sample-button.processing, .unload-sample-button.processing {
-  background-color: #6c757d; /* Tailwind: bg-gray-500 */
+  background-color: #6c757d;
 }
 
 .load-sample-button .button-content .fa-spinner, 
 .unload-sample-button .button-content .fa-spinner {
-  margin-right: 8px; /* Or use gap on parent */
+  margin-right: 6px;
 }
 
-.sidebar-divider { /* Re-define if SampleSelector uses it, or use Tailwind hr */
-  margin-top: 1rem;
-  margin-bottom: 1rem;
+.sidebar-divider {
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
   border: 0;
-  border-top: 1px solid #e0e0e0; /* Tailwind: border-t border-gray-200 */
+  border-top: 1px solid #e0e0e0;
 }
 
-.workflow-messages-container { /* Styles for workflow messages in SampleSelector */
-  margin-top: 1rem;
-  margin-bottom: 0.5rem;
-  border: 1px solid #e5e7eb; /* Tailwind: border border-gray-200 */
-  border-radius: 0.25rem; /* Tailwind: rounded-sm */
-  padding: 0.5rem; /* Tailwind: p-2 */
-  background-color: #f9fafb; /* Tailwind: bg-gray-50 */
-  max-height: 12rem; /* Tailwind: max-h-48 */
+.workflow-messages-container {
+  margin-top: 0.75rem;
+  margin-bottom: 0.4rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.25rem;
+  padding: 0.4rem;
+  background-color: #f9fafb;
+  max-height: 10rem;
   overflow-y: auto;
 }
 
 .workflow-messages-container h4 {
-  font-size: 0.875rem; /* Tailwind: text-sm */
-  font-weight: 600; /* Tailwind: font-semibold */
-  margin-bottom: 0.25rem; /* Tailwind: mb-1 */
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-bottom: 0.2rem;
 }
 
 .workflow-messages {
-  font-size: 0.75rem; /* Tailwind: text-xs */
-  list-style-type: none; /* Ensure no bullets */
-  padding-left: 0; /* Remove default padding */
+  font-size: 0.7rem;
+  list-style-type: none;
+  padding-left: 0;
 }
 
 .workflow-messages li {
-  margin-bottom: 0.25rem; /* Tailwind: mb-1 */
-  padding: 0.25rem 0.5rem; /* Tailwind: py-1 px-2 */
-  border-bottom: 1px solid #f3f4f6; /* Tailwind: border-b border-gray-100 */
+  margin-bottom: 0.2rem;
+  padding: 0.2rem 0.4rem;
+  border-bottom: 1px solid #f3f4f6;
 }
 
 .workflow-messages .operation-step .fa-circle-notch {
-  color: #3b82f6; /* Tailwind: text-blue-500 */
-  margin-right: 0.5rem; /* Tailwind: mr-2 */
+  color: #3b82f6;
+  margin-right: 0.4rem;
 }
 
-.sample-loading-status { /* For the status message at the bottom of SampleSelector */
-  margin-top: 0.5rem; /* Tailwind: my-2 -> mt-2 if no mb needed */
-  margin-bottom: 0.5rem;
-  padding: 0.5rem 0.75rem; /* Tailwind: py-2 px-3 */
-  border-radius: 0.25rem; /* Tailwind: rounded */
+.sample-loading-status {
+  margin-top: 0.4rem;
+  margin-bottom: 0.4rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 0.25rem;
   text-align: center;
 }
 
@@ -713,21 +714,25 @@
 .sample-loading-status.bg-blue-100 { background-color: #dbeafe; }
 .sample-loading-status.text-blue-700 { color: #1d4ed8; }
 
-/* New styles for MicroscopeControlPanel layout */
+/* New styles for MicroscopeControlPanel layout - OPTIMIZED */
 .new-mcp-layout {
   display: flex;
-  flex-direction: row; /* Align children (image area and controls/chatbot area) horizontally */
-  height: 100%; /* Make the panel take full height of its container */
-  gap: 1rem; /* Space between image area and controls/chatbot area */
+  flex-direction: row;
+  height: 100%;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  margin: 0;
+  box-sizing: border-box;
 }
 
 .mcp-image-display-area {
-  flex: 2; /* Image area takes 2/3 of the space, adjust ratio as needed */
+  flex: 2.4;
   display: flex;
-  flex-direction: column; /* Stack children vertically if there were multiple */
+  flex-direction: column;
   height: 100%;
-  position: relative; /* For positioning the toggle button */
+  position: relative;
   transition: flex-basis 0.3s ease-in-out;
+  min-height: 0;
 }
 
 /* Ensure the image-display div within image area takes full height */
@@ -736,13 +741,14 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  border: 1px solid #e5e7eb;
 }
 
 /* Custom smaller font for XYZ stage location display */
 .position-display .text-gray-600,
 .position-display .text-gray-800 {
-  font-size: 0.65rem; /* Example: 10.4px if base is 16px. Adjust as needed */
-  line-height: 0.85rem;
+  font-size: 0.6rem;
+  line-height: 0.8rem;
 }
 
 .mcp-image-display-area #image-display img {
@@ -752,66 +758,70 @@
 }
 
 .mcp-controls-chatbot-area {
-  flex: 1; /* Controls/chatbot area takes 1/3 of the space */
+  flex: 0.6;
   display: flex;
-  flex-direction: column; /* Stack microscope controls and chatbot vertically */
-  gap: 1rem; /* Space between microscope controls and chatbot */
-  height: 100%; /* Take full height */
-  position: relative; /* For SampleSelector dropdown positioning context */
-  transition: flex-basis 0.3s ease-in-out, padding 0.3s ease-in-out; /* Added padding transition */
-  overflow: hidden; /* Prevent content overflow during animation */
+  flex-direction: column;
+  gap: 0.5rem;
+  height: 100%;
+  position: relative;
+  transition: flex-basis 0.3s ease-in-out, padding 0.3s ease-in-out;
+  overflow: hidden;
+  min-width: 200px;
 }
 
 .mcp-microscope-controls-area {
-  flex-shrink: 0; /* Microscope controls take only the space they need */
-  overflow-y: auto; /* Allow scrolling for controls if content overflows */
-  padding: 1rem; /* Add some padding inside the controls area */
-  border: 1px solid #e5e7eb; /* Optional: border for visual separation */
-  border-radius: 0.375rem; /* Optional: rounded corners */
-  position: relative; /* Important for SampleSelector dropdown positioning */
-  transition: padding 0.3s ease-in-out; /* For smooth padding change on collapse */
+  flex-shrink: 0;
+  overflow-y: auto;
+  padding: 0.75rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.375rem;
+  position: relative;
+  transition: padding 0.3s ease-in-out;
+  background-color: white;
 }
 
 .mcp-chatbot-area {
-  /* Chatbot takes its natural height, or you can specify a fixed/min-height */
-  flex-shrink: 0; /* ensure it doesn't shrink if controls area is too large */
-  padding: 0.5rem; /* Padding for the chatbot area */
-  border: 1px solid #e5e7eb; /* Optional: border */
-  border-radius: 0.375rem; /* Optional: rounded corners */
-  display: flex; /* To make ChatbotButton fill the area */
-  flex-direction: column; /* Stack elements if ChatbotButton had siblings */
+  flex-shrink: 0;
+  padding: 0.4rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.375rem;
+  display: flex;
+  flex-direction: column;
+  background-color: white;
+  min-height: 60px;
 }
 
-.mcp-chatbot-area > div { /* Assuming ChatbotButton is a div or wrapped in one */
-  height: 100%; /* Make the ChatbotButton component take full height of its parent */
+.mcp-chatbot-area > div {
+  height: 100%;
   display: flex;
   flex-direction: column;
 }
 
 .mcp-chatbot-area > div > button {
-  flex-grow: 1; /* Make the button itself grow to fill the ChatbotButton component area */
+  flex-grow: 1;
 }
 
 /* Styles for right panel collapse */
 .mcp-image-display-area {
-  position: relative; /* For positioning the toggle button */
+  position: relative;
   transition: flex-basis 0.3s ease-in-out;
 }
 
 .right-panel-toggle-button {
   position: absolute;
   top: 50%;
-  right: 0px; /* Position on the right edge of the image area */
+  right: 0px;
   transform: translateY(-50%);
   background-color: rgba(100, 100, 100, 0.6);
   color: white;
   border: none;
-  padding: 10px 5px;
+  padding: 8px 4px;
   cursor: pointer;
-  border-top-left-radius: 5px;
-  border-bottom-left-radius: 5px;
-  z-index: 10; /* Ensure it's above the image */
+  border-top-left-radius: 4px;
+  border-bottom-left-radius: 4px;
+  z-index: 10;
   transition: background-color 0.3s ease;
+  font-size: 0.8rem;
 }
 
 .right-panel-toggle-button:hover {
@@ -819,25 +829,23 @@
 }
 
 .mcp-controls-chatbot-area.collapsed {
-  /* display: none; /* This will hide the panel */ /* Replaced with flex-basis */
   flex-basis: 0;
   padding-left: 0;
   padding-right: 0;
-  /* gap should effectively disappear as children might also be hidden or shrunk */
+  min-width: 0;
 }
 
 /* When controls area is collapsed, its direct children should also not take space */
 .mcp-controls-chatbot-area.collapsed .mcp-microscope-controls-area,
 .mcp-controls-chatbot-area.collapsed .mcp-chatbot-area {
     padding: 0;
-    border-width: 0; /* Hide borders when collapsed */
-    /* Child elements will be hidden by the parent's overflow: hidden and zero flex-basis */
+    border-width: 0;
 }
 
 /* Ensure that when collapsed, the content effectively disappears quickly to not show during shrink */
 .mcp-controls-chatbot-area.collapsed > * {
-  visibility: hidden; /* Hide content immediately when starting to collapse */
-  transition: visibility 0s 0.3s; /* Delay hiding until after transition */
+  visibility: hidden;
+  transition: visibility 0s 0.3s;
 }
 
 .mcp-controls-chatbot-area:not(.collapsed) > * {
@@ -846,7 +854,7 @@
 }
 
 .mcp-image-display-area.expanded {
-  flex-basis: 100%; /* Image area takes full width when panel is collapsed */
+  flex-basis: 100%;
 }
 
 /* Force disabled styles for microscope controls if Tailwind utilities are overridden */
@@ -854,7 +862,7 @@
 .mcp-microscope-controls-area input[disabled],
 .mcp-microscope-controls-area select[disabled] {
   cursor: not-allowed !important;
-  opacity: 0.75 !important; /* Or 0.5 if you prefer Tailwind's default disabled opacity */
+  opacity: 0.75 !important;
 }
 
 /* Image Search Panel Integration */
@@ -891,49 +899,48 @@
 /* Notifications Container - for stacking multiple notifications */
 .notifications-container {
   position: fixed;
-  top: 20px;
-  right: 20px;
+  top: 15px;
+  right: 15px;
   z-index: 9999;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  pointer-events: none; /* Allow clicks to pass through container */
+  gap: 8px;
+  pointer-events: none;
 }
 
 .notifications-container > * {
-  pointer-events: auto; /* Re-enable clicks on individual notifications */
+  pointer-events: auto;
 }
 
 /* Notification Popup Styles */
 .notification-popup {
-  position: relative; /* Changed from fixed to relative for stacking */
-  /* Remove top, right positioning since container handles it */
-  min-width: 300px;
-  max-width: 500px;
+  position: relative;
+  min-width: 280px;
+  max-width: 450px;
   border: 2px solid;
-  border-radius: 8px;
+  border-radius: 6px;
   color: white;
   font-weight: 500;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   animation: slideInFromRight 0.3s ease-out;
 }
 
 .notification-content {
   display: flex;
   align-items: center;
-  padding: 12px 16px;
-  gap: 12px;
+  padding: 10px 14px;
+  gap: 10px;
 }
 
 .notification-icon {
-  font-size: 1.2rem;
+  font-size: 1.1rem;
   flex-shrink: 0;
 }
 
 .notification-message {
   flex: 1;
-  font-size: 0.95rem;
-  line-height: 1.4;
+  font-size: 0.9rem;
+  line-height: 1.3;
 }
 
 .notification-close {
@@ -941,8 +948,8 @@
   border: none;
   color: white;
   cursor: pointer;
-  padding: 4px;
-  border-radius: 4px;
+  padding: 3px;
+  border-radius: 3px;
   transition: background-color 0.2s;
   flex-shrink: 0;
 }
@@ -952,7 +959,7 @@
 }
 
 .notification-close i {
-  font-size: 0.9rem;
+  font-size: 0.8rem;
 }
 
 /* Animation for notification popup */
@@ -983,12 +990,12 @@
 .imagej-badge {
   z-index: 10;
   backdrop-filter: blur(4px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
 }
 
 .imagej-badge:hover {
-  transform: scale(1.05);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  transform: scale(1.03);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
 }
 
 /* ImageJ Panel Styles */
@@ -1010,7 +1017,7 @@
 
 /* Persistent ImageJ Panel Styles */
 .imagej-persistent-panel {
-  transition: none; /* Disable transitions for instant switching */
+  transition: none;
 }
 
 .imagej-persistent-panel.visible {
@@ -1018,17 +1025,16 @@
 }
 
 .imagej-persistent-panel.hidden {
-  /* Keep mounted but hidden - ImageJ will continue running */
   visibility: hidden;
   pointer-events: none;
 }
 
-/* Toggle Switch for Auto Contrast */
+/* Toggle Switch for Auto Contrast - MADE SMALLER */
 .auto-contrast-toggle {
   position: relative;
   display: inline-block;
-  width: 36px;
-  height: 20px;
+  width: 32px;
+  height: 18px;
 }
 
 .auto-contrast-toggle input {
@@ -1046,20 +1052,20 @@
   bottom: 0;
   background-color: #ccc;
   transition: 0.3s;
-  border-radius: 20px;
+  border-radius: 18px;
 }
 
 .auto-contrast-slider:before {
   position: absolute;
   content: "";
-  height: 16px;
-  width: 16px;
+  height: 14px;
+  width: 14px;
   left: 2px;
   bottom: 2px;
   background-color: white;
   transition: 0.3s;
   border-radius: 50%;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
 .auto-contrast-toggle input:checked + .auto-contrast-slider {
@@ -1067,7 +1073,7 @@
 }
 
 .auto-contrast-toggle input:checked + .auto-contrast-slider:before {
-  transform: translateX(16px);
+  transform: translateX(14px);
 }
 
 .auto-contrast-toggle input:disabled + .auto-contrast-slider {
@@ -1140,32 +1146,33 @@
 
 #image-display.dragging video,
 #image-display.dragging img {
-  transition: none; /* Disable transition during dragging for responsive feel */
+  transition: none;
 }
 
-/* Responsive video display styles */
+/* Responsive video display styles - OPTIMIZED */
 .mcp-image-display-area {
   display: flex;
   flex-direction: column;
   flex: 1;
-  min-height: 0; /* Allow flex child to shrink */
+  min-height: 0;
 }
 
 #image-display {
   flex: 1;
-  min-height: 300px; /* Minimum height to ensure usability */
+  min-height: 250px;
 }
 
-/* Video controls bar styling */
+/* Video controls bar styling - OPTIMIZED */
 .video-controls-bar {
-  flex-shrink: 0; /* Don't shrink the controls */
+  flex-shrink: 0;
   backdrop-filter: blur(4px);
-  border-bottom: none; /* Remove bottom border as it connects to video display */
+  border-bottom: none;
+  padding: 0.4rem;
 }
 
-/* Make image display area responsive */
+/* Make image display area responsive - OPTIMIZED */
 .mcp-image-display-area.expanded #image-display {
-  height: calc(100vh - 120px) !important; /* Larger when expanded */
+  height: calc(100vh - 100px) !important;
 }
 
 /* Ensure video content fits properly at different zoom levels */
@@ -1174,7 +1181,82 @@
   transform-origin: center center;
 }
 
-/* Scrollable histogram section */
+/* Scrollable histogram section - OPTIMIZED */
 .video-contrast-controls {
-  flex-shrink: 0; /* Don't let it shrink too much */
+  flex-shrink: 0;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+/* Additional optimizations for better space usage */
+.coordinate-container {
+  margin-bottom: 0.6rem;
+}
+
+.coordinate-group {
+  padding: 0.6rem;
+}
+
+.control-group {
+  margin-bottom: 0.6rem;
+}
+
+.horizontal-buttons {
+  gap: 0.4rem;
+}
+
+.horizontal-buttons button {
+  padding: 0.4rem 0.6rem;
+  font-size: 0.75rem;
+}
+
+.control-input {
+  padding: 0.4rem;
+  font-size: 0.75rem;
+}
+
+/* Optimize position display for smaller footprint */
+.position-display {
+  padding: 0.4rem;
+  font-size: 0.7rem;
+}
+
+/* Video Contrast Controls - Compact */
+.video-contrast-controls {
+  min-height: 24px;
+  transition: all 0.2s ease;
+}
+
+.video-contrast-controls .histogram-display {
+  height: 40px; /* Reduced from default 60px */
+  margin-bottom: 0.25rem;
+}
+
+.video-contrast-controls .histogram-display svg {
+  height: 40px;
+}
+
+.video-contrast-controls input[type="range"] {
+  height: 4px;
+  -webkit-appearance: none;
+  background: #ddd;
+  border-radius: 2px;
+}
+
+.video-contrast-controls input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #007bff;
+  cursor: pointer;
+}
+
+.video-contrast-controls input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #007bff;
+  cursor: pointer;
+  border: none;
 }

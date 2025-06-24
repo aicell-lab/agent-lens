@@ -242,7 +242,7 @@ const ImageSearchPanel = ({ similarityService, appendLog, showNotification }) =>
   );
 
   return (
-    <div className="image-search-panel">
+    <div className="control-view image-search-panel">
       <h3 className="panel-title">Image Similarity Search</h3>
       
       {/* Search Section */}

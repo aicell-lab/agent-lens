@@ -141,6 +141,9 @@ const MicroscopeControlPanel = ({
   // State for collapsing the right panel - THIS WAS ACCIDENTALLY REMOVED, ADDING IT BACK
   const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false);
 
+  // State for collapsing the contrast controls (collapsed by default to not block video)
+  const [isContrastControlsCollapsed, setIsContrastControlsCollapsed] = useState(true);
+
   // New state for video contrast adjustment
   const [videoContrastMin, setVideoContrastMin] = useState(0);
   const [videoContrastMax, setVideoContrastMax] = useState(255);
@@ -148,8 +151,8 @@ const MicroscopeControlPanel = ({
   const autoContrastEnabledRef = useRef(autoContrastEnabled);
   
   // Auto-contrast adjustment parameters
-  const [autoContrastMinAdjust, setAutoContrastMinAdjust] = useState(-60); // P5 - 30
-  const [autoContrastMaxAdjust, setAutoContrastMaxAdjust] = useState(60);  // P95 + 30
+  const [autoContrastMinAdjust, setAutoContrastMinAdjust] = useState(-60); // P5 - 60
+  const [autoContrastMaxAdjust, setAutoContrastMaxAdjust] = useState(60);  // P95 + 60
   const autoContrastMinAdjustRef = useRef(autoContrastMinAdjust);
   const autoContrastMaxAdjustRef = useRef(autoContrastMaxAdjust);
 
@@ -813,15 +816,39 @@ const MicroscopeControlPanel = ({
             const rect = e.currentTarget.getBoundingClientRect();
             const x = e.clientX - rect.left;
             const valueAt = Math.round((x / rect.width) * 255);
-            
-            // Determine which handle is closer
-            const distToMin = Math.abs(valueAt - videoContrastMin);
-            const distToMax = Math.abs(valueAt - videoContrastMax);
-            
-            if (distToMin < distToMax) {
-              setVideoContrastMin(Math.max(0, Math.min(valueAt, videoContrastMax - 1)));
+
+            if (autoContrastEnabled) {
+              // Adjust auto-contrast offsets
+              if (!frameMetadata || !frameMetadata.gray_level_stats || !frameMetadata.gray_level_stats.percentiles) return;
+              
+              const stats = frameMetadata.gray_level_stats;
+              const p5Value = (stats.percentiles.p5 || 0) * 255 / 100;
+              const p95Value = (stats.percentiles.p95 || 100) * 255 / 100;
+
+              // The current min/max are based on p5/p95 + adjustments
+              const currentMin = p5Value + autoContrastMinAdjust;
+              const currentMax = p95Value + autoContrastMaxAdjust;
+
+              const distToMin = Math.abs(valueAt - currentMin);
+              const distToMax = Math.abs(valueAt - currentMax);
+
+              if (distToMin < distToMax) {
+                const newMinAdjust = valueAt - p5Value;
+                setAutoContrastMinAdjust(newMinAdjust);
+              } else {
+                const newMaxAdjust = valueAt - p95Value;
+                setAutoContrastMaxAdjust(newMaxAdjust);
+              }
             } else {
-              setVideoContrastMax(Math.min(255, Math.max(valueAt, videoContrastMin + 1)));
+              // Original logic for manual contrast
+              const distToMin = Math.abs(valueAt - videoContrastMin);
+              const distToMax = Math.abs(valueAt - videoContrastMax);
+              
+              if (distToMin < distToMax) {
+                setVideoContrastMin(Math.max(0, Math.min(valueAt, videoContrastMax - 1)));
+              } else {
+                setVideoContrastMax(Math.min(255, Math.max(valueAt, videoContrastMin + 1)));
+              }
             }
           }}
         />
@@ -1341,7 +1368,7 @@ const MicroscopeControlPanel = ({
   }, [isDragging, appendLog]);
 
   return (
-    <div className="microscope-control-panel-container new-mcp-layout bg-white bg-opacity-95 p-4 rounded-lg shadow-lg border-l border-gray-300 box-border">
+    <div className="control-view microscope-control-panel-container new-mcp-layout">
       {/* Left Side: Image Display */}
       <div className={`mcp-image-display-area ${isRightPanelCollapsed ? 'expanded' : ''}`}>
         {/* Video Display Controls */}
@@ -1495,227 +1522,54 @@ const MicroscopeControlPanel = ({
             )}
           </div>
         )}
-        {/* Video Contrast Controls with Histogram */}
+        {/* Compact Video Contrast Controls - Collapsible */}
         {isWebRtcActive && (
-          <div className="video-contrast-controls mt-2 p-2 border border-gray-300 rounded-lg bg-white bg-opacity-90 max-h-96 overflow-y-auto">
-            <div className="text-xs font-medium text-gray-700 mb-2 flex items-center justify-between">
-              <span>Gray Level Histogram & Contrast</span>
+          <div className="video-contrast-controls mt-1 p-1 border border-gray-300 rounded bg-white bg-opacity-90">
+            <div className="flex items-center justify-between mb-1">
               <div className="flex items-center space-x-2">
+                <span className="text-xs font-medium text-gray-700">Contrast</span>
                 {isDataChannelConnected && (
-                  <span className="text-green-600 text-xs">
-                    <i className="fas fa-circle text-green-500 mr-1" style={{ fontSize: '6px' }}></i>
-                    Metadata Channel
-                  </span>
+                  <i className="fas fa-circle text-green-500" style={{ fontSize: '4px' }} title="Metadata connected"></i>
                 )}
               </div>
+              <button
+                onClick={() => setIsContrastControlsCollapsed(!isContrastControlsCollapsed)}
+                className="text-xs text-gray-500 hover:text-gray-700 p-1"
+                title={isContrastControlsCollapsed ? "Show contrast controls" : "Hide contrast controls"}
+              >
+                <i className={`fas ${isContrastControlsCollapsed ? 'fa-chevron-down' : 'fa-chevron-up'}`}></i>
+              </button>
             </div>
             
-            {/* Auto Contrast Toggle */}
-            <div className="flex items-center mb-2">
-              <label className="text-xs text-gray-600 mr-2">Auto Contrast Adjustment</label>
-              <label className="auto-contrast-toggle mr-2">
-                <input
-                  type="checkbox"
-                  checked={autoContrastEnabled}
-                  onChange={(e) => setAutoContrastEnabled(e.target.checked)}
-                  disabled={!isDataChannelConnected}
-                />
-                <span className="auto-contrast-slider"></span>
-              </label>
-              <span className="text-xs text-gray-500">
-                {autoContrastEnabled ? 'ON' : 'OFF'}
-                {!isDataChannelConnected && ' (Channel Required)'}
-              </span>
-            </div>
-            
-            {/* Auto Contrast Parameters */}
-            {autoContrastEnabled && (
-              <div className="auto-contrast-params mb-2 p-2 bg-gray-50 rounded border">
-                <div className="text-xs text-gray-600 mb-1">Adjustment Parameters</div>
-                <div className="flex items-center justify-between space-x-2">
-                  {/* Min Adjustment */}
-                  <div className="flex items-center space-x-1">
-                    <label className="text-xs text-gray-600 whitespace-nowrap">P5:</label>
-                    <button
-                      type="button"
-                      className="w-5 h-5 text-xs bg-gray-200 hover:bg-gray-300 rounded flex items-center justify-center"
-                      onClick={() => setAutoContrastMinAdjust(prev => prev - 1)}
-                      disabled={!isDataChannelConnected}
-                    >
-                      <i className="fas fa-minus" style={{ fontSize: '8px' }}></i>
-                    </button>
+            {!isContrastControlsCollapsed && (
+              <>
+                {/* Auto Contrast Toggle - Compact */}
+                <div className="flex items-center mb-1">
+                  <span className="text-xs text-gray-600 mr-2">Auto</span>
+                  <label className="auto-contrast-toggle">
                     <input
-                      type="number"
-                      value={autoContrastMinAdjust}
-                      onChange={(e) => {
-                        const value = parseInt(e.target.value, 10);
-                        if (!isNaN(value)) {
-                          setAutoContrastMinAdjust(Math.max(-255, Math.min(255, value)));
-                        }
-                      }}
-                      className="w-12 px-1 py-0 text-xs text-center border border-gray-300 rounded"
+                      type="checkbox"
+                      checked={autoContrastEnabled}
+                      onChange={(e) => setAutoContrastEnabled(e.target.checked)}
                       disabled={!isDataChannelConnected}
-                      step="1"
                     />
-                    <button
-                      type="button"
-                      className="w-5 h-5 text-xs bg-gray-200 hover:bg-gray-300 rounded flex items-center justify-center"
-                      onClick={() => setAutoContrastMinAdjust(prev => prev + 1)}
-                      disabled={!isDataChannelConnected}
-                    >
-                      <i className="fas fa-plus" style={{ fontSize: '8px' }}></i>
-                    </button>
-                  </div>
-                  
-                  {/* Max Adjustment */}
-                  <div className="flex items-center space-x-1">
-                    <label className="text-xs text-gray-600 whitespace-nowrap">P95:</label>
-                    <button
-                      type="button"
-                      className="w-5 h-5 text-xs bg-gray-200 hover:bg-gray-300 rounded flex items-center justify-center"
-                      onClick={() => setAutoContrastMaxAdjust(prev => prev - 1)}
-                      disabled={!isDataChannelConnected}
-                    >
-                      <i className="fas fa-minus" style={{ fontSize: '8px' }}></i>
-                    </button>
-                    <input
-                      type="number"
-                      value={autoContrastMaxAdjust}
-                      onChange={(e) => {
-                        const value = parseInt(e.target.value, 10);
-                        if (!isNaN(value)) {
-                          setAutoContrastMaxAdjust(Math.max(-255, Math.min(255, value)));
-                        }
-                      }}
-                      className="w-12 px-1 py-0 text-xs text-center border border-gray-300 rounded"
-                      disabled={!isDataChannelConnected}
-                      step="1"
-                    />
-                    <button
-                      type="button"
-                      className="w-5 h-5 text-xs bg-gray-200 hover:bg-gray-300 rounded flex items-center justify-center"
-                      onClick={() => setAutoContrastMaxAdjust(prev => prev + 1)}
-                      disabled={!isDataChannelConnected}
-                    >
-                      <i className="fas fa-plus" style={{ fontSize: '8px' }}></i>
-                    </button>
-                  </div>
+                    <span className="auto-contrast-slider"></span>
+                  </label>
                 </div>
-                <div className="text-xs text-gray-500 mt-1">
-                  Range: P5{autoContrastMinAdjust >= 0 ? '+' : ''}{autoContrastMinAdjust} to P95{autoContrastMaxAdjust >= 0 ? '+' : ''}{autoContrastMaxAdjust} gray levels
-                </div>
-              </div>
-            )}
-            
-            {/* Histogram Display */}
-            {frameMetadata && frameMetadata.gray_level_stats ? (
-              <div className="mb-2">
-                {renderHistogramDisplay()}
                 
-                {/* Statistics Display */}
-                <div className="mt-1 text-xs text-gray-600 flex justify-between">
-                  <span>Mean: {frameMetadata.gray_level_stats.mean_percent?.toFixed(1)}%</span>
-                  <span>Range: {videoContrastMin}-{videoContrastMax}</span>
-                  <span>Contrast: {frameMetadata.gray_level_stats.contrast_ratio?.toFixed(3)}</span>
-                </div>
-              </div>
-            ) : (
-              <div className="mb-2 text-xs text-gray-500 italic">
-                {isDataChannelConnected ? 'Waiting for metadata...' : 'No histogram data available'}
-              </div>
+                {/* Histogram Display - Compact */}
+                {frameMetadata && frameMetadata.gray_level_stats && (
+                  <div className="mb-1">
+                    {renderHistogramDisplay()}
+                  </div>
+                )}
+                
+              </>
             )}
-            
-            {/* Manual Contrast Controls */}
-            <div className="flex items-center space-x-2">
-              <label htmlFor="min-contrast" className="text-xs text-gray-600 w-16 shrink-0">Min: {videoContrastMin}</label>
-              <input
-                id="min-contrast"
-                type="range"
-                min="0"
-                max="255"
-                value={videoContrastMin}
-                onChange={(e) => {
-                  const newMin = parseInt(e.target.value, 10);
-                  if (newMin < videoContrastMax) {
-                    setVideoContrastMin(newMin);
-                  }
-                }}
-                className="w-full"
-                title={`Min value: ${videoContrastMin}`}
-              />
-            </div>
-            <div className="flex items-center space-x-2 mt-1">
-              <label htmlFor="max-contrast" className="text-xs text-gray-600 w-16 shrink-0">Max: {videoContrastMax}</label>
-              <input
-                id="max-contrast"
-                type="range"
-                min="0"
-                max="255"
-                value={videoContrastMax}
-                onChange={(e) => {
-                  const newMax = parseInt(e.target.value, 10);
-                  if (newMax > videoContrastMin) {
-                    setVideoContrastMax(newMax);
-                  }
-                }}
-                className="w-full"
-                title={`Max value: ${videoContrastMax}`}
-              />
-            </div>
           </div>
         )}
 
-        {/* Frame Metadata Display */}
-        {isWebRtcActive && frameMetadata && (
-          <div className="frame-metadata-display mt-2 p-2 border border-gray-300 rounded-lg bg-white bg-opacity-90">
-            <div className="text-xs font-medium text-gray-700 mb-2">Microscope Information</div>
-            <div className="text-xs text-gray-600 space-y-1">
-              {/* Stage Position */}
-              {frameMetadata.stage_position && (
-                <div>
-                  <strong>Stage Position:</strong> 
-                  X: {frameMetadata.stage_position.x_mm?.toFixed(3)}mm, 
-                  Y: {frameMetadata.stage_position.y_mm?.toFixed(3)}mm, 
-                  Z: {frameMetadata.stage_position.z_mm?.toFixed(3)}mm
-                </div>
-              )}
-              
-              {/* Channel and Exposure Info */}
-              <div>
-                <strong>Channel:</strong> {frameMetadata.channel} | 
-                <strong> Intensity:</strong> {frameMetadata.intensity}% | 
-                <strong> Exposure:</strong> {frameMetadata.exposure_time_ms}ms
-              </div>
-              
-              {/* Timestamp */}
-              {frameMetadata.timestamp && (
-                <div>
-                  <strong>Timestamp:</strong> {new Date(frameMetadata.timestamp * 1000).toLocaleString()}
-                </div>
-              )}
-              
-              {/* Exposure Quality */}
-              {frameMetadata.gray_level_stats?.exposure_quality && (
-                <div>
-                  <strong>Exposure Quality:</strong> 
-                  Well-exposed: {frameMetadata.gray_level_stats.exposure_quality.well_exposed_pixels_percent?.toFixed(1)}% | 
-                  Under: {frameMetadata.gray_level_stats.exposure_quality.underexposed_pixels_percent?.toFixed(1)}% | 
-                  Over: {frameMetadata.gray_level_stats.exposure_quality.overexposed_pixels_percent?.toFixed(1)}%
-                </div>
-              )}
-              
-              {/* Additional Stats */}
-              {frameMetadata.gray_level_stats && (
-                <div>
-                  <strong>Stats:</strong> 
-                  Std: {frameMetadata.gray_level_stats.std_percent?.toFixed(1)}% | 
-                  Dynamic Range: {frameMetadata.gray_level_stats.dynamic_range_percent?.toFixed(1)}% | 
-                  Median: {frameMetadata.gray_level_stats.median_percent?.toFixed(1)}%
-                </div>
-              )}
-            </div>
-          </div>
-        )}
+
         {/* Toggle button for the right panel */}
         <button 
           onClick={toggleRightPanel}
