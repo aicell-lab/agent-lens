@@ -1402,6 +1402,7 @@ const MicroscopeControlPanel = ({
               microscopeControlService={microscopeControlService}
               appendLog={appendLog}
               showNotification={showNotification}
+              fallbackStagePosition={{ x: xPosition, y: yPosition, z: zPosition }}
             />
           </div>
         ) : (

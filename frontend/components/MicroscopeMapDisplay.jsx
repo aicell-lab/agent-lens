@@ -17,6 +17,7 @@ const MicroscopeMapDisplay = ({
   microscopeControlService,
   appendLog,
   showNotification,
+  fallbackStagePosition,
 }) => {
   const mapContainerRef = useRef(null);
   const canvasRef = useRef(null);
@@ -84,17 +85,31 @@ const MicroscopeMapDisplay = ({
     return displayWidth * actualPixelSizeMm;
   }, [microscopeConfiguration]);
 
-  // Get current stage position from metadata
+  // Get current stage position from metadata or fallback
   const currentStagePosition = useMemo(() => {
-    if (!frameMetadata?.stage_position) {
-      return null;
+    // Prefer WebRTC metadata when available
+    if (frameMetadata?.stage_position) {
+      return {
+        x: frameMetadata.stage_position.x_mm,
+        y: frameMetadata.stage_position.y_mm,
+        z: frameMetadata.stage_position.z_mm
+      };
     }
-    return {
-      x: frameMetadata.stage_position.x_mm,
-      y: frameMetadata.stage_position.y_mm,
-      z: frameMetadata.stage_position.z_mm
-    };
-  }, [frameMetadata]);
+    
+    // Fallback to status data when WebRTC is not active
+    if (fallbackStagePosition && 
+        typeof fallbackStagePosition.x === 'number' && 
+        typeof fallbackStagePosition.y === 'number' && 
+        typeof fallbackStagePosition.z === 'number') {
+      return {
+        x: fallbackStagePosition.x,
+        y: fallbackStagePosition.y,
+        z: fallbackStagePosition.z
+      };
+    }
+    
+    return null;
+  }, [frameMetadata, fallbackStagePosition]);
 
   // Calculate video frame position on the map
   const videoFramePosition = useMemo(() => {
@@ -551,9 +566,11 @@ const MicroscopeMapDisplay = ({
             )}
             
 
-            <div className="absolute -top-6 left-0 text-yellow-400 text-xs whitespace-nowrap">
-              X: {currentStagePosition.x.toFixed(2)}mm, Y: {currentStagePosition.y.toFixed(2)}mm
-            </div>
+            {currentStagePosition && (
+              <div className="absolute -top-6 left-0 text-yellow-400 text-xs whitespace-nowrap">
+                X: {currentStagePosition.x.toFixed(2)}mm, Y: {currentStagePosition.y.toFixed(2)}mm
+              </div>
+            )}
           </div>
         )}
         
@@ -592,6 +609,7 @@ MicroscopeMapDisplay.propTypes = {
   microscopeControlService: PropTypes.object,
   appendLog: PropTypes.func,
   showNotification: PropTypes.func,
+  fallbackStagePosition: PropTypes.object,
 };
 
 export default MicroscopeMapDisplay; 
