@@ -10,9 +10,9 @@ const DEFAULT_ILLUMINATION_SETTINGS = [
   { channel: 'BF LED matrix full', intensity: 28.0, exposure_time: 20.0, enabled: true },
   { channel: 'Fluorescence 405 nm Ex', intensity: 27.0, exposure_time: 60.0, enabled: false },
   { channel: 'Fluorescence 488 nm Ex', intensity: 27.0, exposure_time: 60.0, enabled: true },
-  { channel: 'Fluorescence 561nm Ex', intensity: 98.0, exposure_time: 100.0, enabled: true },
-  { channel: 'Fluorescence 638nm Ex', intensity: 27.0, exposure_time: 60.0, enabled: false },
-  { channel: 'Fluorescence 730nm Ex', intensity: 27.0, exposure_time: 60.0, enabled: false }
+  { channel: 'Fluorescence 561 nm Ex', intensity: 98.0, exposure_time: 100.0, enabled: true },
+  { channel: 'Fluorescence 638 nm Ex', intensity: 27.0, exposure_time: 60.0, enabled: false },
+  { channel: 'Fluorescence 730 nm Ex', intensity: 27.0, exposure_time: 60.0, enabled: false }
 ];
 
 // Channel mapping from channel names to microscope channel IDs
@@ -20,9 +20,9 @@ const CHANNEL_MAPPING = {
   'BF LED matrix full': '0',
   'Fluorescence 405 nm Ex': '11', 
   'Fluorescence 488 nm Ex': '12',
-  'Fluorescence 561nm Ex': '14',
-  'Fluorescence 638nm Ex': '13',
-  'Fluorescence 730nm Ex': '15'
+  'Fluorescence 561 nm Ex': '14',
+  'Fluorescence 638 nm Ex': '13',
+  'Fluorescence 730 nm Ex': '15'
 };
 
 // Updated Tutorial Tooltip Component using a Portal
