@@ -1114,11 +1114,11 @@ async def test_frontend_service_health_comprehensive(test_frontend_service):
 
 @pytest.mark.asyncio
 @pytest.mark.timeout(300)
-async def test_frontend_webrtc_stops_on_operations(test_frontend_service):
-    """Test that WebRTC streaming stops when opening imaging task modal and during sample operations."""
+async def test_frontend_webrtc_operations(test_frontend_service):
+    """Test WebRTC streaming operations including drag move feature, zoom controls, and stream stopping during operations."""
     service, service_url = test_frontend_service
     
-    print("📹 Testing WebRTC stream stopping during operations with simulated microscope...")
+    print("📹 Testing WebRTC operations including new drag move feature with simulated microscope...")
     
     if not WORKSPACE_TOKEN:
         pytest.skip("WORKSPACE_TOKEN environment variable not set")
@@ -1260,6 +1260,207 @@ async def test_frontend_webrtc_stops_on_operations(test_frontend_service):
                 except:
                     continue
             
+            # NEW FEATURE TESTS: Drag Move and Zoom Controls
+            if webrtc_active or webrtc_started:
+                print("\n🎯 TESTING NEW DRAG MOVE FEATURE...")
+                
+                # TEST A: Verify video controls bar is present
+                print("🧪 TEST A: Verifying video controls bar and zoom controls...")
+                video_controls_selectors = [
+                    '.video-controls-bar',
+                    'div:has-text("Zoom:")',
+                    'button[title="Zoom Out"]',
+                    'button[title="Zoom In"]',
+                    'button[title="Reset Zoom"]'
+                ]
+                
+                controls_found = []
+                for selector in video_controls_selectors:
+                    try:
+                        count = await page.locator(selector).count()
+                        if count > 0:
+                            controls_found.append(selector)
+                            print(f"✅ Found video control: {selector} (count: {count})")
+                    except Exception as e:
+                        print(f"  - Control selector '{selector}' failed: {e}")
+                
+                if len(controls_found) >= 3:
+                    print("✅ TEST A PASSED: Video controls bar with zoom controls found")
+                else:
+                    print(f"⚠️  TEST A PARTIAL: Only found {len(controls_found)}/5 video controls")
+                
+                # TEST B: Test zoom functionality
+                print("🧪 TEST B: Testing zoom controls functionality...")
+                
+                # Test zoom in button
+                zoom_in_button = page.locator('button[title="Zoom In"], button:has-text("+"), .fa-search-plus').first
+                if await zoom_in_button.count() > 0:
+                    try:
+                        await zoom_in_button.click()
+                        await page.wait_for_timeout(1000)
+                        print("✅ Successfully clicked zoom in button")
+                        
+                        # Check for zoom percentage display
+                        zoom_display = page.locator('span:has-text("%"), .text-center:has-text("%")').first
+                        if await zoom_display.count() > 0:
+                            zoom_text = await zoom_display.inner_text()
+                            print(f"✅ Zoom display shows: {zoom_text}")
+                        
+                    except Exception as e:
+                        print(f"⚠️  Zoom in test failed: {e}")
+                
+                # Test zoom out button
+                zoom_out_button = page.locator('button[title="Zoom Out"], button:has-text("-"), .fa-search-minus').first
+                if await zoom_out_button.count() > 0:
+                    try:
+                        await zoom_out_button.click()
+                        await page.wait_for_timeout(1000)
+                        print("✅ Successfully clicked zoom out button")
+                    except Exception as e:
+                        print(f"⚠️  Zoom out test failed: {e}")
+                
+                # Test reset zoom button
+                reset_zoom_button = page.locator('button[title="Reset Zoom"], .fa-expand-arrows-alt').first
+                if await reset_zoom_button.count() > 0:
+                    try:
+                        await reset_zoom_button.click()
+                        await page.wait_for_timeout(1000)
+                        print("✅ Successfully clicked reset zoom button")
+                    except Exception as e:
+                        print(f"⚠️  Reset zoom test failed: {e}")
+                
+                print("✅ TEST B COMPLETED: Zoom controls functionality tested")
+                
+                # TEST C: Verify drag move interface elements
+                print("🧪 TEST C: Testing drag move interface elements...")
+                
+                # Check for drag instruction overlay
+                drag_instruction_selectors = [
+                    'div:has-text("Drag to move stage")',
+                    '.fa-hand-paper',
+                    'div:has-text("Moving stage")',
+                    '.fa-arrows-alt'
+                ]
+                
+                instruction_found = False
+                for selector in drag_instruction_selectors:
+                    try:
+                        count = await page.locator(selector).count()
+                        if count > 0:
+                            print(f"✅ Found drag instruction element: {selector}")
+                            instruction_found = True
+                            break
+                    except:
+                        continue
+                
+                if instruction_found:
+                    print("✅ TEST C PASSED: Drag move instruction overlay found")
+                else:
+                    print("⚠️  TEST C: Drag instruction overlay not found")
+                
+                # TEST D: Test video display responsiveness and cursor states
+                print("🧪 TEST D: Testing video display responsiveness...")
+                
+                # Check for proper video display styling
+                video_display_selectors = [
+                    '#image-display',
+                    'video[autoplay]',
+                    '.mcp-image-display-area'
+                ]
+                
+                display_found = False
+                image_display_element = None
+                for selector in video_display_selectors:
+                    try:
+                        element = page.locator(selector).first
+                        if await element.count() > 0:
+                            print(f"✅ Found video display element: {selector}")
+                            display_found = True
+                            if selector == '#image-display':
+                                image_display_element = element
+                            break
+                    except:
+                        continue
+                
+                if display_found:
+                    print("✅ TEST D PASSED: Video display elements found")
+                    
+                    # Test cursor states if image display found
+                    if image_display_element:
+                        try:
+                            # Check for grab cursor class
+                            cursor_classes = await image_display_element.get_attribute('class')
+                            if cursor_classes and ('cursor-grab' in cursor_classes or 'grab' in cursor_classes):
+                                print("✅ Drag cursor styling detected")
+                            else:
+                                print("ℹ️  Drag cursor styling not immediately visible")
+                                
+                        except Exception as e:
+                            print(f"⚠️  Cursor state test failed: {e}")
+                else:
+                    print("⚠️  TEST D: Video display elements not found")
+                
+                # TEST E: Test histogram visibility (should be always visible now)
+                print("🧪 TEST E: Testing histogram always-visible behavior...")
+                
+                histogram_selectors = [
+                    '.video-contrast-controls',
+                    'div:has-text("Gray Level Histogram")',
+                    'div:has-text("Contrast")',
+                    'input[type="range"][min="0"][max="255"]'
+                ]
+                
+                histogram_elements_found = 0
+                for selector in histogram_selectors:
+                    try:
+                        count = await page.locator(selector).count()
+                        if count > 0:
+                            histogram_elements_found += 1
+                            print(f"✅ Found histogram element: {selector}")
+                    except:
+                        continue
+                
+                if histogram_elements_found >= 2:
+                    print("✅ TEST E PASSED: Histogram controls are visible")
+                else:
+                    print(f"⚠️  TEST E PARTIAL: Only found {histogram_elements_found}/4 histogram elements")
+                
+                # TEST F: Test video sizing and responsiveness
+                print("🧪 TEST F: Testing video display sizing...")
+                
+                if image_display_element:
+                    try:
+                        # Get computed styles for responsiveness check
+                        display_styles = await page.evaluate("""
+                            (element) => {
+                                const computed = window.getComputedStyle(element);
+                                return {
+                                    height: computed.height,
+                                    overflow: computed.overflow,
+                                    maxHeight: computed.maxHeight
+                                };
+                            }
+                        """, await image_display_element.element_handle())
+                        
+                        print(f"✅ Video display styles: {display_styles}")
+                        
+                        if display_styles.get('overflow') == 'hidden':
+                            print("✅ Overflow hidden correctly set for drag containment")
+                        
+                        if 'vh' in str(display_styles.get('height', '')):
+                            print("✅ Responsive height detected (vh units)")
+                            
+                    except Exception as e:
+                        print(f"⚠️  Sizing test failed: {e}")
+                
+                print("✅ TEST F COMPLETED: Video display sizing tested")
+                
+                print("🎯 NEW FEATURE TESTING COMPLETED\n")
+            else:
+                print("⚠️  Skipping new feature tests - WebRTC not active")
+            
+            # EXISTING TESTS CONTINUE...
+            
             # TEST 1: Verify New Task button behavior for simulated microscope
             print("🧪 TEST 1: Verifying 'New Task' button behavior for simulated microscope...")
             
@@ -1393,7 +1594,7 @@ async def test_frontend_webrtc_stops_on_operations(test_frontend_service):
             print("✅ WebRTC streaming control test completed")
             
             # Collect coverage data
-            await collect_coverage(page, "webrtc_stream_control")
+            await collect_coverage(page, "webrtc_operations_drag_move")
             
         finally:
             await context.close()

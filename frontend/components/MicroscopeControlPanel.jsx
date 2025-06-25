@@ -5,6 +5,7 @@ import CameraSettings from './CameraSettings';
 import ChatbotButton from './ChatbotButton';
 import SampleSelector from './SampleSelector';
 import ImagingTasksModal from './ImagingTasksModal';
+import MicroscopeMapDisplay from './MicroscopeMapDisplay'; // New import
 import './ImagingTasksModal.css'; // Added for well plate styles
 
 // Helper function to convert a uint8 hypha-rpc numpy array to a displayable Data URL
@@ -140,6 +141,9 @@ const MicroscopeControlPanel = ({
   // State for collapsing the right panel - THIS WAS ACCIDENTALLY REMOVED, ADDING IT BACK
   const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false);
 
+  // State for collapsing the contrast controls (collapsed by default to not block video)
+  const [isContrastControlsCollapsed, setIsContrastControlsCollapsed] = useState(true);
+
   // New state for video contrast adjustment
   const [videoContrastMin, setVideoContrastMin] = useState(0);
   const [videoContrastMax, setVideoContrastMax] = useState(255);
@@ -147,10 +151,20 @@ const MicroscopeControlPanel = ({
   const autoContrastEnabledRef = useRef(autoContrastEnabled);
   
   // Auto-contrast adjustment parameters
-  const [autoContrastMinAdjust, setAutoContrastMinAdjust] = useState(-60); // P5 - 30
-  const [autoContrastMaxAdjust, setAutoContrastMaxAdjust] = useState(60);  // P95 + 30
+  const [autoContrastMinAdjust, setAutoContrastMinAdjust] = useState(-60); // P5 - 60
+  const [autoContrastMaxAdjust, setAutoContrastMaxAdjust] = useState(60);  // P95 + 60
   const autoContrastMinAdjustRef = useRef(autoContrastMinAdjust);
   const autoContrastMaxAdjustRef = useRef(autoContrastMaxAdjust);
+
+  // New states for drag move functionality
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStartPosition, setDragStartPosition] = useState({ x: 0, y: 0 });
+  const [dragCurrentPosition, setDragCurrentPosition] = useState({ x: 0, y: 0 });
+  const [dragTransform, setDragTransform] = useState({ x: 0, y: 0 });
+  const dragImageDisplayRef = useRef(null);
+
+  // New states for video display and zoom functionality
+  const [videoZoom, setVideoZoom] = useState(1.0);
 
   // Refs to hold the latest actual values for use in debounced effects
   const actualIlluminationIntensityRef = useRef(actualIlluminationIntensity);
@@ -510,7 +524,7 @@ const MicroscopeControlPanel = ({
                 dataChannel.addEventListener('message', (event) => {
                   try {
                     const metadata = JSON.parse(event.data);
-                    console.log('Received metadata via data channel:', metadata);
+                    //console.log('Received metadata via data channel:', metadata);
                     setFrameMetadata(metadata);
                     
                     // Auto-adjust contrast range if enabled (use refs to get current values)
@@ -529,7 +543,7 @@ const MicroscopeControlPanel = ({
                         
                         setVideoContrastMin(Math.max(0, Math.min(254, newMin)));
                         setVideoContrastMax(Math.min(255, Math.max(1, newMax)));
-                        console.log(`Auto-contrast updated: Min=${newMin} (P5${currentMinAdjust >= 0 ? '+' : ''}${currentMinAdjust}), Max=${newMax} (P95${currentMaxAdjust >= 0 ? '+' : ''}${currentMaxAdjust})`);
+                        //console.log(`Auto-contrast updated: Min=${newMin} (P5${currentMinAdjust >= 0 ? '+' : ''}${currentMinAdjust}), Max=${newMax} (P95${currentMaxAdjust >= 0 ? '+' : ''}${currentMaxAdjust})`);
                       }
                     }
                     
@@ -715,105 +729,7 @@ const MicroscopeControlPanel = ({
     }
   }, [autoContrastEnabled, autoContrastMinAdjust, autoContrastMaxAdjust]); // Trigger when toggle or adjustments change
 
-  // Helper function to render histogram display
-  const renderHistogramDisplay = () => {
-    if (!frameMetadata || !frameMetadata.gray_level_stats || !frameMetadata.gray_level_stats.histogram) {
-      return null;
-    }
 
-    const histogram = frameMetadata.gray_level_stats.histogram;
-    const counts = histogram.counts || [];
-    const binEdges = histogram.bin_edges || [];
-    
-    if (counts.length === 0) return null;
-
-    const maxCount = Math.max(...counts);
-    const histogramWidth = 256; // Fixed width for display
-    const histogramHeight = 60;
-    
-    return (
-      <div className="histogram-display" style={{ position: 'relative', width: '100%', height: `${histogramHeight}px`, backgroundColor: '#f8f9fa', border: '1px solid #dee2e6', borderRadius: '4px' }}>
-        <svg width="100%" height={histogramHeight} style={{ display: 'block' }}>
-          {counts.map((count, index) => {
-            const x = (index / counts.length) * 100; // Convert to percentage
-            const height = (count / maxCount) * (histogramHeight - 4); // 4px padding
-            const binStart = binEdges[index] || (index * 255 / counts.length);
-            const binEnd = binEdges[index + 1] || ((index + 1) * 255 / counts.length);
-            const binCenter = (binStart + binEnd) / 2;
-            
-            return (
-              <rect
-                key={index}
-                x={`${x}%`}
-                y={histogramHeight - height - 2}
-                width={`${100 / counts.length}%`}
-                height={height}
-                fill="#6c757d"
-                title={`Bin ${binCenter.toFixed(0)}: ${count} pixels`}
-              />
-            );
-          })}
-          
-          {/* Contrast range indicators */}
-          <line
-            x1={`${(videoContrastMin / 255) * 100}%`}
-            y1="0"
-            x2={`${(videoContrastMin / 255) * 100}%`}
-            y2={histogramHeight}
-            stroke="#dc3545"
-            strokeWidth="2"
-            opacity="0.8"
-          />
-          <line
-            x1={`${(videoContrastMax / 255) * 100}%`}
-            y1="0"
-            x2={`${(videoContrastMax / 255) * 100}%`}
-            y2={histogramHeight}
-            stroke="#dc3545"
-            strokeWidth="2"
-            opacity="0.8"
-          />
-          
-          {/* Range fill */}
-          <rect
-            x={`${(videoContrastMin / 255) * 100}%`}
-            y="0"
-            width={`${((videoContrastMax - videoContrastMin) / 255) * 100}%`}
-            height={histogramHeight}
-            fill="#007bff"
-            opacity="0.2"
-          />
-        </svg>
-        
-        {/* Interactive overlay for dragging */}
-        <div 
-          style={{ 
-            position: 'absolute', 
-            top: 0, 
-            left: 0, 
-            width: '100%', 
-            height: '100%', 
-            cursor: 'crosshair' 
-          }}
-          onMouseDown={(e) => {
-            const rect = e.currentTarget.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const valueAt = Math.round((x / rect.width) * 255);
-            
-            // Determine which handle is closer
-            const distToMin = Math.abs(valueAt - videoContrastMin);
-            const distToMax = Math.abs(valueAt - videoContrastMax);
-            
-            if (distToMin < distToMax) {
-              setVideoContrastMin(Math.max(0, Math.min(valueAt, videoContrastMax - 1)));
-            } else {
-              setVideoContrastMax(Math.min(255, Math.max(valueAt, videoContrastMin + 1)));
-            }
-          }}
-        />
-      </div>
-    );
-  };
 
   const moveMicroscope = async (direction, multiplier) => {
     if (!microscopeControlService) return;
@@ -1181,268 +1097,210 @@ const MicroscopeControlPanel = ({
     setIsConfigurationWindowOpen(false);
   };
 
+  // Helper function to calculate FOV size based on microscope configuration
+  const calculateFOVSize = useCallback(() => {
+    if (!microscopeConfiguration?.optics?.calculated_pixel_size_mm || !microscopeConfiguration?.acquisition?.crop_width) {
+      // Default fallback values
+      return { width_mm: 0.5, height_mm: 0.5 };
+    }
+
+    const calculatedPixelSizeMm = microscopeConfiguration.optics.calculated_pixel_size_mm;
+    const cropWidth = microscopeConfiguration.acquisition.crop_width;
+    const displayWidth = 750; // Video frame display size
+    
+    // Calculate FOV: display_width_pixels * pixel_size_mm
+    // calculated_pixel_size_mm is for the full crop, scale it for display
+    const actualPixelSizeMm = calculatedPixelSizeMm * (cropWidth / displayWidth);
+    const fovSize = displayWidth * actualPixelSizeMm;
+    
+    return { width_mm: fovSize, height_mm: fovSize };
+  }, [microscopeConfiguration]);
+
+  // Helper function to convert drag pixels to stage movement in mm
+  const convertDragToStageMovement = useCallback((dragPixels, displaySize) => {
+    const fovSize = calculateFOVSize();
+    
+    // Calculate movement in mm based on FOV and display size
+    const movementX_mm = (dragPixels.x / displaySize.width) * fovSize.width_mm;
+    const movementY_mm = (dragPixels.y / displaySize.height) * fovSize.height_mm;
+    
+    // Apply direction mapping: drag right = stage left (negative x), drag down = stage up (negative y)
+    return {
+      x: -movementX_mm, // Invert X direction
+      y: -movementY_mm  // Invert Y direction
+    };
+  }, [calculateFOVSize]);
+
+  // Mouse event handlers for drag move functionality
+  const handleMouseDown = useCallback((e) => {
+    if (!microscopeControlService || microscopeBusy || currentOperation) {
+      return;
+    }
+
+    // Only enable drag move during video streaming or when snapshot is displayed
+    if (!isWebRtcActive && !snapshotImage) {
+      return;
+    }
+
+    e.preventDefault();
+    setIsDragging(true);
+    
+    const rect = e.currentTarget.getBoundingClientRect();
+    const startPos = {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
+    };
+    
+    setDragStartPosition(startPos);
+    setDragCurrentPosition(startPos);
+    setDragTransform({ x: 0, y: 0 });
+    
+    appendLog('Started drag move operation');
+  }, [microscopeControlService, microscopeBusy, currentOperation, isWebRtcActive, snapshotImage, appendLog]);
+
+  const handleMouseMove = useCallback((e) => {
+    if (!isDragging) return;
+
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const currentPos = {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
+    };
+    
+    setDragCurrentPosition(currentPos);
+    
+    // Calculate drag offset for visual feedback
+    const dragOffset = {
+      x: currentPos.x - dragStartPosition.x,
+      y: currentPos.y - dragStartPosition.y
+    };
+    
+    setDragTransform(dragOffset);
+  }, [isDragging, dragStartPosition]);
+
+  const handleMouseUp = useCallback(async (e) => {
+    if (!isDragging || !microscopeControlService) return;
+
+    e.preventDefault();
+    setIsDragging(false);
+    
+    // Calculate final drag distance
+    const dragDistance = {
+      x: dragCurrentPosition.x - dragStartPosition.x,
+      y: dragCurrentPosition.y - dragStartPosition.y
+    };
+    
+    // Get display size for conversion calculations
+    const rect = e.currentTarget.getBoundingClientRect();
+    const displaySize = { width: rect.width, height: rect.height };
+    
+    // Convert drag distance to stage movement
+    const stageMovement = convertDragToStageMovement(dragDistance, displaySize);
+    
+    // Reset visual transform
+    setDragTransform({ x: 0, y: 0 });
+    
+    // Only move if there's significant movement (threshold to avoid accidental moves)
+    const minMovementThreshold = 0.005; // 5 micrometers
+    const totalMovement = Math.sqrt(stageMovement.x * stageMovement.x + stageMovement.y * stageMovement.y);
+    
+    if (totalMovement > minMovementThreshold) {
+      try {
+        setMicroscopeBusy(true);
+        appendLog(`Moving stage based on drag: X=${stageMovement.x.toFixed(4)}mm, Y=${stageMovement.y.toFixed(4)}mm`);
+        
+        const result = await microscopeControlService.move_by_distance(
+          stageMovement.x, 
+          stageMovement.y, 
+          0 // Z movement is always 0 for drag moves
+        );
+        
+        if (result.success) {
+          appendLog(`Drag move completed: ${result.message}`);
+          appendLog(`Stage moved from (${result.initial_position.x.toFixed(3)}, ${result.initial_position.y.toFixed(3)}) to (${result.final_position.x.toFixed(3)}, ${result.final_position.y.toFixed(3)})`);
+        } else {
+          appendLog(`Drag move failed: ${result.message}`);
+        }
+      } catch (error) {
+        appendLog(`Error in drag move: ${error.message}`);
+        console.error("[MicroscopeControlPanel] Error in drag move:", error);
+      } finally {
+        setMicroscopeBusy(false);
+      }
+    } else {
+      appendLog('Drag move canceled: movement too small');
+    }
+  }, [isDragging, dragCurrentPosition, dragStartPosition, microscopeControlService, convertDragToStageMovement, appendLog]);
+
+  // Handle mouse leave to cancel drag operation
+  const handleMouseLeave = useCallback(() => {
+    if (isDragging) {
+      setIsDragging(false);
+      setDragTransform({ x: 0, y: 0 });
+      appendLog('Drag move canceled: mouse left display area');
+    }
+  }, [isDragging, appendLog]);
+
   return (
-    <div className="microscope-control-panel-container new-mcp-layout bg-white bg-opacity-95 p-4 rounded-lg shadow-lg border-l border-gray-300 box-border">
+    <div className="control-view microscope-control-panel-container new-mcp-layout">
       {/* Left Side: Image Display */}
       <div className={`mcp-image-display-area ${isRightPanelCollapsed ? 'expanded' : ''}`}>
+        {/* Unified Map/Video Display */}
         <div
-          id="image-display"
-          className={`w-full border ${
-            (snapshotImage || isWebRtcActive) ? 'border-gray-300' : 'border-dotted border-gray-400'
-          } rounded flex items-center justify-center bg-black relative`}
+          className="w-full border border-gray-300 bg-black relative"
+          style={{
+            height: 'calc(100vh - 16px)',
+            maxHeight: 'none',
+            overflow: 'hidden',
+          }}
         >
-          {isWebRtcActive && !webRtcError ? (
-            <video ref={videoRef} autoPlay playsInline muted className="object-contain w-full h-full" />
-          ) : snappedImageData.url ? (
-            <>
-              <img
-                src={snappedImageData.url}
-                alt="Microscope Snapshot"
-                className="object-contain w-full h-full"
-              />
-              {/* ImageJ.js Badge */}
-              {onOpenImageJ && (
-                <button
-                  onClick={() => onOpenImageJ(snappedImageData.numpy)}
-                  className="imagej-badge absolute top-2 right-2 p-1 bg-white bg-opacity-90 hover:bg-opacity-100 rounded shadow-md transition-all duration-200 flex items-center gap-1 text-xs font-medium text-gray-700 hover:text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed"
-                  title={imjoyApi ? "Open in ImageJ.js" : "ImageJ.js integration is loading..."}
-                  disabled={!imjoyApi}
-                >
-                  <img 
-                    src="https://ij.imjoy.io/assets/badge/open-in-imagej-js-badge.svg" 
-                    alt="Open in ImageJ.js" 
-                    className="h-4"
-                  />
-                </button>
-              )}
-            </>
-          ) : (
-            <p className="placeholder-text text-center text-gray-300">
-              {webRtcError ? `WebRTC Error: ${webRtcError}` : (microscopeControlService ? 'Image Display' : 'Microscope not connected')}
-            </p>
-          )}
+          <MicroscopeMapDisplay
+            isOpen={true}
+            onClose={() => {}} // No longer needed since it's always displayed
+            microscopeConfiguration={microscopeConfiguration}
+            isWebRtcActive={isWebRtcActive}
+            videoRef={videoRef}
+            remoteStream={remoteStream}
+            frameMetadata={frameMetadata}
+            videoZoom={videoZoom}
+            setVideoZoom={setVideoZoom}
+            snapshotImage={snappedImageData.url}
+            snappedImageData={snappedImageData}
+            isDragging={isDragging}
+            dragTransform={dragTransform}
+            microscopeControlService={microscopeControlService}
+            appendLog={appendLog}
+            showNotification={showNotification}
+            fallbackStagePosition={{ x: xPosition, y: yPosition, z: zPosition }}
+            onOpenImageJ={onOpenImageJ}
+            imjoyApi={imjoyApi}
+            webRtcError={webRtcError}
+            microscopeBusy={microscopeBusy}
+            currentOperation={currentOperation}
+            videoContrastMin={videoContrastMin}
+            setVideoContrastMin={setVideoContrastMin}
+            videoContrastMax={videoContrastMax}
+            setVideoContrastMax={setVideoContrastMax}
+            autoContrastEnabled={autoContrastEnabled}
+            setAutoContrastEnabled={setAutoContrastEnabled}
+            autoContrastMinAdjust={autoContrastMinAdjust}
+            setAutoContrastMinAdjust={setAutoContrastMinAdjust}
+            autoContrastMaxAdjust={autoContrastMaxAdjust}
+            setAutoContrastMaxAdjust={setAutoContrastMaxAdjust}
+            isDataChannelConnected={isDataChannelConnected}
+            isContrastControlsCollapsed={isContrastControlsCollapsed}
+            setIsContrastControlsCollapsed={setIsContrastControlsCollapsed}
+            // Pass drag handlers
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseLeave}
+          />
         </div>
-        {/* Video Contrast Controls with Histogram */}
-        {isWebRtcActive && (
-          <div className="video-contrast-controls mt-2 p-2 border border-gray-300 rounded-lg bg-white bg-opacity-90">
-            <div className="text-xs font-medium text-gray-700 mb-2 flex items-center justify-between">
-              <span>Gray Level Histogram & Contrast</span>
-              <div className="flex items-center space-x-2">
-                {isDataChannelConnected && (
-                  <span className="text-green-600 text-xs">
-                    <i className="fas fa-circle text-green-500 mr-1" style={{ fontSize: '6px' }}></i>
-                    Metadata Channel
-                  </span>
-                )}
-              </div>
-            </div>
-            
-            {/* Auto Contrast Toggle */}
-            <div className="flex items-center mb-2">
-              <label className="text-xs text-gray-600 mr-2">Auto Contrast Adjustment</label>
-              <label className="auto-contrast-toggle mr-2">
-                <input
-                  type="checkbox"
-                  checked={autoContrastEnabled}
-                  onChange={(e) => setAutoContrastEnabled(e.target.checked)}
-                  disabled={!isDataChannelConnected}
-                />
-                <span className="auto-contrast-slider"></span>
-              </label>
-              <span className="text-xs text-gray-500">
-                {autoContrastEnabled ? 'ON' : 'OFF'}
-                {!isDataChannelConnected && ' (Channel Required)'}
-              </span>
-            </div>
-            
-            {/* Auto Contrast Parameters */}
-            {autoContrastEnabled && (
-              <div className="auto-contrast-params mb-2 p-2 bg-gray-50 rounded border">
-                <div className="text-xs text-gray-600 mb-1">Adjustment Parameters</div>
-                <div className="flex items-center justify-between space-x-2">
-                  {/* Min Adjustment */}
-                  <div className="flex items-center space-x-1">
-                    <label className="text-xs text-gray-600 whitespace-nowrap">P5:</label>
-                    <button
-                      type="button"
-                      className="w-5 h-5 text-xs bg-gray-200 hover:bg-gray-300 rounded flex items-center justify-center"
-                      onClick={() => setAutoContrastMinAdjust(prev => prev - 1)}
-                      disabled={!isDataChannelConnected}
-                    >
-                      <i className="fas fa-minus" style={{ fontSize: '8px' }}></i>
-                    </button>
-                    <input
-                      type="number"
-                      value={autoContrastMinAdjust}
-                      onChange={(e) => {
-                        const value = parseInt(e.target.value, 10);
-                        if (!isNaN(value)) {
-                          setAutoContrastMinAdjust(Math.max(-255, Math.min(255, value)));
-                        }
-                      }}
-                      className="w-12 px-1 py-0 text-xs text-center border border-gray-300 rounded"
-                      disabled={!isDataChannelConnected}
-                      step="1"
-                    />
-                    <button
-                      type="button"
-                      className="w-5 h-5 text-xs bg-gray-200 hover:bg-gray-300 rounded flex items-center justify-center"
-                      onClick={() => setAutoContrastMinAdjust(prev => prev + 1)}
-                      disabled={!isDataChannelConnected}
-                    >
-                      <i className="fas fa-plus" style={{ fontSize: '8px' }}></i>
-                    </button>
-                  </div>
-                  
-                  {/* Max Adjustment */}
-                  <div className="flex items-center space-x-1">
-                    <label className="text-xs text-gray-600 whitespace-nowrap">P95:</label>
-                    <button
-                      type="button"
-                      className="w-5 h-5 text-xs bg-gray-200 hover:bg-gray-300 rounded flex items-center justify-center"
-                      onClick={() => setAutoContrastMaxAdjust(prev => prev - 1)}
-                      disabled={!isDataChannelConnected}
-                    >
-                      <i className="fas fa-minus" style={{ fontSize: '8px' }}></i>
-                    </button>
-                    <input
-                      type="number"
-                      value={autoContrastMaxAdjust}
-                      onChange={(e) => {
-                        const value = parseInt(e.target.value, 10);
-                        if (!isNaN(value)) {
-                          setAutoContrastMaxAdjust(Math.max(-255, Math.min(255, value)));
-                        }
-                      }}
-                      className="w-12 px-1 py-0 text-xs text-center border border-gray-300 rounded"
-                      disabled={!isDataChannelConnected}
-                      step="1"
-                    />
-                    <button
-                      type="button"
-                      className="w-5 h-5 text-xs bg-gray-200 hover:bg-gray-300 rounded flex items-center justify-center"
-                      onClick={() => setAutoContrastMaxAdjust(prev => prev + 1)}
-                      disabled={!isDataChannelConnected}
-                    >
-                      <i className="fas fa-plus" style={{ fontSize: '8px' }}></i>
-                    </button>
-                  </div>
-                </div>
-                <div className="text-xs text-gray-500 mt-1">
-                  Range: P5{autoContrastMinAdjust >= 0 ? '+' : ''}{autoContrastMinAdjust} to P95{autoContrastMaxAdjust >= 0 ? '+' : ''}{autoContrastMaxAdjust} gray levels
-                </div>
-              </div>
-            )}
-            
-            {/* Histogram Display */}
-            {frameMetadata && frameMetadata.gray_level_stats ? (
-              <div className="mb-2">
-                {renderHistogramDisplay()}
-                
-                {/* Statistics Display */}
-                <div className="mt-1 text-xs text-gray-600 flex justify-between">
-                  <span>Mean: {frameMetadata.gray_level_stats.mean_percent?.toFixed(1)}%</span>
-                  <span>Range: {videoContrastMin}-{videoContrastMax}</span>
-                  <span>Contrast: {frameMetadata.gray_level_stats.contrast_ratio?.toFixed(3)}</span>
-                </div>
-              </div>
-            ) : (
-              <div className="mb-2 text-xs text-gray-500 italic">
-                {isDataChannelConnected ? 'Waiting for metadata...' : 'No histogram data available'}
-              </div>
-            )}
-            
-            {/* Manual Contrast Controls */}
-            <div className="flex items-center space-x-2">
-              <label htmlFor="min-contrast" className="text-xs text-gray-600 w-16 shrink-0">Min: {videoContrastMin}</label>
-              <input
-                id="min-contrast"
-                type="range"
-                min="0"
-                max="255"
-                value={videoContrastMin}
-                onChange={(e) => {
-                  const newMin = parseInt(e.target.value, 10);
-                  if (newMin < videoContrastMax) {
-                    setVideoContrastMin(newMin);
-                  }
-                }}
-                className="w-full"
-                title={`Min value: ${videoContrastMin}`}
-              />
-            </div>
-            <div className="flex items-center space-x-2 mt-1">
-              <label htmlFor="max-contrast" className="text-xs text-gray-600 w-16 shrink-0">Max: {videoContrastMax}</label>
-              <input
-                id="max-contrast"
-                type="range"
-                min="0"
-                max="255"
-                value={videoContrastMax}
-                onChange={(e) => {
-                  const newMax = parseInt(e.target.value, 10);
-                  if (newMax > videoContrastMin) {
-                    setVideoContrastMax(newMax);
-                  }
-                }}
-                className="w-full"
-                title={`Max value: ${videoContrastMax}`}
-              />
-            </div>
-          </div>
-        )}
 
-        {/* Frame Metadata Display */}
-        {isWebRtcActive && frameMetadata && (
-          <div className="frame-metadata-display mt-2 p-2 border border-gray-300 rounded-lg bg-white bg-opacity-90">
-            <div className="text-xs font-medium text-gray-700 mb-2">Microscope Information</div>
-            <div className="text-xs text-gray-600 space-y-1">
-              {/* Stage Position */}
-              {frameMetadata.stage_position && (
-                <div>
-                  <strong>Stage Position:</strong> 
-                  X: {frameMetadata.stage_position.x_mm?.toFixed(3)}mm, 
-                  Y: {frameMetadata.stage_position.y_mm?.toFixed(3)}mm, 
-                  Z: {frameMetadata.stage_position.z_mm?.toFixed(3)}mm
-                </div>
-              )}
-              
-              {/* Channel and Exposure Info */}
-              <div>
-                <strong>Channel:</strong> {frameMetadata.channel} | 
-                <strong> Intensity:</strong> {frameMetadata.intensity}% | 
-                <strong> Exposure:</strong> {frameMetadata.exposure_time_ms}ms
-              </div>
-              
-              {/* Timestamp */}
-              {frameMetadata.timestamp && (
-                <div>
-                  <strong>Timestamp:</strong> {new Date(frameMetadata.timestamp * 1000).toLocaleString()}
-                </div>
-              )}
-              
-              {/* Exposure Quality */}
-              {frameMetadata.gray_level_stats?.exposure_quality && (
-                <div>
-                  <strong>Exposure Quality:</strong> 
-                  Well-exposed: {frameMetadata.gray_level_stats.exposure_quality.well_exposed_pixels_percent?.toFixed(1)}% | 
-                  Under: {frameMetadata.gray_level_stats.exposure_quality.underexposed_pixels_percent?.toFixed(1)}% | 
-                  Over: {frameMetadata.gray_level_stats.exposure_quality.overexposed_pixels_percent?.toFixed(1)}%
-                </div>
-              )}
-              
-              {/* Additional Stats */}
-              {frameMetadata.gray_level_stats && (
-                <div>
-                  <strong>Stats:</strong> 
-                  Std: {frameMetadata.gray_level_stats.std_percent?.toFixed(1)}% | 
-                  Dynamic Range: {frameMetadata.gray_level_stats.dynamic_range_percent?.toFixed(1)}% | 
-                  Median: {frameMetadata.gray_level_stats.median_percent?.toFixed(1)}%
-                </div>
-              )}
-            </div>
-          </div>
-        )}
+
+
         {/* Toggle button for the right panel */}
         <button 
           onClick={toggleRightPanel}
@@ -1453,8 +1311,8 @@ const MicroscopeControlPanel = ({
         </button>
       </div>
 
-      {/* Right Side: Controls and Chatbot */}
-      <div className={`mcp-controls-chatbot-area ${isRightPanelCollapsed ? 'collapsed' : ''}`}>
+      {/* Right Side: Controls and Chatbot - Always visible */}
+      <div className={`mcp-controls-chatbot-area ${isRightPanelCollapsed ? 'collapsed' : ''}`} style={{ display: 'block', visibility: 'visible' }}>
         {/* Top-Right: Microscope Controls */}
         <div className="mcp-microscope-controls-area">
           {/* SampleSelector is moved here for better positioning context of its dropdown */}
@@ -1574,6 +1432,8 @@ const MicroscopeControlPanel = ({
             </div>
           </div>
 
+
+
           <div className="coordinate-container mb-3 flex justify-between space-x-1">
             {['x', 'y', 'z'].map((axis) => (
               <div key={axis} className="coordinate-group p-1 border border-gray-300 rounded-lg w-1/3">
@@ -1674,9 +1534,9 @@ const MicroscopeControlPanel = ({
                   <option value="0">BF LED matrix full</option>
                   <option value="11">Fluorescence 405 nm Ex</option>
                   <option value="12">Fluorescence 488 nm Ex</option>
-                  <option value="14">Fluorescence 561nm Ex</option>
-                  <option value="13">Fluorescence 638nm Ex</option>
-                  <option value="15">Fluorescence 730nm Ex</option>
+                  <option value="14">Fluorescence 561 nm Ex</option>
+                  <option value="13">Fluorescence 638 nm Ex</option>
+                  <option value="15">Fluorescence 730 nm Ex</option>
                 </select>
               </div>
             </div>
@@ -1912,6 +1772,8 @@ const MicroscopeControlPanel = ({
           </div>
         </div>
       )}
+
+
     </div>
   );
 };

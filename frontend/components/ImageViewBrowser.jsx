@@ -176,7 +176,7 @@ const ImageViewBrowser = ({ appendLog }) => {
 
   if (!selectedGalleryId) {
     return (
-      <div className="image-view-browser">
+      <div className="control-view image-view-browser">
         <div className="browser-placeholder">
           <h3>Image Data Browser</h3>
           <p>Select a gallery from the sidebar to view available datasets.</p>
@@ -186,7 +186,7 @@ const ImageViewBrowser = ({ appendLog }) => {
   }
 
   return (
-    <div className="image-view-browser">
+    <div className="control-view image-view-browser">
       <h3 className="browser-title">
         {currentView === 'datasets' ? 'Available Datasets' : 'Browse Files'}
         {selectedGalleryName && <span className="gallery-subtitle">Gallery: {selectedGalleryName}</span>}

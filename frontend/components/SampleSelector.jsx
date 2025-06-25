@@ -477,45 +477,6 @@ const SampleSelector = ({
       <h3 className="sample-sidebar-title">Select Sample</h3>
       
       <div className="sample-options-container">
-        <div className="sample-options">
-          {isSimulatedMicroscopeSelected && (
-            <>
-              {Object.keys(sampleDataAliases).map(sampleKey => (
-                <button
-                  key={sampleKey}
-                  className={`sample-option ${(isSampleLoaded ? selectedSampleId === sampleKey : selectedSampleId === sampleKey) ? 'active' : ''}`}
-                  onClick={() => handleSampleSelect(sampleKey)}
-                  disabled={currentOperation !== null || (isSampleLoaded && selectedSampleId !== sampleKey)}
-                >
-                  <i className="fas fa-flask"></i> 
-                  <span>{sampleKey.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</span>
-                </button>
-              ))}
-            </>
-          )}
-          {isRealMicroscopeSelected && incubatorSlots.length > 0 && incubatorSlots.map(slot => (
-            <button
-              key={slot.id}
-              className={getSampleButtonClass(slot)}
-              onClick={() => handleSampleSelect(slot.id)}
-              disabled={currentOperation !== null || !canSelectSample(slot)}
-            >
-              <i className="fas fa-vial"></i> 
-              <div className="sample-info">
-                <span className="sample-name">{slot.name || `Slot ${slot.incubator_slot}`}</span>
-                <span className="sample-location">
-                  Location: {slot.location}
-                  {slot.location === 'incubator_slot' && ` (Slot #${slot.incubator_slot})`}
-                </span>
-              </div>
-            </button>
-          ))}
-          {isRealMicroscopeSelected && incubatorSlots.length === 0 && (
-                <p className="no-samples-message">No occupied incubator slots found or service unavailable.</p>
-          )}
-        </div>
-        
-        <hr className="sidebar-divider" />
         {/* Revised button rendering logic to prioritize currentOperation */}
         {currentOperation === 'unloading' ? (
           <button 
@@ -583,6 +544,46 @@ const SampleSelector = ({
             </div>
           </button>
         )}
+        
+        <hr className="sidebar-divider" />
+        
+        <div className="sample-options">
+          {isSimulatedMicroscopeSelected && (
+            <>
+              {Object.keys(sampleDataAliases).map(sampleKey => (
+                <button
+                  key={sampleKey}
+                  className={`sample-option ${(isSampleLoaded ? selectedSampleId === sampleKey : selectedSampleId === sampleKey) ? 'active' : ''}`}
+                  onClick={() => handleSampleSelect(sampleKey)}
+                  disabled={currentOperation !== null || (isSampleLoaded && selectedSampleId !== sampleKey)}
+                >
+                  <i className="fas fa-flask"></i> 
+                  <span>{sampleKey.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</span>
+                </button>
+              ))}
+            </>
+          )}
+          {isRealMicroscopeSelected && incubatorSlots.length > 0 && incubatorSlots.map(slot => (
+            <button
+              key={slot.id}
+              className={getSampleButtonClass(slot)}
+              onClick={() => handleSampleSelect(slot.id)}
+              disabled={currentOperation !== null || !canSelectSample(slot)}
+            >
+              <i className="fas fa-vial"></i> 
+              <div className="sample-info">
+                <span className="sample-name">{slot.name || `Slot ${slot.incubator_slot}`}</span>
+                <span className="sample-location">
+                  Location: {slot.location}
+                  {slot.location === 'incubator_slot' && ` (Slot #${slot.incubator_slot})`}
+                </span>
+              </div>
+            </button>
+          ))}
+          {isRealMicroscopeSelected && incubatorSlots.length === 0 && (
+                <p className="no-samples-message">No occupied incubator slots found or service unavailable.</p>
+          )}
+        </div>
       </div>
 
       {workflowMessages.length > 0 && (

@@ -217,7 +217,7 @@ const IncubatorControl = ({ incubatorControlService, appendLog }) => {
   const isSlotEmpty = !selectedSlot || !selectedSlot.name || !selectedSlot.name.trim();
 
   return (
-    <div className="flex relative">
+    <div className="control-view flex relative">
       {/* Main incubator control panel */}
       <div className={`bg-white bg-opacity-95 p-6 rounded-lg shadow-lg border-l border-gray-300 box-border overflow-y-auto transition-all duration-300 ${sidebarOpen ? 'w-2/3' : 'w-full'}`}>
         <h3 className="text-xl font-medium mb-4">Incubator Control</h3>

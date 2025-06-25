@@ -72,9 +72,9 @@ const MicroscopeControl = () => {
     };
     setNotifications(prev => {
       const updated = [...prev, newNotification];
-      // Limit to maximum 5 notifications to prevent UI clutter
-      if (updated.length > 5) {
-        return updated.slice(-5); // Keep only the last 5 notifications
+      // Limit to maximum 2 notifications to prevent UI clutter
+      if (updated.length > 2) {
+        return updated.slice(-2); // Keep only the last 5 notifications
       }
       return updated;
     });
@@ -262,11 +262,9 @@ const MicroscopeControl = () => {
     switch (activeTab) {
       case 'image-view':
         return (
-          <div className="control-view">
-            <ImageViewBrowser
-              appendLog={appendLog}
-            />
-          </div>
+          <ImageViewBrowser
+            appendLog={appendLog}
+          />
         );
       case 'image-view-map':
         // Only render MapDisplay when in image-view-map mode
@@ -281,56 +279,48 @@ const MicroscopeControl = () => {
         );
       case 'image-search':
         return (
-          <div className="control-view">
-            <ImageSearchPanel
-              similarityService={similarityService}
-              appendLog={appendLog}
-              showNotification={showNotification}
-            />
-          </div>
+          <ImageSearchPanel
+            similarityService={similarityService}
+            appendLog={appendLog}
+            showNotification={showNotification}
+          />
         );
       case 'microscope':
         return (
-          <div className="control-view">
-            <MicroscopeControlPanel
-              key={selectedMicroscopeId}
-              microscopeControlService={microscopeControlService}
-              appendLog={appendLog}
-              map={currentMap}
-              setSnapshotImage={setSnapshotImage}
-              snapshotImage={snapshotImage}
-              segmentService={segmentService}
-              addTileLayer={addTileLayer}
-              channelNames={channelNames}
-              vectorLayer={vectorLayer}
-              selectedMicroscopeId={selectedMicroscopeId}
-              incubatorControlService={incubatorControlService}
-              roboticArmService={roboticArmService}
-              orchestratorManagerService={orchestratorManagerService}
-              currentOperation={currentOperation}
-              setCurrentOperation={setCurrentOperation}
-              hyphaManager={hyphaManager}
-              showNotification={showNotification}
-              onOpenImageJ={handleOpenImageJ}
-              imjoyApi={imjoyApi}
-              onClose={() => {}}
-            />
-          </div>
+          <MicroscopeControlPanel
+            key={selectedMicroscopeId}
+            microscopeControlService={microscopeControlService}
+            appendLog={appendLog}
+            map={currentMap}
+            setSnapshotImage={setSnapshotImage}
+            snapshotImage={snapshotImage}
+            segmentService={segmentService}
+            addTileLayer={addTileLayer}
+            channelNames={channelNames}
+            vectorLayer={vectorLayer}
+            selectedMicroscopeId={selectedMicroscopeId}
+            incubatorControlService={incubatorControlService}
+            roboticArmService={roboticArmService}
+            orchestratorManagerService={orchestratorManagerService}
+            currentOperation={currentOperation}
+            setCurrentOperation={setCurrentOperation}
+            hyphaManager={hyphaManager}
+            showNotification={showNotification}
+            onOpenImageJ={handleOpenImageJ}
+            imjoyApi={imjoyApi}
+            onClose={() => {}}
+          />
         );
       case 'incubator':
         return (
-          <div className="control-view">
-            <IncubatorControl
-              incubatorControlService={incubatorControlService}
-              appendLog={appendLog}
-            />
-          </div>
+          <IncubatorControl
+            incubatorControlService={incubatorControlService}
+            appendLog={appendLog}
+          />
         );
       case 'dashboard':
         return (
-          <div className="control-view">
-            <LogSection log={log} />
-          </div>
+          <LogSection log={log} />
         );
       case 'imagej':
         // ImageJ content is now rendered separately as a persistent panel
