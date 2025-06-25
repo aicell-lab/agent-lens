@@ -81,4 +81,32 @@
   to {
     opacity: 1;
   }
+}
+
+/* Disabled map state */
+.microscope-map-disabled {
+  cursor: not-allowed !important;
+  opacity: 0.75 !important;
+  pointer-events: none;
+}
+
+.microscope-map-disabled * {
+  cursor: not-allowed !important;
+}
+
+/* Disabled button styles */
+button:disabled {
+  cursor: not-allowed !important;
+  opacity: 0.75 !important;
+}
+
+/* Disabled checkbox styles */
+input[type="checkbox"]:disabled {
+  cursor: not-allowed !important;
+  opacity: 0.75 !important;
+}
+
+input[type="checkbox"]:disabled + span {
+  cursor: not-allowed !important;
+  opacity: 0.75 !important;
 } 

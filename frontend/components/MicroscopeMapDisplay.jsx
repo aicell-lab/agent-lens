@@ -112,7 +112,10 @@ const MicroscopeMapDisplay = ({
   // Get current stage position from metadata or fallback
   const currentStagePosition = useMemo(() => {
     // Prefer WebRTC metadata when available
-    if (frameMetadata?.stage_position) {
+    if (frameMetadata?.stage_position &&
+        typeof frameMetadata.stage_position.x_mm === 'number' &&
+        typeof frameMetadata.stage_position.y_mm === 'number' &&
+        typeof frameMetadata.stage_position.z_mm === 'number') {
       return {
         x: frameMetadata.stage_position.x_mm,
         y: frameMetadata.stage_position.y_mm,
@@ -237,9 +240,12 @@ const MicroscopeMapDisplay = ({
     };
   }, [mapViewMode, currentStagePosition, stageDimensions, mapScale, effectivePan, fovSize, pixelsPerMm]);
 
+  // Check if interactions should be disabled
+  const isInteractionDisabled = microscopeBusy || currentOperation !== null;
+
   // Handle panning (only in FREE_PAN mode)
   const handleMapPanning = (e) => {
-    if (mapViewMode !== 'FREE_PAN') return;
+    if (mapViewMode !== 'FREE_PAN' || isInteractionDisabled) return;
     
     if (e.button === 0) { // Left click
       setIsPanning(true);
@@ -248,7 +254,7 @@ const MicroscopeMapDisplay = ({
   };
 
   const handleMapPanMove = (e) => {
-    if (isPanning && mapViewMode === 'FREE_PAN') {
+    if (isPanning && mapViewMode === 'FREE_PAN' && !isInteractionDisabled) {
       setMapPan({
         x: e.clientX - panStart.x,
         y: e.clientY - panStart.y
@@ -257,6 +263,10 @@ const MicroscopeMapDisplay = ({
   };
 
   const handleMapPanEnd = () => {
+    if (isInteractionDisabled) {
+      setIsPanning(false);
+      return;
+    }
     setIsPanning(false);
   };
   
@@ -285,8 +295,8 @@ const MicroscopeMapDisplay = ({
   }, [appendLog]);
 
   const handleDoubleClick = async (e) => {
-    if (!microscopeControlService || !microscopeConfiguration || !stageDimensions) {
-      if (showNotification) {
+    if (!microscopeControlService || !microscopeConfiguration || !stageDimensions || isInteractionDisabled) {
+      if (showNotification && !isInteractionDisabled) {
         showNotification('Cannot move stage: microscope service or configuration not available', 'warning');
       }
       return;
@@ -372,6 +382,8 @@ const MicroscopeMapDisplay = ({
 
   const handleWheel = useCallback((e) => {
     e.preventDefault();
+    
+    if (isInteractionDisabled) return;
     
     if (mapViewMode === 'FOV_FITTED') {
       // In FOV_FITTED mode, zoom out transitions to FREE_PAN mode
@@ -692,9 +704,11 @@ const MicroscopeMapDisplay = ({
             left: 0, 
             width: '100%', 
             height: '100%', 
-            cursor: 'crosshair' 
+            cursor: isInteractionDisabled ? 'not-allowed' : 'crosshair',
+            pointerEvents: isInteractionDisabled ? 'none' : 'auto'
           }}
           onMouseDown={(e) => {
+            if (isInteractionDisabled) return;
             const rect = e.currentTarget.getBoundingClientRect();
             const x = e.clientX - rect.left;
             const valueAt = Math.round((x / rect.width) * 255);
@@ -754,6 +768,7 @@ const MicroscopeMapDisplay = ({
               <div className="flex items-center space-x-2">
                 <button
                   onClick={(e) => {
+                    if (isInteractionDisabled) return;
                     const newZoom = zoomLevel * 0.9;
                     const rect = mapContainerRef.current.getBoundingClientRect();
                     const centerX = rect.width / 2;
@@ -765,9 +780,9 @@ const MicroscopeMapDisplay = ({
                       zoomToPoint(Math.max(0.17, newZoom), scaleLevel, centerX, centerY);
                     }
                   }}
-                  className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded disabled:opacity-50"
+                  className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Zoom Out"
-                  disabled={scaleLevel === 3 && zoomLevel <= 0.17}
+                  disabled={isInteractionDisabled || (scaleLevel === 3 && zoomLevel <= 0.17)}
                 >
                   <i className="fas fa-search-minus"></i>
                 </button>
@@ -776,6 +791,7 @@ const MicroscopeMapDisplay = ({
                 </span>
                 <button
                   onClick={(e) => {
+                    if (isInteractionDisabled) return;
                     const newZoom = zoomLevel * 1.1;
                     const rect = mapContainerRef.current.getBoundingClientRect();
                     const centerX = rect.width / 2;
@@ -787,16 +803,17 @@ const MicroscopeMapDisplay = ({
                       zoomToPoint(Math.min(2.0, newZoom), scaleLevel, centerX, centerY);
                     }
                   }}
-                  className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded disabled:opacity-50"
+                  className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Zoom In"
-                  disabled={scaleLevel === 0 && zoomLevel >= 2.0}
+                  disabled={isInteractionDisabled || (scaleLevel === 0 && zoomLevel >= 2.0)}
                 >
                   <i className="fas fa-search-plus"></i>
                 </button>
                 <button
-                  onClick={fitToView}
-                  className="px-2 py-1 text-xs bg-green-600 hover:bg-green-500 text-white rounded"
+                  onClick={isInteractionDisabled ? undefined : fitToView}
+                  className="px-2 py-1 text-xs bg-green-600 hover:bg-green-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Fit to View"
+                  disabled={isInteractionDisabled}
                 >
                   <i className="fas fa-crosshairs mr-1"></i>
                   Fit to View
@@ -807,20 +824,22 @@ const MicroscopeMapDisplay = ({
                 <input
                   type="checkbox"
                   checked={showWellPlate}
-                  onChange={(e) => setShowWellPlate(e.target.checked)}
-                  className="mr-2"
+                  onChange={(e) => !isInteractionDisabled && setShowWellPlate(e.target.checked)}
+                  className="mr-2 disabled:cursor-not-allowed disabled:opacity-75"
+                  disabled={isInteractionDisabled}
                 />
-                Show 96-Well Plate
+                <span className={isInteractionDisabled ? 'opacity-75' : ''}>Show 96-Well Plate</span>
               </label>
               
               <label className="flex items-center text-white text-xs">
                 <input
                   type="checkbox"
                   checked={showScanResults}
-                  onChange={(e) => setShowScanResults(e.target.checked)}
-                  className="mr-2"
+                  onChange={(e) => !isInteractionDisabled && setShowScanResults(e.target.checked)}
+                  className="mr-2 disabled:cursor-not-allowed disabled:opacity-75"
+                  disabled={isInteractionDisabled}
                 />
-                Show Scan Results
+                <span className={isInteractionDisabled ? 'opacity-75' : ''}>Show Scan Results</span>
               </label>
             </>
           )}
@@ -838,16 +857,21 @@ const MicroscopeMapDisplay = ({
       <div
         ref={mapContainerRef}
         className={`absolute inset-0 top-12 overflow-hidden ${
-          mapViewMode === 'FOV_FITTED' ? 'cursor-grab' : 'cursor-move'
+          isInteractionDisabled 
+            ? 'cursor-not-allowed microscope-map-disabled' 
+            : mapViewMode === 'FOV_FITTED' 
+              ? 'cursor-grab' 
+              : 'cursor-move'
         } ${isDragging || isPanning ? 'cursor-grabbing' : ''}`}
-        onMouseDown={mapViewMode === 'FOV_FITTED' ? onMouseDown : handleMapPanning}
-        onMouseMove={mapViewMode === 'FOV_FITTED' ? onMouseMove : handleMapPanMove}
-        onMouseUp={mapViewMode === 'FOV_FITTED' ? onMouseUp : handleMapPanEnd}
-        onMouseLeave={mapViewMode === 'FOV_FITTED' ? onMouseLeave : handleMapPanEnd}
-        onDoubleClick={mapViewMode === 'FREE_PAN' ? handleDoubleClick : undefined}
+        onMouseDown={isInteractionDisabled ? undefined : (mapViewMode === 'FOV_FITTED' ? onMouseDown : handleMapPanning)}
+        onMouseMove={isInteractionDisabled ? undefined : (mapViewMode === 'FOV_FITTED' ? onMouseMove : handleMapPanMove)}
+        onMouseUp={isInteractionDisabled ? undefined : (mapViewMode === 'FOV_FITTED' ? onMouseUp : handleMapPanEnd)}
+        onMouseLeave={isInteractionDisabled ? undefined : (mapViewMode === 'FOV_FITTED' ? onMouseLeave : handleMapPanEnd)}
+        onDoubleClick={isInteractionDisabled ? undefined : (mapViewMode === 'FREE_PAN' ? handleDoubleClick : undefined)}
         style={{
           userSelect: 'none',
-          transition: isDragging || isPanning ? 'none' : 'transform 0.3s ease-out'
+          transition: isDragging || isPanning ? 'none' : 'transform 0.3s ease-out',
+          opacity: isInteractionDisabled ? 0.75 : 1
         }}
       >
         {/* Map canvas for FREE_PAN mode */}
@@ -952,7 +976,7 @@ const MicroscopeMapDisplay = ({
         )}
         
         {/* Drag move instructions overlay for FOV_FITTED mode */}
-        {mapViewMode === 'FOV_FITTED' && (isWebRtcActive || snapshotImage) && microscopeControlService && !microscopeBusy && !currentOperation && !isDragging && (
+        {mapViewMode === 'FOV_FITTED' && (isWebRtcActive || snapshotImage) && microscopeControlService && !isInteractionDisabled && !isDragging && (
           <div className="absolute bottom-2 left-2 bg-black bg-opacity-60 text-white text-xs px-2 py-1 rounded pointer-events-none">
             <i className="fas fa-hand-paper mr-1"></i>
             Drag to move stage
@@ -964,6 +988,16 @@ const MicroscopeMapDisplay = ({
           <div className="absolute top-2 left-2 bg-blue-500 bg-opacity-80 text-white text-xs px-2 py-1 rounded pointer-events-none">
             <i className="fas fa-arrows-alt mr-1"></i>
             Moving stage...
+          </div>
+        )}
+        
+        {/* Disabled state indicator */}
+        {isInteractionDisabled && (
+          <div className="absolute top-2 left-2 bg-red-500 bg-opacity-80 text-white text-xs px-2 py-1 rounded pointer-events-none">
+            <i className="fas fa-lock mr-1"></i>
+            {currentOperation === 'loading' || currentOperation === 'unloading' ? 
+              `Map disabled during ${currentOperation}` : 
+              'Map disabled during operation'}
           </div>
         )}
         
@@ -986,7 +1020,7 @@ const MicroscopeMapDisplay = ({
       
       {/* Video contrast controls for FOV_FITTED mode */}
       {mapViewMode === 'FOV_FITTED' && isWebRtcActive && (
-        <div className="absolute bottom-2 right-2 bg-black bg-opacity-80 p-2 rounded text-white max-w-xs">
+        <div className={`absolute bottom-2 right-2 bg-black bg-opacity-80 p-2 rounded text-white max-w-xs ${isInteractionDisabled ? 'opacity-75' : ''}`}>
           <div className="flex items-center justify-between mb-1">
             <div className="flex items-center space-x-2">
               <span className="text-xs font-medium">Contrast</span>
@@ -995,9 +1029,10 @@ const MicroscopeMapDisplay = ({
               )}
             </div>
             <button
-              onClick={() => setIsContrastControlsCollapsed(!isContrastControlsCollapsed)}
-              className="text-xs text-gray-300 hover:text-white p-1"
+              onClick={() => !isInteractionDisabled && setIsContrastControlsCollapsed(!isContrastControlsCollapsed)}
+              className="text-xs text-gray-300 hover:text-white p-1 disabled:cursor-not-allowed disabled:opacity-75"
               title={isContrastControlsCollapsed ? "Show contrast controls" : "Hide contrast controls"}
+              disabled={isInteractionDisabled}
             >
               <i className={`fas ${isContrastControlsCollapsed ? 'fa-chevron-up' : 'fa-chevron-down'}`}></i>
             </button>
@@ -1012,8 +1047,8 @@ const MicroscopeMapDisplay = ({
                   <input
                     type="checkbox"
                     checked={autoContrastEnabled}
-                    onChange={(e) => setAutoContrastEnabled(e.target.checked)}
-                    disabled={!isDataChannelConnected}
+                    onChange={(e) => !isInteractionDisabled && setAutoContrastEnabled(e.target.checked)}
+                    disabled={!isDataChannelConnected || isInteractionDisabled}
                   />
                   <span className="auto-contrast-slider"></span>
                 </label>
