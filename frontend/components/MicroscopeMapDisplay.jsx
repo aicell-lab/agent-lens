@@ -140,6 +140,8 @@ const MicroscopeMapDisplay = ({
 
   // In FOV_FITTED mode, automatically calculate scale and pan to fit video in the display
   // In FREE_PAN mode, use manual scale and pan controls
+  // Scale levels: 0=1x, 1=0.25x, 2=0.0625x, 3=0.015625x, 4=0.00390625x (4x difference between levels)
+  // Zoom range: 25% to 1600% (0.25x to 16x) within each scale level
   const baseScale = 1 / Math.pow(4, scaleLevel);
   const calculatedMapScale = baseScale * zoomLevel;
   
@@ -275,8 +277,10 @@ const MicroscopeMapDisplay = ({
     if (mapViewMode === 'FOV_FITTED') {
       setMapViewMode('FREE_PAN');
       // Set scale and pan to current fitted values for smooth transition
-      setScaleLevel(0);
-      setZoomLevel(autoFittedScale);
+      // Start at scale 1 since video resolution fits scale 1, not scale 0
+      // Compensate for 4x scale difference: scale 1 = 0.25x, so multiply zoom by 4
+      setScaleLevel(1);
+      setZoomLevel(autoFittedScale * 4); // Multiply by 4 to maintain same visual scale
       setMapPan(autoFittedPan);
       if (appendLog) {
         appendLog('Switched to stage map view');
@@ -287,8 +291,8 @@ const MicroscopeMapDisplay = ({
   // Switch back to FOV_FITTED mode
   const fitToView = useCallback(() => {
     setMapViewMode('FOV_FITTED');
-    setScaleLevel(0);
-    setZoomLevel(1.0);
+    setScaleLevel(0); // FOV_FITTED mode always uses scale 0 (highest resolution)
+    setZoomLevel(1.0); // Reset to 100% zoom
     if (appendLog) {
       appendLog('Switched to fitted video view');
     }
@@ -406,19 +410,19 @@ const MicroscopeMapDisplay = ({
     const mouseY = e.clientY - rect.top;
     
     // Check if we should change scale level
-    if (newZoomLevel > 2.0 && scaleLevel > 0) {
+    if (newZoomLevel > 16.0 && scaleLevel > 0) {
       // Zoom in to higher resolution (lower scale number = less zoomed out)
       // Calculate equivalent zoom level in the new scale to maintain continuity
       const equivalentZoom = (newZoomLevel * (1 / Math.pow(4, scaleLevel))) / (1 / Math.pow(4, scaleLevel - 1));
-      zoomToPoint(Math.min(2.0, equivalentZoom), scaleLevel - 1, mouseX, mouseY);
-    } else if (newZoomLevel < 0.17 && scaleLevel < 3) {
+      zoomToPoint(Math.min(16.0, equivalentZoom), scaleLevel - 1, mouseX, mouseY);
+    } else if (newZoomLevel < 0.25 && scaleLevel < 4) {
       // Zoom out to lower resolution (higher scale number = more zoomed out)
       // Calculate equivalent zoom level in the new scale to maintain continuity
       const equivalentZoom = (newZoomLevel * (1 / Math.pow(4, scaleLevel))) / (1 / Math.pow(4, scaleLevel + 1));
-      zoomToPoint(Math.max(0.17, equivalentZoom), scaleLevel + 1, mouseX, mouseY);
+      zoomToPoint(Math.max(0.25, equivalentZoom), scaleLevel + 1, mouseX, mouseY);
     } else {
       // Smooth zoom within current scale level
-      newZoomLevel = Math.max(0.17, Math.min(2.0, newZoomLevel));
+      newZoomLevel = Math.max(0.25, Math.min(16.0, newZoomLevel));
       zoomToPoint(newZoomLevel, scaleLevel, mouseX, mouseY);
     }
   }, [mapViewMode, zoomLevel, scaleLevel, zoomToPoint, transitionToFreePan, setVideoZoom]);
@@ -795,15 +799,15 @@ const MicroscopeMapDisplay = ({
                     const centerX = rect.width / 2;
                     const centerY = rect.height / 2;
                     
-                    if (newZoom < 0.17 && scaleLevel < 3) {
-                      zoomToPoint(0.17, scaleLevel + 1, centerX, centerY);
+                    if (newZoom < 0.25 && scaleLevel < 4) {
+                      zoomToPoint(0.25, scaleLevel + 1, centerX, centerY);
                     } else {
-                      zoomToPoint(Math.max(0.17, newZoom), scaleLevel, centerX, centerY);
+                      zoomToPoint(Math.max(0.25, newZoom), scaleLevel, centerX, centerY);
                     }
                   }}
                   className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Zoom Out"
-                  disabled={isInteractionDisabled || (scaleLevel === 3 && zoomLevel <= 0.17)}
+                  disabled={isInteractionDisabled || (scaleLevel === 4 && zoomLevel <= 0.25)}
                 >
                   <i className="fas fa-search-minus"></i>
                 </button>
@@ -818,15 +822,15 @@ const MicroscopeMapDisplay = ({
                     const centerX = rect.width / 2;
                     const centerY = rect.height / 2;
                     
-                    if (newZoom > 2.0 && scaleLevel > 0) {
-                      zoomToPoint(0.17, scaleLevel - 1, centerX, centerY);
+                    if (newZoom > 16.0 && scaleLevel > 0) {
+                      zoomToPoint(0.25, scaleLevel - 1, centerX, centerY);
                     } else {
-                      zoomToPoint(Math.min(2.0, newZoom), scaleLevel, centerX, centerY);
+                      zoomToPoint(Math.min(16.0, newZoom), scaleLevel, centerX, centerY);
                     }
                   }}
                   className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Zoom In"
-                  disabled={isInteractionDisabled || (scaleLevel === 0 && zoomLevel >= 2.0)}
+                  disabled={isInteractionDisabled || (scaleLevel === 0 && zoomLevel >= 16.0)}
                 >
                   <i className="fas fa-search-plus"></i>
                 </button>
