@@ -1814,9 +1814,9 @@ const MicroscopeControlPanel = ({
                   <option value="0">BF LED matrix full</option>
                   <option value="11">Fluorescence 405 nm Ex</option>
                   <option value="12">Fluorescence 488 nm Ex</option>
-                  <option value="14">Fluorescence 561nm Ex</option>
-                  <option value="13">Fluorescence 638nm Ex</option>
-                  <option value="15">Fluorescence 730nm Ex</option>
+                  <option value="14">Fluorescence 561 nm Ex</option>
+                  <option value="13">Fluorescence 638 nm Ex</option>
+                  <option value="15">Fluorescence 730 nm Ex</option>
                 </select>
               </div>
             </div>
