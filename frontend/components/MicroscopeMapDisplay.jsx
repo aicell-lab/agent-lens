@@ -499,6 +499,27 @@ const MicroscopeMapDisplay = ({
     });
   }, [mapViewMode, isWebRtcActive, scaleLevel, remoteStream, videoRef]);
 
+  // State to trigger canvas redraw on container resize
+  const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
+  
+  // Set up ResizeObserver to detect container size changes
+  useEffect(() => {
+    if (!mapContainerRef.current || !isOpen) return;
+    
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        setContainerSize({ width, height });
+      }
+    });
+    
+    resizeObserver.observe(mapContainerRef.current);
+    
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [isOpen]);
+
   // Draw the map
   useEffect(() => {
     if (!canvasRef.current || !isOpen) return;
@@ -552,7 +573,7 @@ const MicroscopeMapDisplay = ({
     }
     
     ctx.restore();
-  }, [isOpen, stageDimensions, mapScale, effectivePan, showWellPlate]);
+  }, [isOpen, stageDimensions, mapScale, effectivePan, showWellPlate, containerSize]);
 
   // Render 96-well plate overlay
   const render96WellPlate = () => {
