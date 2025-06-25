@@ -1274,10 +1274,8 @@ const MicroscopeMapDisplay = ({
         
         {/* Stitched scan results layer (below other elements) */}
         {mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && stitchedCanvasData && stitchedCanvasData.scale === scaleLevel && (
-          <img
-            src={stitchedCanvasData.data}
-            alt="Scan Results"
-            className="absolute pointer-events-none"
+          <div
+            className="absolute pointer-events-none scan-results-container"
             style={{
               left: `${stageToDisplayCoords(stitchedCanvasData.bounds.topLeft.x, stitchedCanvasData.bounds.topLeft.y).x}px`,
               top: `${stageToDisplayCoords(stitchedCanvasData.bounds.topLeft.x, stitchedCanvasData.bounds.topLeft.y).y}px`,
@@ -1285,7 +1283,18 @@ const MicroscopeMapDisplay = ({
               height: `${stitchedCanvasData.height_mm * pixelsPerMm * mapScale}px`,
               opacity: 0.8
             }}
-          />
+          >
+            <img
+              src={stitchedCanvasData.data}
+              alt="Scan Results"
+              className="w-full h-full"
+              style={{
+                objectFit: 'fill', // Fill the container exactly, matching the calculated dimensions
+                objectPosition: 'top left', // Ensure alignment with top-left corner
+                display: 'block' // Remove any inline spacing
+              }}
+            />
+          </div>
         )}
         
         {/* Loading indicator for canvas */}
