@@ -55,8 +55,43 @@ const MicroscopeMapDisplay = ({
   const [mapPan, setMapPan] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
-  const [showWellPlate, setShowWellPlate] = useState(true);
-  const [showScanResults, setShowScanResults] = useState(false);
+  
+  // New states for scan functionality
+  const [isRectangleSelection, setIsRectangleSelection] = useState(false);
+  const [rectangleStart, setRectangleStart] = useState(null);
+  const [rectangleEnd, setRectangleEnd] = useState(null);
+  const [showScanConfig, setShowScanConfig] = useState(false);
+  const [scanParameters, setScanParameters] = useState({
+    start_x_mm: 20,
+    start_y_mm: 20,
+    Nx: 5,
+    Ny: 5,
+    dx_mm: 0.9,
+    dy_mm: 0.9,
+    illumination_settings: [{ channel: 'BF LED matrix full', intensity: 50, exposure_time: 100 }],
+    do_contrast_autofocus: false,
+    do_reflection_af: false
+  });
+  
+  // Layer visibility management
+  const [visibleLayers, setVisibleLayers] = useState({
+    wellPlate: true,
+    scanResults: true,
+    channels: {
+      'BF LED matrix full': true,
+      'F405': false,
+      'F488': false,
+      'F561': false,
+      'F638': false,
+      'F730': false
+    }
+  });
+  
+  // Stitched canvas state
+  const [stitchedCanvasData, setStitchedCanvasData] = useState(null);
+  const [isLoadingCanvas, setIsLoadingCanvas] = useState(false);
+  const canvasUpdateTimerRef = useRef(null);
+  const lastCanvasRequestRef = useRef({ x: 0, y: 0, width: 0, height: 0, scale: 0 });
 
   // Calculate stage dimensions from configuration
   const stageDimensions = useMemo(() => {
@@ -249,6 +284,11 @@ const MicroscopeMapDisplay = ({
   const handleMapPanning = (e) => {
     if (mapViewMode !== 'FREE_PAN' || isInteractionDisabled) return;
     
+    if (isRectangleSelection) {
+      handleRectangleSelectionStart(e);
+      return;
+    }
+    
     if (e.button === 0) { // Left click
       setIsPanning(true);
       setPanStart({ x: e.clientX - mapPan.x, y: e.clientY - mapPan.y });
@@ -256,6 +296,11 @@ const MicroscopeMapDisplay = ({
   };
 
   const handleMapPanMove = (e) => {
+    if (isRectangleSelection && rectangleStart) {
+      handleRectangleSelectionMove(e);
+      return;
+    }
+    
     if (isPanning && mapViewMode === 'FREE_PAN' && !isInteractionDisabled) {
       setMapPan({
         x: e.clientX - panStart.x,
@@ -265,6 +310,11 @@ const MicroscopeMapDisplay = ({
   };
 
   const handleMapPanEnd = () => {
+    if (isRectangleSelection && rectangleStart) {
+      handleRectangleSelectionEnd();
+      return;
+    }
+    
     if (isInteractionDisabled) {
       setIsPanning(false);
       return;
@@ -439,6 +489,23 @@ const MicroscopeMapDisplay = ({
     }
   }, [isOpen, handleWheel]);
 
+  // Effect to clear cached canvas data when scale level changes
+  useEffect(() => {
+    if (stitchedCanvasData && stitchedCanvasData.scale !== scaleLevel) {
+      setStitchedCanvasData(null); // Clear cached data when scale changes
+      // Reset the last request to force a new request
+      lastCanvasRequestRef.current = { x: 0, y: 0, width: 0, height: 0, scale: -1 };
+    }
+  }, [scaleLevel, stitchedCanvasData]);
+
+  // Effect to clear canvas data when channel changes (let the view change effect handle reloading)
+  useEffect(() => {
+    if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
+      setStitchedCanvasData(null); // Clear cached data when channel changes
+      lastCanvasRequestRef.current = { x: 0, y: 0, width: 0, height: 0, scale: -1 };
+    }
+  }, [visibleLayers.channels, mapViewMode, visibleLayers.scanResults]);
+
   // Handle video source assignment for both main video and map video refs
   useEffect(() => {
     if (isWebRtcActive && remoteStream) {
@@ -555,7 +622,7 @@ const MicroscopeMapDisplay = ({
         
     // 96-well plate border
     const wellConfig = microscopeConfiguration?.wellplate?.formats?.['96_well'];
-    if (wellConfig && showWellPlate) {
+    if (wellConfig && visibleLayers.wellPlate) {
       const { well_spacing_mm, a1_x_mm, a1_y_mm } = wellConfig;
       
       // Calculate 96-well plate boundaries (A1 to H12)
@@ -577,11 +644,11 @@ const MicroscopeMapDisplay = ({
     }
     
     ctx.restore();
-  }, [isOpen, stageDimensions, mapScale, effectivePan, showWellPlate, containerSize]);
+  }, [isOpen, stageDimensions, mapScale, effectivePan, visibleLayers.wellPlate, containerSize]);
 
   // Render 96-well plate overlay
   const render96WellPlate = () => {
-    if (!showWellPlate || !microscopeConfiguration) {
+    if (!visibleLayers.wellPlate || !microscopeConfiguration) {
       return null;
     }
     
@@ -777,6 +844,227 @@ const MicroscopeMapDisplay = ({
     );
   };
 
+  // Handle mouse leave to cancel drag operation
+  const handleMouseLeave = useCallback(() => {
+    if (isDragging) {
+      setIsDragging(false);
+      setDragTransform({ x: 0, y: 0 });
+      appendLog('Drag move canceled: mouse left display area');
+    }
+  }, [isDragging, appendLog]);
+  
+  // Helper function to convert display coordinates to stage coordinates
+  const displayToStageCoords = useCallback((displayX, displayY) => {
+    if (mapViewMode === 'FOV_FITTED') {
+      // In FOV_FITTED mode, use a simpler conversion
+      return { x: 0, y: 0 }; // Not applicable in FOV_FITTED mode
+    }
+    
+    // In FREE_PAN mode, account for pan and scale correctly
+    const mapX = (displayX - effectivePan.x) / mapScale;
+    const mapY = (displayY - effectivePan.y) / mapScale;
+    const stageX_mm = (mapX / pixelsPerMm) + stageDimensions.xMin;
+    const stageY_mm = (mapY / pixelsPerMm) + stageDimensions.yMin;
+    return { x: stageX_mm, y: stageY_mm };
+  }, [mapViewMode, effectivePan, mapScale, pixelsPerMm, stageDimensions]);
+  
+  // Helper function to convert stage coordinates to display coordinates
+  const stageToDisplayCoords = useCallback((stageX_mm, stageY_mm) => {
+    if (mapViewMode === 'FOV_FITTED') {
+      // In FOV_FITTED mode, not applicable
+      return { x: 0, y: 0 };
+    }
+    
+    // In FREE_PAN mode, convert stage coordinates to display coordinates
+    const mapX = (stageX_mm - stageDimensions.xMin) * pixelsPerMm;
+    const mapY = (stageY_mm - stageDimensions.yMin) * pixelsPerMm;
+    const displayX = mapX * mapScale + effectivePan.x;
+    const displayY = mapY * mapScale + effectivePan.y;
+    return { x: displayX, y: displayY };
+  }, [mapViewMode, stageDimensions, pixelsPerMm, mapScale, effectivePan]);
+  
+  // Debounced function to load stitched canvas
+  const loadStitchedCanvas = useCallback(async () => {
+    if (!microscopeControlService || !visibleLayers.scanResults || mapViewMode !== 'FREE_PAN') {
+      return;
+    }
+    
+    const container = mapContainerRef.current;
+    if (!container || !stageDimensions || !pixelsPerMm) return;
+    
+    // Calculate visible region in stage coordinates with buffer
+    const bufferPercent = 0.1; // 10% buffer around visible area
+    const containerWidth = container.clientWidth;
+    const containerHeight = container.clientHeight;
+    
+    // Add buffer to the visible area
+    const bufferedLeft = -containerWidth * bufferPercent;
+    const bufferedTop = -containerHeight * bufferPercent;
+    const bufferedRight = containerWidth * (1 + bufferPercent);
+    const bufferedBottom = containerHeight * (1 + bufferPercent);
+    
+    const topLeft = displayToStageCoords(bufferedLeft, bufferedTop);
+    const bottomRight = displayToStageCoords(bufferedRight, bufferedBottom);
+    
+    // Clamp to stage boundaries
+    const clampedTopLeft = {
+      x: Math.max(stageDimensions.xMin, topLeft.x),
+      y: Math.max(stageDimensions.yMin, topLeft.y)
+    };
+    const clampedBottomRight = {
+      x: Math.min(stageDimensions.xMax, bottomRight.x),
+      y: Math.min(stageDimensions.yMax, bottomRight.y)
+    };
+    
+    const width_mm = clampedBottomRight.x - clampedTopLeft.x;
+    const height_mm = clampedBottomRight.y - clampedTopLeft.y;
+    
+    // Check if we need to update (significant change in view or scale)
+    const currentRequest = { 
+      x: clampedTopLeft.x, 
+      y: clampedTopLeft.y, 
+      width: width_mm, 
+      height: height_mm, 
+      scale: scaleLevel 
+    };
+    
+    const lastRequest = lastCanvasRequestRef.current;
+    const positionThreshold = Math.max(width_mm * 0.3, 1.0); // 30% or 1mm minimum
+    const sizeThreshold = 0.3; // 30% change in size
+    
+    const viewChanged = Math.abs(currentRequest.x - lastRequest.x) > positionThreshold ||
+                       Math.abs(currentRequest.y - lastRequest.y) > positionThreshold ||
+                       Math.abs(currentRequest.width - lastRequest.width) > lastRequest.width * sizeThreshold ||
+                       Math.abs(currentRequest.height - lastRequest.height) > lastRequest.height * sizeThreshold ||
+                       currentRequest.scale !== lastRequest.scale;
+    
+    if (!viewChanged && stitchedCanvasData) return;
+    
+    lastCanvasRequestRef.current = currentRequest;
+    setIsLoadingCanvas(true);
+    
+    try {
+      // Get the active channel
+      const activeChannel = Object.entries(visibleLayers.channels)
+        .find(([_, isVisible]) => isVisible)?.[0] || 'BF LED matrix full';
+      
+      const result = await microscopeControlService.get_stitched_region(
+        clampedTopLeft.x,
+        clampedTopLeft.y,
+        width_mm,
+        height_mm,
+        scaleLevel,
+        activeChannel,
+        'base64'
+      );
+      
+      if (result.success) {
+        setStitchedCanvasData({
+          data: `data:image/png;base64,${result.data}`,
+          bounds: { topLeft: clampedTopLeft, bottomRight: clampedBottomRight },
+          width_mm,
+          height_mm,
+          scale: scaleLevel
+        });
+      }
+    } catch (error) {
+      console.error('Failed to load stitched canvas:', error);
+      if (appendLog) appendLog(`Failed to load scan results: ${error.message}`);
+    } finally {
+      setIsLoadingCanvas(false);
+    }
+  }, [microscopeControlService, visibleLayers.scanResults, visibleLayers.channels, mapViewMode, scaleLevel, displayToStageCoords, stageDimensions, pixelsPerMm, stitchedCanvasData, appendLog]);
+  
+  // Debounce canvas loading with longer delay
+  const scheduleCanvasUpdate = useCallback(() => {
+    if (canvasUpdateTimerRef.current) {
+      clearTimeout(canvasUpdateTimerRef.current);
+    }
+    canvasUpdateTimerRef.current = setTimeout(loadStitchedCanvas, 2000); // Increased to 2 seconds
+  }, [loadStitchedCanvas]);
+  
+  // Rectangle selection handlers
+  const handleRectangleSelectionStart = useCallback((e) => {
+    if (!isRectangleSelection || isInteractionDisabled) return;
+    
+    const rect = mapContainerRef.current.getBoundingClientRect();
+    const startX = e.clientX - rect.left;
+    const startY = e.clientY - rect.top;
+    
+    setRectangleStart({ x: startX, y: startY });
+    setRectangleEnd({ x: startX, y: startY });
+  }, [isRectangleSelection, isInteractionDisabled]);
+  
+  const handleRectangleSelectionMove = useCallback((e) => {
+    if (!rectangleStart || !isRectangleSelection) return;
+    
+    const rect = mapContainerRef.current.getBoundingClientRect();
+    const currentX = e.clientX - rect.left;
+    const currentY = e.clientY - rect.top;
+    
+    setRectangleEnd({ x: currentX, y: currentY });
+  }, [rectangleStart, isRectangleSelection]);
+  
+  const handleRectangleSelectionEnd = useCallback((e) => {
+    if (!rectangleStart || !rectangleEnd || !isRectangleSelection) return;
+    
+    // Convert rectangle corners to stage coordinates
+    const topLeft = displayToStageCoords(
+      Math.min(rectangleStart.x, rectangleEnd.x),
+      Math.min(rectangleStart.y, rectangleEnd.y)
+    );
+    const bottomRight = displayToStageCoords(
+      Math.max(rectangleStart.x, rectangleEnd.x),
+      Math.max(rectangleStart.y, rectangleEnd.y)
+    );
+    
+    const width_mm = bottomRight.x - topLeft.x;
+    const height_mm = bottomRight.y - topLeft.y;
+    
+    // Calculate grid parameters
+    const Nx = Math.round(width_mm / scanParameters.dx_mm);
+    const Ny = Math.round(height_mm / scanParameters.dy_mm);
+    
+    // Update scan parameters
+    setScanParameters(prev => ({
+      ...prev,
+      start_x_mm: topLeft.x,
+      start_y_mm: topLeft.y,
+      Nx: Math.max(1, Nx),
+      Ny: Math.max(1, Ny)
+    }));
+    
+    // Show configuration window
+    setShowScanConfig(true);
+    setIsRectangleSelection(false);
+    setRectangleStart(null);
+    setRectangleEnd(null);
+  }, [rectangleStart, rectangleEnd, isRectangleSelection, displayToStageCoords, scanParameters.dx_mm, scanParameters.dy_mm]);
+
+  // Effect to trigger canvas loading when view changes (only on significant changes)
+  useEffect(() => {
+    if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
+      // Only trigger on significant pan changes (>50px) or scale changes
+      const container = mapContainerRef.current;
+      if (container) {
+        const panThreshold = 50; // pixels
+        const lastPan = lastCanvasRequestRef.current.panX || 0;
+        const lastMapScale = lastCanvasRequestRef.current.mapScale || 0;
+        
+        const significantPanChange = Math.abs(mapPan.x - lastPan) > panThreshold || 
+                                    Math.abs(mapPan.y - (lastCanvasRequestRef.current.panY || 0)) > panThreshold;
+        const scaleChange = Math.abs(mapScale - lastMapScale) > lastMapScale * 0.1; // 10% scale change
+        
+        if (significantPanChange || scaleChange) {
+          lastCanvasRequestRef.current.panX = mapPan.x;
+          lastCanvasRequestRef.current.panY = mapPan.y;
+          lastCanvasRequestRef.current.mapScale = mapScale;
+          scheduleCanvasUpdate();
+        }
+      }
+    }
+  }, [mapPan.x, mapPan.y, mapScale, mapViewMode, visibleLayers.scanResults, scheduleCanvasUpdate]);
+
   if (!isOpen) return null;
 
   return (
@@ -845,27 +1133,105 @@ const MicroscopeMapDisplay = ({
                 </button>
               </div>
               
-              <label className="flex items-center text-white text-xs">
-                <input
-                  type="checkbox"
-                  checked={showWellPlate}
-                  onChange={(e) => !isInteractionDisabled && setShowWellPlate(e.target.checked)}
-                  className="mr-2 disabled:cursor-not-allowed disabled:opacity-75"
+              {/* Layer selector dropdown */}
+              <div className="relative group">
+                <button
+                  className="px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
                   disabled={isInteractionDisabled}
-                />
-                <span className={isInteractionDisabled ? 'opacity-75' : ''}>Show 96-Well Plate</span>
-              </label>
+                >
+                  <i className="fas fa-layer-group mr-1"></i>
+                  Layers
+                  <i className="fas fa-caret-down ml-1"></i>
+                </button>
+                
+                <div className="absolute top-full right-0 mt-1 bg-gray-800 rounded shadow-lg p-2 min-w-[200px] hidden group-hover:block z-20">
+                  <div className="text-xs text-gray-300 font-semibold mb-2">Map Layers</div>
+                  
+                  <label className="flex items-center text-white text-xs mb-1 hover:bg-gray-700 p-1 rounded cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={visibleLayers.wellPlate}
+                      onChange={(e) => !isInteractionDisabled && setVisibleLayers(prev => ({ ...prev, wellPlate: e.target.checked }))}
+                      className="mr-2"
+                      disabled={isInteractionDisabled}
+                    />
+                    96-Well Plate Grid
+                  </label>
+                  
+                  <label className="flex items-center text-white text-xs mb-2 hover:bg-gray-700 p-1 rounded cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={visibleLayers.scanResults}
+                      onChange={(e) => !isInteractionDisabled && setVisibleLayers(prev => ({ ...prev, scanResults: e.target.checked }))}
+                      className="mr-2"
+                      disabled={isInteractionDisabled}
+                    />
+                    Scan Results
+                  </label>
+                  
+                  {visibleLayers.scanResults && (
+                    <>
+                      <div className="text-xs text-gray-300 font-semibold mb-1 mt-2 border-t border-gray-700 pt-2">Channels</div>
+                      {Object.entries(visibleLayers.channels).map(([channel, isVisible]) => (
+                        <label key={channel} className="flex items-center text-white text-xs mb-1 hover:bg-gray-700 p-1 rounded cursor-pointer">
+                          <input
+                            type="radio"
+                            name="channel"
+                            checked={isVisible}
+                            onChange={() => !isInteractionDisabled && setVisibleLayers(prev => ({
+                              ...prev,
+                              channels: Object.fromEntries(
+                                Object.keys(prev.channels).map(ch => [ch, ch === channel])
+                              )
+                            }))}
+                            className="mr-2"
+                            disabled={isInteractionDisabled}
+                          />
+                          {channel}
+                        </label>
+                      ))}
+                    </>
+                  )}
+                </div>
+              </div>
               
-              <label className="flex items-center text-white text-xs">
-                <input
-                  type="checkbox"
-                  checked={showScanResults}
-                  onChange={(e) => !isInteractionDisabled && setShowScanResults(e.target.checked)}
-                  className="mr-2 disabled:cursor-not-allowed disabled:opacity-75"
-                  disabled={isInteractionDisabled}
-                />
-                <span className={isInteractionDisabled ? 'opacity-75' : ''}>Show Scan Results</span>
-              </label>
+              {/* Scan controls */}
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => !isInteractionDisabled && setIsRectangleSelection(!isRectangleSelection)}
+                  className={`px-2 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed ${
+                    isRectangleSelection ? 'bg-blue-600 hover:bg-blue-500' : 'bg-gray-700 hover:bg-gray-600'
+                  }`}
+                  title="Select scan area"
+                  disabled={isInteractionDisabled || !microscopeControlService}
+                >
+                  <i className="fas fa-vector-square mr-1"></i>
+                  {isRectangleSelection ? 'Cancel Selection' : 'Select Scan Area'}
+                </button>
+                
+                <button
+                  onClick={async () => {
+                    if (!microscopeControlService || isInteractionDisabled) return;
+                    try {
+                      const result = await microscopeControlService.reset_stitching_canvas();
+                      if (result.success) {
+                        setStitchedCanvasData(null);
+                        if (showNotification) showNotification('Scan canvas cleared', 'success');
+                        if (appendLog) appendLog('Scan canvas cleared successfully');
+                      }
+                    } catch (error) {
+                      if (showNotification) showNotification(`Failed to clear canvas: ${error.message}`, 'error');
+                      if (appendLog) appendLog(`Failed to clear scan canvas: ${error.message}`);
+                    }
+                  }}
+                  className="px-2 py-1 text-xs bg-red-600 hover:bg-red-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Clear scan results"
+                  disabled={isInteractionDisabled || !microscopeControlService}
+                >
+                  <i className="fas fa-trash mr-1"></i>
+                  Clear Canvas
+                </button>
+              </div>
             </>
           )}
           
@@ -886,13 +1252,15 @@ const MicroscopeMapDisplay = ({
             ? 'cursor-not-allowed microscope-map-disabled' 
             : mapViewMode === 'FOV_FITTED' 
               ? 'cursor-grab' 
-              : 'cursor-move'
+              : isRectangleSelection
+                ? 'cursor-crosshair'
+                : 'cursor-move'
         } ${isDragging || isPanning ? 'cursor-grabbing' : ''}`}
         onMouseDown={isInteractionDisabled ? undefined : (mapViewMode === 'FOV_FITTED' ? onMouseDown : handleMapPanning)}
         onMouseMove={isInteractionDisabled ? undefined : (mapViewMode === 'FOV_FITTED' ? onMouseMove : handleMapPanMove)}
         onMouseUp={isInteractionDisabled ? undefined : (mapViewMode === 'FOV_FITTED' ? onMouseUp : handleMapPanEnd)}
         onMouseLeave={isInteractionDisabled ? undefined : (mapViewMode === 'FOV_FITTED' ? onMouseLeave : handleMapPanEnd)}
-        onDoubleClick={isInteractionDisabled ? undefined : (mapViewMode === 'FREE_PAN' ? handleDoubleClick : undefined)}
+        onDoubleClick={isInteractionDisabled ? undefined : (mapViewMode === 'FREE_PAN' && !isRectangleSelection ? handleDoubleClick : undefined)}
         style={{
           userSelect: 'none',
           transition: isDragging || isPanning ? 'none' : 'transform 0.3s ease-out',
@@ -904,8 +1272,75 @@ const MicroscopeMapDisplay = ({
           <canvas ref={canvasRef} className="absolute inset-0" />
         )}
         
+        {/* Stitched scan results layer (below other elements) */}
+        {mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && stitchedCanvasData && stitchedCanvasData.scale === scaleLevel && (
+          <img
+            src={stitchedCanvasData.data}
+            alt="Scan Results"
+            className="absolute pointer-events-none"
+            style={{
+              left: `${stageToDisplayCoords(stitchedCanvasData.bounds.topLeft.x, stitchedCanvasData.bounds.topLeft.y).x}px`,
+              top: `${stageToDisplayCoords(stitchedCanvasData.bounds.topLeft.x, stitchedCanvasData.bounds.topLeft.y).y}px`,
+              width: `${stitchedCanvasData.width_mm * pixelsPerMm * mapScale}px`,
+              height: `${stitchedCanvasData.height_mm * pixelsPerMm * mapScale}px`,
+              opacity: 0.8
+            }}
+          />
+        )}
+        
+        {/* Loading indicator for canvas */}
+        {mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && isLoadingCanvas && (
+          <div className="absolute top-2 right-2 bg-black bg-opacity-60 text-white text-xs px-2 py-1 rounded">
+            <i className="fas fa-spinner fa-spin mr-1"></i>Loading scan results...
+          </div>
+        )}
+        
         {/* 96-well plate overlay for FREE_PAN mode */}
         {mapViewMode === 'FREE_PAN' && render96WellPlate()}
+        
+        {/* Rectangle selection overlay */}
+        {mapViewMode === 'FREE_PAN' && isRectangleSelection && rectangleStart && rectangleEnd && (
+          <>
+            <div
+              className="absolute border-2 border-blue-400 bg-blue-400 bg-opacity-20 pointer-events-none"
+              style={{
+                left: `${Math.min(rectangleStart.x, rectangleEnd.x)}px`,
+                top: `${Math.min(rectangleStart.y, rectangleEnd.y)}px`,
+                width: `${Math.abs(rectangleEnd.x - rectangleStart.x)}px`,
+                height: `${Math.abs(rectangleEnd.y - rectangleStart.y)}px`
+              }}
+            />
+            <div className="absolute bg-black bg-opacity-80 text-white text-xs px-2 py-1 rounded pointer-events-none"
+                 style={{
+                   left: `${rectangleEnd.x + 10}px`,
+                   top: `${rectangleEnd.y + 10}px`
+                 }}>
+              {(() => {
+                const topLeft = displayToStageCoords(
+                  Math.min(rectangleStart.x, rectangleEnd.x),
+                  Math.min(rectangleStart.y, rectangleEnd.y)
+                );
+                const bottomRight = displayToStageCoords(
+                  Math.max(rectangleStart.x, rectangleEnd.x),
+                  Math.max(rectangleStart.y, rectangleEnd.y)
+                );
+                const width_mm = bottomRight.x - topLeft.x;
+                const height_mm = bottomRight.y - topLeft.y;
+                const Nx = Math.max(1, Math.round(width_mm / scanParameters.dx_mm));
+                const Ny = Math.max(1, Math.round(height_mm / scanParameters.dy_mm));
+                
+                return (
+                  <>
+                    <div>Start: ({topLeft.x.toFixed(1)}, {topLeft.y.toFixed(1)}) mm</div>
+                    <div>Grid: {Nx} × {Ny} positions</div>
+                    <div>Step: {scanParameters.dx_mm} × {scanParameters.dy_mm} mm</div>
+                    <div>End: ({(topLeft.x + (Nx-1) * scanParameters.dx_mm).toFixed(1)}, {(topLeft.y + (Ny-1) * scanParameters.dy_mm).toFixed(1)}) mm</div>
+                  </>
+                );
+              })()}
+            </div>
+          </>
+        )}
         
         {/* Current video frame position indicator */}
         {videoFramePosition && (
@@ -1087,6 +1522,177 @@ const MicroscopeMapDisplay = ({
               )}
             </>
           )}
+        </div>
+      )}
+
+      {/* Scan Configuration Modal */}
+      {showScanConfig && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-4">
+            <h3 className="text-lg font-semibold mb-3">Scan Configuration</h3>
+            
+            <div className="space-y-3 text-sm">
+              <div>
+                <label className="block text-gray-700 font-medium mb-1">Start Position (mm)</label>
+                <div className="flex space-x-2">
+                  <input
+                    type="number"
+                    value={scanParameters.start_x_mm.toFixed(2)}
+                    onChange={(e) => setScanParameters(prev => ({ ...prev, start_x_mm: parseFloat(e.target.value) }))}
+                    className="w-1/2 px-2 py-1 border rounded"
+                    step="0.1"
+                  />
+                  <input
+                    type="number"
+                    value={scanParameters.start_y_mm.toFixed(2)}
+                    onChange={(e) => setScanParameters(prev => ({ ...prev, start_y_mm: parseFloat(e.target.value) }))}
+                    className="w-1/2 px-2 py-1 border rounded"
+                    step="0.1"
+                  />
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-gray-700 font-medium mb-1">Grid Size (positions)</label>
+                <div className="flex space-x-2">
+                  <input
+                    type="number"
+                    value={scanParameters.Nx}
+                    onChange={(e) => setScanParameters(prev => ({ ...prev, Nx: parseInt(e.target.value) }))}
+                    className="w-1/2 px-2 py-1 border rounded"
+                    min="1"
+                  />
+                  <input
+                    type="number"
+                    value={scanParameters.Ny}
+                    onChange={(e) => setScanParameters(prev => ({ ...prev, Ny: parseInt(e.target.value) }))}
+                    className="w-1/2 px-2 py-1 border rounded"
+                    min="1"
+                  />
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-gray-700 font-medium mb-1">Step Size (mm)</label>
+                <div className="flex space-x-2">
+                  <input
+                    type="number"
+                    value={scanParameters.dx_mm}
+                    onChange={(e) => setScanParameters(prev => ({ ...prev, dx_mm: parseFloat(e.target.value) }))}
+                    className="w-1/2 px-2 py-1 border rounded"
+                    step="0.1"
+                    min="0.1"
+                  />
+                  <input
+                    type="number"
+                    value={scanParameters.dy_mm}
+                    onChange={(e) => setScanParameters(prev => ({ ...prev, dy_mm: parseFloat(e.target.value) }))}
+                    className="w-1/2 px-2 py-1 border rounded"
+                    step="0.1"
+                    min="0.1"
+                  />
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-gray-700 font-medium mb-1">Illumination</label>
+                <select
+                  value={scanParameters.illumination_settings[0].channel}
+                  onChange={(e) => setScanParameters(prev => ({
+                    ...prev,
+                    illumination_settings: [{
+                      ...prev.illumination_settings[0],
+                      channel: e.target.value
+                    }]
+                  }))}
+                  className="w-full px-2 py-1 border rounded"
+                >
+                  <option value="BF LED matrix full">BF LED matrix full</option>
+                  <option value="F405">Fluorescence 405 nm</option>
+                  <option value="F488">Fluorescence 488 nm</option>
+                  <option value="F561">Fluorescence 561 nm</option>
+                  <option value="F638">Fluorescence 638 nm</option>
+                  <option value="F730">Fluorescence 730 nm</option>
+                </select>
+              </div>
+              
+              <div className="flex items-center space-x-4">
+                <label className="flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={scanParameters.do_contrast_autofocus}
+                    onChange={(e) => setScanParameters(prev => ({ ...prev, do_contrast_autofocus: e.target.checked }))}
+                    className="mr-2"
+                  />
+                  Contrast AF
+                </label>
+                <label className="flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={scanParameters.do_reflection_af}
+                    onChange={(e) => setScanParameters(prev => ({ ...prev, do_reflection_af: e.target.checked }))}
+                    className="mr-2"
+                  />
+                  Reflection AF
+                </label>
+              </div>
+              
+              <div className="bg-gray-100 p-2 rounded text-xs">
+                <div>Total scan area: {(scanParameters.Nx * scanParameters.dx_mm).toFixed(1)} × {(scanParameters.Ny * scanParameters.dy_mm).toFixed(1)} mm</div>
+                <div>Total positions: {scanParameters.Nx * scanParameters.Ny}</div>
+                <div>End position: ({(scanParameters.start_x_mm + (scanParameters.Nx-1) * scanParameters.dx_mm).toFixed(1)}, {(scanParameters.start_y_mm + (scanParameters.Ny-1) * scanParameters.dy_mm).toFixed(1)}) mm</div>
+              </div>
+            </div>
+            
+            <div className="flex justify-end space-x-2 mt-4">
+              <button
+                onClick={() => setShowScanConfig(false)}
+                className="px-3 py-1 text-sm bg-gray-300 hover:bg-gray-400 rounded"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  if (!microscopeControlService) return;
+                  
+                  try {
+                    if (appendLog) appendLog(`Starting scan: ${scanParameters.Nx}×${scanParameters.Ny} positions from (${scanParameters.start_x_mm.toFixed(1)}, ${scanParameters.start_y_mm.toFixed(1)}) mm`);
+                    
+                    const result = await microscopeControlService.normal_scan_with_stitching(
+                      scanParameters.start_x_mm,
+                      scanParameters.start_y_mm,
+                      scanParameters.Nx,
+                      scanParameters.Ny,
+                      scanParameters.dx_mm,
+                      scanParameters.dy_mm,
+                      scanParameters.illumination_settings,
+                      scanParameters.do_contrast_autofocus,
+                      scanParameters.do_reflection_af,
+                      'scan_' + Date.now()
+                    );
+                    
+                    if (result.success) {
+                      if (showNotification) showNotification('Scan started successfully', 'success');
+                      if (appendLog) appendLog('Scan started successfully');
+                      setShowScanConfig(false);
+                      // Enable scan results layer if not already
+                      setVisibleLayers(prev => ({ ...prev, scanResults: true }));
+                    } else {
+                      if (showNotification) showNotification(`Scan failed: ${result.message}`, 'error');
+                      if (appendLog) appendLog(`Scan failed: ${result.message}`);
+                    }
+                  } catch (error) {
+                    if (showNotification) showNotification(`Scan error: ${error.message}`, 'error');
+                    if (appendLog) appendLog(`Scan error: ${error.message}`);
+                  }
+                }}
+                className="px-3 py-1 text-sm bg-blue-500 hover:bg-blue-600 text-white rounded"
+                disabled={!microscopeControlService}
+              >
+                Start Scan
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
