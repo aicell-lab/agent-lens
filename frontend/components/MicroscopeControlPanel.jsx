@@ -165,9 +165,6 @@ const MicroscopeControlPanel = ({
 
   // New states for video display and zoom functionality
   const [videoZoom, setVideoZoom] = useState(1.0);
-  
-  // State for full-screen map display
-  const [isMapFullScreen, setIsMapFullScreen] = useState(false);
 
   // Refs to hold the latest actual values for use in debounced effects
   const actualIlluminationIntensityRef = useRef(actualIlluminationIntensity);
@@ -732,129 +729,7 @@ const MicroscopeControlPanel = ({
     }
   }, [autoContrastEnabled, autoContrastMinAdjust, autoContrastMaxAdjust]); // Trigger when toggle or adjustments change
 
-  // Helper function to render histogram display
-  const renderHistogramDisplay = () => {
-    if (!frameMetadata || !frameMetadata.gray_level_stats || !frameMetadata.gray_level_stats.histogram) {
-      return null;
-    }
 
-    const histogram = frameMetadata.gray_level_stats.histogram;
-    const counts = histogram.counts || [];
-    const binEdges = histogram.bin_edges || [];
-    
-    if (counts.length === 0) return null;
-
-    const maxCount = Math.max(...counts);
-    const histogramWidth = 256; // Fixed width for display
-    const histogramHeight = 60;
-    
-    return (
-      <div className="histogram-display" style={{ position: 'relative', width: '100%', height: `${histogramHeight}px`, backgroundColor: '#f8f9fa', border: '1px solid #dee2e6', borderRadius: '4px' }}>
-        <svg width="100%" height={histogramHeight} style={{ display: 'block' }}>
-          {counts.map((count, index) => {
-            const x = (index / counts.length) * 100; // Convert to percentage
-            const height = (count / maxCount) * (histogramHeight - 4); // 4px padding
-            const binStart = binEdges[index] || (index * 255 / counts.length);
-            const binEnd = binEdges[index + 1] || ((index + 1) * 255 / counts.length);
-            const binCenter = (binStart + binEnd) / 2;
-            
-            return (
-              <rect
-                key={index}
-                x={`${x}%`}
-                y={histogramHeight - height - 2}
-                width={`${100 / counts.length}%`}
-                height={height}
-                fill="#6c757d"
-                title={`Bin ${binCenter.toFixed(0)}: ${count} pixels`}
-              />
-            );
-          })}
-          
-          {/* Contrast range indicators */}
-          <line
-            x1={`${(videoContrastMin / 255) * 100}%`}
-            y1="0"
-            x2={`${(videoContrastMin / 255) * 100}%`}
-            y2={histogramHeight}
-            stroke="#dc3545"
-            strokeWidth="2"
-            opacity="0.8"
-          />
-          <line
-            x1={`${(videoContrastMax / 255) * 100}%`}
-            y1="0"
-            x2={`${(videoContrastMax / 255) * 100}%`}
-            y2={histogramHeight}
-            stroke="#dc3545"
-            strokeWidth="2"
-            opacity="0.8"
-          />
-          
-          {/* Range fill */}
-          <rect
-            x={`${(videoContrastMin / 255) * 100}%`}
-            y="0"
-            width={`${((videoContrastMax - videoContrastMin) / 255) * 100}%`}
-            height={histogramHeight}
-            fill="#007bff"
-            opacity="0.2"
-          />
-        </svg>
-        
-        {/* Interactive overlay for dragging */}
-        <div 
-          style={{ 
-            position: 'absolute', 
-            top: 0, 
-            left: 0, 
-            width: '100%', 
-            height: '100%', 
-            cursor: 'crosshair' 
-          }}
-          onMouseDown={(e) => {
-            const rect = e.currentTarget.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const valueAt = Math.round((x / rect.width) * 255);
-
-            if (autoContrastEnabled) {
-              // Adjust auto-contrast offsets
-              if (!frameMetadata || !frameMetadata.gray_level_stats || !frameMetadata.gray_level_stats.percentiles) return;
-              
-              const stats = frameMetadata.gray_level_stats;
-              const p5Value = (stats.percentiles.p5 || 0) * 255 / 100;
-              const p95Value = (stats.percentiles.p95 || 100) * 255 / 100;
-
-              // The current min/max are based on p5/p95 + adjustments
-              const currentMin = p5Value + autoContrastMinAdjust;
-              const currentMax = p95Value + autoContrastMaxAdjust;
-
-              const distToMin = Math.abs(valueAt - currentMin);
-              const distToMax = Math.abs(valueAt - currentMax);
-
-              if (distToMin < distToMax) {
-                const newMinAdjust = valueAt - p5Value;
-                setAutoContrastMinAdjust(newMinAdjust);
-              } else {
-                const newMaxAdjust = valueAt - p95Value;
-                setAutoContrastMaxAdjust(newMaxAdjust);
-              }
-            } else {
-              // Original logic for manual contrast
-              const distToMin = Math.abs(valueAt - videoContrastMin);
-              const distToMax = Math.abs(valueAt - videoContrastMax);
-              
-              if (distToMin < distToMax) {
-                setVideoContrastMin(Math.max(0, Math.min(valueAt, videoContrastMax - 1)));
-              } else {
-                setVideoContrastMax(Math.min(255, Math.max(valueAt, videoContrastMin + 1)));
-              }
-            }
-          }}
-        />
-      </div>
-    );
-  };
 
   const moveMicroscope = async (direction, multiplier) => {
     if (!microscopeControlService) return;
@@ -1371,203 +1246,59 @@ const MicroscopeControlPanel = ({
     <div className="control-view microscope-control-panel-container new-mcp-layout">
       {/* Left Side: Image Display */}
       <div className={`mcp-image-display-area ${isRightPanelCollapsed ? 'expanded' : ''}`}>
-        {/* Video Display Controls */}
-        {(isWebRtcActive || snapshotImage) && !isMapFullScreen && (
-          <div className="video-controls-bar flex items-center justify-between p-2 bg-gray-100 border border-gray-300 rounded-t">
-            <div className="flex items-center space-x-2">
-              <span className="text-xs text-gray-600">Zoom:</span>
-              <button
-                onClick={() => setVideoZoom(prev => Math.max(0.25, prev - 0.25))}
-                className="px-2 py-1 text-xs bg-gray-200 hover:bg-gray-300 rounded disabled:opacity-50"
-                disabled={videoZoom <= 0.25}
-                title="Zoom Out"
-              >
-                <i className="fas fa-search-minus"></i>
-              </button>
-              <span className="text-xs text-gray-700 min-w-[3rem] text-center">{Math.round(videoZoom * 100)}%</span>
-              <button
-                onClick={() => setVideoZoom(prev => Math.min(3.0, prev + 0.25))}
-                className="px-2 py-1 text-xs bg-gray-200 hover:bg-gray-300 rounded disabled:opacity-50"
-                disabled={videoZoom >= 3.0}
-                title="Zoom In"
-              >
-                <i className="fas fa-search-plus"></i>
-              </button>
-              <button
-                onClick={() => setVideoZoom(1.0)}
-                className="px-2 py-1 text-xs bg-blue-500 hover:bg-blue-600 text-white rounded"
-                title="Reset Zoom"
-              >
-                <i className="fas fa-expand-arrows-alt"></i>
-              </button>
-            </div>
-          </div>
-        )}
-        
-        {/* Image Display or Map Display */}
-        {isMapFullScreen ? (
-          <div
-            className="w-full border border-gray-300 bg-black relative"
-            style={{
-              height: isRightPanelCollapsed ? 'calc(100vh - 105px)' : 'calc(100vh - 245px)',
-              maxHeight: '90vh',
-              overflow: 'hidden',
-            }}
-          >
-            <MicroscopeMapDisplay
-              isOpen={true}
-              onClose={() => setIsMapFullScreen(false)}
-              microscopeConfiguration={microscopeConfiguration}
-              isWebRtcActive={isWebRtcActive}
-              videoRef={videoRef}
-              remoteStream={remoteStream}
-              frameMetadata={frameMetadata}
-              videoZoom={videoZoom}
-              snapshotImage={snapshotImage}
-              isDragging={isDragging}
-              dragTransform={dragTransform}
-              microscopeControlService={microscopeControlService}
-              appendLog={appendLog}
-              showNotification={showNotification}
-              fallbackStagePosition={{ x: xPosition, y: yPosition, z: zPosition }}
-            />
-          </div>
-        ) : (
-          <div
-            ref={dragImageDisplayRef}
-            id="image-display"
-            className={`w-full border-l border-r border-b ${
-              (snapshotImage || isWebRtcActive) ? 'border-gray-300' : 'border-dotted border-gray-400'
-            } ${(snapshotImage || isWebRtcActive) ? '' : 'rounded'} flex items-center justify-center bg-black relative ${
-              (isWebRtcActive || snapshotImage) && microscopeControlService && !microscopeBusy && !currentOperation ? 'cursor-grab' : ''
-            } ${isDragging ? 'cursor-grabbing' : ''}`}
+        {/* Unified Map/Video Display */}
+        <div
+          className="w-full border border-gray-300 bg-black relative"
+          style={{
+            height: 'calc(100vh - 16px)',
+            maxHeight: 'none',
+            overflow: 'hidden',
+          }}
+        >
+          <MicroscopeMapDisplay
+            isOpen={true}
+            onClose={() => {}} // No longer needed since it's always displayed
+            microscopeConfiguration={microscopeConfiguration}
+            isWebRtcActive={isWebRtcActive}
+            videoRef={videoRef}
+            remoteStream={remoteStream}
+            frameMetadata={frameMetadata}
+            videoZoom={videoZoom}
+            setVideoZoom={setVideoZoom}
+            snapshotImage={snappedImageData.url}
+            snappedImageData={snappedImageData}
+            isDragging={isDragging}
+            dragTransform={dragTransform}
+            microscopeControlService={microscopeControlService}
+            appendLog={appendLog}
+            showNotification={showNotification}
+            fallbackStagePosition={{ x: xPosition, y: yPosition, z: zPosition }}
+            onOpenImageJ={onOpenImageJ}
+            imjoyApi={imjoyApi}
+            webRtcError={webRtcError}
+            microscopeBusy={microscopeBusy}
+            currentOperation={currentOperation}
+            videoContrastMin={videoContrastMin}
+            setVideoContrastMin={setVideoContrastMin}
+            videoContrastMax={videoContrastMax}
+            setVideoContrastMax={setVideoContrastMax}
+            autoContrastEnabled={autoContrastEnabled}
+            setAutoContrastEnabled={setAutoContrastEnabled}
+            autoContrastMinAdjust={autoContrastMinAdjust}
+            setAutoContrastMinAdjust={setAutoContrastMinAdjust}
+            autoContrastMaxAdjust={autoContrastMaxAdjust}
+            setAutoContrastMaxAdjust={setAutoContrastMaxAdjust}
+            isDataChannelConnected={isDataChannelConnected}
+            isContrastControlsCollapsed={isContrastControlsCollapsed}
+            setIsContrastControlsCollapsed={setIsContrastControlsCollapsed}
+            // Pass drag handlers
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseLeave}
-            style={{
-              userSelect: 'none',
-              transition: isDragging ? 'none' : 'transform 0.3s ease-out',
-              overflow: 'hidden', // Hide content that moves outside the display window
-              height: isRightPanelCollapsed ? 'calc(100vh - 105px)' : 'calc(100vh - 245px)', // Responsive height (increased by ~30%)
-              maxHeight: '90vh', // Prevent taking up entire screen (increased from 80vh)
-            }}
-          >
-            {isWebRtcActive && !webRtcError ? (
-              <video 
-                ref={videoRef} 
-                autoPlay 
-                playsInline 
-                muted 
-                className="pointer-events-none"
-                style={{
-                  transform: `translate(${dragTransform.x}px, ${dragTransform.y}px) scale(${videoZoom})`,
-                  transition: isDragging ? 'none' : 'transform 0.3s ease-out',
-                  width: '750px',
-                  height: '750px',
-                  objectFit: 'contain',
-                }}
-              />
-            ) : snappedImageData.url ? (
-              <>
-                <img
-                  src={snappedImageData.url}
-                  alt="Microscope Snapshot"
-                  className="pointer-events-none"
-                  style={{
-                    transform: `translate(${dragTransform.x}px, ${dragTransform.y}px) scale(${videoZoom})`,
-                    transition: isDragging ? 'none' : 'transform 0.3s ease-out',
-                    width: '750px',
-                    height: '750px',
-                    objectFit: 'contain',
-                  }}
-                />
-                {/* ImageJ.js Badge */}
-                {onOpenImageJ && (
-                  <button
-                    onClick={() => onOpenImageJ(snappedImageData.numpy)}
-                    className="imagej-badge absolute top-2 right-2 p-1 bg-white bg-opacity-90 hover:bg-opacity-100 rounded shadow-md transition-all duration-200 flex items-center gap-1 text-xs font-medium text-gray-700 hover:text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed z-10"
-                    title={imjoyApi ? "Open in ImageJ.js" : "ImageJ.js integration is loading..."}
-                    disabled={!imjoyApi}
-                    style={{ pointerEvents: 'auto' }} // Allow the badge to be clickable even when video/image has pointer-events-none
-                  >
-                    <img 
-                      src="https://ij.imjoy.io/assets/badge/open-in-imagej-js-badge.svg" 
-                      alt="Open in ImageJ.js" 
-                      className="h-4"
-                    />
-                  </button>
-                )}
-              </>
-            ) : (
-              <p className="placeholder-text text-center text-gray-300">
-                {webRtcError ? `WebRTC Error: ${webRtcError}` : (microscopeControlService ? 'Image Display' : 'Microscope not connected')}
-              </p>
-            )}
-            
-            {/* Drag move instructions overlay */}
-            {(isWebRtcActive || snapshotImage) && microscopeControlService && !microscopeBusy && !currentOperation && !isDragging && (
-              <div className="absolute bottom-2 left-2 bg-black bg-opacity-60 text-white text-xs px-2 py-1 rounded pointer-events-none">
-                <i className="fas fa-hand-paper mr-1"></i>
-                Drag to move stage
-              </div>
-            )}
-            
-            {/* Visual feedback during dragging */}
-            {isDragging && (
-              <div className="absolute top-2 left-2 bg-blue-500 bg-opacity-80 text-white text-xs px-2 py-1 rounded pointer-events-none">
-                <i className="fas fa-arrows-alt mr-1"></i>
-                Moving stage...
-              </div>
-            )}
-          </div>
-        )}
-        {/* Compact Video Contrast Controls - Collapsible */}
-        {isWebRtcActive && (
-          <div className="video-contrast-controls mt-1 p-1 border border-gray-300 rounded bg-white bg-opacity-90">
-            <div className="flex items-center justify-between mb-1">
-              <div className="flex items-center space-x-2">
-                <span className="text-xs font-medium text-gray-700">Contrast</span>
-                {isDataChannelConnected && (
-                  <i className="fas fa-circle text-green-500" style={{ fontSize: '4px' }} title="Metadata connected"></i>
-                )}
-              </div>
-              <button
-                onClick={() => setIsContrastControlsCollapsed(!isContrastControlsCollapsed)}
-                className="text-xs text-gray-500 hover:text-gray-700 p-1"
-                title={isContrastControlsCollapsed ? "Show contrast controls" : "Hide contrast controls"}
-              >
-                <i className={`fas ${isContrastControlsCollapsed ? 'fa-chevron-down' : 'fa-chevron-up'}`}></i>
-              </button>
-            </div>
-            
-            {!isContrastControlsCollapsed && (
-              <>
-                {/* Auto Contrast Toggle - Compact */}
-                <div className="flex items-center mb-1">
-                  <span className="text-xs text-gray-600 mr-2">Auto</span>
-                  <label className="auto-contrast-toggle">
-                    <input
-                      type="checkbox"
-                      checked={autoContrastEnabled}
-                      onChange={(e) => setAutoContrastEnabled(e.target.checked)}
-                      disabled={!isDataChannelConnected}
-                    />
-                    <span className="auto-contrast-slider"></span>
-                  </label>
-                </div>
-                
-                {/* Histogram Display - Compact */}
-                {frameMetadata && frameMetadata.gray_level_stats && (
-                  <div className="mb-1">
-                    {renderHistogramDisplay()}
-                  </div>
-                )}
-                
-              </>
-            )}
-          </div>
-        )}
+          />
+        </div>
+
 
 
         {/* Toggle button for the right panel */}
@@ -1701,18 +1432,7 @@ const MicroscopeControlPanel = ({
             </div>
           </div>
 
-          {/* Map View Toggle */}
-          <div className="control-group mb-3">
-            <div className="horizontal-buttons flex justify-between space-x-1">
-              <button
-                className="control-button bg-green-500 text-white hover:bg-green-600 w-1/5 px-1.5 py-0.5 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
-                onClick={() => setIsMapFullScreen(!isMapFullScreen)}
-                disabled={!microscopeConfiguration}
-              >
-                <i className="fas fa-map icon mr-1"></i> Stage Map
-              </button>
-            </div>
-          </div>
+
 
           <div className="coordinate-container mb-3 flex justify-between space-x-1">
             {['x', 'y', 'z'].map((axis) => (
