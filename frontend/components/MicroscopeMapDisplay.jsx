@@ -401,17 +401,17 @@ const MicroscopeMapDisplay = ({
       let initialScaleLevel = 1; // Default to scale 1
       let initialZoomLevel;
       
-      // Adjust scale level based on effective zoom to bias towards higher scale levels
-      if (baseEffectiveScale < 0.025) { // Very zoomed out
+      // Aggressively adjust scale level based on effective zoom to bias heavily towards higher scale levels (lower resolution)
+      if (baseEffectiveScale < 0.05) { // Very zoomed out
         initialScaleLevel = 4; // Use lowest resolution
         initialZoomLevel = baseEffectiveScale * Math.pow(4, 4);
-      } else if (baseEffectiveScale < 0.125) { // Zoomed out
+      } else if (baseEffectiveScale < 0.25) { // Zoomed out - increased threshold to push more users to low resolution
         initialScaleLevel = 3; // Use low resolution  
         initialZoomLevel = baseEffectiveScale * Math.pow(4, 3);
-      } else if (baseEffectiveScale < 0.5) { // Medium zoom
+      } else if (baseEffectiveScale < 1.0) { // Medium zoom - increased threshold significantly
         initialScaleLevel = 2; // Use medium resolution
         initialZoomLevel = baseEffectiveScale * Math.pow(4, 2);
-      } else { // Close zoom
+      } else { // Close zoom - only when really zoomed in
         initialScaleLevel = 1; // Use higher resolution
         initialZoomLevel = baseEffectiveScale * Math.pow(4, 1);
       }
@@ -549,15 +549,15 @@ const MicroscopeMapDisplay = ({
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
     
-    // Check if we should change scale level - bias towards higher scale levels to reduce data loading
-    if (newZoomLevel > 8.0 && scaleLevel > 0) {
+    // Check if we should change scale level - aggressively bias towards higher scale levels to reduce data loading
+    if (newZoomLevel > 4.0 && scaleLevel > 0) {
       // Zoom in to higher resolution (lower scale number = less zoomed out)
-      // More restrictive threshold (8.0 instead of 16.0) to keep users at lower resolution longer
+      // Much more restrictive threshold (4.0 instead of 8.0) to keep users at lower resolution longer
       const equivalentZoom = (newZoomLevel * (1 / Math.pow(4, scaleLevel))) / (1 / Math.pow(4, scaleLevel - 1));
       zoomToPoint(Math.min(16.0, equivalentZoom), scaleLevel - 1, mouseX, mouseY);
-    } else if (newZoomLevel < 0.5 && scaleLevel < 4) {
+    } else if (newZoomLevel < 1.5 && scaleLevel < 4) {
       // Zoom out to lower resolution (higher scale number = more zoomed out)
-      // More aggressive threshold (0.5 instead of 0.25) to push users to lower resolution sooner
+      // Much more aggressive threshold (1.5 instead of 0.5) to push users to lower resolution much sooner
       const equivalentZoom = (newZoomLevel * (1 / Math.pow(4, scaleLevel))) / (1 / Math.pow(4, scaleLevel + 1));
       zoomToPoint(Math.max(0.25, equivalentZoom), scaleLevel + 1, mouseX, mouseY);
     } else {
