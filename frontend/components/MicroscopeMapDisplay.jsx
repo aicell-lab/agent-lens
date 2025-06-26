@@ -149,11 +149,12 @@ const MicroscopeMapDisplay = ({
     }
   });
   
-  // Stitched canvas state
-  const [stitchedCanvasData, setStitchedCanvasData] = useState(null);
+  // Tile-based canvas state (replacing single stitchedCanvasData)
+  const [stitchedTiles, setStitchedTiles] = useState([]); // Array of tile objects
   const [isLoadingCanvas, setIsLoadingCanvas] = useState(false);
   const canvasUpdateTimerRef = useRef(null);
   const lastCanvasRequestRef = useRef({ x: 0, y: 0, width: 0, height: 0, scale: 0 });
+  const activeTileRequestsRef = useRef(new Set()); // Track active requests to prevent duplicates
 
   // Calculate stage dimensions from configuration
   const stageDimensions = useMemo(() => {
@@ -364,6 +365,11 @@ const MicroscopeMapDisplay = ({
     }
     
     if (isPanning && mapViewMode === 'FREE_PAN' && !isInteractionDisabled) {
+      // Cancel any pending tile loads during active panning
+      if (canvasUpdateTimerRef.current) {
+        clearTimeout(canvasUpdateTimerRef.current);
+      }
+      
       setMapPan({
         x: e.clientX - panStart.x,
         y: e.clientY - panStart.y
@@ -573,22 +579,117 @@ const MicroscopeMapDisplay = ({
     }
   }, [isOpen, handleWheel]);
 
-  // Effect to clear cached canvas data when scale level changes
-  useEffect(() => {
-    if (stitchedCanvasData && stitchedCanvasData.scale !== scaleLevel) {
-      setStitchedCanvasData(null); // Clear cached data when scale changes
-      // Reset the last request to force a new request
-      lastCanvasRequestRef.current = { x: 0, y: 0, width: 0, height: 0, scale: -1 };
-    }
-  }, [scaleLevel, stitchedCanvasData]);
+  // Helper functions for tile management
+  const getTileKey = useCallback((bounds, scale, channel) => {
+    return `${bounds.topLeft.x.toFixed(1)}_${bounds.topLeft.y.toFixed(1)}_${bounds.bottomRight.x.toFixed(1)}_${bounds.bottomRight.y.toFixed(1)}_${scale}_${channel}`;
+  }, []);
 
-  // Effect to clear canvas data when channel changes (let the view change effect handle reloading)
+  // Memoize visible tiles with smart cleanup strategy
+  const visibleTiles = useMemo(() => {
+    if (!visibleLayers.scanResults) return [];
+    
+    const activeChannel = Object.entries(visibleLayers.channels)
+      .find(([_, isVisible]) => isVisible)?.[0] || 'BF LED matrix full';
+    
+    // Get tiles for current scale and channel
+    const currentScaleTiles = stitchedTiles.filter(tile => 
+      tile.scale === scaleLevel && 
+      tile.channel === activeChannel
+    );
+    
+    if (currentScaleTiles.length > 0) {
+      // If we have current scale tiles, only show current scale
+      return currentScaleTiles;
+    }
+    
+    // If no current scale tiles, show lower resolution (higher scale number) tiles as fallback
+    // This prevents showing high-res tiles when zoomed out (which would be wasteful)
+    const availableScales = [...new Set(stitchedTiles.map(tile => tile.scale))]
+      .filter(scale => scale >= scaleLevel) // Only show equal or lower resolution
+      .sort((a, b) => a - b); // Sort ascending (lower numbers = higher resolution)
+    
+    for (const scale of availableScales) {
+      const scaleTiles = stitchedTiles.filter(tile => 
+        tile.scale === scale && 
+        tile.channel === activeChannel
+      );
+      if (scaleTiles.length > 0) {
+        return scaleTiles;
+      }
+    }
+    
+    return [];
+  }, [stitchedTiles, scaleLevel, visibleLayers.channels, visibleLayers.scanResults]);
+
+  const addOrUpdateTile = useCallback((newTile) => {
+    setStitchedTiles(prevTiles => {
+      const tileKey = getTileKey(newTile.bounds, newTile.scale, newTile.channel);
+      const existingIndex = prevTiles.findIndex(tile => 
+        getTileKey(tile.bounds, tile.scale, tile.channel) === tileKey
+      );
+      
+      if (existingIndex >= 0) {
+        // Update existing tile
+        const updatedTiles = [...prevTiles];
+        updatedTiles[existingIndex] = newTile;
+        return updatedTiles;
+      } else {
+        // Add new tile
+        return [...prevTiles, newTile];
+      }
+    });
+  }, [getTileKey]);
+
+  const cleanupOldTiles = useCallback((currentScale, activeChannel, maxTilesPerScale = 20) => {
+    setStitchedTiles(prevTiles => {
+      // Keep all tiles for current scale and channel
+      const currentTiles = prevTiles.filter(tile => 
+        tile.scale === currentScale && tile.channel === activeChannel
+      );
+      
+      // Smart cleanup: when zooming out (to higher scale numbers), aggressively clean high-res tiles
+      // When zooming in (to lower scale numbers), keep lower-res tiles as background
+      const otherTiles = prevTiles.filter(tile => 
+        !(tile.scale === currentScale && tile.channel === activeChannel)
+      ).filter(tile => {
+        // If zooming out (currentScale > tile.scale), remove high-resolution tiles
+        if (currentScale > tile.scale) {
+          return false; // Remove higher resolution tiles to save memory
+        }
+        // If zooming in (currentScale < tile.scale), keep lower resolution tiles
+        return tile.channel === activeChannel; // Only keep same channel
+      }).slice(-maxTilesPerScale); // Limit total tiles
+      
+      return [...currentTiles, ...otherTiles];
+    });
+  }, []);
+
+  // Effect to clean up old tiles when channel changes  
   useEffect(() => {
     if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
-      setStitchedCanvasData(null); // Clear cached data when channel changes
-      lastCanvasRequestRef.current = { x: 0, y: 0, width: 0, height: 0, scale: -1 };
+      // Clean up but don't immediately clear everything - let new tiles load first
+      const activeChannel = Object.entries(visibleLayers.channels)
+        .find(([_, isVisible]) => isVisible)?.[0] || 'BF LED matrix full';
+      
+      // Trigger cleanup of old tiles after a delay to allow new ones to load
+      const cleanupTimer = setTimeout(() => {
+        cleanupOldTiles(scaleLevel, activeChannel);
+      }, 2000);
+      
+      return () => clearTimeout(cleanupTimer);
     }
-  }, [visibleLayers.channels, mapViewMode, visibleLayers.scanResults]);
+  }, [visibleLayers.channels, mapViewMode, visibleLayers.scanResults, scaleLevel, cleanupOldTiles]);
+
+  // Effect to cleanup high-resolution tiles when zooming out
+  useEffect(() => {
+    if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
+      const activeChannel = Object.entries(visibleLayers.channels)
+        .find(([_, isVisible]) => isVisible)?.[0] || 'BF LED matrix full';
+      
+      // Cleanup immediately when scale changes
+      cleanupOldTiles(scaleLevel, activeChannel);
+    }
+  }, [scaleLevel, mapViewMode, visibleLayers.scanResults, visibleLayers.channels, cleanupOldTiles]);
 
   // Handle video source assignment for both main video and map video refs
   useEffect(() => {
@@ -638,21 +739,6 @@ const MicroscopeMapDisplay = ({
     }
   }, [isWebRtcActive, remoteStream, mapViewMode, scaleLevel, videoRef]);
 
-  // Debug effect to monitor video stream availability
-  useEffect(() => {
-    console.log('Map Display Debug:', {
-      mapViewMode,
-      isWebRtcActive,
-      scaleLevel,
-      hasVideoRef: !!videoRef?.current,
-      hasRemoteStream: !!remoteStream,
-      hasMapVideoRef: !!mapVideoRef.current,
-      mainVideoHasStream: !!videoRef?.current?.srcObject,
-      mapVideoHasStream: !!mapVideoRef.current?.srcObject,
-      shouldShowVideoInFOV: mapViewMode === 'FOV_FITTED' && isWebRtcActive && remoteStream,
-      shouldShowVideoInMap: mapViewMode === 'FREE_PAN' && scaleLevel <= 1 && isWebRtcActive && remoteStream
-    });
-  }, [mapViewMode, isWebRtcActive, scaleLevel, remoteStream, videoRef]);
 
   // State to trigger canvas redraw on container resize
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
@@ -795,7 +881,8 @@ const MicroscopeMapDisplay = ({
           left: 0,
           width: '100%',
           height: '100%',
-          pointerEvents: 'none'
+          pointerEvents: 'none',
+          zIndex: 5 // 96-well plate overlay above scan results
         }}
       >
         {wells}
@@ -1025,8 +1112,26 @@ const MicroscopeMapDisplay = ({
     }
   }, [microscopeControlService, appendLog]);
 
-  // Debounced function to load stitched canvas
-  const loadStitchedCanvas = useCallback(async () => {
+  // Helper function to check if a region is covered by existing tiles
+  const isRegionCovered = useCallback((bounds, scale, channel, existingTiles) => {
+    const tilesForScaleAndChannel = existingTiles.filter(tile => 
+      tile.scale === scale && tile.channel === channel
+    );
+    
+    // Check if the requested region is fully covered by existing tiles
+    for (const tile of tilesForScaleAndChannel) {
+      if (tile.bounds.topLeft.x <= bounds.topLeft.x &&
+          tile.bounds.topLeft.y <= bounds.topLeft.y &&
+          tile.bounds.bottomRight.x >= bounds.bottomRight.x &&
+          tile.bounds.bottomRight.y >= bounds.bottomRight.y) {
+        return true;
+      }
+    }
+    return false;
+  }, []);
+
+  // Intelligent tile-based loading function
+  const loadStitchedTiles = useCallback(async () => {
     if (!microscopeControlService || !visibleLayers.scanResults || mapViewMode !== 'FREE_PAN') {
       return;
     }
@@ -1034,8 +1139,12 @@ const MicroscopeMapDisplay = ({
     const container = mapContainerRef.current;
     if (!container || !stageDimensions || !pixelsPerMm) return;
     
+    // Get the active channel
+    const activeChannel = Object.entries(visibleLayers.channels)
+      .find(([_, isVisible]) => isVisible)?.[0] || 'BF LED matrix full';
+    
     // Calculate visible region in stage coordinates with buffer
-    const bufferPercent = 0.1; // 10% buffer around visible area
+    const bufferPercent = 0.2; // 20% buffer around visible area for smoother panning
     const containerWidth = container.clientWidth;
     const containerHeight = container.clientHeight;
     
@@ -1058,38 +1167,30 @@ const MicroscopeMapDisplay = ({
       y: Math.min(stageDimensions.yMax, bottomRight.y)
     };
     
+    const bounds = { topLeft: clampedTopLeft, bottomRight: clampedBottomRight };
+    
+    // Check if this region is already covered by existing tiles
+    if (isRegionCovered(bounds, scaleLevel, activeChannel, stitchedTiles)) {
+      // Region is already loaded, no need to fetch
+      return;
+    }
+    
     const width_mm = clampedBottomRight.x - clampedTopLeft.x;
     const height_mm = clampedBottomRight.y - clampedTopLeft.y;
     
-    // Check if we need to update (significant change in view or scale)
-    const currentRequest = { 
-      x: clampedTopLeft.x, 
-      y: clampedTopLeft.y, 
-      width: width_mm, 
-      height: height_mm, 
-      scale: scaleLevel 
-    };
+    // Create a unique request key to prevent duplicate requests
+    const requestKey = getTileKey(bounds, scaleLevel, activeChannel);
     
-    const lastRequest = lastCanvasRequestRef.current;
-    const positionThreshold = Math.max(width_mm * 0.3, 1.0); // 30% or 1mm minimum
-    const sizeThreshold = 0.3; // 30% change in size
+    // Check if we're already loading this tile
+    if (activeTileRequestsRef.current.has(requestKey)) {
+      return;
+    }
     
-    const viewChanged = Math.abs(currentRequest.x - lastRequest.x) > positionThreshold ||
-                       Math.abs(currentRequest.y - lastRequest.y) > positionThreshold ||
-                       Math.abs(currentRequest.width - lastRequest.width) > lastRequest.width * sizeThreshold ||
-                       Math.abs(currentRequest.height - lastRequest.height) > lastRequest.height * sizeThreshold ||
-                       currentRequest.scale !== lastRequest.scale;
-    
-    if (!viewChanged && stitchedCanvasData) return;
-    
-    lastCanvasRequestRef.current = currentRequest;
+    // Mark this request as active
+    activeTileRequestsRef.current.add(requestKey);
     setIsLoadingCanvas(true);
     
     try {
-      // Get the active channel
-      const activeChannel = Object.entries(visibleLayers.channels)
-        .find(([_, isVisible]) => isVisible)?.[0] || 'BF LED matrix full';
-      
       const result = await microscopeControlService.get_stitched_region(
         clampedTopLeft.x,
         clampedTopLeft.y,
@@ -1101,42 +1202,71 @@ const MicroscopeMapDisplay = ({
       );
       
       if (result.success) {
-        setStitchedCanvasData({
+        const newTile = {
           data: `data:image/png;base64,${result.data}`,
-          bounds: { topLeft: clampedTopLeft, bottomRight: clampedBottomRight },
+          bounds,
           width_mm,
           height_mm,
-          scale: scaleLevel
-        });
+          scale: scaleLevel,
+          channel: activeChannel,
+          timestamp: Date.now()
+        };
+        
+        addOrUpdateTile(newTile);
+        
+        // Clean up old tiles for this scale/channel combination to prevent memory bloat
+        cleanupOldTiles(scaleLevel, activeChannel);
+        
+        if (appendLog) {
+          appendLog(`Loaded tile for scale ${scaleLevel}, region (${clampedTopLeft.x.toFixed(1)}, ${clampedTopLeft.y.toFixed(1)}) to (${clampedBottomRight.x.toFixed(1)}, ${clampedBottomRight.y.toFixed(1)})`);
+        }
       }
     } catch (error) {
-      console.error('Failed to load stitched canvas:', error);
-      if (appendLog) appendLog(`Failed to load scan results: ${error.message}`);
+      console.error('Failed to load stitched tile:', error);
+      if (appendLog) appendLog(`Failed to load scan tile: ${error.message}`);
     } finally {
-      setIsLoadingCanvas(false);
+      // Remove from active requests
+      activeTileRequestsRef.current.delete(requestKey);
+      
+      // Update loading state - check if any requests are still active
+      if (activeTileRequestsRef.current.size === 0) {
+        setIsLoadingCanvas(false);
+      }
     }
-  }, [microscopeControlService, visibleLayers.scanResults, visibleLayers.channels, mapViewMode, scaleLevel, displayToStageCoords, stageDimensions, pixelsPerMm, stitchedCanvasData, appendLog]);
+  }, [microscopeControlService, visibleLayers.scanResults, visibleLayers.channels, mapViewMode, scaleLevel, displayToStageCoords, stageDimensions, pixelsPerMm, isRegionCovered, getTileKey, addOrUpdateTile, appendLog]);
   
-  // Debounce canvas loading with longer delay
-  const scheduleCanvasUpdate = useCallback(() => {
+  // Debounce tile loading - only load after user stops interacting for 1 second
+  const scheduleTileUpdate = useCallback(() => {
     if (canvasUpdateTimerRef.current) {
       clearTimeout(canvasUpdateTimerRef.current);
     }
-    canvasUpdateTimerRef.current = setTimeout(loadStitchedCanvas, 666); // Wait 600ms before loading
-  }, [loadStitchedCanvas]);
+    canvasUpdateTimerRef.current = setTimeout(loadStitchedTiles, 1000); // Wait 1 second after user stops
+  }, [loadStitchedTiles]);
   
   // Function to refresh scan results
   const refreshScanResults = useCallback(() => {
     if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
-      setStitchedCanvasData(null);
-      lastCanvasRequestRef.current = { x: 0, y: 0, width: 0, height: 0, scale: -1 };
+      // Don't clear all tiles immediately - let new ones load first
+      const activeChannel = Object.entries(visibleLayers.channels)
+        .find(([_, isVisible]) => isVisible)?.[0] || 'BF LED matrix full';
+      
+      // Clear only tiles for current scale and channel to force refresh
+      setStitchedTiles(prevTiles => 
+        prevTiles.filter(tile => 
+          !(tile.scale === scaleLevel && tile.channel === activeChannel)
+        )
+      );
+      
+      // Clear active requests to allow new ones
+      activeTileRequestsRef.current.clear();
+      
       // Trigger immediate reload
-      scheduleCanvasUpdate();
+      scheduleTileUpdate();
       if (appendLog) {
         appendLog('Refreshing scan results display');
       }
     }
-  }, [mapViewMode, visibleLayers.scanResults, scheduleCanvasUpdate, appendLog]);
+  }, [mapViewMode, visibleLayers.scanResults, visibleLayers.channels, scaleLevel, scheduleTileUpdate, appendLog]);
   
   // Rectangle selection handlers
   const handleRectangleSelectionStart = useCallback((e) => {
@@ -1196,29 +1326,28 @@ const MicroscopeMapDisplay = ({
     setRectangleEnd(null);
   }, [rectangleStart, rectangleEnd, isRectangleSelection, displayToStageCoords, scanParameters.dx_mm, scanParameters.dy_mm]);
 
-  // Effect to trigger canvas loading when view changes (only on significant changes)
+  // Effect to trigger tile loading when view changes (throttled for performance)
   useEffect(() => {
     if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
-      // Only trigger on significant pan changes (>50px) or scale changes
       const container = mapContainerRef.current;
       if (container) {
-        const panThreshold = 50; // pixels
+        const panThreshold = 80; // Increased threshold to reduce triggering
         const lastPan = lastCanvasRequestRef.current.panX || 0;
         const lastMapScale = lastCanvasRequestRef.current.mapScale || 0;
         
         const significantPanChange = Math.abs(mapPan.x - lastPan) > panThreshold || 
                                     Math.abs(mapPan.y - (lastCanvasRequestRef.current.panY || 0)) > panThreshold;
-        const scaleChange = Math.abs(mapScale - lastMapScale) > lastMapScale * 0.1; // 10% scale change
+        const scaleChange = Math.abs(mapScale - lastMapScale) > lastMapScale * 0.15; // Less sensitive to scale changes
         
         if (significantPanChange || scaleChange) {
           lastCanvasRequestRef.current.panX = mapPan.x;
           lastCanvasRequestRef.current.panY = mapPan.y;
           lastCanvasRequestRef.current.mapScale = mapScale;
-          scheduleCanvasUpdate();
+          scheduleTileUpdate();
         }
       }
     }
-  }, [mapPan.x, mapPan.y, mapScale, mapViewMode, visibleLayers.scanResults, scheduleCanvasUpdate]);
+  }, [mapPan.x, mapPan.y, mapScale, mapViewMode, visibleLayers.scanResults, scheduleTileUpdate]);
 
   // Effect to refresh scan results every 3 seconds during scanning
   useEffect(() => {
@@ -1244,6 +1373,14 @@ const MicroscopeMapDisplay = ({
       }
     };
   }, [isScanInProgress, mapViewMode, visibleLayers.scanResults, refreshScanResults, appendLog]);
+
+  // Initial tile loading when the map becomes visible
+  useEffect(() => {
+    if (isOpen && mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
+      // Trigger initial tile loading through debounced function
+      scheduleTileUpdate();
+    }
+  }, [isOpen, mapViewMode, visibleLayers.scanResults, scheduleTileUpdate]);
 
   if (!isOpen) return null;
 
@@ -1410,7 +1547,8 @@ const MicroscopeMapDisplay = ({
                     try {
                       const result = await microscopeControlService.reset_stitching_canvas();
                       if (result.success) {
-                        setStitchedCanvasData(null);
+                        setStitchedTiles([]);
+                        activeTileRequestsRef.current.clear();
                         if (showNotification) showNotification('Scan canvas cleared', 'success');
                         if (appendLog) appendLog('Scan canvas cleared successfully');
                       }
@@ -1467,30 +1605,41 @@ const MicroscopeMapDisplay = ({
           <canvas ref={canvasRef} className="absolute inset-0" />
         )}
         
-        {/* Stitched scan results layer (below other elements) */}
-        {mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && stitchedCanvasData && stitchedCanvasData.scale === scaleLevel && (
-          <div
-            className="absolute pointer-events-none scan-results-container"
-            style={{
-              left: `${stageToDisplayCoords(stitchedCanvasData.bounds.topLeft.x, stitchedCanvasData.bounds.topLeft.y).x}px`,
-              top: `${stageToDisplayCoords(stitchedCanvasData.bounds.topLeft.x, stitchedCanvasData.bounds.topLeft.y).y}px`,
-              width: `${stitchedCanvasData.width_mm * pixelsPerMm * mapScale}px`,
-              height: `${stitchedCanvasData.height_mm * pixelsPerMm * mapScale}px`,
-              opacity: 0.8
-            }}
-          >
-            <img
-              src={stitchedCanvasData.data}
-              alt="Scan Results"
-              className="w-full h-full"
+        {/* Stitched scan results tiles layer (below other elements) */}
+        {mapViewMode === 'FREE_PAN' && visibleTiles.map((tile, index) => {
+          return (
+            <div
+              key={`${getTileKey(tile.bounds, tile.scale, tile.channel)}_${index}`}
+              className="absolute pointer-events-none scan-results-container"
               style={{
-                objectFit: 'fill', // Fill the container exactly, matching the calculated dimensions
-                objectPosition: 'top left', // Ensure alignment with top-left corner
-                display: 'block' // Remove any inline spacing
+                left: `${stageToDisplayCoords(tile.bounds.topLeft.x, tile.bounds.topLeft.y).x}px`,
+                top: `${stageToDisplayCoords(tile.bounds.topLeft.x, tile.bounds.topLeft.y).y}px`,
+                width: `${tile.width_mm * pixelsPerMm * mapScale}px`,
+                height: `${tile.height_mm * pixelsPerMm * mapScale}px`,
+                opacity: 0.8, // Consistent opacity for all tiles
+                zIndex: 1 // All scan result tiles at same level
               }}
-            />
-          </div>
-        )}
+            >
+              <img
+                src={tile.data}
+                alt={`Scan Results Tile (Scale ${tile.scale})`}
+                className="w-full h-full"
+                style={{
+                  objectFit: 'fill', // Fill the container exactly, matching the calculated dimensions
+                  objectPosition: 'top left', // Ensure alignment with top-left corner
+                  display: 'block' // Remove any inline spacing
+                }}
+              />
+              
+              {/* Debug info for tiles */}
+              {process.env.NODE_ENV === 'development' && (
+                <div className="absolute top-0 left-0 bg-black bg-opacity-50 text-white text-xs p-1">
+                  S{tile.scale} {tile.channel.substring(0, 3)}
+                </div>
+              )}
+            </div>
+          );
+        })}
         
         {/* Loading indicator for canvas */}
         {mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && isLoadingCanvas && (
@@ -1554,7 +1703,8 @@ const MicroscopeMapDisplay = ({
               left: `${videoFramePosition.x - videoFramePosition.width / 2}px`,
               top: `${videoFramePosition.y - videoFramePosition.height / 2}px`,
               width: `${videoFramePosition.width}px`,
-              height: `${videoFramePosition.height}px`
+              height: `${videoFramePosition.height}px`,
+              zIndex: 10 // FOV box should be on top of everything
             }}
           >
             {/* Show video content based on mode */}
