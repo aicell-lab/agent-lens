@@ -203,6 +203,32 @@ input[type="checkbox"]:disabled + span {
   color: white !important;
 }
 
+/* Rectangle selection cursor enhancement */
+.cursor-crosshair {
+  cursor: crosshair !important;
+}
+
+/* Enhanced crosshair cursor for rectangle selection */
+.rectangle-selection-active {
+  cursor: crosshair !important;
+  position: relative;
+}
+
+.rectangle-selection-active::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 20px;
+  height: 20px;
+  border: 2px solid #60a5fa;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 9999;
+  animation: pulse 2s infinite;
+}
+
 /* Invalid state - red border with dark background */
 .input-validation-container input.border-red-400 {
   background-color: #374151 !important; /* Keep dark background */

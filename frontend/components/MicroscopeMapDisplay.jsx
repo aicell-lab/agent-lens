@@ -64,6 +64,7 @@ const MicroscopeMapDisplay = ({
   const [rectangleEnd, setRectangleEnd] = useState(null);
   const [showScanConfig, setShowScanConfig] = useState(false);
   const [isScanInProgress, setIsScanInProgress] = useState(false);
+  const [isRefreshingScanResults, setIsRefreshingScanResults] = useState(false);
   const [scanParameters, setScanParameters] = useState({
     start_x_mm: 20,
     start_y_mm: 20,
@@ -624,34 +625,54 @@ const MicroscopeMapDisplay = ({
   const addOrUpdateTile = useCallback((newTile) => {
     setStitchedTiles(prevTiles => {
       const tileKey = getTileKey(newTile.bounds, newTile.scale, newTile.channel);
-      const existingIndex = prevTiles.findIndex(tile => 
-        getTileKey(tile.bounds, tile.scale, tile.channel) === tileKey
+      
+      // Remove any existing tiles (fresh or stale) that match this location
+      const filteredTiles = prevTiles.filter(tile => 
+        getTileKey(tile.bounds, tile.scale, tile.channel) !== tileKey
       );
       
-      if (existingIndex >= 0) {
-        // Update existing tile
-        const updatedTiles = [...prevTiles];
-        updatedTiles[existingIndex] = newTile;
-        return updatedTiles;
-      } else {
-        // Add new tile
-        return [...prevTiles, newTile];
-      }
+      // Add the new fresh tile
+      const freshTile = { ...newTile, isStale: false };
+      return [...filteredTiles, freshTile];
     });
   }, [getTileKey]);
 
   const cleanupOldTiles = useCallback((currentScale, activeChannel, maxTilesPerScale = 20) => {
     setStitchedTiles(prevTiles => {
-      // Keep all tiles for current scale and channel
-      const currentTiles = prevTiles.filter(tile => 
-        tile.scale === currentScale && tile.channel === activeChannel
+      const now = Date.now();
+      const staleTimeoutMs = 3000; // Remove stale tiles after 3 seconds (faster cleanup)
+      
+      // Keep all fresh tiles for current scale and channel
+      const currentFreshTiles = prevTiles.filter(tile => 
+        tile.scale === currentScale && tile.channel === activeChannel && !tile.isStale
       );
+      
+      // Keep stale tiles for current scale/channel only if there are no fresh tiles covering the same area
+      const currentStaleTiles = prevTiles.filter(tile => 
+        tile.scale === currentScale && tile.channel === activeChannel && tile.isStale
+      ).filter(staleTile => {
+        // Remove stale tile if there's a fresh tile covering the same area
+        const hasFreshReplacement = currentFreshTiles.some(freshTile => 
+          getTileKey(freshTile.bounds, freshTile.scale, freshTile.channel) === 
+          getTileKey(staleTile.bounds, staleTile.scale, staleTile.channel)
+        );
+        
+        // Also remove if too old
+        const isTooOld = staleTile.staleTimestamp && (now - staleTile.staleTimestamp) > staleTimeoutMs;
+        
+        return !hasFreshReplacement && !isTooOld;
+      });
       
       // Smart cleanup: when zooming out (to higher scale numbers), aggressively clean high-res tiles
       // When zooming in (to lower scale numbers), keep lower-res tiles as background
       const otherTiles = prevTiles.filter(tile => 
         !(tile.scale === currentScale && tile.channel === activeChannel)
       ).filter(tile => {
+        // Remove very old stale tiles
+        if (tile.isStale && tile.staleTimestamp && (now - tile.staleTimestamp) > staleTimeoutMs) {
+          return false;
+        }
+        
         // If zooming out (currentScale > tile.scale), remove high-resolution tiles
         if (currentScale > tile.scale) {
           return false; // Remove higher resolution tiles to save memory
@@ -660,9 +681,9 @@ const MicroscopeMapDisplay = ({
         return tile.channel === activeChannel; // Only keep same channel
       }).slice(-maxTilesPerScale); // Limit total tiles
       
-      return [...currentTiles, ...otherTiles];
+      return [...currentFreshTiles, ...currentStaleTiles, ...otherTiles];
     });
-  }, []);
+  }, [getTileKey]);
 
   // Effect to clean up old tiles when channel changes  
   useEffect(() => {
@@ -1112,14 +1133,14 @@ const MicroscopeMapDisplay = ({
     }
   }, [microscopeControlService, appendLog]);
 
-  // Helper function to check if a region is covered by existing tiles
+  // Helper function to check if a region is covered by existing fresh tiles
   const isRegionCovered = useCallback((bounds, scale, channel, existingTiles) => {
-    const tilesForScaleAndChannel = existingTiles.filter(tile => 
-      tile.scale === scale && tile.channel === channel
+    const freshTilesForScaleAndChannel = existingTiles.filter(tile => 
+      tile.scale === scale && tile.channel === channel && !tile.isStale
     );
     
-    // Check if the requested region is fully covered by existing tiles
-    for (const tile of tilesForScaleAndChannel) {
+    // Check if the requested region is fully covered by existing fresh tiles
+    for (const tile of freshTilesForScaleAndChannel) {
       if (tile.bounds.topLeft.x <= bounds.topLeft.x &&
           tile.bounds.topLeft.y <= bounds.topLeft.y &&
           tile.bounds.bottomRight.x >= bounds.bottomRight.x &&
@@ -1214,7 +1235,7 @@ const MicroscopeMapDisplay = ({
         
         addOrUpdateTile(newTile);
         
-        // Clean up old tiles for this scale/channel combination to prevent memory bloat
+        // Immediately clean up any overlapping stale tiles and old tiles
         cleanupOldTiles(scaleLevel, activeChannel);
         
         if (appendLog) {
@@ -1244,26 +1265,36 @@ const MicroscopeMapDisplay = ({
   }, [loadStitchedTiles]);
   
   // Function to refresh scan results
-  const refreshScanResults = useCallback(() => {
+  const refreshScanResults = useCallback(async () => {
     if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
-      // Don't clear all tiles immediately - let new ones load first
-      const activeChannel = Object.entries(visibleLayers.channels)
-        .find(([_, isVisible]) => isVisible)?.[0] || 'BF LED matrix full';
+      setIsRefreshingScanResults(true);
       
-      // Clear only tiles for current scale and channel to force refresh
-      setStitchedTiles(prevTiles => 
-        prevTiles.filter(tile => 
-          !(tile.scale === scaleLevel && tile.channel === activeChannel)
-        )
-      );
-      
-      // Clear active requests to allow new ones
-      activeTileRequestsRef.current.clear();
-      
-      // Trigger immediate reload
-      scheduleTileUpdate();
-      if (appendLog) {
-        appendLog('Refreshing scan results display');
+      try {
+        const activeChannel = Object.entries(visibleLayers.channels)
+          .find(([_, isVisible]) => isVisible)?.[0] || 'BF LED matrix full';
+        
+        // Mark existing tiles as stale instead of removing them immediately
+        setStitchedTiles(prevTiles => 
+          prevTiles.map(tile => 
+            (tile.scale === scaleLevel && tile.channel === activeChannel)
+              ? { ...tile, isStale: true, staleTimestamp: Date.now() }
+              : tile
+          )
+        );
+        
+        // Clear active requests to allow new ones
+        activeTileRequestsRef.current.clear();
+        
+        // Trigger immediate reload - new tiles will replace stale ones
+        scheduleTileUpdate();
+        if (appendLog) {
+          appendLog('Refreshing scan results display');
+        }
+        
+        // Keep the indicator visible for at least 1 second
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      } finally {
+        setIsRefreshingScanResults(false);
       }
     }
   }, [mapViewMode, visibleLayers.scanResults, visibleLayers.channels, scaleLevel, scheduleTileUpdate, appendLog]);
@@ -1373,6 +1404,25 @@ const MicroscopeMapDisplay = ({
       }
     };
   }, [isScanInProgress, mapViewMode, visibleLayers.scanResults, refreshScanResults, appendLog]);
+
+  // Effect to periodically clean up stale tiles
+  useEffect(() => {
+    let staleCleanupInterval;
+    
+    if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
+      staleCleanupInterval = setInterval(() => {
+        const activeChannel = Object.entries(visibleLayers.channels)
+          .find(([_, isVisible]) => isVisible)?.[0] || 'BF LED matrix full';
+        cleanupOldTiles(scaleLevel, activeChannel);
+      }, 2000); // More frequent cleanup to remove replaced stale tiles quickly
+    }
+    
+    return () => {
+      if (staleCleanupInterval) {
+        clearInterval(staleCleanupInterval);
+      }
+    };
+  }, [mapViewMode, visibleLayers.scanResults, visibleLayers.channels, scaleLevel, cleanupOldTiles]);
 
   // Initial tile loading when the map becomes visible
   useEffect(() => {
@@ -1514,32 +1564,39 @@ const MicroscopeMapDisplay = ({
               
               {/* Scan controls */}
               <div className="flex items-center space-x-2">
-                <button
-                  onClick={() => {
-                    if (isInteractionDisabled) return;
-                    if (showScanConfig || isRectangleSelection) {
-                      // Close scan panel and cancel selection
-                      setShowScanConfig(false);
-                      setIsRectangleSelection(false);
-                      setRectangleStart(null);
-                      setRectangleEnd(null);
-                    } else {
-                      // Open scan panel and load current microscope settings
-                      loadCurrentMicroscopeSettings();
-                      setShowScanConfig(true);
-                      // Automatically enable rectangle selection when opening scan panel
-                      setIsRectangleSelection(true);
+                              <button
+                onClick={() => {
+                  if (isInteractionDisabled) return;
+                  if (showScanConfig || isRectangleSelection) {
+                    // Close scan panel and cancel selection
+                    setShowScanConfig(false);
+                    setIsRectangleSelection(false);
+                    setRectangleStart(null);
+                    setRectangleEnd(null);
+                  } else {
+                    // Automatically switch to FREE_PAN mode if in FOV_FITTED mode
+                    if (mapViewMode === 'FOV_FITTED') {
+                      transitionToFreePan();
+                      if (appendLog) {
+                        appendLog('Switched to stage map view for scan area selection');
+                      }
                     }
-                  }}
-                  className={`px-2 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed ${
-                    showScanConfig || isRectangleSelection ? 'bg-blue-600 hover:bg-blue-500' : 'bg-gray-700 hover:bg-gray-600'
-                  }`}
-                  title="Configure scan and select area"
-                  disabled={isInteractionDisabled || !microscopeControlService}
-                >
-                  <i className="fas fa-vector-square mr-1"></i>
-                  {isScanInProgress ? 'Scanning...' : (showScanConfig || isRectangleSelection ? 'Cancel Scan Setup' : 'Scan Area')}
-                </button>
+                    // Open scan panel and load current microscope settings
+                    loadCurrentMicroscopeSettings();
+                    setShowScanConfig(true);
+                    // Automatically enable rectangle selection when opening scan panel
+                    setIsRectangleSelection(true);
+                  }
+                }}
+                className={`px-2 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed ${
+                  showScanConfig || isRectangleSelection ? 'bg-blue-600 hover:bg-blue-500' : 'bg-gray-700 hover:bg-gray-600'
+                }`}
+                title="Configure scan and select area (automatically switches to stage map view)"
+                disabled={isInteractionDisabled || !microscopeControlService}
+              >
+                <i className="fas fa-vector-square mr-1"></i>
+                {isScanInProgress ? 'Scanning...' : (showScanConfig || isRectangleSelection ? 'Cancel Scan Setup' : 'Scan Area')}
+              </button>
                 
                 <button
                   onClick={async () => {
@@ -1572,6 +1629,26 @@ const MicroscopeMapDisplay = ({
             <div className="flex items-center space-x-2">
               <span className="text-xs text-gray-300">Zoom: {Math.round(videoZoom * 100)}%</span>
               <span className="text-xs text-gray-400">• Scroll down to see stage map</span>
+              {/* Scan Area button visible in FOV_FITTED mode */}
+              <button
+                onClick={() => {
+                  if (isInteractionDisabled) return;
+                  // Automatically switch to FREE_PAN mode and open scan configuration
+                  transitionToFreePan();
+                  loadCurrentMicroscopeSettings();
+                  setShowScanConfig(true);
+                  setIsRectangleSelection(true);
+                  if (appendLog) {
+                    appendLog('Switched to stage map view for scan area selection');
+                  }
+                }}
+                className="px-2 py-1 text-xs bg-green-600 hover:bg-green-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Switch to stage map and configure scan area"
+                disabled={isInteractionDisabled || !microscopeControlService}
+              >
+                <i className="fas fa-vector-square mr-1"></i>
+                Scan Area
+              </button>
             </div>
           )}
         </div>
@@ -1597,7 +1674,8 @@ const MicroscopeMapDisplay = ({
         style={{
           userSelect: 'none',
           transition: isDragging || isPanning ? 'none' : 'transform 0.3s ease-out',
-          opacity: isInteractionDisabled ? 0.75 : 1
+          opacity: isInteractionDisabled ? 0.75 : 1,
+          cursor: isRectangleSelection && mapViewMode === 'FREE_PAN' && !isInteractionDisabled ? 'crosshair' : undefined
         }}
       >
         {/* Map canvas for FREE_PAN mode */}
@@ -1607,6 +1685,8 @@ const MicroscopeMapDisplay = ({
         
         {/* Stitched scan results tiles layer (below other elements) */}
         {mapViewMode === 'FREE_PAN' && visibleTiles.map((tile, index) => {
+          const isStale = tile.isStale === true;
+          
           return (
             <div
               key={`${getTileKey(tile.bounds, tile.scale, tile.channel)}_${index}`}
@@ -1616,8 +1696,7 @@ const MicroscopeMapDisplay = ({
                 top: `${stageToDisplayCoords(tile.bounds.topLeft.x, tile.bounds.topLeft.y).y}px`,
                 width: `${tile.width_mm * pixelsPerMm * mapScale}px`,
                 height: `${tile.height_mm * pixelsPerMm * mapScale}px`,
-                opacity: 0.8, // Consistent opacity for all tiles
-                zIndex: 1 // All scan result tiles at same level
+                zIndex: isStale ? 0 : 1, // Stale tiles behind fresh tiles (replaced seamlessly)
               }}
             >
               <img
@@ -1634,7 +1713,7 @@ const MicroscopeMapDisplay = ({
               {/* Debug info for tiles */}
               {process.env.NODE_ENV === 'development' && (
                 <div className="absolute top-0 left-0 bg-black bg-opacity-50 text-white text-xs p-1">
-                  S{tile.scale} {tile.channel.substring(0, 3)}
+                  S{tile.scale} {tile.channel.substring(0, 3)} {isStale ? '(stale)' : ''}
                 </div>
               )}
             </div>
@@ -1642,15 +1721,42 @@ const MicroscopeMapDisplay = ({
         })}
         
         {/* Loading indicator for canvas */}
-        {mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && isLoadingCanvas && (
-          <div className="absolute top-2 right-2 bg-black bg-opacity-60 text-white text-xs px-2 py-1 rounded">
-            <i className="fas fa-spinner fa-spin mr-1"></i>Loading scan results...
+        {mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && (isLoadingCanvas || isRefreshingScanResults) && (
+          <div className="absolute top-2 right-2 bg-black bg-opacity-60 text-white text-xs px-2 py-1 rounded" style={{ zIndex: 25 }}>
+            <i className="fas fa-spinner fa-spin mr-1"></i>
+            {isRefreshingScanResults ? 'Refreshing scan results...' : 'Loading scan results...'}
+          </div>
+        )}
+        
+        {/* Scan refresh indicator during active scanning */}
+        {mapViewMode === 'FREE_PAN' && isScanInProgress && visibleLayers.scanResults && (
+          <div className="absolute top-16 right-2 bg-green-600 bg-opacity-90 text-white text-xs px-3 py-2 rounded-lg border border-green-400" style={{ zIndex: 25 }}>
+            <div className="flex items-center space-x-2">
+              <div className="w-2 h-2 bg-green-300 rounded-full animate-pulse"></div>
+              <div>
+                <div className="font-medium">Live Scan Updates</div>
+                <div className="opacity-90">Updates every 3 seconds</div>
+              </div>
+            </div>
           </div>
         )}
         
         {/* 96-well plate overlay for FREE_PAN mode */}
         {mapViewMode === 'FREE_PAN' && render96WellPlate()}
         
+        {/* Rectangle selection active indicator */}
+        {mapViewMode === 'FREE_PAN' && isRectangleSelection && !rectangleStart && (
+          <div className="absolute top-16 left-1/2 transform -translate-x-1/2 bg-blue-600 bg-opacity-90 text-white px-4 py-2 rounded-lg border border-blue-400 animate-pulse" style={{ zIndex: 30 }}>
+            <div className="flex items-center space-x-2">
+              <i className="fas fa-vector-square text-lg"></i>
+              <div>
+                <div className="font-medium">Rectangle Selection Active</div>
+                <div className="text-xs opacity-90">Click and drag to select scan area</div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Rectangle selection overlay */}
         {mapViewMode === 'FREE_PAN' && isRectangleSelection && rectangleStart && rectangleEnd && (
           <>
@@ -1660,13 +1766,15 @@ const MicroscopeMapDisplay = ({
                 left: `${Math.min(rectangleStart.x, rectangleEnd.x)}px`,
                 top: `${Math.min(rectangleStart.y, rectangleEnd.y)}px`,
                 width: `${Math.abs(rectangleEnd.x - rectangleStart.x)}px`,
-                height: `${Math.abs(rectangleEnd.y - rectangleStart.y)}px`
+                height: `${Math.abs(rectangleEnd.y - rectangleStart.y)}px`,
+                zIndex: 30 // High z-index to stay above all map layers
               }}
             />
             <div className="absolute bg-black bg-opacity-80 text-white text-xs px-2 py-1 rounded pointer-events-none"
                  style={{
                    left: `${rectangleEnd.x + 10}px`,
-                   top: `${rectangleEnd.y + 10}px`
+                   top: `${rectangleEnd.y + 10}px`,
+                   zIndex: 31 // Even higher z-index for the info tooltip
                  }}>
               {(() => {
                 const topLeft = displayToStageCoords(
