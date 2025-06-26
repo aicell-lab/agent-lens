@@ -64,7 +64,6 @@ const MicroscopeMapDisplay = ({
   const [rectangleEnd, setRectangleEnd] = useState(null);
   const [showScanConfig, setShowScanConfig] = useState(false);
   const [isScanInProgress, setIsScanInProgress] = useState(false);
-  const [isRefreshingScanResults, setIsRefreshingScanResults] = useState(false);
   const [scanParameters, setScanParameters] = useState({
     start_x_mm: 20,
     start_y_mm: 20,
@@ -625,54 +624,34 @@ const MicroscopeMapDisplay = ({
   const addOrUpdateTile = useCallback((newTile) => {
     setStitchedTiles(prevTiles => {
       const tileKey = getTileKey(newTile.bounds, newTile.scale, newTile.channel);
-      
-      // Remove any existing tiles (fresh or stale) that match this location
-      const filteredTiles = prevTiles.filter(tile => 
-        getTileKey(tile.bounds, tile.scale, tile.channel) !== tileKey
+      const existingIndex = prevTiles.findIndex(tile => 
+        getTileKey(tile.bounds, tile.scale, tile.channel) === tileKey
       );
       
-      // Add the new fresh tile
-      const freshTile = { ...newTile, isStale: false };
-      return [...filteredTiles, freshTile];
+      if (existingIndex >= 0) {
+        // Update existing tile
+        const updatedTiles = [...prevTiles];
+        updatedTiles[existingIndex] = newTile;
+        return updatedTiles;
+      } else {
+        // Add new tile
+        return [...prevTiles, newTile];
+      }
     });
   }, [getTileKey]);
 
   const cleanupOldTiles = useCallback((currentScale, activeChannel, maxTilesPerScale = 20) => {
     setStitchedTiles(prevTiles => {
-      const now = Date.now();
-      const staleTimeoutMs = 3000; // Remove stale tiles after 3 seconds (faster cleanup)
-      
-      // Keep all fresh tiles for current scale and channel
-      const currentFreshTiles = prevTiles.filter(tile => 
-        tile.scale === currentScale && tile.channel === activeChannel && !tile.isStale
+      // Keep all tiles for current scale and channel
+      const currentTiles = prevTiles.filter(tile => 
+        tile.scale === currentScale && tile.channel === activeChannel
       );
-      
-      // Keep stale tiles for current scale/channel only if there are no fresh tiles covering the same area
-      const currentStaleTiles = prevTiles.filter(tile => 
-        tile.scale === currentScale && tile.channel === activeChannel && tile.isStale
-      ).filter(staleTile => {
-        // Remove stale tile if there's a fresh tile covering the same area
-        const hasFreshReplacement = currentFreshTiles.some(freshTile => 
-          getTileKey(freshTile.bounds, freshTile.scale, freshTile.channel) === 
-          getTileKey(staleTile.bounds, staleTile.scale, staleTile.channel)
-        );
-        
-        // Also remove if too old
-        const isTooOld = staleTile.staleTimestamp && (now - staleTile.staleTimestamp) > staleTimeoutMs;
-        
-        return !hasFreshReplacement && !isTooOld;
-      });
       
       // Smart cleanup: when zooming out (to higher scale numbers), aggressively clean high-res tiles
       // When zooming in (to lower scale numbers), keep lower-res tiles as background
       const otherTiles = prevTiles.filter(tile => 
         !(tile.scale === currentScale && tile.channel === activeChannel)
       ).filter(tile => {
-        // Remove very old stale tiles
-        if (tile.isStale && tile.staleTimestamp && (now - tile.staleTimestamp) > staleTimeoutMs) {
-          return false;
-        }
-        
         // If zooming out (currentScale > tile.scale), remove high-resolution tiles
         if (currentScale > tile.scale) {
           return false; // Remove higher resolution tiles to save memory
@@ -681,9 +660,9 @@ const MicroscopeMapDisplay = ({
         return tile.channel === activeChannel; // Only keep same channel
       }).slice(-maxTilesPerScale); // Limit total tiles
       
-      return [...currentFreshTiles, ...currentStaleTiles, ...otherTiles];
+      return [...currentTiles, ...otherTiles];
     });
-  }, [getTileKey]);
+  }, []);
 
   // Effect to clean up old tiles when channel changes  
   useEffect(() => {
@@ -1133,14 +1112,14 @@ const MicroscopeMapDisplay = ({
     }
   }, [microscopeControlService, appendLog]);
 
-  // Helper function to check if a region is covered by existing fresh tiles
+  // Helper function to check if a region is covered by existing tiles
   const isRegionCovered = useCallback((bounds, scale, channel, existingTiles) => {
-    const freshTilesForScaleAndChannel = existingTiles.filter(tile => 
-      tile.scale === scale && tile.channel === channel && !tile.isStale
+    const tilesForScaleAndChannel = existingTiles.filter(tile => 
+      tile.scale === scale && tile.channel === channel
     );
     
-    // Check if the requested region is fully covered by existing fresh tiles
-    for (const tile of freshTilesForScaleAndChannel) {
+    // Check if the requested region is fully covered by existing tiles
+    for (const tile of tilesForScaleAndChannel) {
       if (tile.bounds.topLeft.x <= bounds.topLeft.x &&
           tile.bounds.topLeft.y <= bounds.topLeft.y &&
           tile.bounds.bottomRight.x >= bounds.bottomRight.x &&
@@ -1235,7 +1214,7 @@ const MicroscopeMapDisplay = ({
         
         addOrUpdateTile(newTile);
         
-        // Immediately clean up any overlapping stale tiles and old tiles
+        // Clean up old tiles for this scale/channel combination to prevent memory bloat
         cleanupOldTiles(scaleLevel, activeChannel);
         
         if (appendLog) {
@@ -1265,39 +1244,20 @@ const MicroscopeMapDisplay = ({
   }, [loadStitchedTiles]);
   
   // Function to refresh scan results
-  const refreshScanResults = useCallback(async () => {
-    if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
-      setIsRefreshingScanResults(true);
+  const refreshScanResults = useCallback(() => {
+    if (visibleLayers.scanResults) {
+      // Don't clear tiles immediately - just mark them for refresh by clearing active requests
+      // and triggering a new load which will replace tiles when ready
+      activeTileRequestsRef.current.clear();
       
-      try {
-        const activeChannel = Object.entries(visibleLayers.channels)
-          .find(([_, isVisible]) => isVisible)?.[0] || 'BF LED matrix full';
-        
-        // Mark existing tiles as stale instead of removing them immediately
-        setStitchedTiles(prevTiles => 
-          prevTiles.map(tile => 
-            (tile.scale === scaleLevel && tile.channel === activeChannel)
-              ? { ...tile, isStale: true, staleTimestamp: Date.now() }
-              : tile
-          )
-        );
-        
-        // Clear active requests to allow new ones
-        activeTileRequestsRef.current.clear();
-        
-        // Trigger immediate reload - new tiles will replace stale ones
-        scheduleTileUpdate();
-        if (appendLog) {
-          appendLog('Refreshing scan results display');
-        }
-        
-        // Keep the indicator visible for at least 1 second
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      } finally {
-        setIsRefreshingScanResults(false);
+      // Force immediate tile loading without clearing existing ones first
+      loadStitchedTiles();
+      
+      if (appendLog) {
+        appendLog('Refreshing scan results display');
       }
     }
-  }, [mapViewMode, visibleLayers.scanResults, visibleLayers.channels, scaleLevel, scheduleTileUpdate, appendLog]);
+  }, [visibleLayers.scanResults, loadStitchedTiles, appendLog]);
   
   // Rectangle selection handlers
   const handleRectangleSelectionStart = useCallback((e) => {
@@ -1378,51 +1338,7 @@ const MicroscopeMapDisplay = ({
         }
       }
     }
-  }, [mapPan.x, mapPan.y, mapScale, mapViewMode, visibleLayers.scanResults, scheduleTileUpdate]);
-
-  // Effect to refresh scan results every 3 seconds during scanning
-  useEffect(() => {
-    let scanRefreshInterval;
-    
-    if (isScanInProgress && mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
-      if (appendLog) {
-        appendLog('Starting live scan progress updates (every 3 seconds)');
-      }
-      
-      scanRefreshInterval = setInterval(() => {
-        refreshScanResults();
-      }, 3000); // Refresh every 3 seconds during scan
-    }
-    
-    // Cleanup interval when scan stops or component unmounts
-    return () => {
-      if (scanRefreshInterval) {
-        clearInterval(scanRefreshInterval);
-        if (isScanInProgress && appendLog) {
-          appendLog('Stopped live scan progress updates');
-        }
-      }
-    };
-  }, [isScanInProgress, mapViewMode, visibleLayers.scanResults, refreshScanResults, appendLog]);
-
-  // Effect to periodically clean up stale tiles
-  useEffect(() => {
-    let staleCleanupInterval;
-    
-    if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
-      staleCleanupInterval = setInterval(() => {
-        const activeChannel = Object.entries(visibleLayers.channels)
-          .find(([_, isVisible]) => isVisible)?.[0] || 'BF LED matrix full';
-        cleanupOldTiles(scaleLevel, activeChannel);
-      }, 2000); // More frequent cleanup to remove replaced stale tiles quickly
-    }
-    
-    return () => {
-      if (staleCleanupInterval) {
-        clearInterval(staleCleanupInterval);
-      }
-    };
-  }, [mapViewMode, visibleLayers.scanResults, visibleLayers.channels, scaleLevel, cleanupOldTiles]);
+    }, [mapPan.x, mapPan.y, mapScale, mapViewMode, visibleLayers.scanResults, scheduleTileUpdate]);
 
   // Initial tile loading when the map becomes visible
   useEffect(() => {
@@ -1685,8 +1601,6 @@ const MicroscopeMapDisplay = ({
         
         {/* Stitched scan results tiles layer (below other elements) */}
         {mapViewMode === 'FREE_PAN' && visibleTiles.map((tile, index) => {
-          const isStale = tile.isStale === true;
-          
           return (
             <div
               key={`${getTileKey(tile.bounds, tile.scale, tile.channel)}_${index}`}
@@ -1696,7 +1610,8 @@ const MicroscopeMapDisplay = ({
                 top: `${stageToDisplayCoords(tile.bounds.topLeft.x, tile.bounds.topLeft.y).y}px`,
                 width: `${tile.width_mm * pixelsPerMm * mapScale}px`,
                 height: `${tile.height_mm * pixelsPerMm * mapScale}px`,
-                zIndex: isStale ? 0 : 1, // Stale tiles behind fresh tiles (replaced seamlessly)
+                opacity: 0.8, // Consistent opacity for all tiles
+                zIndex: 1 // All scan result tiles at same level
               }}
             >
               <img
@@ -1713,7 +1628,7 @@ const MicroscopeMapDisplay = ({
               {/* Debug info for tiles */}
               {process.env.NODE_ENV === 'development' && (
                 <div className="absolute top-0 left-0 bg-black bg-opacity-50 text-white text-xs p-1">
-                  S{tile.scale} {tile.channel.substring(0, 3)} {isStale ? '(stale)' : ''}
+                  S{tile.scale} {tile.channel.substring(0, 3)}
                 </div>
               )}
             </div>
@@ -1721,23 +1636,9 @@ const MicroscopeMapDisplay = ({
         })}
         
         {/* Loading indicator for canvas */}
-        {mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && (isLoadingCanvas || isRefreshingScanResults) && (
+        {mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && isLoadingCanvas && (
           <div className="absolute top-2 right-2 bg-black bg-opacity-60 text-white text-xs px-2 py-1 rounded" style={{ zIndex: 25 }}>
-            <i className="fas fa-spinner fa-spin mr-1"></i>
-            {isRefreshingScanResults ? 'Refreshing scan results...' : 'Loading scan results...'}
-          </div>
-        )}
-        
-        {/* Scan refresh indicator during active scanning */}
-        {mapViewMode === 'FREE_PAN' && isScanInProgress && visibleLayers.scanResults && (
-          <div className="absolute top-16 right-2 bg-green-600 bg-opacity-90 text-white text-xs px-3 py-2 rounded-lg border border-green-400" style={{ zIndex: 25 }}>
-            <div className="flex items-center space-x-2">
-              <div className="w-2 h-2 bg-green-300 rounded-full animate-pulse"></div>
-              <div>
-                <div className="font-medium">Live Scan Updates</div>
-                <div className="opacity-90">Updates every 3 seconds</div>
-              </div>
-            </div>
+            <i className="fas fa-spinner fa-spin mr-1"></i>Loading scan results...
           </div>
         )}
         
@@ -2293,7 +2194,7 @@ const MicroscopeMapDisplay = ({
                       // Enable scan results layer if not already
                       setVisibleLayers(prev => ({ ...prev, scanResults: true }));
                       
-                      // Auto-refresh the scan results display
+                      // Refresh scan results display once after completion
                       setTimeout(() => {
                         refreshScanResults();
                       }, 1000); // Wait 1 second then refresh
