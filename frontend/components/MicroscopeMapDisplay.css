@@ -188,3 +188,57 @@ input[type="checkbox"]:disabled + span {
   max-width: none; /* Prevent responsive image behavior */
   max-height: none; /* Prevent responsive image behavior */
 }
+
+/* Dark theme input validation overrides for Scan Configuration panel */
+.input-validation-container input[type="number"] {
+  /* Ensure dark background is maintained */
+  background-color: #374151 !important; /* Tailwind gray-700 */
+  color: white !important;
+}
+
+/* Valid but unsaved state - yellow border with dark background */
+.input-validation-container input.border-yellow-400 {
+  background-color: #374151 !important; /* Keep dark background */
+  border-color: #fbbf24 !important; /* Yellow border */
+  color: white !important;
+}
+
+/* Invalid state - red border with dark background */
+.input-validation-container input.border-red-400 {
+  background-color: #374151 !important; /* Keep dark background */
+  border-color: #f87171 !important; /* Red border */
+  color: white !important;
+}
+
+/* Normal/confirmed state - gray border with dark background */
+.input-validation-container input.border-gray-300,
+.input-validation-container input.border-gray-600 {
+  background-color: #374151 !important; /* Keep dark background */
+  border-color: #6b7280 !important; /* Gray border */
+  color: white !important;
+}
+
+/* Focus state */
+.input-validation-container input[type="number"]:focus {
+  background-color: #374151 !important;
+  color: white !important;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5); /* Blue focus ring */
+}
+
+/* Placeholder text */
+.input-validation-container input[type="number"]::placeholder {
+  color: #9ca3af !important; /* Gray-400 for placeholder */
+}
+
+/* Remove any light theme background overrides */
+.input-validation-container input.bg-yellow-50,
+.input-validation-container input.bg-red-50,
+.input-validation-container input.bg-green-50 {
+  background-color: #374151 !important;
+}
+
+/* Ensure relative positioning for containers */
+.input-validation-container {
+  position: relative;
+}
