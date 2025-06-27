@@ -819,9 +819,31 @@ const MicroscopeMapDisplay = ({
     
     const { well_size_mm, well_spacing_mm, a1_x_mm, a1_y_mm } = wellConfig;
     
-    const wells = [];
+    // Calculate 96-well plate border dimensions
     const rows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
     const cols = Array.from({ length: 12 }, (_, i) => i + 1);
+    
+    // Calculate plate boundary in stage coordinates
+    const plateMargin = well_size_mm / 2 + 3; // Add 3mm margin around wells for better visual spacing
+    const plateTopLeftX = a1_x_mm - plateMargin;
+    const plateTopLeftY = a1_y_mm - plateMargin;
+    const plateBottomRightX = a1_x_mm + (cols.length - 1) * well_spacing_mm + plateMargin;
+    const plateBottomRightY = a1_y_mm + (rows.length - 1) * well_spacing_mm + plateMargin;
+    
+    // Convert plate boundaries to display coordinates
+    const plateDisplayTopLeft = {
+      x: (plateTopLeftX - stageDimensions.xMin) * pixelsPerMm * mapScale + effectivePan.x,
+      y: (plateTopLeftY - stageDimensions.yMin) * pixelsPerMm * mapScale + effectivePan.y
+    };
+    const plateDisplayBottomRight = {
+      x: (plateBottomRightX - stageDimensions.xMin) * pixelsPerMm * mapScale + effectivePan.x,
+      y: (plateBottomRightY - stageDimensions.yMin) * pixelsPerMm * mapScale + effectivePan.y
+    };
+    
+    const plateWidth = plateDisplayBottomRight.x - plateDisplayTopLeft.x;
+    const plateHeight = plateDisplayBottomRight.y - plateDisplayTopLeft.y;
+    
+    const wells = [];
     
     rows.forEach((row, rowIndex) => {
       cols.forEach((col, colIndex) => {
@@ -863,6 +885,7 @@ const MicroscopeMapDisplay = ({
     
     return (
       <svg
+        className="well-plate-overlay"
         style={{
           position: 'absolute',
           top: 0,
@@ -873,6 +896,19 @@ const MicroscopeMapDisplay = ({
           zIndex: 5 // 96-well plate overlay above scan results
         }}
       >
+        {/* 96-well plate rectangular border */}
+        <rect
+          x={plateDisplayTopLeft.x}
+          y={plateDisplayTopLeft.y}
+          width={plateWidth}
+          height={plateHeight}
+          fill="none"
+          stroke="rgba(255, 255, 255, 0.8)"
+          strokeWidth="1"
+          rx="4"
+          ry="4"
+        />
+        
         {wells}
       </svg>
     );

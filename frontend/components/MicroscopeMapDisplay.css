@@ -15,6 +15,28 @@
   width: 100%;
   height: 100%;
   pointer-events: none;
+  opacity: 1 !important; /* Ensure overlay remains visible during all interactions */
+  z-index: 5; /* Keep above scan results */
+}
+
+/* Prevent well plate from being affected by disabled/dragging states */
+.microscope-map-disabled .well-plate-overlay,
+.cursor-grabbing .well-plate-overlay,
+.cursor-grab .well-plate-overlay {
+  opacity: 1 !important;
+}
+
+/* Ensure well plate SVG elements are not affected by parent opacity changes */
+.well-plate-overlay svg,
+.well-plate-overlay rect,
+.well-plate-overlay circle,
+.well-plate-overlay text {
+  opacity: inherit !important;
+}
+
+/* Prevent any transform transitions from affecting the well plate during interactions */
+.well-plate-overlay * {
+  transition: none !important;
 }
 
 /* Current position indicator */
