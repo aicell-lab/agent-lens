@@ -1886,19 +1886,49 @@ const MicroscopeMapDisplay = ({
                 )}
               </div>
             ) : (
-              // FREE_PAN mode: Show video in map frame when at high zoom
-              scaleLevel <= 1 && isWebRtcActive && remoteStream && (
-                <video
-                  ref={mapVideoRef}
-                  autoPlay
-                  muted
-                  playsInline
-                  className="w-full h-full object-cover"
-                  style={{
-                    backgroundColor: 'transparent',
-                    border: '1px solid rgba(255, 255, 0, 0.3)',
-                  }}
-                />
+              // FREE_PAN mode: Show video in map frame when at high zoom, or snapped image
+              scaleLevel <= 1 && (
+                isWebRtcActive && remoteStream ? (
+                  <video
+                    ref={mapVideoRef}
+                    autoPlay
+                    muted
+                    playsInline
+                    className="w-full h-full object-cover"
+                    style={{
+                      backgroundColor: 'transparent',
+                      border: '1px solid rgba(255, 255, 0, 0.3)',
+                    }}
+                  />
+                ) : snappedImageData?.url ? (
+                  <>
+                    <img
+                      src={snappedImageData.url}
+                      alt="Microscope Snapshot"
+                      className="w-full h-full object-cover"
+                      style={{
+                        backgroundColor: 'transparent',
+                        border: '1px solid rgba(255, 255, 0, 0.3)',
+                      }}
+                    />
+                    {/* ImageJ.js Badge for FREE_PAN mode */}
+                    {onOpenImageJ && (
+                      <button
+                        onClick={() => onOpenImageJ(snappedImageData.numpy)}
+                        className="imagej-badge absolute top-1 right-1 p-1 bg-white bg-opacity-90 hover:bg-opacity-100 rounded shadow-md transition-all duration-200 flex items-center gap-1 text-xs font-medium text-gray-700 hover:text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed z-10"
+                        title={imjoyApi ? "Open in ImageJ.js" : "ImageJ.js integration is loading..."}
+                        disabled={!imjoyApi}
+                        style={{ pointerEvents: 'auto' }}
+                      >
+                        <img 
+                          src="https://ij.imjoy.io/assets/badge/open-in-imagej-js-badge.svg" 
+                          alt="Open in ImageJ.js" 
+                          className="h-3"
+                        />
+                      </button>
+                    )}
+                  </>
+                ) : null
               )
             )}
 
