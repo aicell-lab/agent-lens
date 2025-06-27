@@ -1336,6 +1336,7 @@ const MicroscopeControlPanel = ({
             imjoyApi={imjoyApi}
             webRtcError={webRtcError}
             microscopeBusy={microscopeBusy}
+            setMicroscopeBusy={setMicroscopeBusy}
             currentOperation={currentOperation}
             videoContrastMin={videoContrastMin}
             setVideoContrastMin={setVideoContrastMin}

@@ -25,6 +25,7 @@ const MicroscopeMapDisplay = ({
   imjoyApi,
   webRtcError,
   microscopeBusy,
+  setMicroscopeBusy,
   currentOperation,
   videoContrastMin,
   setVideoContrastMin,
@@ -411,9 +412,12 @@ const MicroscopeMapDisplay = ({
       } else if (baseEffectiveScale < 1.0) { // Medium zoom - increased threshold significantly
         initialScaleLevel = 2; // Use medium resolution
         initialZoomLevel = baseEffectiveScale * Math.pow(4, 2);
-      } else { // Close zoom - only when really zoomed in
-        initialScaleLevel = 1; // Use higher resolution
+      } else if (baseEffectiveScale < 4.0) { // Close zoom - use scale 1 instead of 0 for better performance
+        initialScaleLevel = 1; // Use higher resolution (but not highest)
         initialZoomLevel = baseEffectiveScale * Math.pow(4, 1);
+      } else { // Extremely close zoom - only then use highest resolution
+        initialScaleLevel = 0; // Use highest resolution only when extremely zoomed in
+        initialZoomLevel = baseEffectiveScale;
       }
       
       // Clamp zoom level to valid range
@@ -550,9 +554,10 @@ const MicroscopeMapDisplay = ({
     const mouseY = e.clientY - rect.top;
     
     // Check if we should change scale level - aggressively bias towards higher scale levels to reduce data loading
-    if (newZoomLevel > 4.0 && scaleLevel > 0) {
+    if (newZoomLevel > (scaleLevel === 1 ? 12.0 : 4.0) && scaleLevel > 0) {
       // Zoom in to higher resolution (lower scale number = less zoomed out)
-      // Much more restrictive threshold (4.0 instead of 8.0) to keep users at lower resolution longer
+      // Extra restrictive for scale 1→0 transition (12.0) to avoid loading highest resolution unless really needed
+      // Regular restrictive threshold (4.0) for other scale transitions
       const equivalentZoom = (newZoomLevel * (1 / Math.pow(4, scaleLevel))) / (1 / Math.pow(4, scaleLevel - 1));
       zoomToPoint(Math.min(16.0, equivalentZoom), scaleLevel - 1, mouseX, mouseY);
     } else if (newZoomLevel < 1.5 && scaleLevel < 4) {
@@ -790,28 +795,6 @@ const MicroscopeMapDisplay = ({
     const stagePixelWidth = stageDimensions.width * pixelsPerMm;
     const stagePixelHeight = stageDimensions.height * pixelsPerMm;
         
-    // 96-well plate border
-    const wellConfig = microscopeConfiguration?.wellplate?.formats?.['96_well'];
-    if (wellConfig && visibleLayers.wellPlate) {
-      const { well_spacing_mm, a1_x_mm, a1_y_mm } = wellConfig;
-      
-      // Calculate 96-well plate boundaries (A1 to H12)
-      const plateStartX = a1_x_mm - well_spacing_mm * 0.5; // Half well before A1
-      const plateStartY = a1_y_mm - well_spacing_mm * 0.5; // Half well before A1
-      const plateEndX = a1_x_mm + 11 * well_spacing_mm + well_spacing_mm * 0.5; // Half well after column 12
-      const plateEndY = a1_y_mm + 7 * well_spacing_mm + well_spacing_mm * 0.5; // Half well after row H
-      
-      // Convert to pixel coordinates
-      const platePixelX = (plateStartX - stageDimensions.xMin) * pixelsPerMm;
-      const platePixelY = (plateStartY - stageDimensions.yMin) * pixelsPerMm;
-      const platePixelWidth = (plateEndX - plateStartX) * pixelsPerMm;
-      const platePixelHeight = (plateEndY - plateStartY) * pixelsPerMm;
-      
-      // Draw well plate border
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-      ctx.lineWidth = 2 / mapScale;
-      ctx.strokeRect(platePixelX, platePixelY, platePixelWidth, platePixelHeight);
-    }
     
     ctx.restore();
   }, [isOpen, stageDimensions, mapScale, effectivePan, visibleLayers.wellPlate, containerSize]);
@@ -1610,7 +1593,6 @@ const MicroscopeMapDisplay = ({
                 top: `${stageToDisplayCoords(tile.bounds.topLeft.x, tile.bounds.topLeft.y).y}px`,
                 width: `${tile.width_mm * pixelsPerMm * mapScale}px`,
                 height: `${tile.height_mm * pixelsPerMm * mapScale}px`,
-                opacity: 0.8, // Consistent opacity for all tiles
                 zIndex: 1 // All scan result tiles at same level
               }}
             >
@@ -2137,6 +2119,7 @@ const MicroscopeMapDisplay = ({
                   if (!microscopeControlService || isScanInProgress) return;
                   
                   setIsScanInProgress(true);
+                  if (setMicroscopeBusy) setMicroscopeBusy(true); // Also set global busy state
                   
                   try {
                     
@@ -2185,6 +2168,7 @@ const MicroscopeMapDisplay = ({
                     if (appendLog) appendLog(`Scan error: ${error.message}`);
                   } finally {
                     setIsScanInProgress(false);
+                    if (setMicroscopeBusy) setMicroscopeBusy(false); // Clear global busy state
                   }
                 }}
               className="px-3 py-1 text-xs bg-green-600 hover:bg-green-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
@@ -2231,6 +2215,7 @@ MicroscopeMapDisplay.propTypes = {
   imjoyApi: PropTypes.object,
   webRtcError: PropTypes.string,
   microscopeBusy: PropTypes.bool,
+  setMicroscopeBusy: PropTypes.func,
   currentOperation: PropTypes.oneOfType([PropTypes.string, PropTypes.object]),
   videoContrastMin: PropTypes.number,
   setVideoContrastMin: PropTypes.func,
