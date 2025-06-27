@@ -683,9 +683,9 @@ const MicroscopeMapDisplay = ({
       
       return () => clearTimeout(cleanupTimer);
     }
-  }, [visibleLayers.channels, mapViewMode, visibleLayers.scanResults, scaleLevel, cleanupOldTiles]);
+  }, [visibleLayers.channels, mapViewMode, visibleLayers.scanResults, scaleLevel]);
 
-  // Effect to cleanup high-resolution tiles when zooming out
+  // Effect to cleanup high-resolution tiles when zooming out and trigger fresh load
   useEffect(() => {
     if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
       const activeChannel = Object.entries(visibleLayers.channels)
@@ -693,8 +693,13 @@ const MicroscopeMapDisplay = ({
       
       // Cleanup immediately when scale changes
       cleanupOldTiles(scaleLevel, activeChannel);
+      
+      // Force tile load for the new scale level to ensure fresh data
+      setTimeout(() => {
+        loadStitchedTiles();
+      }, 200); // Small delay to ensure cleanup is complete
     }
-  }, [scaleLevel, mapViewMode, visibleLayers.scanResults, visibleLayers.channels, cleanupOldTiles]);
+  }, [scaleLevel, mapViewMode, visibleLayers.scanResults, visibleLayers.channels]);
 
   // Handle video source assignment for both main video and map video refs
   useEffect(() => {
@@ -1134,6 +1139,16 @@ const MicroscopeMapDisplay = ({
           tile.bounds.topLeft.y <= bounds.topLeft.y &&
           tile.bounds.bottomRight.x >= bounds.bottomRight.x &&
           tile.bounds.bottomRight.y >= bounds.bottomRight.y) {
+        
+        // Check if tile is potentially stale (older than 30 seconds)
+        const tileAge = Date.now() - (tile.timestamp || 0);
+        const maxTileAge = 10000; // 10 seconds
+        
+        if (tileAge > maxTileAge) {
+          // Tile is stale, don't consider region as covered
+          return false;
+        }
+        
         return true;
       }
     }
@@ -1256,15 +1271,19 @@ const MicroscopeMapDisplay = ({
   // Function to refresh scan results
   const refreshScanResults = useCallback(() => {
     if (visibleLayers.scanResults) {
-      // Don't clear tiles immediately - just mark them for refresh by clearing active requests
-      // and triggering a new load which will replace tiles when ready
+      // Clear active requests
       activeTileRequestsRef.current.clear();
       
-      // Force immediate tile loading without clearing existing ones first
-      loadStitchedTiles();
+      // Clear all existing tiles to force reload of fresh data
+      setStitchedTiles([]);
+      
+      // Force immediate tile loading after clearing tiles
+      setTimeout(() => {
+        loadStitchedTiles();
+      }, 100); // Small delay to ensure state is updated
       
       if (appendLog) {
-        appendLog('Refreshing scan results display');
+        appendLog('Refreshing scan results display - cleared cache');
       }
     }
   }, [visibleLayers.scanResults, loadStitchedTiles, appendLog]);
