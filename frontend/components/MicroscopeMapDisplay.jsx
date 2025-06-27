@@ -2139,28 +2139,6 @@ const MicroscopeMapDisplay = ({
                   setIsScanInProgress(true);
                   
                   try {
-                    // Check if WebRTC is active and stop it before scanning
-                    if (isWebRtcActive) {
-                      if (appendLog) appendLog('Stopping video stream before scan...');
-                      if (showNotification) showNotification('Stopping video stream for scan...', 'info');
-                      
-                                             // Stop WebRTC stream by calling the provided toggle function or service
-                       try {
-                         // If there's a toggle function passed as prop, use it
-                         if (toggleWebRtcStream) {
-                           await toggleWebRtcStream();
-                         } else {
-                           // Fallback: try to stop via service
-                           await microscopeControlService.stop_webrtc_stream();
-                         }
-                        
-                        // Wait 2 seconds for stream to properly close
-                        if (appendLog) appendLog('Waiting 2 seconds for stream to close...');
-                        await new Promise(resolve => setTimeout(resolve, 2000));
-                      } catch (streamError) {
-                        if (appendLog) appendLog(`Warning: Could not stop video stream: ${streamError.message}`);
-                      }
-                    }
                     
                     if (appendLog) appendLog(`Starting scan: ${scanParameters.Nx}×${scanParameters.Ny} positions from (${scanParameters.start_x_mm.toFixed(1)}, ${scanParameters.start_y_mm.toFixed(1)}) mm`);
                     
