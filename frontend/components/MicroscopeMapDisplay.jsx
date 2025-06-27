@@ -1036,6 +1036,33 @@ const MicroscopeMapDisplay = ({
     const displayY = mapY * mapScale + effectivePan.y;
     return { x: displayX, y: displayY };
   }, [mapViewMode, stageDimensions, pixelsPerMm, mapScale, effectivePan]);
+
+  // Calculate FOV positions for scan preview
+  const calculateFOVPositions = useCallback(() => {
+    if (!scanParameters || !fovSize || !pixelsPerMm || !mapScale) return [];
+    
+    const positions = [];
+    for (let i = 0; i < scanParameters.Nx; i++) {
+      for (let j = 0; j < scanParameters.Ny; j++) {
+        const stageX = scanParameters.start_x_mm + i * scanParameters.dx_mm;
+        const stageY = scanParameters.start_y_mm + j * scanParameters.dy_mm;
+        
+        const displayCoords = stageToDisplayCoords(stageX, stageY);
+        const fovDisplaySize = fovSize * pixelsPerMm * mapScale;
+        
+        positions.push({
+          x: displayCoords.x - fovDisplaySize / 2,
+          y: displayCoords.y - fovDisplaySize / 2,
+          width: fovDisplaySize,
+          height: fovDisplaySize,
+          stageX,
+          stageY,
+          index: i * scanParameters.Ny + j
+        });
+      }
+    }
+    return positions;
+  }, [scanParameters, fovSize, pixelsPerMm, mapScale, stageToDisplayCoords]);
   
   // Helper function to get intensity/exposure pair from status object (similar to MicroscopeControlPanel)
   const getIntensityExposurePairFromStatus = (status, channel) => {
@@ -1653,6 +1680,58 @@ const MicroscopeMapDisplay = ({
                 zIndex: 30 // High z-index to stay above all map layers
               }}
             />
+            {/* FOV preview boxes during rectangle selection */}
+            {(() => {
+              const topLeft = displayToStageCoords(
+                Math.min(rectangleStart.x, rectangleEnd.x),
+                Math.min(rectangleStart.y, rectangleEnd.y)
+              );
+              const bottomRight = displayToStageCoords(
+                Math.max(rectangleStart.x, rectangleEnd.x),
+                Math.max(rectangleStart.y, rectangleEnd.y)
+              );
+              const width_mm = bottomRight.x - topLeft.x;
+              const height_mm = bottomRight.y - topLeft.y;
+              const Nx = Math.max(1, Math.round(width_mm / scanParameters.dx_mm));
+              const Ny = Math.max(1, Math.round(height_mm / scanParameters.dy_mm));
+              
+              // Calculate FOV positions for the selected rectangle
+              const fovDisplaySize = fovSize * pixelsPerMm * mapScale;
+              const fovPreviews = [];
+              
+              for (let i = 0; i < Nx; i++) {
+                for (let j = 0; j < Ny; j++) {
+                  const stageX = topLeft.x + i * scanParameters.dx_mm;
+                  const stageY = topLeft.y + j * scanParameters.dy_mm;
+                  const displayCoords = stageToDisplayCoords(stageX, stageY);
+                  
+                  fovPreviews.push(
+                    <div
+                      key={`preview-fov-${i}-${j}`}
+                      className="absolute border border-orange-400 bg-orange-400 bg-opacity-15 pointer-events-none"
+                      style={{
+                        left: `${displayCoords.x - fovDisplaySize / 2}px`,
+                        top: `${displayCoords.y - fovDisplaySize / 2}px`,
+                        width: `${fovDisplaySize}px`,
+                        height: `${fovDisplaySize}px`,
+                        zIndex: 29 // Below info tooltip but above selection rectangle
+                      }}
+                    >
+                      {fovDisplaySize > 20 && (
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <span className="text-orange-300 text-xs font-bold bg-black bg-opacity-60 px-1 rounded">
+                            {i * Ny + j + 1}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                }
+              }
+              
+              return fovPreviews;
+            })()}
+            
             <div className="absolute bg-black bg-opacity-80 text-white text-xs px-2 py-1 rounded pointer-events-none"
                  style={{
                    left: `${rectangleEnd.x + 10}px`,
@@ -1685,6 +1764,39 @@ const MicroscopeMapDisplay = ({
             </div>
           </>
         )}
+
+        {/* FOV boxes preview during scan configuration */}
+        {mapViewMode === 'FREE_PAN' && showScanConfig && (() => {
+          const fovPositions = calculateFOVPositions();
+          return fovPositions.map((fov, index) => (
+            <div
+              key={`fov-${index}`}
+              className="absolute border border-green-400 bg-green-400 bg-opacity-10 pointer-events-none"
+              style={{
+                left: `${fov.x}px`,
+                top: `${fov.y}px`,
+                width: `${fov.width}px`,
+                height: `${fov.height}px`,
+                zIndex: 25 // Above scan results but below selection rectangle
+              }}
+            >
+              {/* Show position number for each FOV if zoom is high enough */}
+              {fov.width > 30 && (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <span className="text-green-300 text-xs font-bold bg-black bg-opacity-60 px-1 rounded">
+                    {fov.index + 1}
+                  </span>
+                </div>
+              )}
+              {/* Show stage coordinates if FOV is large enough */}
+              {fov.width > 50 && (
+                <div className="absolute top-0 left-0 text-green-300 text-xs bg-black bg-opacity-60 px-1 rounded-br">
+                  {fov.stageX.toFixed(1)}, {fov.stageY.toFixed(1)}
+                </div>
+              )}
+            </div>
+          ));
+        })()}
         
         {/* Current video frame position indicator */}
         {videoFramePosition && (
