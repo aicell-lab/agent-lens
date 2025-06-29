@@ -227,7 +227,7 @@ docs/                    # Documentation and diagrams
 
 ### 4.1. Microscopy Domain Knowledge
 - Understand multi-dimensional acquisition (X, Y, Z, time, channels)
-- Handle different illumination channels (BF, fluorescence: F405, F488, F561, F638, F730)
+- Handle different illumination channels (BF_LED_matrix_full, Fluorescence_405_nm_Ex, Fluorescence_488_nm_Ex, Fluorescence_561_nm_Ex, Fluorescence_638_nm_Ex, Fluorescence_730 nm_Ex)
 - Implement proper camera exposure and intensity control
 - Support autofocus algorithms (contrast-based and laser-based)
 - Handle well plate navigation (96, 48, 24-well formats)

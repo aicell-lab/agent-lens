@@ -74,8 +74,8 @@ const MicroscopeMapDisplay = ({
     start_y_mm: 20,
     Nx: 5,
     Ny: 5,
-    dx_mm: 0.9,
-    dy_mm: 0.9,
+    dx_mm: 0.85,
+    dy_mm: 0.85,
     channel: 'BF LED matrix full',
     intensity: 50,
     exposure_time: 100,
@@ -146,11 +146,11 @@ const MicroscopeMapDisplay = ({
     scanResults: true,
     channels: {
       'BF LED matrix full': true,
-      'F405': false,
-      'F488': false,
-      'F561': false,
-      'F638': false,
-      'F730': false
+      'Fluorescence 405 nm Ex': false,
+      'Fluorescence 488 nm Ex': false,
+      'Fluorescence 561 nm Ex': false,
+      'Fluorescence 638 nm Ex': false,
+      'Fluorescence 730 nm Ex': false
     }
   });
   
@@ -1152,11 +1152,11 @@ const MicroscopeMapDisplay = ({
       // Map channel numbers to channel names
       const channelMap = {
         "0": "BF LED matrix full",
-        "11": "F405",
-        "12": "F488", 
-        "14": "F561",
-        "13": "F638",
-        "15": "F730"
+        "11": "Fluorescence 405 nm Ex",
+        "12": "Fluorescence 488 nm Ex", 
+        "14": "Fluorescence 561 nm Ex",
+        "13": "Fluorescence 638 nm Ex",
+        "15": "Fluorescence 730 nm Ex"
       };
       
       const channelName = channelMap[currentChannel] || "BF LED matrix full";
@@ -2300,11 +2300,11 @@ const MicroscopeMapDisplay = ({
                 disabled={isScanInProgress}
               >
                 <option value="BF LED matrix full">BF LED matrix full</option>
-                <option value="F405">Fluorescence 405 nm</option>
-                <option value="F488">Fluorescence 488 nm</option>
-                <option value="F561">Fluorescence 561 nm</option>
-                <option value="F638">Fluorescence 638 nm</option>
-                <option value="F730">Fluorescence 730 nm</option>
+                <option value="Fluorescence 405 nm Ex">Fluorescence 405 nm Ex</option>
+                <option value="Fluorescence 488 nm Ex">Fluorescence 488 nm Ex</option>
+                <option value="Fluorescence 561 nm Ex">Fluorescence 561 nm Ex</option>
+                <option value="Fluorescence 638 nm Ex">Fluorescence 638 nm Ex</option>
+                <option value="Fluorescence 730 nm Ex">Fluorescence 730 nm Ex</option>
               </select>
             </div>
             

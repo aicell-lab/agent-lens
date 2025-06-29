@@ -37,7 +37,7 @@ Built for research laboratories, Agent-Lens combines modern web technologies wit
 
 ### 🔬 **Microscopy Control**
 - **Multi-dimensional Control**: X, Y, Z positioning with precision movement
-- **Illumination Management**: Support for multiple channels (BF, F405, F488, F561, F638, F730)
+- **Illumination Management**: Support for multiple channels (BF LED matrix full, Fluorescence 405 nm Ex, Fluorescence 488 nm Ex, Fluorescence 561 nm Ex, Fluorescence 638 nm Ex, Fluorescence 730 nm Ex)
 - **Camera Control**: Adjustable exposure time and intensity settings
 - **Autofocus**: Contrast-based and laser-based autofocus algorithms
 - **Well Plate Navigation**: Support for 96, 48, and 24-well plate formats
