@@ -59,6 +59,10 @@ const MicroscopeMapDisplay = ({
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   
+  // Add state to track active zoom operations
+  const [isZooming, setIsZooming] = useState(false);
+  const zoomTimeoutRef = useRef(null);
+  
   // New states for scan functionality
   const [isRectangleSelection, setIsRectangleSelection] = useState(false);
   const [rectangleStart, setRectangleStart] = useState(null);
@@ -388,7 +392,11 @@ const MicroscopeMapDisplay = ({
       setIsPanning(false);
       return;
     }
-    setIsPanning(false);
+    
+    // Set isPanning to false after a small delay to ensure operation is truly complete
+    setTimeout(() => {
+      setIsPanning(false);
+    }, 100); // Small delay to ensure pan operation is complete
   };
   
   // Switch to FREE_PAN mode when zooming out in FOV_FITTED mode
@@ -532,6 +540,17 @@ const MicroscopeMapDisplay = ({
     e.preventDefault();
     
     if (isInteractionDisabled) return;
+    
+    // Set zooming state to true and reset timeout
+    setIsZooming(true);
+    if (zoomTimeoutRef.current) {
+      clearTimeout(zoomTimeoutRef.current);
+    }
+    
+    // Clear zooming state after 500ms of no zoom activity
+    zoomTimeoutRef.current = setTimeout(() => {
+      setIsZooming(false);
+    }, 500);
     
     if (mapViewMode === 'FOV_FITTED') {
       // In FOV_FITTED mode, zoom out transitions to FREE_PAN mode
@@ -685,21 +704,24 @@ const MicroscopeMapDisplay = ({
     }
   }, [visibleLayers.channels, mapViewMode, visibleLayers.scanResults, scaleLevel]);
 
-  // Effect to cleanup high-resolution tiles when zooming out and trigger fresh load
+  // Effect to cleanup high-resolution tiles when zooming out (but don't immediately load during active zoom)
   useEffect(() => {
     if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
       const activeChannel = Object.entries(visibleLayers.channels)
         .find(([_, isVisible]) => isVisible)?.[0] || 'BF LED matrix full';
       
-      // Cleanup immediately when scale changes
+      // Always cleanup immediately when scale changes to save memory
       cleanupOldTiles(scaleLevel, activeChannel);
       
-      // Force tile load for the new scale level to ensure fresh data
-      setTimeout(() => {
-        loadStitchedTiles();
-      }, 200); // Small delay to ensure cleanup is complete
+      // Only trigger immediate tile load if user is NOT actively zooming
+      // If user is zooming, let the interaction completion effect handle it
+      if (!isZooming) {
+        setTimeout(() => {
+          loadStitchedTiles();
+        }, 200); // Small delay to ensure cleanup is complete
+      }
     }
-  }, [scaleLevel, mapViewMode, visibleLayers.scanResults, visibleLayers.channels]);
+  }, [scaleLevel, mapViewMode, visibleLayers.scanResults, visibleLayers.channels, isZooming]);
 
   // Handle video source assignment for both main video and map video refs
   useEffect(() => {
@@ -1385,6 +1407,11 @@ const MicroscopeMapDisplay = ({
   // Effect to trigger tile loading when view changes (throttled for performance)
   useEffect(() => {
     if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
+      // Don't trigger tile loading if user is actively interacting with the map
+      if (isPanning || isZooming) {
+        return;
+      }
+      
       const container = mapContainerRef.current;
       if (container) {
         const panThreshold = 80; // Increased threshold to reduce triggering
@@ -1403,7 +1430,22 @@ const MicroscopeMapDisplay = ({
         }
       }
     }
-    }, [mapPan.x, mapPan.y, mapScale, mapViewMode, visibleLayers.scanResults, scheduleTileUpdate]);
+  }, [mapPan.x, mapPan.y, mapScale, mapViewMode, visibleLayers.scanResults, isPanning, isZooming, scheduleTileUpdate]);
+
+  // Effect to trigger tile loading when user interactions finish
+  useEffect(() => {
+    if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
+      // Only trigger when user has stopped interacting (neither panning nor zooming)
+      if (!isPanning && !isZooming) {
+        // Add a small delay to ensure the interaction state has stabilized
+        const interactionEndTimer = setTimeout(() => {
+          scheduleTileUpdate();
+        }, 200); // 200ms delay after interactions end
+        
+        return () => clearTimeout(interactionEndTimer);
+      }
+    }
+  }, [isPanning, isZooming, mapViewMode, visibleLayers.scanResults, scheduleTileUpdate]);
 
   // Initial tile loading when the map becomes visible
   useEffect(() => {
@@ -1412,6 +1454,18 @@ const MicroscopeMapDisplay = ({
       scheduleTileUpdate();
     }
   }, [isOpen, mapViewMode, visibleLayers.scanResults, scheduleTileUpdate]);
+
+  // Cleanup timeouts on unmount
+  useEffect(() => {
+    return () => {
+      if (zoomTimeoutRef.current) {
+        clearTimeout(zoomTimeoutRef.current);
+      }
+      if (canvasUpdateTimerRef.current) {
+        clearTimeout(canvasUpdateTimerRef.current);
+      }
+    };
+  }, []);
 
   if (!isOpen) return null;
 
@@ -1430,6 +1484,16 @@ const MicroscopeMapDisplay = ({
                 <button
                   onClick={(e) => {
                     if (isInteractionDisabled) return;
+                    
+                    // Track zoom operation
+                    setIsZooming(true);
+                    if (zoomTimeoutRef.current) {
+                      clearTimeout(zoomTimeoutRef.current);
+                    }
+                    zoomTimeoutRef.current = setTimeout(() => {
+                      setIsZooming(false);
+                    }, 500);
+                    
                     const newZoom = zoomLevel * 0.9;
                     const rect = mapContainerRef.current.getBoundingClientRect();
                     const centerX = rect.width / 2;
@@ -1453,6 +1517,16 @@ const MicroscopeMapDisplay = ({
                 <button
                   onClick={(e) => {
                     if (isInteractionDisabled) return;
+                    
+                    // Track zoom operation
+                    setIsZooming(true);
+                    if (zoomTimeoutRef.current) {
+                      clearTimeout(zoomTimeoutRef.current);
+                    }
+                    zoomTimeoutRef.current = setTimeout(() => {
+                      setIsZooming(false);
+                    }, 500);
+                    
                     const newZoom = zoomLevel * 1.1;
                     const rect = mapContainerRef.current.getBoundingClientRect();
                     const centerX = rect.width / 2;
@@ -1471,7 +1545,18 @@ const MicroscopeMapDisplay = ({
                   <i className="fas fa-search-plus"></i>
                 </button>
                 <button
-                  onClick={isInteractionDisabled ? undefined : fitToView}
+                  onClick={isInteractionDisabled ? undefined : () => {
+                    // Track zoom operation
+                    setIsZooming(true);
+                    if (zoomTimeoutRef.current) {
+                      clearTimeout(zoomTimeoutRef.current);
+                    }
+                    zoomTimeoutRef.current = setTimeout(() => {
+                      setIsZooming(false);
+                    }, 500);
+                    
+                    fitToView();
+                  }}
                   className="px-2 py-1 text-xs bg-green-600 hover:bg-green-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Fit to View"
                   disabled={isInteractionDisabled}
