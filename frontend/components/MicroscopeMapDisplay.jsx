@@ -94,6 +94,10 @@ const MicroscopeMapDisplay = ({
     fps_target: 20
   });
 
+  // Layer dropdown state
+  const [isLayerDropdownOpen, setIsLayerDropdownOpen] = useState(false);
+  const layerDropdownRef = useRef(null);
+
   // Validation hooks for scan parameters with "Enter to confirm" behavior
   const startXInput = useValidatedNumberInput(
     scanParameters.start_x_mm,
@@ -385,12 +389,16 @@ const MicroscopeMapDisplay = ({
     };
   }, [mapViewMode, currentStagePosition, stageDimensions, mapScale, effectivePan, fovSize, pixelsPerMm]);
 
-  // Check if interactions should be disabled
-  const isInteractionDisabled = microscopeBusy || currentOperation !== null || isScanInProgress || isQuickScanInProgress;
+  // Split interaction controls: hardware vs map browsing
+  const isHardwareInteractionDisabled = microscopeBusy || currentOperation !== null || isScanInProgress || isQuickScanInProgress;
+  const isMapBrowsingDisabled = false; // Allow map browsing during all operations for real-time scan result viewing
+  
+  // Legacy compatibility - some UI elements still use the general disabled state
+  const isInteractionDisabled = isHardwareInteractionDisabled;
 
   // Handle panning (only in FREE_PAN mode)
   const handleMapPanning = (e) => {
-    if (mapViewMode !== 'FREE_PAN' || isInteractionDisabled) return;
+    if (mapViewMode !== 'FREE_PAN' || isMapBrowsingDisabled) return;
     
     if (isRectangleSelection) {
       handleRectangleSelectionStart(e);
@@ -409,7 +417,7 @@ const MicroscopeMapDisplay = ({
       return;
     }
     
-    if (isPanning && mapViewMode === 'FREE_PAN' && !isInteractionDisabled) {
+    if (isPanning && mapViewMode === 'FREE_PAN' && !isMapBrowsingDisabled) {
       // Cancel any pending tile loads during active panning
       if (canvasUpdateTimerRef.current) {
         clearTimeout(canvasUpdateTimerRef.current);
@@ -428,7 +436,7 @@ const MicroscopeMapDisplay = ({
       return;
     }
     
-    if (isInteractionDisabled) {
+    if (isMapBrowsingDisabled) {
       setIsPanning(false);
       return;
     }
@@ -491,8 +499,8 @@ const MicroscopeMapDisplay = ({
   }, [appendLog]);
 
   const handleDoubleClick = async (e) => {
-    if (!microscopeControlService || !microscopeConfiguration || !stageDimensions || isInteractionDisabled) {
-      if (showNotification && !isInteractionDisabled) {
+    if (!microscopeControlService || !microscopeConfiguration || !stageDimensions || isHardwareInteractionDisabled) {
+      if (showNotification && !isHardwareInteractionDisabled) {
         showNotification('Cannot move stage: microscope service or configuration not available', 'warning');
       }
       return;
@@ -579,7 +587,7 @@ const MicroscopeMapDisplay = ({
   const handleWheel = useCallback((e) => {
     e.preventDefault();
     
-    if (isInteractionDisabled) return;
+    if (isMapBrowsingDisabled) return;
     
     // Set zooming state to true and reset timeout
     setIsZooming(true);
@@ -1053,11 +1061,11 @@ const MicroscopeMapDisplay = ({
             left: 0, 
             width: '100%', 
             height: '100%', 
-            cursor: isInteractionDisabled ? 'not-allowed' : 'crosshair',
-            pointerEvents: isInteractionDisabled ? 'none' : 'auto'
+            cursor: isHardwareInteractionDisabled ? 'not-allowed' : 'crosshair',
+            pointerEvents: isHardwareInteractionDisabled ? 'none' : 'auto'
           }}
           onMouseDown={(e) => {
-            if (isInteractionDisabled) return;
+            if (isHardwareInteractionDisabled) return;
             const rect = e.currentTarget.getBoundingClientRect();
             const x = e.clientX - rect.left;
             const valueAt = Math.round((x / rect.width) * 255);
@@ -1388,7 +1396,7 @@ const MicroscopeMapDisplay = ({
   
   // Rectangle selection handlers
   const handleRectangleSelectionStart = useCallback((e) => {
-    if (!isRectangleSelection || isInteractionDisabled) return;
+    if (!isRectangleSelection || isHardwareInteractionDisabled) return;
     
     const rect = mapContainerRef.current.getBoundingClientRect();
     const startX = e.clientX - rect.left;
@@ -1494,6 +1502,22 @@ const MicroscopeMapDisplay = ({
       scheduleTileUpdate();
     }
   }, [isOpen, mapViewMode, visibleLayers.scanResults, scheduleTileUpdate]);
+
+  // Click outside handler for layer dropdown
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (layerDropdownRef.current && !layerDropdownRef.current.contains(event.target)) {
+        setIsLayerDropdownOpen(false);
+      }
+    };
+
+    if (isLayerDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside);
+      };
+    }
+  }, [isLayerDropdownOpen]);
 
   // Cleanup timeouts on unmount
   useEffect(() => {
@@ -1607,26 +1631,26 @@ const MicroscopeMapDisplay = ({
               </div>
               
               {/* Layer selector dropdown */}
-              <div className="relative group">
+              <div className="relative" ref={layerDropdownRef}>
                 <button
-                  className="px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
-                  disabled={isInteractionDisabled}
+                  onClick={() => setIsLayerDropdownOpen(!isLayerDropdownOpen)}
+                  className="px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded flex items-center"
                 >
                   <i className="fas fa-layer-group mr-1"></i>
                   Layers
-                  <i className="fas fa-caret-down ml-1"></i>
+                  <i className={`fas ml-1 transition-transform ${isLayerDropdownOpen ? 'fa-caret-up' : 'fa-caret-down'}`}></i>
                 </button>
                 
-                <div className="absolute top-full right-0 mt-1 bg-gray-800 rounded shadow-lg p-2 min-w-[200px] hidden group-hover:block z-20">
+                {isLayerDropdownOpen && (
+                  <div className="absolute top-full right-0 mt-1 bg-gray-800 rounded shadow-lg p-2 min-w-[200px] z-20">
                   <div className="text-xs text-gray-300 font-semibold mb-2">Map Layers</div>
                   
                   <label className="flex items-center text-white text-xs mb-1 hover:bg-gray-700 p-1 rounded cursor-pointer">
                     <input
                       type="checkbox"
                       checked={visibleLayers.wellPlate}
-                      onChange={(e) => !isInteractionDisabled && setVisibleLayers(prev => ({ ...prev, wellPlate: e.target.checked }))}
+                      onChange={(e) => setVisibleLayers(prev => ({ ...prev, wellPlate: e.target.checked }))}
                       className="mr-2"
-                      disabled={isInteractionDisabled}
                     />
                     96-Well Plate Grid
                   </label>
@@ -1635,9 +1659,8 @@ const MicroscopeMapDisplay = ({
                     <input
                       type="checkbox"
                       checked={visibleLayers.scanResults}
-                      onChange={(e) => !isInteractionDisabled && setVisibleLayers(prev => ({ ...prev, scanResults: e.target.checked }))}
+                      onChange={(e) => setVisibleLayers(prev => ({ ...prev, scanResults: e.target.checked }))}
                       className="mr-2"
-                      disabled={isInteractionDisabled}
                     />
                     Scan Results
                   </label>
@@ -1651,21 +1674,21 @@ const MicroscopeMapDisplay = ({
                             type="radio"
                             name="channel"
                             checked={isVisible}
-                            onChange={() => !isInteractionDisabled && setVisibleLayers(prev => ({
+                            onChange={() => setVisibleLayers(prev => ({
                               ...prev,
                               channels: Object.fromEntries(
                                 Object.keys(prev.channels).map(ch => [ch, ch === channel])
                               )
                             }))}
                             className="mr-2"
-                            disabled={isInteractionDisabled}
                           />
                           {channel}
                         </label>
                       ))}
                     </>
                   )}
-                </div>
+                  </div>
+                )}
               </div>
               
               {/* Scan controls */}
@@ -1804,25 +1827,25 @@ const MicroscopeMapDisplay = ({
       <div
         ref={mapContainerRef}
         className={`absolute inset-0 top-12 overflow-hidden ${
-          isInteractionDisabled 
+          isMapBrowsingDisabled 
             ? 'cursor-not-allowed microscope-map-disabled' 
             : mapViewMode === 'FOV_FITTED' 
-              ? 'cursor-grab' 
+              ? (isHardwareInteractionDisabled ? 'cursor-not-allowed' : 'cursor-grab')
               : isRectangleSelection
-                ? 'cursor-crosshair'
+                ? (isHardwareInteractionDisabled ? 'cursor-not-allowed' : 'cursor-crosshair')
                 : 'cursor-move'
         } ${isDragging || isPanning ? 'cursor-grabbing' : ''}`}
-        onMouseDown={isInteractionDisabled ? undefined : (mapViewMode === 'FOV_FITTED' ? onMouseDown : handleMapPanning)}
-        onMouseMove={isInteractionDisabled ? undefined : (mapViewMode === 'FOV_FITTED' ? onMouseMove : handleMapPanMove)}
-        onMouseUp={isInteractionDisabled ? undefined : (mapViewMode === 'FOV_FITTED' ? onMouseUp : handleMapPanEnd)}
-        onMouseLeave={isInteractionDisabled ? undefined : (mapViewMode === 'FOV_FITTED' ? onMouseLeave : handleMapPanEnd)}
-        onDoubleClick={isInteractionDisabled ? undefined : (mapViewMode === 'FREE_PAN' && !isRectangleSelection ? handleDoubleClick : undefined)}
-        style={{
-          userSelect: 'none',
-          transition: isDragging || isPanning ? 'none' : 'transform 0.3s ease-out',
-          opacity: isInteractionDisabled ? 0.75 : 1,
-          cursor: isRectangleSelection && mapViewMode === 'FREE_PAN' && !isInteractionDisabled ? 'crosshair' : undefined
-        }}
+        onMouseDown={isMapBrowsingDisabled ? undefined : (mapViewMode === 'FOV_FITTED' ? (isHardwareInteractionDisabled ? undefined : onMouseDown) : handleMapPanning)}
+        onMouseMove={isMapBrowsingDisabled ? undefined : (mapViewMode === 'FOV_FITTED' ? (isHardwareInteractionDisabled ? undefined : onMouseMove) : handleMapPanMove)}
+        onMouseUp={isMapBrowsingDisabled ? undefined : (mapViewMode === 'FOV_FITTED' ? (isHardwareInteractionDisabled ? undefined : onMouseUp) : handleMapPanEnd)}
+        onMouseLeave={isMapBrowsingDisabled ? undefined : (mapViewMode === 'FOV_FITTED' ? (isHardwareInteractionDisabled ? undefined : onMouseLeave) : handleMapPanEnd)}
+        onDoubleClick={isHardwareInteractionDisabled ? undefined : (mapViewMode === 'FREE_PAN' && !isRectangleSelection ? handleDoubleClick : undefined)}
+                  style={{
+            userSelect: 'none',
+            transition: isDragging || isPanning ? 'none' : 'transform 0.3s ease-out',
+            opacity: isMapBrowsingDisabled ? 0.75 : 1,
+            cursor: isRectangleSelection && mapViewMode === 'FREE_PAN' && !isHardwareInteractionDisabled ? 'crosshair' : undefined
+          }}
       >
         {/* Map canvas for FREE_PAN mode */}
         {mapViewMode === 'FREE_PAN' && (
@@ -2143,7 +2166,7 @@ const MicroscopeMapDisplay = ({
         )}
         
         {/* Drag move instructions overlay for FOV_FITTED mode */}
-        {mapViewMode === 'FOV_FITTED' && (isWebRtcActive || snapshotImage) && microscopeControlService && !isInteractionDisabled && !isDragging && (
+        {mapViewMode === 'FOV_FITTED' && (isWebRtcActive || snapshotImage) && microscopeControlService && !isHardwareInteractionDisabled && !isDragging && (
           <div className="absolute bottom-2 left-2 bg-black bg-opacity-60 text-white text-xs px-2 py-1 rounded pointer-events-none">
             <i className="fas fa-hand-paper mr-1"></i>
             Drag to move stage
@@ -2158,17 +2181,17 @@ const MicroscopeMapDisplay = ({
           </div>
         )}
         
-        {/* Disabled state indicator */}
-        {isInteractionDisabled && (
-          <div className="absolute top-2 left-2 bg-red-500 bg-opacity-80 text-white text-xs px-2 py-1 rounded pointer-events-none">
-            <i className="fas fa-lock mr-1"></i>
+        {/* Hardware operations status indicator */}
+        {isHardwareInteractionDisabled && (
+          <div className="absolute top-2 left-2 hardware-status-indicator text-white text-xs px-2 py-1 rounded pointer-events-none">
+            <i className="fas fa-cog mr-1"></i>
             {isScanInProgress ? 
-              'Map disabled during scanning' :
+              'Hardware locked during scanning • Map browsing available' :
               isQuickScanInProgress ?
-                'Map disabled during quick scanning' :
+                'Hardware locked during quick scanning • Map browsing available' :
                 currentOperation === 'loading' || currentOperation === 'unloading' ? 
-                  `Map disabled during ${currentOperation}` : 
-                  'Map disabled during operation'}
+                  `Hardware locked during ${currentOperation} • Map browsing available` : 
+                  'Hardware locked during operation • Map browsing available'}
           </div>
         )}
         
@@ -2179,10 +2202,16 @@ const MicroscopeMapDisplay = ({
             <div>X: {currentStagePosition.x.toFixed(3)}mm</div>
             <div>Y: {currentStagePosition.y.toFixed(3)}mm</div>
             <div>Z: {currentStagePosition.z.toFixed(3)}mm</div>
-            {microscopeControlService && (
+            {microscopeControlService && !isHardwareInteractionDisabled && (
               <div className="mt-1 text-xs text-gray-300 border-t border-gray-600 pt-1">
                 <i className="fas fa-mouse-pointer mr-1"></i>
                 Double-click to move stage
+              </div>
+            )}
+            {microscopeControlService && isHardwareInteractionDisabled && (
+              <div className="mt-1 text-xs text-orange-300 border-t border-gray-600 pt-1">
+                <i className="fas fa-lock mr-1"></i>
+                Stage movement locked
               </div>
             )}
           </div>
@@ -2191,7 +2220,7 @@ const MicroscopeMapDisplay = ({
       
       {/* Video contrast controls for FOV_FITTED mode */}
       {mapViewMode === 'FOV_FITTED' && isWebRtcActive && (
-        <div className={`absolute bottom-2 right-2 bg-black bg-opacity-80 p-2 rounded text-white max-w-xs ${isInteractionDisabled ? 'opacity-75' : ''}`}>
+        <div className={`absolute bottom-2 right-2 bg-black bg-opacity-80 p-2 rounded text-white max-w-xs ${isHardwareInteractionDisabled ? 'opacity-75' : ''}`}>
           <div className="flex items-center justify-between mb-1">
             <div className="flex items-center space-x-2">
               <span className="text-xs font-medium">Contrast</span>
@@ -2200,10 +2229,10 @@ const MicroscopeMapDisplay = ({
               )}
             </div>
             <button
-              onClick={() => !isInteractionDisabled && setIsContrastControlsCollapsed(!isContrastControlsCollapsed)}
+              onClick={() => !isHardwareInteractionDisabled && setIsContrastControlsCollapsed(!isContrastControlsCollapsed)}
               className="text-xs text-gray-300 hover:text-white p-1 disabled:cursor-not-allowed disabled:opacity-75"
               title={isContrastControlsCollapsed ? "Show contrast controls" : "Hide contrast controls"}
-              disabled={isInteractionDisabled}
+              disabled={isHardwareInteractionDisabled}
             >
               <i className={`fas ${isContrastControlsCollapsed ? 'fa-chevron-up' : 'fa-chevron-down'}`}></i>
             </button>
@@ -2218,8 +2247,8 @@ const MicroscopeMapDisplay = ({
                   <input
                     type="checkbox"
                     checked={autoContrastEnabled}
-                    onChange={(e) => !isInteractionDisabled && setAutoContrastEnabled(e.target.checked)}
-                    disabled={!isDataChannelConnected || isInteractionDisabled}
+                    onChange={(e) => !isHardwareInteractionDisabled && setAutoContrastEnabled(e.target.checked)}
+                    disabled={!isDataChannelConnected || isHardwareInteractionDisabled}
                   />
                   <span className="auto-contrast-slider"></span>
                 </label>

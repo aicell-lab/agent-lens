@@ -134,12 +134,8 @@ input[type="checkbox"]:disabled + span {
 }
 
 /* Layer dropdown styles */
-.group:hover .group-hover\:block {
-  display: block !important;
-}
-
-.group .group-hover\:block {
-  display: none;
+.layer-dropdown-transition {
+  transition: opacity 200ms ease-out, transform 200ms ease-out;
 }
 
 /* Auto-contrast toggle styles */
@@ -289,4 +285,21 @@ input[type="checkbox"]:disabled + span {
 /* Ensure relative positioning for containers */
 .input-validation-container {
   position: relative;
+}
+
+/* Hardware operations status indicator */
+.hardware-status-indicator {
+  background: linear-gradient(135deg, rgba(251, 146, 60, 0.9), rgba(245, 101, 101, 0.9));
+  border: 1px solid rgba(251, 146, 60, 0.6);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  animation: pulse-orange 2s infinite;
+}
+
+@keyframes pulse-orange {
+  0%, 100% {
+    box-shadow: 0 2px 8px rgba(251, 146, 60, 0.3);
+  }
+  50% {
+    box-shadow: 0 2px 12px rgba(251, 146, 60, 0.6);
+  }
 }
