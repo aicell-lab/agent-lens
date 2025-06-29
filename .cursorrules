@@ -161,8 +161,8 @@ tests/                     # Pytest test files (project root level)
 frontend/                  # React application
 ├── main.jsx              # Root React component
 ├── components/           # Reusable UI components
-├── utils.jsx            # Utility functions and service connections
-└── main.css             # Global styles
+├── utils.jsx            # Utility functions, service connections, and input validation
+└── main.css             # Global styles with input validation CSS classes
 
 docker/                   # Containerization
 ├── docker-compose-*.yml  # Multi-service configurations
@@ -194,6 +194,9 @@ docs/                    # Documentation and diagrams
 - Use async/await for API calls with error handling
 - Optimize re-renders with useCallback and useMemo
 - Follow React best practices for state management
+- **MANDATORY**: Use `useValidatedNumberInput` hook for all number input fields to prevent NaN crashes
+- Implement "Enter to confirm" behavior for better UX and data integrity
+- Use consistent validation styling with `input-validation-container` pattern
 
 ### 3.3. Performance Optimization
 - Use Zarr format for efficient large image data handling
@@ -212,11 +215,19 @@ docs/                    # Documentation and diagrams
 - Support keyboard shortcuts for common operations
 - Use notification system for user feedback
 
+#### Input Validation UI/UX Requirements
+- **ALWAYS use validated inputs** for number fields to prevent NaN crashes
+- **Visual validation feedback** with color-coded borders and icons
+- **"Enter to confirm" behavior** - no immediate state updates on keystroke
+- **Escape to cancel** - allow users to revert changes before confirming
+- **Help text on hover/focus** - show valid ranges and usage hints
+- **Consistent validation styling** across all components using `input-validation-container` pattern
+
 ## 4. Core Feature Implementation
 
 ### 4.1. Microscopy Domain Knowledge
 - Understand multi-dimensional acquisition (X, Y, Z, time, channels)
-- Handle different illumination channels (BF, fluorescence: F405, F488, F561, F638, F730)
+- Handle different illumination channels (BF_LED_matrix_full, Fluorescence_405_nm_Ex, Fluorescence_488_nm_Ex, Fluorescence_561_nm_Ex, Fluorescence_638_nm_Ex, Fluorescence_730 nm_Ex)
 - Implement proper camera exposure and intensity control
 - Support autofocus algorithms (contrast-based and laser-based)
 - Handle well plate navigation (96, 48, 24-well formats)
@@ -373,8 +384,54 @@ container: python:3.11-slim
 - [ ] Security best practices followed
 - [ ] Tests included for new functionality
 - [ ] Documentation updated if needed
+- [ ] **Number inputs use `useValidatedNumberInput` hook** (prevents NaN crashes)
+- [ ] **Input validation uses `getInputValidationClasses` for background color feedback**
+- [ ] **"Enter to confirm" behavior implemented for critical inputs**
 
 ### 7.2. Common Code Patterns
+
+#### Input Validation Pattern (✅ Implemented System)
+For all number input fields, use the validated input system to prevent NaN crashes and provide better UX:
+
+```jsx
+// Import validation utilities
+import { useValidatedNumberInput, getInputValidationClasses } from '../utils';
+
+// Create validation hook with appropriate constraints
+const myNumberInput = useValidatedNumberInput(
+  currentValue,                              // Current state value
+  (newValue) => setState(newValue),         // State update function
+  { 
+    min: 0,                                 // Minimum allowed value
+    max: 100,                               // Maximum allowed value
+    allowFloat: true,                       // Allow decimal numbers
+    allowEmpty: false                       // Whether empty input is valid
+  },
+  showNotification                          // Optional notification function
+);
+
+// Use in JSX with validation styling
+<input
+  type="number"
+  value={myNumberInput.inputValue}
+  onChange={myNumberInput.handleInputChange}
+  onKeyDown={myNumberInput.handleKeyDown}    // Enter to confirm, Escape to cancel
+  onBlur={myNumberInput.handleBlur}          // Confirm on focus loss
+  className={getInputValidationClasses(
+    myNumberInput.isValid,
+    myNumberInput.hasUnsavedChanges,
+    "base-input-classes"
+  )}
+  placeholder="Enter value"
+/>
+```
+
+**Key Benefits:**
+- **NaN Prevention**: Users can clear fields without causing crashes
+- **"Enter to Confirm"**: Changes only apply when user presses Enter or loses focus
+- **Visual Feedback**: Background color changes indicate validation state (normal/pending/error)
+- **Consistent UX**: Same behavior across all number inputs in the application
+- **Range Validation**: Automatic enforcement of min/max constraints
 
 #### Service Registration Pattern
 ```python

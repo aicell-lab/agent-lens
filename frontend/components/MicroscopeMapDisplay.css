@@ -15,6 +15,28 @@
   width: 100%;
   height: 100%;
   pointer-events: none;
+  opacity: 1 !important; /* Ensure overlay remains visible during all interactions */
+  z-index: 5; /* Keep above scan results */
+}
+
+/* Prevent well plate from being affected by disabled/dragging states */
+.microscope-map-disabled .well-plate-overlay,
+.cursor-grabbing .well-plate-overlay,
+.cursor-grab .well-plate-overlay {
+  opacity: 1 !important;
+}
+
+/* Ensure well plate SVG elements are not affected by parent opacity changes */
+.well-plate-overlay svg,
+.well-plate-overlay rect,
+.well-plate-overlay circle,
+.well-plate-overlay text {
+  opacity: inherit !important;
+}
+
+/* Prevent any transform transitions from affecting the well plate during interactions */
+.well-plate-overlay * {
+  transition: none !important;
 }
 
 /* Current position indicator */
@@ -109,4 +131,175 @@ input[type="checkbox"]:disabled {
 input[type="checkbox"]:disabled + span {
   cursor: not-allowed !important;
   opacity: 0.75 !important;
-} 
+}
+
+/* Layer dropdown styles */
+.layer-dropdown-transition {
+  transition: opacity 200ms ease-out, transform 200ms ease-out;
+}
+
+/* Auto-contrast toggle styles */
+.auto-contrast-toggle {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 20px;
+}
+
+.auto-contrast-toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.auto-contrast-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #4a5568;
+  transition: .3s;
+  border-radius: 20px;
+}
+
+.auto-contrast-slider:before {
+  position: absolute;
+  content: "";
+  height: 14px;
+  width: 14px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: .3s;
+  border-radius: 50%;
+}
+
+.auto-contrast-toggle input:checked + .auto-contrast-slider {
+  background-color: #3182ce;
+}
+
+.auto-contrast-toggle input:focus + .auto-contrast-slider {
+  box-shadow: 0 0 1px #3182ce;
+}
+
+.auto-contrast-toggle input:checked + .auto-contrast-slider:before {
+  transform: translateX(20px);
+}
+
+.auto-contrast-toggle input:disabled + .auto-contrast-slider {
+  background-color: #2d3748;
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Scan results image container styles */
+.scan-results-container {
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
+}
+
+.scan-results-container img {
+  image-rendering: inherit;
+  max-width: none; /* Prevent responsive image behavior */
+  max-height: none; /* Prevent responsive image behavior */
+}
+
+/* Dark theme input validation overrides for Scan Configuration panel */
+.input-validation-container input[type="number"] {
+  /* Ensure dark background is maintained */
+  background-color: #374151 !important; /* Tailwind gray-700 */
+  color: white !important;
+}
+
+/* Valid but unsaved state - yellow border with dark background */
+.input-validation-container input.border-yellow-400 {
+  background-color: #374151 !important; /* Keep dark background */
+  border-color: #fbbf24 !important; /* Yellow border */
+  color: white !important;
+}
+
+/* Rectangle selection cursor enhancement */
+.cursor-crosshair {
+  cursor: crosshair !important;
+}
+
+/* Enhanced crosshair cursor for rectangle selection */
+.rectangle-selection-active {
+  cursor: crosshair !important;
+  position: relative;
+}
+
+.rectangle-selection-active::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 20px;
+  height: 20px;
+  border: 2px solid #60a5fa;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 9999;
+  animation: pulse 2s infinite;
+}
+
+/* Invalid state - red border with dark background */
+.input-validation-container input.border-red-400 {
+  background-color: #374151 !important; /* Keep dark background */
+  border-color: #f87171 !important; /* Red border */
+  color: white !important;
+}
+
+/* Normal/confirmed state - gray border with dark background */
+.input-validation-container input.border-gray-300,
+.input-validation-container input.border-gray-600 {
+  background-color: #374151 !important; /* Keep dark background */
+  border-color: #6b7280 !important; /* Gray border */
+  color: white !important;
+}
+
+/* Focus state */
+.input-validation-container input[type="number"]:focus {
+  background-color: #374151 !important;
+  color: white !important;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5); /* Blue focus ring */
+}
+
+/* Placeholder text */
+.input-validation-container input[type="number"]::placeholder {
+  color: #9ca3af !important; /* Gray-400 for placeholder */
+}
+
+/* Remove any light theme background overrides */
+.input-validation-container input.bg-yellow-50,
+.input-validation-container input.bg-red-50,
+.input-validation-container input.bg-green-50 {
+  background-color: #374151 !important;
+}
+
+/* Ensure relative positioning for containers */
+.input-validation-container {
+  position: relative;
+}
+
+/* Hardware operations status indicator */
+.hardware-status-indicator {
+  background: linear-gradient(135deg, rgba(251, 146, 60, 0.9), rgba(245, 101, 101, 0.9));
+  border: 1px solid rgba(251, 146, 60, 0.6);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  animation: pulse-orange 2s infinite;
+}
+
+@keyframes pulse-orange {
+  0%, 100% {
+    box-shadow: 0 2px 8px rgba(251, 146, 60, 0.3);
+  }
+  50% {
+    box-shadow: 0 2px 12px rgba(251, 146, 60, 0.6);
+  }
+}
