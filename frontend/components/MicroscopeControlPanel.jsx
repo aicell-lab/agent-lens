@@ -1356,6 +1356,7 @@ const MicroscopeControlPanel = ({
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseLeave}
+            toggleWebRtcStream={toggleWebRtcStream}
           />
         </div>
 

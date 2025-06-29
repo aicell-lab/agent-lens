@@ -2315,6 +2315,23 @@ const MicroscopeMapDisplay = ({
                 onClick={async () => {
                   if (!microscopeControlService || isScanInProgress) return;
                   
+                  // Check if WebRTC is active and stop it to prevent camera resource conflict
+                  const wasWebRtcActive = isWebRtcActive;
+                  if (wasWebRtcActive) {
+                    if (appendLog) appendLog('Stopping WebRTC stream to prevent camera resource conflict during scanning...');
+                    try {
+                      if (toggleWebRtcStream) {
+                        toggleWebRtcStream(); // This will stop the WebRTC stream
+                        // Wait a moment for the stream to fully stop
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                      } else {
+                        if (appendLog) appendLog('Warning: toggleWebRtcStream function not available, proceeding with scan...');
+                      }
+                    } catch (webRtcError) {
+                      if (appendLog) appendLog(`Warning: Failed to stop WebRTC stream: ${webRtcError.message}. Proceeding with scan...`);
+                    }
+                  }
+                  
                   setIsScanInProgress(true);
                   if (setMicroscopeBusy) setMicroscopeBusy(true); // Also set global busy state
                   
@@ -2344,7 +2361,12 @@ const MicroscopeMapDisplay = ({
                     
                     if (result.success) {
                       if (showNotification) showNotification('Scan completed successfully', 'success');
-                      if (appendLog) appendLog('Scan completed successfully');
+                      if (appendLog) {
+                        appendLog('Scan completed successfully');
+                        if (wasWebRtcActive) {
+                          appendLog('Note: WebRTC stream was stopped for scanning. Click "Start Live" to resume video stream if needed.');
+                        }
+                      }
                       setShowScanConfig(false);
                       setIsRectangleSelection(false);
                       setRectangleStart(null);
