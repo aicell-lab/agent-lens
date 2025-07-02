@@ -40,6 +40,7 @@ const MicroscopeMapDisplay = ({
   isDataChannelConnected,
   isContrastControlsCollapsed,
   setIsContrastControlsCollapsed,
+  selectedMicroscopeId,
   onMouseDown,
   onMouseMove,
   onMouseUp,
@@ -50,6 +51,21 @@ const MicroscopeMapDisplay = ({
   const canvasRef = useRef(null);
   const mapVideoRef = useRef(null);
   const dragImageDisplayRef = useRef(null);
+  
+  // Check if using simulated microscope - disable scanning features
+  const isSimulatedMicroscope = selectedMicroscopeId === 'agent-lens/squid-control-reef';
+  
+  // Close scan configurations when switching to simulated microscope
+  useEffect(() => {
+    if (isSimulatedMicroscope) {
+      // Close any open scan configurations
+      setShowScanConfig(false);
+      setShowQuickScanConfig(false);
+      setIsRectangleSelection(false);
+      setRectangleStart(null);
+      setRectangleEnd(null);
+    }
+  }, [isSimulatedMicroscope]);
   
   // Map view mode: 'FOV_FITTED' for fitted video view, 'FREE_PAN' for stage map view
   const [mapViewMode, setMapViewMode] = useState('FOV_FITTED');
@@ -1263,7 +1279,7 @@ const MicroscopeMapDisplay = ({
 
   // Intelligent tile-based loading function
   const loadStitchedTiles = useCallback(async () => {
-    if (!microscopeControlService || !visibleLayers.scanResults || mapViewMode !== 'FREE_PAN') {
+    if (!microscopeControlService || !visibleLayers.scanResults || mapViewMode !== 'FREE_PAN' || isSimulatedMicroscope) {
       return;
     }
     
@@ -1364,7 +1380,7 @@ const MicroscopeMapDisplay = ({
         setIsLoadingCanvas(false);
       }
     }
-  }, [microscopeControlService, visibleLayers.scanResults, visibleLayers.channels, mapViewMode, scaleLevel, displayToStageCoords, stageDimensions, pixelsPerMm, isRegionCovered, getTileKey, addOrUpdateTile, appendLog]);
+  }, [microscopeControlService, visibleLayers.scanResults, visibleLayers.channels, mapViewMode, scaleLevel, displayToStageCoords, stageDimensions, pixelsPerMm, isRegionCovered, getTileKey, addOrUpdateTile, appendLog, isSimulatedMicroscope]);
   
   // Debounce tile loading - only load after user stops interacting for 1 second
   const scheduleTileUpdate = useCallback(() => {
@@ -1376,7 +1392,7 @@ const MicroscopeMapDisplay = ({
   
   // Function to refresh scan results
   const refreshScanResults = useCallback(() => {
-    if (visibleLayers.scanResults) {
+    if (visibleLayers.scanResults && !isSimulatedMicroscope) {
       // Clear active requests
       activeTileRequestsRef.current.clear();
       
@@ -1392,11 +1408,11 @@ const MicroscopeMapDisplay = ({
         appendLog('Refreshing scan results display - cleared cache');
       }
     }
-  }, [visibleLayers.scanResults, loadStitchedTiles, appendLog]);
+  }, [visibleLayers.scanResults, loadStitchedTiles, appendLog, isSimulatedMicroscope]);
   
   // Rectangle selection handlers
   const handleRectangleSelectionStart = useCallback((e) => {
-    if (!isRectangleSelection || isHardwareInteractionDisabled) return;
+    if (!isRectangleSelection || isHardwareInteractionDisabled || isSimulatedMicroscope) return;
     
     const rect = mapContainerRef.current.getBoundingClientRect();
     const startX = e.clientX - rect.left;
@@ -1404,20 +1420,20 @@ const MicroscopeMapDisplay = ({
     
     setRectangleStart({ x: startX, y: startY });
     setRectangleEnd({ x: startX, y: startY });
-  }, [isRectangleSelection, isInteractionDisabled]);
+  }, [isRectangleSelection, isHardwareInteractionDisabled, isSimulatedMicroscope]);
   
   const handleRectangleSelectionMove = useCallback((e) => {
-    if (!rectangleStart || !isRectangleSelection) return;
+    if (!rectangleStart || !isRectangleSelection || isSimulatedMicroscope) return;
     
     const rect = mapContainerRef.current.getBoundingClientRect();
     const currentX = e.clientX - rect.left;
     const currentY = e.clientY - rect.top;
     
     setRectangleEnd({ x: currentX, y: currentY });
-  }, [rectangleStart, isRectangleSelection]);
+  }, [rectangleStart, isRectangleSelection, isSimulatedMicroscope]);
   
   const handleRectangleSelectionEnd = useCallback((e) => {
-    if (!rectangleStart || !rectangleEnd || !isRectangleSelection) return;
+    if (!rectangleStart || !rectangleEnd || !isRectangleSelection || isSimulatedMicroscope) return;
     
     // Convert rectangle corners to stage coordinates
     const topLeft = displayToStageCoords(
@@ -1450,7 +1466,7 @@ const MicroscopeMapDisplay = ({
     setIsRectangleSelection(false);
     setRectangleStart(null);
     setRectangleEnd(null);
-  }, [rectangleStart, rectangleEnd, isRectangleSelection, displayToStageCoords, scanParameters.dx_mm, scanParameters.dy_mm]);
+  }, [rectangleStart, rectangleEnd, isRectangleSelection, displayToStageCoords, scanParameters.dx_mm, scanParameters.dy_mm, isSimulatedMicroscope]);
 
   // Effect to trigger tile loading when view changes (throttled for performance)
   useEffect(() => {
@@ -1695,7 +1711,7 @@ const MicroscopeMapDisplay = ({
               <div className="flex items-center space-x-2">
                               <button
                 onClick={() => {
-                  if (isInteractionDisabled) return;
+                  if (isInteractionDisabled || isSimulatedMicroscope) return;
                   if (showScanConfig || isRectangleSelection) {
                     // Close scan panel and cancel selection
                     setShowScanConfig(false);
@@ -1720,8 +1736,8 @@ const MicroscopeMapDisplay = ({
                 className={`px-2 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed ${
                   showScanConfig || isRectangleSelection ? 'bg-blue-600 hover:bg-blue-500' : 'bg-gray-700 hover:bg-gray-600'
                 }`}
-                title="Configure scan and select area (automatically switches to stage map view)"
-                disabled={isInteractionDisabled || !microscopeControlService}
+                title={isSimulatedMicroscope ? "Scanning not supported for simulated microscope" : "Configure scan and select area (automatically switches to stage map view)"}
+                disabled={isInteractionDisabled || !microscopeControlService || isSimulatedMicroscope}
               >
                 <i className="fas fa-vector-square mr-1"></i>
                 {isScanInProgress ? 'Scanning...' : (showScanConfig || isRectangleSelection ? 'Cancel Scan Setup' : 'Scan Area')}
@@ -1729,7 +1745,7 @@ const MicroscopeMapDisplay = ({
                 
                 <button
                   onClick={() => {
-                    if (isInteractionDisabled) return;
+                    if (isInteractionDisabled || isSimulatedMicroscope) return;
                     if (showQuickScanConfig) {
                       // Close quick scan panel
                       setShowQuickScanConfig(false);
@@ -1746,8 +1762,8 @@ const MicroscopeMapDisplay = ({
                   className={`px-2 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed ${
                     showQuickScanConfig ? 'bg-green-600 hover:bg-green-500' : 'bg-gray-700 hover:bg-gray-600'
                   }`}
-                  title="Quick scan entire well plate with high-speed acquisition"
-                  disabled={isInteractionDisabled || !microscopeControlService}
+                  title={isSimulatedMicroscope ? "Quick scanning not supported for simulated microscope" : "Quick scan entire well plate with high-speed acquisition"}
+                  disabled={isInteractionDisabled || !microscopeControlService || isSimulatedMicroscope}
                 >
                   <i className="fas fa-bolt mr-1"></i>
                   {isQuickScanInProgress ? 'Quick Scanning...' : (showQuickScanConfig ? 'Cancel Quick Scan' : 'Quick Scan')}
@@ -1755,7 +1771,7 @@ const MicroscopeMapDisplay = ({
                 
                 <button
                   onClick={async () => {
-                    if (!microscopeControlService || isInteractionDisabled) return;
+                    if (!microscopeControlService || isInteractionDisabled || isSimulatedMicroscope) return;
                     try {
                       const result = await microscopeControlService.reset_stitching_canvas();
                       if (result.success) {
@@ -1770,8 +1786,8 @@ const MicroscopeMapDisplay = ({
                     }
                   }}
                   className="px-2 py-1 text-xs bg-red-600 hover:bg-red-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                  title="Clear scan results"
-                  disabled={isInteractionDisabled || !microscopeControlService}
+                  title={isSimulatedMicroscope ? "Canvas clearing not supported for simulated microscope" : "Clear scan results"}
+                  disabled={isInteractionDisabled || !microscopeControlService || isSimulatedMicroscope}
                 >
                   <i className="fas fa-trash mr-1"></i>
                   Clear Canvas
@@ -1787,7 +1803,7 @@ const MicroscopeMapDisplay = ({
               {/* Scan buttons visible in FOV_FITTED mode */}
               <button
                 onClick={() => {
-                  if (isInteractionDisabled) return;
+                  if (isInteractionDisabled || isSimulatedMicroscope) return;
                   // Automatically switch to FREE_PAN mode and open scan configuration
                   transitionToFreePan();
                   loadCurrentMicroscopeSettings();
@@ -1798,8 +1814,8 @@ const MicroscopeMapDisplay = ({
                   }
                 }}
                 className="px-2 py-1 text-xs bg-green-600 hover:bg-green-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                title="Switch to stage map and configure scan area"
-                disabled={isInteractionDisabled || !microscopeControlService}
+                title={isSimulatedMicroscope ? "Scanning not supported for simulated microscope" : "Switch to stage map and configure scan area"}
+                disabled={isInteractionDisabled || !microscopeControlService || isSimulatedMicroscope}
               >
                 <i className="fas fa-vector-square mr-1"></i>
                 Scan Area
@@ -1807,13 +1823,13 @@ const MicroscopeMapDisplay = ({
               
               <button
                 onClick={() => {
-                  if (isInteractionDisabled) return;
+                  if (isInteractionDisabled || isSimulatedMicroscope) return;
                   // Open quick scan configuration without switching view modes
                   setShowQuickScanConfig(true);
                 }}
                 className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                title="Quick scan entire well plate with high-speed acquisition"
-                disabled={isInteractionDisabled || !microscopeControlService}
+                title={isSimulatedMicroscope ? "Quick scanning not supported for simulated microscope" : "Quick scan entire well plate with high-speed acquisition"}
+                disabled={isInteractionDisabled || !microscopeControlService || isSimulatedMicroscope}
               >
                 <i className="fas fa-bolt mr-1"></i>
                 Quick Scan
@@ -2862,6 +2878,7 @@ MicroscopeMapDisplay.propTypes = {
   isDataChannelConnected: PropTypes.bool,
   isContrastControlsCollapsed: PropTypes.bool,
   setIsContrastControlsCollapsed: PropTypes.func,
+  selectedMicroscopeId: PropTypes.string,
   onMouseDown: PropTypes.func,
   onMouseMove: PropTypes.func,
   onMouseUp: PropTypes.func,
