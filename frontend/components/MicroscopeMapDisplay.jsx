@@ -118,6 +118,9 @@ const MicroscopeMapDisplay = ({
   const [isLayerDropdownOpen, setIsLayerDropdownOpen] = useState(false);
   const layerDropdownRef = useRef(null);
 
+  // Clear canvas confirmation dialog state
+  const [showClearCanvasConfirmation, setShowClearCanvasConfirmation] = useState(false);
+
   // Validation hooks for scan parameters with "Enter to confirm" behavior
   const startXInput = useValidatedNumberInput(
     scanParameters.start_x_mm,
@@ -1405,6 +1408,29 @@ const MicroscopeMapDisplay = ({
       }
     }
   }, [visibleLayers.scanResults, loadStitchedTiles, appendLog, isSimulatedMicroscope]);
+
+  // Function to clear canvas after confirmation
+  const handleClearCanvas = useCallback(async () => {
+    if (!microscopeControlService) return;
+    
+    try {
+      const result = await microscopeControlService.reset_stitching_canvas();
+      if (result.success) {
+        setStitchedTiles([]);
+        activeTileRequestsRef.current.clear();
+        if (showNotification) showNotification('Scan canvas cleared', 'success');
+        if (appendLog) appendLog('Scan canvas cleared successfully');
+      } else {
+        if (showNotification) showNotification(`Failed to clear canvas: ${result.message}`, 'error');
+        if (appendLog) appendLog(`Failed to clear scan canvas: ${result.message}`);
+      }
+    } catch (error) {
+      if (showNotification) showNotification(`Failed to clear canvas: ${error.message}`, 'error');
+      if (appendLog) appendLog(`Failed to clear scan canvas: ${error.message}`);
+    } finally {
+      setShowClearCanvasConfirmation(false);
+    }
+  }, [microscopeControlService, showNotification, appendLog]);
   
   // Rectangle selection handlers
   const handleRectangleSelectionStart = useCallback((e) => {
@@ -1766,20 +1792,9 @@ const MicroscopeMapDisplay = ({
                 </button>
                 
                 <button
-                  onClick={async () => {
+                  onClick={() => {
                     if (!microscopeControlService || isInteractionDisabled || isSimulatedMicroscope) return;
-                    try {
-                      const result = await microscopeControlService.reset_stitching_canvas();
-                      if (result.success) {
-                        setStitchedTiles([]);
-                        activeTileRequestsRef.current.clear();
-                        if (showNotification) showNotification('Scan canvas cleared', 'success');
-                        if (appendLog) appendLog('Scan canvas cleared successfully');
-                      }
-                    } catch (error) {
-                      if (showNotification) showNotification(`Failed to clear canvas: ${error.message}`, 'error');
-                      if (appendLog) appendLog(`Failed to clear scan canvas: ${error.message}`);
-                    }
+                    setShowClearCanvasConfirmation(true);
                   }}
                   className="px-2 py-1 text-xs bg-red-600 hover:bg-red-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
                   title={isSimulatedMicroscope ? "Canvas clearing not supported for simulated microscope" : "Clear scan results"}
@@ -2276,6 +2291,66 @@ const MicroscopeMapDisplay = ({
               )}
             </>
           )}
+        </div>
+      )}
+
+      {/* Clear Canvas Confirmation Dialog */}
+      {showClearCanvasConfirmation && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-800 border border-gray-600 rounded-lg shadow-xl max-w-md w-full text-white">
+            {/* Modal Header */}
+            <div className="flex justify-between items-center p-4 border-b border-gray-600">
+              <h3 className="text-lg font-semibold text-gray-200 flex items-center">
+                <i className="fas fa-exclamation-triangle text-red-400 mr-2"></i>
+                Clear Scan Canvas
+              </h3>
+              <button
+                onClick={() => setShowClearCanvasConfirmation(false)}
+                className="text-gray-400 hover:text-white text-xl font-bold w-6 h-6 flex items-center justify-center"
+                title="Close"
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-4">
+              <p className="text-gray-300 mb-4">
+                Are you sure you want to clear the scan canvas? This will permanently delete all scan results and cannot be undone.
+              </p>
+              <div className="bg-yellow-900 bg-opacity-30 border border-yellow-500 rounded-lg p-3 mb-4">
+                <div className="flex items-start">
+                  <i className="fas fa-info-circle text-yellow-400 mr-2 mt-0.5"></i>
+                  <div className="text-sm text-yellow-200">
+                    <p className="font-medium mb-1">This action will:</p>
+                    <ul className="list-disc list-inside space-y-1">
+                      <li>Remove all scan result images from the display</li>
+                      <li>Clear the scan data from microscope memory</li>
+                      <li>Reset the stitching canvas to empty state</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex justify-end space-x-3 p-4 border-t border-gray-600">
+              <button
+                onClick={() => setShowClearCanvasConfirmation(false)}
+                className="px-4 py-2 text-sm bg-gray-600 hover:bg-gray-500 text-white rounded focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
+              >
+                <i className="fas fa-times mr-1"></i>
+                Cancel
+              </button>
+              <button
+                onClick={handleClearCanvas}
+                className="px-4 py-2 text-sm bg-red-600 hover:bg-red-500 text-white rounded focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+              >
+                <i className="fas fa-trash mr-1"></i>
+                Clear Canvas
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
