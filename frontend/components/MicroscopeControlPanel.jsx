@@ -6,6 +6,7 @@ import ChatbotButton from './ChatbotButton';
 import SampleSelector from './SampleSelector';
 import ImagingTasksModal from './ImagingTasksModal';
 import MicroscopeMapDisplay from './MicroscopeMapDisplay'; // New import
+import { useValidatedNumberInput, getInputValidationClasses } from '../utils'; // Import validation utilities
 import './ImagingTasksModal.css'; // Added for well plate styles
 
 // Helper function to convert a uint8 hypha-rpc numpy array to a displayable Data URL
@@ -90,10 +91,6 @@ const MicroscopeControlPanel = ({
   const [zMove, setZMove] = useState(0.01);
   const [microscopeBusy, setMicroscopeBusy] = useState(false);
 
-  // String states for input fields to allow smooth float input
-  const [xMoveStr, setXMoveStr] = useState(xMove.toString());
-  const [yMoveStr, setYMoveStr] = useState(yMove.toString());
-  const [zMoveStr, setZMoveStr] = useState(zMove.toString());
 
   // State for the snapped image, storing both raw numpy and display URL
   const [snappedImageData, setSnappedImageData] = useState({
@@ -193,6 +190,68 @@ const MicroscopeControlPanel = ({
   const handleSampleLoadStatusChange = useCallback((status) => {
     setSampleLoadStatus(status);
   }, []);
+
+  // Validated input hooks for better UX and error handling
+  const exposureInput = useValidatedNumberInput(
+    desiredCameraExposure,
+    setDesiredCameraExposure,
+    {
+      min: 1,
+      max: 900,
+      allowFloat: false,
+      defaultValue: 100
+    },
+    showNotification
+  );
+
+  const intensityInput = useValidatedNumberInput(
+    desiredIlluminationIntensity,
+    setDesiredIlluminationIntensity,
+    {
+      min: 0,
+      max: 100,
+      allowFloat: true,
+      defaultValue: 50
+    },
+    showNotification
+  );
+
+  // Validated inputs for movement values
+  const xMoveInput = useValidatedNumberInput(
+    xMove,
+    setXMove,
+    {
+      min: 0,
+      max: 100,
+      allowFloat: true,
+      defaultValue: 0.1
+    },
+    showNotification
+  );
+
+  const yMoveInput = useValidatedNumberInput(
+    yMove,
+    setYMove,
+    {
+      min: 0,
+      max: 100,
+      allowFloat: true,
+      defaultValue: 0.1
+    },
+    showNotification
+  );
+
+  const zMoveInput = useValidatedNumberInput(
+    zMove,
+    setZMove,
+    {
+      min: 0,
+      max: 10,
+      allowFloat: true,
+      defaultValue: 0.01
+    },
+    showNotification
+  );
 
   useEffect(() => {
     actualIlluminationIntensityRef.current = actualIlluminationIntensity;
@@ -1277,6 +1336,7 @@ const MicroscopeControlPanel = ({
             imjoyApi={imjoyApi}
             webRtcError={webRtcError}
             microscopeBusy={microscopeBusy}
+            setMicroscopeBusy={setMicroscopeBusy}
             currentOperation={currentOperation}
             videoContrastMin={videoContrastMin}
             setVideoContrastMin={setVideoContrastMin}
@@ -1291,11 +1351,13 @@ const MicroscopeControlPanel = ({
             isDataChannelConnected={isDataChannelConnected}
             isContrastControlsCollapsed={isContrastControlsCollapsed}
             setIsContrastControlsCollapsed={setIsContrastControlsCollapsed}
+            selectedMicroscopeId={selectedMicroscopeId}
             // Pass drag handlers
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseLeave}
+            toggleWebRtcStream={toggleWebRtcStream}
           />
         </div>
 
@@ -1444,36 +1506,23 @@ const MicroscopeControlPanel = ({
                       {(axis === 'x' ? xPosition : axis === 'y' ? yPosition : zPosition).toFixed(3)} mm
                     </span>
                   </div>
-                  <input
-                    type="number"
-                    className="control-input w-1/2 p-1 border border-gray-300 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
-                    placeholder={`d${axis.toUpperCase()}(mm)`}
-                    value={axis === 'x' ? xMoveStr : axis === 'y' ? yMoveStr : zMoveStr}
-                    min="0"
-                    onChange={(e) => {
-                      if (currentOperation || microscopeBusy) return;
-                      const newStringValue = e.target.value;
-                      let newNumericValue = parseFloat(newStringValue);
-
-                      if (axis === 'x') {
-                        setXMoveStr(newStringValue);
-                        if (!isNaN(newNumericValue)) {
-                          setXMove(newNumericValue < 0 ? 0 : newNumericValue);
-                        }
-                      } else if (axis === 'y') {
-                        setYMoveStr(newStringValue);
-                        if (!isNaN(newNumericValue)) {
-                          setYMove(newNumericValue < 0 ? 0 : newNumericValue);
-                        }
-                      } else { // Z-axis
-                        setZMoveStr(newStringValue);
-                        if (!isNaN(newNumericValue)) {
-                          setZMove(newNumericValue < 0 ? 0 : newNumericValue);
-                        }
-                      }
-                    }}
-                    disabled={currentOperation !== null || microscopeBusy}
-                  />
+                  <div className="input-container w-1/2">
+                    <input
+                      type="number"
+                      className={`control-input w-full p-1 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed ${getInputValidationClasses(
+                        (axis === 'x' ? xMoveInput : axis === 'y' ? yMoveInput : zMoveInput).isValid,
+                        (axis === 'x' ? xMoveInput : axis === 'y' ? yMoveInput : zMoveInput).hasUnsavedChanges,
+                        'border'
+                      )}`}
+                      placeholder={`d${axis.toUpperCase()}(mm)`}
+                      value={(axis === 'x' ? xMoveInput : axis === 'y' ? yMoveInput : zMoveInput).inputValue}
+                      min="0"
+                      onChange={(axis === 'x' ? xMoveInput : axis === 'y' ? yMoveInput : zMoveInput).handleInputChange}
+                      onKeyDown={(axis === 'x' ? xMoveInput : axis === 'y' ? yMoveInput : zMoveInput).handleKeyDown}
+                      onBlur={(axis === 'x' ? xMoveInput : axis === 'y' ? yMoveInput : zMoveInput).handleBlur}
+                      disabled={currentOperation !== null || microscopeBusy}
+                    />
+                  </div>
                 </div>
                 <div className="aligned-buttons flex justify-between space-x-1">
                   <button
@@ -1544,23 +1593,23 @@ const MicroscopeControlPanel = ({
             <div className="camera-exposure-settings p-1 border border-gray-300 rounded-lg w-1/2 text-xs">
               <label>Camera Exposure:</label>
               <span className="ml-1 text-gray-800 text-xs">{actualCameraExposure} ms</span>
-              <input
-                type="number"
-                className="control-input w-full mt-1 p-1 border border-gray-300 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
-                value={desiredCameraExposure}
-                max="900"
-                onChange={(e) => {
-                  if (currentOperation || microscopeBusy) return;
-                  const value = parseInt(e.target.value, 10);
-                  if (value > 900) {
-                    if (showNotification) {
-                      showNotification('Maximum exposure time is 900ms', 'warning');
-                    }
-                  }
-                  setDesiredCameraExposure(Math.min(value, 900)); // Ensure value doesn't exceed 900ms
-                }}
-                disabled={currentOperation !== null || microscopeBusy}
-              />
+              <div className="input-container">
+                <input
+                  type="number"
+                  className={`control-input w-full mt-1 p-1 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed ${getInputValidationClasses(
+                    exposureInput.isValid,
+                    exposureInput.hasUnsavedChanges,
+                    'border'
+                  )}`}
+                  value={exposureInput.inputValue}
+                  max="900"
+                  onChange={exposureInput.handleInputChange}
+                  onKeyDown={exposureInput.handleKeyDown}
+                  onBlur={exposureInput.handleBlur}
+                  disabled={currentOperation !== null || microscopeBusy}
+                  placeholder="1-900ms"
+                />
+              </div>
             </div>
           </div>
         </div>

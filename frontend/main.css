@@ -1029,6 +1029,37 @@
   pointer-events: none;
 }
 
+/* Input validation styles */
+
+.input-container {
+  position: relative;
+}
+
+/* Enhanced input styles for validation states */
+.control-input, .modal-input {
+  transition: border-color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.control-input:focus, .modal-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
+}
+
+.control-input.validation-pending, .modal-input.validation-pending {
+  border-color: #f59e0b;
+  background-color: #fffbeb;
+}
+
+.control-input.validation-error, .modal-input.validation-error {
+  border-color: #ef4444;
+  background-color: #fef2f2;
+}
+
+.control-input.validation-success, .modal-input.validation-success {
+  border-color: #10b981;
+  background-color: #f0fdf4;
+}
+
 /* Toggle Switch for Auto Contrast - MADE SMALLER */
 .auto-contrast-toggle {
   position: relative;

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import ReactDOM from 'react-dom'; // Import ReactDOM for createPortal
 import PropTypes from 'prop-types';
+import { useValidatedNumberInput, getInputValidationClasses } from '../utils'; // Import validation utilities
 import './ImagingTasksModal.css'; // We will create this CSS file
 
 const ROW_LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
@@ -120,6 +121,43 @@ const ImagingTasksModal = ({
   const [endTime, setEndTime] = useState('');   // ISO string e.g., 2024-07-01T12:00:00
   const [intervalMinutes, setIntervalMinutes] = useState('30'); // In minutes
   const [pendingTimePoints, setPendingTimePoints] = useState(''); // Text area for ISO strings
+
+  // Validated input hooks for better UX and error handling
+  const nxInput = useValidatedNumberInput(
+    parseInt(nx) || 3,
+    (value) => setNx(value.toString()),
+    {
+      min: 1,
+      max: 20,
+      allowFloat: false,
+      defaultValue: 3
+    },
+    showNotification
+  );
+
+  const nyInput = useValidatedNumberInput(
+    parseInt(ny) || 3,
+    (value) => setNy(value.toString()),
+    {
+      min: 1,
+      max: 20,
+      allowFloat: false,
+      defaultValue: 3
+    },
+    showNotification
+  );
+
+  const intervalInput = useValidatedNumberInput(
+    parseInt(intervalMinutes) || 30,
+    (value) => setIntervalMinutes(value.toString()),
+    {
+      min: 1,
+      max: 1440, // Max 24 hours in minutes
+      allowFloat: false,
+      defaultValue: 30
+    },
+    showNotification
+  );
 
   const fetchCurrentIlluminationSettings = useCallback(async () => {
     if (!microscopeControlService) {
@@ -352,7 +390,25 @@ const ImagingTasksModal = ({
   const handleIlluminationSettingChange = (index, field, value) => {
     setIlluminationSettings(prev => {
       const newSettings = [...prev];
-      newSettings[index] = { ...newSettings[index], [field]: value };
+      
+      // Add validation for numeric fields
+      if (field === 'intensity' || field === 'exposure_time') {
+        // Only update if the value is a valid number
+        if (typeof value === 'number' && !isNaN(value)) {
+          // Apply constraints
+          if (field === 'intensity') {
+            value = Math.max(0, Math.min(100, value)); // Clamp intensity to 0-100
+          } else if (field === 'exposure_time') {
+            value = Math.max(1, Math.min(900, value)); // Clamp exposure to 1-900ms
+          }
+          newSettings[index] = { ...newSettings[index], [field]: value };
+        }
+        // If invalid number, don't update (keep previous value)
+      } else {
+        // For non-numeric fields (like enabled checkbox)
+        newSettings[index] = { ...newSettings[index], [field]: value };
+      }
+      
       return newSettings;
     });
   };
@@ -659,32 +715,52 @@ const ImagingTasksModal = ({
                               Nx (FOVs per well)
                               <TutorialTooltip text="Number of Fields of View (FOVs) to capture along the X-axis within each selected well. E.g., 3 for a 3xM grid. Current default dx is ~0.9mm with ~10% overlap." />
                           </label>
-                          <input
-                              id="nx"
-                              type="number"
-                              className="modal-input"
-                              value={nx}
-                              onChange={(e) => setNx(e.target.value)}
-                              min="1"
-                              required
-                              disabled={slotsLoading || illuminationLoading}
-                          />
+                          <div className="input-container">
+                            <input
+                                id="nx"
+                                type="number"
+                                className={`modal-input ${getInputValidationClasses(
+                                  nxInput.isValid,
+                                  nxInput.hasUnsavedChanges,
+                                  ''
+                                )}`}
+                                value={nxInput.inputValue}
+                                onChange={nxInput.handleInputChange}
+                                onKeyDown={nxInput.handleKeyDown}
+                                onBlur={nxInput.handleBlur}
+                                min="1"
+                                max="20"
+                                required
+                                disabled={slotsLoading || illuminationLoading}
+                                placeholder="1-20"
+                            />
+                          </div>
                       </div>
                       <div className="form-group">
                           <label htmlFor="ny" className="form-label">
                               Ny (FOVs per well)
                               <TutorialTooltip text="Number of Fields of View (FOVs) to capture along the Y-axis within each selected well. E.g., M for an Mx3 grid. Current default dy is ~0.9mm with ~10% overlap." />
                           </label>
-                          <input
-                              id="ny"
-                              type="number"
-                              className="modal-input"
-                              value={ny}
-                              onChange={(e) => setNy(e.target.value)}
-                              min="1"
-                              required
-                              disabled={slotsLoading || illuminationLoading}
-                          />
+                          <div className="input-container">
+                            <input
+                                id="ny"
+                                type="number"
+                                className={`modal-input ${getInputValidationClasses(
+                                  nyInput.isValid,
+                                  nyInput.hasUnsavedChanges,
+                                  ''
+                                )}`}
+                                value={nyInput.inputValue}
+                                onChange={nyInput.handleInputChange}
+                                onKeyDown={nyInput.handleKeyDown}
+                                onBlur={nyInput.handleBlur}
+                                min="1"
+                                max="20"
+                                required
+                                disabled={slotsLoading || illuminationLoading}
+                                placeholder="1-20"
+                            />
+                          </div>
                       </div>
                   </div>
                    <p className="text-xs mt-1 form-label">
@@ -736,15 +812,25 @@ const ImagingTasksModal = ({
                               Interval (minutes)
                               <TutorialTooltip text="Set the time interval in minutes between consecutive imaging points. E.g., 30 for imaging every 30 minutes." />
                           </label>
-                          <input
-                              id="intervalMinutes"
-                              type="number"
-                              className="modal-input"
-                              value={intervalMinutes}
-                              onChange={(e) => setIntervalMinutes(e.target.value)}
-                              min="1"
-                              disabled={slotsLoading || illuminationLoading || !startTime}
-                          />
+                          <div className="input-container">
+                            <input
+                                id="intervalMinutes"
+                                type="number"
+                                className={`modal-input ${getInputValidationClasses(
+                                  intervalInput.isValid,
+                                  intervalInput.hasUnsavedChanges,
+                                  ''
+                                )}`}
+                                value={intervalInput.inputValue}
+                                onChange={intervalInput.handleInputChange}
+                                onKeyDown={intervalInput.handleKeyDown}
+                                onBlur={intervalInput.handleBlur}
+                                min="1"
+                                max="1440"
+                                disabled={slotsLoading || illuminationLoading || !startTime}
+                                placeholder="1-1440 minutes"
+                            />
+                          </div>
                       </div>
                   </div>
                   <button 
@@ -842,10 +928,31 @@ const ImagingTasksModal = ({
                                       type="number"
                                       className="modal-input text-xs illumination-input"
                                       value={setting.intensity}
-                                      onChange={(e) => handleIlluminationSettingChange(index, 'intensity', parseFloat(e.target.value))}
+                                      onChange={(e) => {
+                                        const value = parseFloat(e.target.value);
+                                        if (!isNaN(value) || e.target.value === '') {
+                                          handleIlluminationSettingChange(index, 'intensity', value);
+                                        }
+                                      }}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                          e.target.blur(); // Trigger validation on Enter
+                                        }
+                                      }}
+                                      onBlur={(e) => {
+                                        const value = parseFloat(e.target.value);
+                                        if (isNaN(value)) {
+                                          // Reset to previous valid value
+                                          e.target.value = setting.intensity;
+                                          if (showNotification) {
+                                            showNotification('Invalid intensity value. Please enter a number between 0-100.', 'warning');
+                                          }
+                                        }
+                                      }}
                                       min="0" max="100" step="0.1"
                                       disabled={!setting.enabled || slotsLoading || illuminationLoading}
                                       title="Intensity (%)"
+                                      placeholder="0-100%"
                                   />
                               </div>
                               <div className="form-group mb-0 illumination-input-group">
@@ -855,10 +962,31 @@ const ImagingTasksModal = ({
                                       type="number"
                                       className="modal-input text-xs illumination-input"
                                       value={setting.exposure_time}
-                                      onChange={(e) => handleIlluminationSettingChange(index, 'exposure_time', parseFloat(e.target.value))}
-                                      min="1" step="0.1"
+                                      onChange={(e) => {
+                                        const value = parseFloat(e.target.value);
+                                        if (!isNaN(value) || e.target.value === '') {
+                                          handleIlluminationSettingChange(index, 'exposure_time', value);
+                                        }
+                                      }}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                          e.target.blur(); // Trigger validation on Enter
+                                        }
+                                      }}
+                                      onBlur={(e) => {
+                                        const value = parseFloat(e.target.value);
+                                        if (isNaN(value)) {
+                                          // Reset to previous valid value
+                                          e.target.value = setting.exposure_time;
+                                          if (showNotification) {
+                                            showNotification('Invalid exposure time. Please enter a number between 1-5000ms.', 'warning');
+                                          }
+                                        }
+                                      }}
+                                      min="1" max="900" step="0.1"
                                       disabled={!setting.enabled || slotsLoading || illuminationLoading}
                                       title="Exposure Time (ms)"
+                                      placeholder="1-900ms"
                                   />
                               </div>
                           </div>

@@ -1,3 +1,5 @@
+import { useState, useEffect, useCallback } from 'react';
+
 const getServerUrl = () => {
   return getUrlParam("server") || window.location.origin;
 }
@@ -325,3 +327,139 @@ export const login = async () => {
   localStorage.setItem("token", token);
   return token;
 }
+
+// Input validation utilities
+export const validateNumberInput = (value, options = {}) => {
+  const {
+    min = Number.NEGATIVE_INFINITY,
+    max = Number.POSITIVE_INFINITY,
+    allowFloat = true,
+    allowEmpty = false,
+    defaultValue = null
+  } = options;
+
+  // Handle empty input
+  if (value === '' || value === null || value === undefined) {
+    if (allowEmpty) {
+      return { isValid: true, value: null, error: null };
+    }
+    if (defaultValue !== null) {
+      return { isValid: true, value: defaultValue, error: null };
+    }
+    return { isValid: false, value: null, error: 'Value is required' };
+  }
+
+  // Parse the value
+  const parsedValue = allowFloat ? parseFloat(value) : parseInt(value, 10);
+
+  // Check if parsing was successful
+  if (isNaN(parsedValue)) {
+    return { isValid: false, value: null, error: 'Invalid number format' };
+  }
+
+  // Check range constraints
+  if (parsedValue < min) {
+    return { isValid: false, value: null, error: `Value must be at least ${min}` };
+  }
+
+  if (parsedValue > max) {
+    return { isValid: false, value: null, error: `Value must not exceed ${max}` };
+  }
+
+  return { isValid: true, value: parsedValue, error: null };
+};
+
+// Hook for managing validated number inputs with "Enter to confirm" behavior
+export const useValidatedNumberInput = (
+  initialValue,
+  onValidatedChange,
+  validationOptions = {},
+  showNotification = null
+) => {
+  const [inputValue, setInputValue] = useState(initialValue?.toString() || '');
+  const [isValid, setIsValid] = useState(true);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+
+  // Update input value when initialValue changes externally
+  useEffect(() => {
+    if (initialValue !== undefined && initialValue !== null) {
+      const newInputValue = initialValue.toString();
+      if (inputValue !== newInputValue && !hasUnsavedChanges) {
+        setInputValue(newInputValue);
+      }
+    }
+  }, [initialValue, inputValue, hasUnsavedChanges]);
+
+  const validateAndUpdate = useCallback((value) => {
+    const validation = validateNumberInput(value, validationOptions);
+    setIsValid(validation.isValid);
+
+    if (validation.isValid) {
+      if (onValidatedChange) {
+        onValidatedChange(validation.value);
+      }
+      setHasUnsavedChanges(false);
+      return true;
+    } else {
+      if (showNotification && validation.error) {
+        showNotification(validation.error, 'warning');
+      }
+      return false;
+    }
+  }, [onValidatedChange, validationOptions, showNotification]);
+
+  const handleInputChange = useCallback((e) => {
+    const newValue = e.target.value;
+    setInputValue(newValue);
+    
+    // Show validation status visually but don't update the actual value yet
+    const validation = validateNumberInput(newValue, validationOptions);
+    setIsValid(validation.isValid);
+    setHasUnsavedChanges(true);
+  }, [validationOptions]);
+
+  const handleKeyDown = useCallback((e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      validateAndUpdate(inputValue);
+    } else if (e.key === 'Escape') {
+      // Reset to original value
+      setInputValue(initialValue?.toString() || '');
+      setIsValid(true);
+      setHasUnsavedChanges(false);
+    }
+  }, [inputValue, validateAndUpdate, initialValue]);
+
+  const handleBlur = useCallback(() => {
+    if (hasUnsavedChanges) {
+      validateAndUpdate(inputValue);
+    }
+  }, [hasUnsavedChanges, inputValue, validateAndUpdate]);
+
+  return {
+    inputValue,
+    isValid,
+    hasUnsavedChanges,
+    handleInputChange,
+    handleKeyDown,
+    handleBlur,
+    validateAndUpdate: () => validateAndUpdate(inputValue)
+  };
+};
+
+// Helper function to get CSS classes for input validation state
+export const getInputValidationClasses = (isValid, hasUnsavedChanges, baseClasses = '') => {
+  let classes = baseClasses;
+  
+  if (hasUnsavedChanges) {
+    if (isValid) {
+      classes += ' border-yellow-400 bg-yellow-50'; // Valid but unsaved
+    } else {
+      classes += ' border-red-400 bg-red-50'; // Invalid
+    }
+  } else {
+    classes += ' border-gray-300'; // Normal state
+  }
+  
+  return classes;
+};
