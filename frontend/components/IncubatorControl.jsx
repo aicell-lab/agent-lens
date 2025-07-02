@@ -1,7 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
 
-const IncubatorControl = ({ incubatorControlService, appendLog }) => {
+const IncubatorControl = ({ 
+  incubatorControlService, 
+  appendLog,
+  microscopeControlService,
+  roboticArmService,
+  selectedMicroscopeId 
+}) => {
   // Example state for incubator parameters; adjust as needed.
   const [temperature, setTemperature] = useState(37);
   const [CO2, setCO2] = useState(5);
@@ -24,6 +30,20 @@ const IncubatorControl = ({ incubatorControlService, appendLog }) => {
   
   // Warning message state
   const [warningMessage, setWarningMessage] = useState('');
+  
+  // State for operation tracking
+  const [currentOperation, setCurrentOperation] = useState(null);
+  const [workflowMessages, setWorkflowMessages] = useState([]);
+  
+  // Helper functions for workflow messages
+  const addWorkflowMessage = (message) => {
+    setWorkflowMessages(prev => [{ message, timestamp: Date.now() }, ...prev]);
+    appendLog(message);
+  };
+
+  const clearWorkflowMessages = () => {
+    setWorkflowMessages([]);
+  };
 
   const updateSettings = async () => {
     if (incubatorControlService) {
@@ -44,10 +64,26 @@ const IncubatorControl = ({ incubatorControlService, appendLog }) => {
   const fetchSlotInformation = async () => {
     if (incubatorControlService) {
       try {
-        const updatedSlotsInfo = [];
-        for (let i = 1; i <= 42; i++) {
-          const slotInfo = await incubatorControlService.get_slot_information(i);
-          updatedSlotsInfo.push(slotInfo);
+        const allSlotInfo = await incubatorControlService.get_slot_information();
+        // Handle both array and individual slot responses
+        const updatedSlotsInfo = Array(42).fill({});
+        if (Array.isArray(allSlotInfo)) {
+          allSlotInfo.forEach(slotInfo => {
+            if (slotInfo && slotInfo.incubator_slot && slotInfo.incubator_slot >= 1 && slotInfo.incubator_slot <= 42) {
+              updatedSlotsInfo[slotInfo.incubator_slot - 1] = slotInfo;
+            }
+          });
+        } else if (allSlotInfo) {
+          // If it returns a single slot info, handle it appropriately
+          // This is a fallback in case the service returns different format
+          for (let i = 1; i <= 42; i++) {
+            try {
+              const slotInfo = await incubatorControlService.get_slot_information(i);
+              updatedSlotsInfo[i - 1] = slotInfo || {};
+            } catch (error) {
+              updatedSlotsInfo[i - 1] = {};
+            }
+          }
         }
         setSlotsInfo(updatedSlotsInfo);
         appendLog(`Slots information updated`);
@@ -122,6 +158,67 @@ const IncubatorControl = ({ incubatorControlService, appendLog }) => {
     }
   };
 
+  // Helper function to check for microscope conflicts
+  const checkMicroscopeConflict = async (microscopeNumber) => {
+    try {
+      const allSlotInfo = await incubatorControlService.get_slot_information();
+      if (Array.isArray(allSlotInfo)) {
+        const conflictSample = allSlotInfo.find(slot => 
+          slot && slot.location === `microscope${microscopeNumber}`
+        );
+        return conflictSample;
+      }
+    } catch (error) {
+      console.error('Error checking microscope conflict:', error);
+      return null;
+    }
+    return null;
+  };
+
+  // Helper function to transfer sample from microscope to incubator slot
+  const transferFromMicroscopeToSlot = async (microscopeNumber, targetSlot) => {
+    clearWorkflowMessages();
+    setCurrentOperation('transferring');
+    
+    try {
+      addWorkflowMessage(`Preparing to transfer sample from Microscope ${microscopeNumber} to slot ${targetSlot}`);
+      
+      if (!microscopeControlService) {
+        throw new Error("Microscope service not available");
+      }
+      
+      if (!roboticArmService) {
+        throw new Error("Robotic arm service not available");
+      }
+      
+      addWorkflowMessage(`Homing microscope stage for Microscope ${microscopeNumber}`);
+      await microscopeControlService.home_stage();
+      addWorkflowMessage(`Microscope ${microscopeNumber} stage homed successfully`);
+      
+      await roboticArmService.connect();
+      await roboticArmService.light_on();
+      
+      addWorkflowMessage(`Transporting sample from microscope ${microscopeNumber} to incubator`);
+      await roboticArmService.microscope_to_incubator(microscopeNumber);
+      addWorkflowMessage("Sample transported to incubator transfer station");
+      
+      await incubatorControlService.put_sample_from_transfer_station_to_slot(targetSlot);
+      addWorkflowMessage(`Sample moved to incubator slot ${targetSlot}`);
+      
+      await microscopeControlService.return_stage();
+      await roboticArmService.light_off();
+      await roboticArmService.disconnect();
+      
+      addWorkflowMessage("Sample successfully transferred to incubator slot");
+      setCurrentOperation(null);
+      return true;
+    } catch (error) {
+      addWorkflowMessage(`Error during transfer: ${error.message}`);
+      setCurrentOperation(null);
+      throw error;
+    }
+  };
+
   const handleAddSample = async () => {
     // Validate required fields
     const missingFields = [];
@@ -139,6 +236,69 @@ const IncubatorControl = ({ incubatorControlService, appendLog }) => {
       return;
     }
 
+    // Handle special position workflows
+    if (sampleForm.status === 'incubator_transfer_station') {
+      try {
+        clearWorkflowMessages();
+        addWorkflowMessage(`Moving sample from transfer station to slot ${selectedSlotNumber}`);
+        await incubatorControlService.put_sample_from_transfer_station_to_slot(selectedSlotNumber);
+        
+        // Add the sample with correct location
+        const result = await incubatorControlService.add_sample(
+          selectedSlotNumber,
+          sampleForm.name,
+          'IN', // Set status to IN since it's now in the incubator
+          'incubator_slot', // Set location to incubator_slot
+          sampleForm.date_to_incubator,
+          sampleForm.well_plate_type
+        );
+        addWorkflowMessage("Sample successfully moved from transfer station to incubator slot");
+        appendLog(result);
+        await fetchSlotInformation();
+        setWarningMessage('');
+        closeSidebar();
+      } catch (error) {
+        setWarningMessage(`Failed to transfer sample from transfer station: ${error.message}`);
+        appendLog(`Failed to transfer sample from transfer station: ${error.message}`);
+      }
+      return;
+    }
+
+    if (sampleForm.status === 'microscope1' || sampleForm.status === 'microscope2') {
+      const microscopeNumber = sampleForm.status === 'microscope1' ? 1 : 2;
+      
+      try {
+        // Check for conflicts on the target microscope
+        const conflictSample = await checkMicroscopeConflict(microscopeNumber);
+        if (conflictSample) {
+          setWarningMessage(`Conflict detected: There is already a sample on Microscope ${microscopeNumber} (${conflictSample.name}). Please contact the developer to resolve this issue.`);
+          return;
+        }
+        
+        // Transfer sample from microscope to the target slot
+        await transferFromMicroscopeToSlot(microscopeNumber, selectedSlotNumber);
+        
+        // Add the sample with correct location
+        const result = await incubatorControlService.add_sample(
+          selectedSlotNumber,
+          sampleForm.name,
+          'IN', // Set status to IN since it's now in the incubator
+          'incubator_slot', // Set location to incubator_slot
+          sampleForm.date_to_incubator,
+          sampleForm.well_plate_type
+        );
+        appendLog(result);
+        await fetchSlotInformation();
+        setWarningMessage('');
+        closeSidebar();
+      } catch (error) {
+        setWarningMessage(`Failed to transfer sample from microscope: ${error.message}`);
+        appendLog(`Failed to transfer sample from microscope: ${error.message}`);
+      }
+      return;
+    }
+
+    // Standard workflow for regular status options
     try {
       const result = await incubatorControlService.add_sample(
         selectedSlotNumber,
@@ -288,6 +448,19 @@ const IncubatorControl = ({ incubatorControlService, appendLog }) => {
                   {warningMessage}
                 </div>
               )}
+              {workflowMessages.length > 0 && (
+                <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded max-h-32 overflow-y-auto">
+                  <h6 className="text-sm font-semibold mb-2 text-blue-700">Operation Progress:</h6>
+                  <ul className="text-xs space-y-1">
+                    {workflowMessages.map((msg, index) => (
+                      <li key={index} className="text-blue-600">
+                        <i className="fas fa-circle-notch text-blue-500 mr-2"></i>
+                        {msg.message}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <div className="space-y-3">
                 <div>
                   <label className="block text-sm font-medium mb-1">Sample Name: <span className="text-red-500">*</span></label>
@@ -300,15 +473,18 @@ const IncubatorControl = ({ incubatorControlService, appendLog }) => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1">Status: <span className="text-red-500">*</span></label>
+                  <label className="block text-sm font-medium mb-1">Status/Position: <span className="text-red-500">*</span></label>
                   <select
                     className="w-full border border-gray-300 rounded p-2"
                     value={sampleForm.status}
                     onChange={(e) => handleFormChange('status', e.target.value)}
                   >
-                    <option value="IN">IN</option>
+                    <option value="IN">IN (Normal incubator slot)</option>
                     <option value="OUT">OUT</option>
                     <option value="Not Available">Not Available</option>
+                    <option value="incubator_transfer_station">From Incubator Transfer Station</option>
+                    <option value="microscope1">From Microscope 1</option>
+                    <option value="microscope2">From Microscope 2</option>
                   </select>
                 </div>
                 <div>
@@ -335,9 +511,21 @@ const IncubatorControl = ({ incubatorControlService, appendLog }) => {
                 </div>
                 <button
                   onClick={handleAddSample}
-                  className="w-full bg-green-500 text-white p-2 rounded hover:bg-green-600"
+                  className={`w-full p-2 rounded text-white ${
+                    currentOperation 
+                      ? 'bg-gray-400 cursor-not-allowed' 
+                      : 'bg-green-500 hover:bg-green-600'
+                  }`}
+                  disabled={currentOperation !== null}
                 >
-                  Add Sample
+                  {currentOperation === 'transferring' ? (
+                    <span>
+                      <i className="fas fa-spinner fa-spin mr-2"></i>
+                      Processing Transfer...
+                    </span>
+                  ) : (
+                    'Add Sample'
+                  )}
                 </button>
               </div>
             </div>
@@ -379,6 +567,19 @@ const IncubatorControl = ({ incubatorControlService, appendLog }) => {
                       {warningMessage}
                     </div>
                   )}
+                  {workflowMessages.length > 0 && (
+                    <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded max-h-32 overflow-y-auto">
+                      <h6 className="text-sm font-semibold mb-2 text-blue-700">Operation Progress:</h6>
+                      <ul className="text-xs space-y-1">
+                        {workflowMessages.map((msg, index) => (
+                          <li key={index} className="text-blue-600">
+                            <i className="fas fa-circle-notch text-blue-500 mr-2"></i>
+                            {msg.message}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                   <div className="space-y-3">
                     <div>
                       <label className="block text-sm font-medium mb-1">Sample Name:</label>
@@ -390,16 +591,19 @@ const IncubatorControl = ({ incubatorControlService, appendLog }) => {
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium mb-1">Status:</label>
+                      <label className="block text-sm font-medium mb-1">Status/Position:</label>
                       <select
                         className="w-full border border-gray-300 rounded p-2"
                         value={sampleForm.status}
                         onChange={(e) => handleFormChange('status', e.target.value)}
                       >
-                        <option value="">Select status</option>
-                        <option value="IN">IN</option>
+                        <option value="">Select status/position</option>
+                        <option value="IN">IN (Normal incubator slot)</option>
                         <option value="OUT">OUT</option>
                         <option value="Not Available">Not Available</option>
+                        <option value="incubator_transfer_station">From Incubator Transfer Station</option>
+                        <option value="microscope1">From Microscope 1</option>
+                        <option value="microscope2">From Microscope 2</option>
                       </select>
                     </div>
                     <div>
@@ -427,15 +631,23 @@ const IncubatorControl = ({ incubatorControlService, appendLog }) => {
                     <div className="space-y-2">
                       <button
                         onClick={handleEditSample}
-                        className="w-full bg-orange-500 text-white p-2 rounded hover:bg-orange-600"
-                        disabled={!sampleForm.name.trim() || !sampleForm.status.trim() || !sampleForm.well_plate_type.trim()}
-                        style={{ 
-                          backgroundColor: (!sampleForm.name.trim() || !sampleForm.status.trim() || !sampleForm.well_plate_type.trim()) ? '#cccccc' : '#f97316',
-                          color: 'white',
-                          opacity: (!sampleForm.name.trim() || !sampleForm.status.trim() || !sampleForm.well_plate_type.trim()) ? '0.7' : '1'
-                        }}
+                        className={`w-full p-2 rounded text-white ${
+                          currentOperation 
+                            ? 'bg-gray-400 cursor-not-allowed' 
+                            : (!sampleForm.name.trim() || !sampleForm.status.trim() || !sampleForm.well_plate_type.trim())
+                              ? 'bg-gray-400 cursor-not-allowed opacity-70'
+                              : 'bg-orange-500 hover:bg-orange-600'
+                        }`}
+                        disabled={currentOperation !== null || !sampleForm.name.trim() || !sampleForm.status.trim() || !sampleForm.well_plate_type.trim()}
                       >
-                        Save Changes
+                        {currentOperation === 'transferring' ? (
+                          <span>
+                            <i className="fas fa-spinner fa-spin mr-2"></i>
+                            Processing Transfer...
+                          </span>
+                        ) : (
+                          'Save Changes'
+                        )}
                       </button>
                       <button
                         onClick={() => setIsEditing(false)}
@@ -459,6 +671,9 @@ const IncubatorControl = ({ incubatorControlService, appendLog }) => {
 IncubatorControl.propTypes = {
   incubatorControlService: PropTypes.object,
   appendLog: PropTypes.func.isRequired,
+  microscopeControlService: PropTypes.object,
+  roboticArmService: PropTypes.object,
+  selectedMicroscopeId: PropTypes.string,
 };
 
 export default IncubatorControl;
