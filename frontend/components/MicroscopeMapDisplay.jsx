@@ -2370,13 +2370,16 @@ const MicroscopeMapDisplay = ({
           </div>
         )}
       </div>
-      
-      {/* Video contrast controls for FOV_FITTED mode */}
-      {mapViewMode === 'FOV_FITTED' && isWebRtcActive && (
-        <div className={`absolute bottom-2 right-2 bg-black bg-opacity-80 p-2 rounded text-white max-w-xs ${isHardwareInteractionDisabled ? 'opacity-75' : ''}`}>
+
+      {/* Video contrast controls - positioned below the video frame */}
+      {isWebRtcActive && (
+        <div 
+          className={`absolute bottom-2 right-2 bg-black bg-opacity-80 p-2 rounded text-white max-w-xs ${isHardwareInteractionDisabled ? 'opacity-75' : ''}`}
+          style={{ zIndex: 30 }}
+        >
           <div className="flex items-center justify-between mb-1">
             <div className="flex items-center space-x-2">
-              <span className="text-xs font-medium">Contrast</span>
+              <span className="text-xs font-medium">Video Contrast</span>
               {isDataChannelConnected && (
                 <i className="fas fa-circle text-green-500" style={{ fontSize: '4px' }} title="Metadata connected"></i>
               )}
