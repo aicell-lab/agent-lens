@@ -121,32 +121,137 @@ const MicroscopeMapDisplay = ({
   // Clear canvas confirmation dialog state
   const [showClearCanvasConfirmation, setShowClearCanvasConfirmation] = useState(false);
 
+  // Calculate stage dimensions from configuration (moved early to avoid dependency issues)
+  const stageDimensions = useMemo(() => {
+    if (!microscopeConfiguration?.limits?.software_pos_limit) {
+      return { width: 100, height: 70 }; // Default dimensions in mm
+    }
+    const limits = microscopeConfiguration.limits.software_pos_limit;
+    const width = limits.x_positive - limits.x_negative;
+    const height = limits.y_positive - limits.y_negative;
+    return { 
+      width, 
+      height,
+      xMin: limits.x_negative,
+      xMax: limits.x_positive,
+      yMin: limits.y_negative || 0,
+      yMax: limits.y_positive
+    };
+  }, [microscopeConfiguration]);
+
+  // Calculate dynamic bounds for scan parameters based on microscope configuration
+  const scanBounds = useMemo(() => {
+    if (!stageDimensions || !microscopeConfiguration?.limits?.software_pos_limit) {
+      return {
+        xMin: 0, xMax: 200,
+        yMin: 0, yMax: 100
+      };
+    }
+    return {
+      xMin: stageDimensions.xMin,
+      xMax: stageDimensions.xMax,
+      yMin: stageDimensions.yMin,
+      yMax: stageDimensions.yMax
+    };
+  }, [stageDimensions, microscopeConfiguration]);
+
+  // Custom validation function for start positions that considers grid end position
+  const validateStartPosition = useCallback((value, isX = true) => {
+    const currentScanParams = scanParameters;
+    const endPosition = isX 
+      ? value + (currentScanParams.Nx - 1) * currentScanParams.dx_mm
+      : value + (currentScanParams.Ny - 1) * currentScanParams.dy_mm;
+    
+    const maxAllowed = isX ? scanBounds.xMax : scanBounds.yMax;
+    const minAllowed = isX ? scanBounds.xMin : scanBounds.yMin;
+    
+    if (value < minAllowed) {
+      return { isValid: false, value: null, error: `Start position must be at least ${minAllowed.toFixed(1)} mm` };
+    }
+    
+    if (endPosition > maxAllowed) {
+      const maxStartForGrid = maxAllowed - (isX ? (currentScanParams.Nx - 1) * currentScanParams.dx_mm : (currentScanParams.Ny - 1) * currentScanParams.dy_mm);
+      return { 
+        isValid: false, 
+        value: null, 
+        error: `Grid extends beyond stage limit. Max start position: ${maxStartForGrid.toFixed(1)} mm` 
+      };
+    }
+    
+    return { isValid: true, value: value, error: null };
+  }, [scanParameters, scanBounds]);
+
+  // Custom validation function for grid size that considers current start position
+  const validateGridSize = useCallback((value, isNx = true) => {
+    const currentScanParams = scanParameters;
+    const startPos = isNx ? currentScanParams.start_x_mm : currentScanParams.start_y_mm;
+    const stepSize = isNx ? currentScanParams.dx_mm : currentScanParams.dy_mm;
+    const endPosition = startPos + (value - 1) * stepSize;
+    
+    const maxAllowed = isNx ? scanBounds.xMax : scanBounds.yMax;
+    
+    if (value < 1) {
+      return { isValid: false, value: null, error: 'Grid size must be at least 1' };
+    }
+    
+    if (endPosition > maxAllowed) {
+      const maxGridSize = Math.floor((maxAllowed - startPos) / stepSize) + 1;
+      return { 
+        isValid: false, 
+        value: null, 
+        error: `Grid too large. Max size: ${maxGridSize} positions` 
+      };
+    }
+    
+    return { isValid: true, value: value, error: null };
+  }, [scanParameters, scanBounds]);
+
   // Validation hooks for scan parameters with "Enter to confirm" behavior
   const startXInput = useValidatedNumberInput(
     scanParameters.start_x_mm,
     (value) => setScanParameters(prev => ({ ...prev, start_x_mm: value })),
-    { min: 0, max: 200, allowFloat: true },
+    { 
+      min: scanBounds.xMin, 
+      max: scanBounds.xMax, 
+      allowFloat: true,
+      customValidation: (value) => validateStartPosition(value, true)
+    },
     showNotification
   );
 
   const startYInput = useValidatedNumberInput(
     scanParameters.start_y_mm,
     (value) => setScanParameters(prev => ({ ...prev, start_y_mm: value })),
-    { min: 0, max: 100, allowFloat: true },
+    { 
+      min: scanBounds.yMin, 
+      max: scanBounds.yMax, 
+      allowFloat: true,
+      customValidation: (value) => validateStartPosition(value, false)
+    },
     showNotification
   );
 
   const nxInput = useValidatedNumberInput(
     scanParameters.Nx,
     (value) => setScanParameters(prev => ({ ...prev, Nx: value })),
-    { min: 1, max: 50, allowFloat: false },
+    { 
+      min: 1, 
+      max: 50, 
+      allowFloat: false,
+      customValidation: (value) => validateGridSize(value, true)
+    },
     showNotification
   );
 
   const nyInput = useValidatedNumberInput(
     scanParameters.Ny,
     (value) => setScanParameters(prev => ({ ...prev, Ny: value })),
-    { min: 1, max: 50, allowFloat: false },
+    { 
+      min: 1, 
+      max: 50, 
+      allowFloat: false,
+      customValidation: (value) => validateGridSize(value, false)
+    },
     showNotification
   );
 
@@ -215,24 +320,6 @@ const MicroscopeMapDisplay = ({
   const canvasUpdateTimerRef = useRef(null);
   const lastCanvasRequestRef = useRef({ x: 0, y: 0, width: 0, height: 0, scale: 0 });
   const activeTileRequestsRef = useRef(new Set()); // Track active requests to prevent duplicates
-
-  // Calculate stage dimensions from configuration
-  const stageDimensions = useMemo(() => {
-    if (!microscopeConfiguration?.limits?.software_pos_limit) {
-      return { width: 100, height: 70 }; // Default dimensions in mm
-    }
-    const limits = microscopeConfiguration.limits.software_pos_limit;
-    const width = limits.x_positive - limits.x_negative;
-    const height = limits.y_positive - limits.y_negative;
-    return { 
-      width, 
-      height,
-      xMin: limits.x_negative,
-      xMax: limits.x_positive,
-      yMin: limits.y_negative || 0,
-      yMax: limits.y_positive
-    };
-  }, [microscopeConfiguration]);
 
   // Calculate pixelsPerMm from microscope configuration
   const pixelsPerMm = useMemo(() => {
@@ -1467,6 +1554,43 @@ const MicroscopeMapDisplay = ({
       Math.max(rectangleStart.y, rectangleEnd.y)
     );
     
+    // Check if the selected area is within stage bounds
+    if (topLeft.x < scanBounds.xMin || bottomRight.x > scanBounds.xMax ||
+        topLeft.y < scanBounds.yMin || bottomRight.y > scanBounds.yMax) {
+      
+      // Clamp the selection to stage bounds
+      const clampedTopLeft = {
+        x: Math.max(scanBounds.xMin, topLeft.x),
+        y: Math.max(scanBounds.yMin, topLeft.y)
+      };
+      const clampedBottomRight = {
+        x: Math.min(scanBounds.xMax, bottomRight.x),
+        y: Math.min(scanBounds.yMax, bottomRight.y)
+      };
+      
+      if (showNotification) {
+        showNotification(
+          `Selected area extends beyond stage limits. Adjusted to fit within bounds: ` +
+          `(${clampedTopLeft.x.toFixed(1)}, ${clampedTopLeft.y.toFixed(1)}) to ` +
+          `(${clampedBottomRight.x.toFixed(1)}, ${clampedBottomRight.y.toFixed(1)}) mm`,
+          'warning'
+        );
+      }
+      
+      if (appendLog) {
+        appendLog(`Grid selection clamped to stage bounds: ` +
+          `X: ${clampedTopLeft.x.toFixed(1)}-${clampedBottomRight.x.toFixed(1)} mm, ` +
+          `Y: ${clampedTopLeft.y.toFixed(1)}-${clampedBottomRight.y.toFixed(1)} mm`
+        );
+      }
+      
+      // Use clamped values
+      topLeft.x = clampedTopLeft.x;
+      topLeft.y = clampedTopLeft.y;
+      bottomRight.x = clampedBottomRight.x;
+      bottomRight.y = clampedBottomRight.y;
+    }
+    
     const width_mm = bottomRight.x - topLeft.x;
     const height_mm = bottomRight.y - topLeft.y;
     
@@ -1488,7 +1612,7 @@ const MicroscopeMapDisplay = ({
     setIsRectangleSelection(false);
     setRectangleStart(null);
     setRectangleEnd(null);
-  }, [rectangleStart, rectangleEnd, isRectangleSelection, displayToStageCoords, scanParameters.dx_mm, scanParameters.dy_mm, isSimulatedMicroscope]);
+  }, [rectangleStart, rectangleEnd, isRectangleSelection, displayToStageCoords, scanParameters.dx_mm, scanParameters.dy_mm, isSimulatedMicroscope, scanBounds, showNotification, appendLog]);
 
   // Effect to trigger tile loading when view changes (throttled for performance)
   useEffect(() => {
@@ -2923,6 +3047,28 @@ const MicroscopeMapDisplay = ({
               <div>End position: ({(scanParameters.start_x_mm + (scanParameters.Nx-1) * scanParameters.dx_mm).toFixed(1)}, {(scanParameters.start_y_mm + (scanParameters.Ny-1) * scanParameters.dy_mm).toFixed(1)}) mm</div>
             </div>
             
+            <div className="bg-gray-600 p-2 rounded text-xs">
+              <div className="text-gray-300 font-medium mb-1">Stage Limits</div>
+              <div>X: {scanBounds.xMin.toFixed(1)} to {scanBounds.xMax.toFixed(1)} mm</div>
+              <div>Y: {scanBounds.yMin.toFixed(1)} to {scanBounds.yMax.toFixed(1)} mm</div>
+              {(() => {
+                const endX = scanParameters.start_x_mm + (scanParameters.Nx-1) * scanParameters.dx_mm;
+                const endY = scanParameters.start_y_mm + (scanParameters.Ny-1) * scanParameters.dy_mm;
+                const isWithinBounds = 
+                  scanParameters.start_x_mm >= scanBounds.xMin && endX <= scanBounds.xMax &&
+                  scanParameters.start_y_mm >= scanBounds.yMin && endY <= scanBounds.yMax;
+                
+                return (
+                  <div className={`mt-1 px-2 py-1 rounded text-xs font-medium ${
+                    isWithinBounds ? 'bg-green-700 text-green-100' : 'bg-red-700 text-red-100'
+                  }`}>
+                    <i className={`fas ${isWithinBounds ? 'fa-check-circle' : 'fa-exclamation-triangle'} mr-1`}></i>
+                    {isWithinBounds ? 'Grid within bounds' : 'Grid extends beyond stage limits'}
+                  </div>
+                );
+              })()}
+            </div>
+            
             {isRectangleSelection && (
               <div className="bg-blue-900 bg-opacity-50 p-2 rounded text-xs border border-blue-500">
                 <i className="fas fa-vector-square mr-1"></i>
@@ -2945,6 +3091,24 @@ const MicroscopeMapDisplay = ({
               <button
                 onClick={async () => {
                   if (!microscopeControlService || isScanInProgress) return;
+                  
+                  // Validate that the entire scan area is within stage bounds before starting
+                  const endX = scanParameters.start_x_mm + (scanParameters.Nx - 1) * scanParameters.dx_mm;
+                  const endY = scanParameters.start_y_mm + (scanParameters.Ny - 1) * scanParameters.dy_mm;
+                  
+                  if (scanParameters.start_x_mm < scanBounds.xMin || endX > scanBounds.xMax ||
+                      scanParameters.start_y_mm < scanBounds.yMin || endY > scanBounds.yMax) {
+                    
+                    const errorMsg = `Scan area extends beyond stage limits! ` +
+                      `Start: (${scanParameters.start_x_mm.toFixed(1)}, ${scanParameters.start_y_mm.toFixed(1)}) mm, ` +
+                      `End: (${endX.toFixed(1)}, ${endY.toFixed(1)}) mm. ` +
+                      `Stage limits: X: ${scanBounds.xMin.toFixed(1)}-${scanBounds.xMax.toFixed(1)} mm, ` +
+                      `Y: ${scanBounds.yMin.toFixed(1)}-${scanBounds.yMax.toFixed(1)} mm`;
+                    
+                    if (showNotification) showNotification(errorMsg, 'error');
+                    if (appendLog) appendLog(errorMsg);
+                    return;
+                  }
                   
                   // Check if WebRTC is active and stop it to prevent camera resource conflict
                   const wasWebRtcActive = isWebRtcActive;

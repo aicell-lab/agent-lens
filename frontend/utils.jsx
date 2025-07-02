@@ -335,7 +335,8 @@ export const validateNumberInput = (value, options = {}) => {
     max = Number.POSITIVE_INFINITY,
     allowFloat = true,
     allowEmpty = false,
-    defaultValue = null
+    defaultValue = null,
+    customValidation = null
   } = options;
 
   // Handle empty input
@@ -357,13 +358,26 @@ export const validateNumberInput = (value, options = {}) => {
     return { isValid: false, value: null, error: 'Invalid number format' };
   }
 
-  // Check range constraints
+  // Check range constraints (basic validation)
   if (parsedValue < min) {
     return { isValid: false, value: null, error: `Value must be at least ${min}` };
   }
 
   if (parsedValue > max) {
     return { isValid: false, value: null, error: `Value must not exceed ${max}` };
+  }
+
+  // Apply custom validation if provided (for more complex constraints)
+  if (customValidation && typeof customValidation === 'function') {
+    try {
+      const customResult = customValidation(parsedValue);
+      if (customResult && !customResult.isValid) {
+        return customResult;
+      }
+    } catch (error) {
+      console.warn('Custom validation function threw an error:', error);
+      // Fall back to basic validation if custom validation fails
+    }
   }
 
   return { isValid: true, value: parsedValue, error: null };
