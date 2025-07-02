@@ -92,9 +92,13 @@ const MicroscopeMapDisplay = ({
     Ny: 5,
     dx_mm: 0.85,
     dy_mm: 0.85,
-    channel: 'BF LED matrix full',
-    intensity: 50,
-    exposure_time: 100,
+    illumination_settings: [
+      {
+        channel: 'BF LED matrix full',
+        intensity: 50,
+        exposure_time: 100
+      }
+    ],
     do_contrast_autofocus: false,
     do_reflection_af: false
   });
@@ -157,19 +161,7 @@ const MicroscopeMapDisplay = ({
     showNotification
   );
 
-  const intensityInput = useValidatedNumberInput(
-    scanParameters.intensity,
-    (value) => setScanParameters(prev => ({ ...prev, intensity: value })),
-    { min: 1, max: 100, allowFloat: false },
-    showNotification
-  );
 
-  const exposureInput = useValidatedNumberInput(
-    scanParameters.exposure_time,
-    (value) => setScanParameters(prev => ({ ...prev, exposure_time: value })),
-    { min: 1, max: 900, allowFloat: false },
-    showNotification
-  );
 
   // Validation hooks for quick scan parameters with "Enter to confirm" behavior
   const quickExposureInput = useValidatedNumberInput(
@@ -1233,9 +1225,13 @@ const MicroscopeMapDisplay = ({
       // Update scan parameters with current microscope settings
       setScanParameters(prev => ({
         ...prev,
-        channel: channelName,
-        intensity: intensity,
-        exposure_time: exposure_time
+        illumination_settings: [
+          {
+            channel: channelName,
+            intensity: intensity,
+            exposure_time: exposure_time
+          }
+        ]
       }));
       
       if (appendLog) {
@@ -2015,6 +2011,8 @@ const MicroscopeMapDisplay = ({
                   <>
                     <div>Start: ({topLeft.x.toFixed(1)}, {topLeft.y.toFixed(1)}) mm</div>
                     <div>Grid: {Nx} × {Ny} positions</div>
+                    <div>Channels: {scanParameters.illumination_settings.length}</div>
+                    <div>Total images: {Nx * Ny * scanParameters.illumination_settings.length}</div>
                     <div>Step: {scanParameters.dx_mm} × {scanParameters.dy_mm} mm</div>
                     <div>End: ({(topLeft.x + (Nx-1) * scanParameters.dx_mm).toFixed(1)}, {(topLeft.y + (Ny-1) * scanParameters.dy_mm).toFixed(1)}) mm</div>
                   </>
@@ -2636,60 +2634,187 @@ const MicroscopeMapDisplay = ({
             </div>
             
             <div>
-              <label className="block text-gray-300 font-medium mb-1">Channel</label>
-              <select
-                value={scanParameters.channel}
-                onChange={(e) => setScanParameters(prev => ({ ...prev, channel: e.target.value }))}
-                className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white"
-                disabled={isScanInProgress}
-              >
-                <option value="BF LED matrix full">BF LED matrix full</option>
-                <option value="Fluorescence 405 nm Ex">Fluorescence 405 nm Ex</option>
-                <option value="Fluorescence 488 nm Ex">Fluorescence 488 nm Ex</option>
-                <option value="Fluorescence 561 nm Ex">Fluorescence 561 nm Ex</option>
-                <option value="Fluorescence 638 nm Ex">Fluorescence 638 nm Ex</option>
-                <option value="Fluorescence 730 nm Ex">Fluorescence 730 nm Ex</option>
-              </select>
-            </div>
-            
-            <div className="flex space-x-4">
-              <div className="flex-1 input-validation-container">
-                <label className="block text-gray-300 font-medium mb-1">Intensity (%)</label>
-                <input
-                  type="number"
-                  value={intensityInput.inputValue}
-                  onChange={intensityInput.handleInputChange}
-                  onKeyDown={intensityInput.handleKeyDown}
-                  onBlur={intensityInput.handleBlur}
-                  className={getInputValidationClasses(
-                    intensityInput.isValid,
-                    intensityInput.hasUnsavedChanges,
-                    "w-full px-2 py-1 bg-gray-700 border rounded text-white"
-                  )}
-                  min="1"
-                  max="100"
-                  disabled={isScanInProgress}
-                  placeholder="1-100%"
-                />
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-gray-300 font-medium">Illumination Channels</label>
+                <div className="flex space-x-1">
+                  <button
+                    onClick={() => {
+                      if (isScanInProgress) return;
+                      loadCurrentMicroscopeSettings();
+                    }}
+                    className="px-2 py-1 text-xs bg-green-600 hover:bg-green-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={isScanInProgress || !microscopeControlService}
+                    title="Load current microscope settings"
+                  >
+                    <i className="fas fa-download mr-1"></i>
+                    Load Current
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (isScanInProgress) return;
+                      // Find a channel that's not already in use
+                      const availableChannels = [
+                        'BF LED matrix full',
+                        'Fluorescence 405 nm Ex',
+                        'Fluorescence 488 nm Ex',
+                        'Fluorescence 561 nm Ex',
+                        'Fluorescence 638 nm Ex',
+                        'Fluorescence 730 nm Ex'
+                      ];
+                      const usedChannels = scanParameters.illumination_settings.map(s => s.channel);
+                      const nextChannel = availableChannels.find(c => !usedChannels.includes(c)) || 'BF LED matrix full';
+                      
+                      setScanParameters(prev => ({
+                        ...prev,
+                        illumination_settings: [
+                          ...prev.illumination_settings,
+                          {
+                            channel: nextChannel,
+                            intensity: 50,
+                            exposure_time: 100
+                          }
+                        ]
+                      }));
+                    }}
+                    className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={isScanInProgress || scanParameters.illumination_settings.length >= 6}
+                    title="Add channel"
+                  >
+                    <i className="fas fa-plus mr-1"></i>
+                    Add Channel
+                  </button>
+                </div>
               </div>
-              <div className="flex-1 input-validation-container">
-                <label className="block text-gray-300 font-medium mb-1">Exposure (ms)</label>
-                <input
-                  type="number"
-                  value={exposureInput.inputValue}
-                  onChange={exposureInput.handleInputChange}
-                  onKeyDown={exposureInput.handleKeyDown}
-                  onBlur={exposureInput.handleBlur}
-                  className={getInputValidationClasses(
-                    exposureInput.isValid,
-                    exposureInput.hasUnsavedChanges,
-                    "w-full px-2 py-1 bg-gray-700 border rounded text-white"
-                  )}
-                  min="1"
-                  disabled={isScanInProgress}
-                  placeholder="1-5000ms"
-                />
+              
+              <div className="space-y-2 max-h-48 overflow-y-auto">
+                {scanParameters.illumination_settings.map((setting, index) => (
+                  <div key={index} className="bg-gray-700 p-2 rounded border border-gray-600">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs text-gray-300 font-medium">Channel {index + 1}</span>
+                      <button
+                        onClick={() => {
+                          if (isScanInProgress || scanParameters.illumination_settings.length <= 1) return;
+                          setScanParameters(prev => ({
+                            ...prev,
+                            illumination_settings: prev.illumination_settings.filter((_, i) => i !== index)
+                          }));
+                        }}
+                        className="px-1 py-0.5 text-xs bg-red-600 hover:bg-red-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={isScanInProgress || scanParameters.illumination_settings.length <= 1}
+                        title="Remove channel"
+                      >
+                        <i className="fas fa-times"></i>
+                      </button>
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <select
+                          value={setting.channel}
+                          onChange={(e) => {
+                            if (isScanInProgress) return;
+                            setScanParameters(prev => ({
+                              ...prev,
+                              illumination_settings: prev.illumination_settings.map((s, i) => 
+                                i === index ? { ...s, channel: e.target.value } : s
+                              )
+                            }));
+                          }}
+                          className={`w-full px-2 py-1 text-xs bg-gray-600 border rounded text-white ${
+                            scanParameters.illumination_settings.filter(s => s.channel === setting.channel).length > 1 
+                              ? 'border-yellow-500' 
+                              : 'border-gray-500'
+                          }`}
+                          disabled={isScanInProgress}
+                        >
+                          <option value="BF LED matrix full">BF LED matrix full</option>
+                          <option value="Fluorescence 405 nm Ex">Fluorescence 405 nm Ex</option>
+                          <option value="Fluorescence 488 nm Ex">Fluorescence 488 nm Ex</option>
+                          <option value="Fluorescence 561 nm Ex">Fluorescence 561 nm Ex</option>
+                          <option value="Fluorescence 638 nm Ex">Fluorescence 638 nm Ex</option>
+                          <option value="Fluorescence 730 nm Ex">Fluorescence 730 nm Ex</option>
+                        </select>
+                        {scanParameters.illumination_settings.filter(s => s.channel === setting.channel).length > 1 && (
+                          <div className="absolute -top-1 -right-1">
+                            <i className="fas fa-exclamation-triangle text-yellow-500 text-xs" title="Duplicate channel detected"></i>
+                          </div>
+                        )}
+                      </div>
+                      
+                      <div className="flex space-x-2">
+                        <div className="flex-1">
+                          <input
+                            type="number"
+                            value={setting.intensity}
+                            onChange={(e) => {
+                              if (isScanInProgress) return;
+                              const value = parseInt(e.target.value) || 0;
+                              if (value >= 1 && value <= 100) {
+                                setScanParameters(prev => ({
+                                  ...prev,
+                                  illumination_settings: prev.illumination_settings.map((s, i) => 
+                                    i === index ? { ...s, intensity: value } : s
+                                  )
+                                }));
+                              }
+                            }}
+                            className="w-full px-2 py-1 text-xs bg-gray-600 border border-gray-500 rounded text-white"
+                            min="1"
+                            max="100"
+                            disabled={isScanInProgress}
+                            placeholder="Intensity %"
+                          />
+                        </div>
+                        <div className="flex-1">
+                          <input
+                            type="number"
+                            value={setting.exposure_time}
+                            onChange={(e) => {
+                              if (isScanInProgress) return;
+                              const value = parseInt(e.target.value) || 0;
+                              if (value >= 1 && value <= 1000) {
+                                setScanParameters(prev => ({
+                                  ...prev,
+                                  illumination_settings: prev.illumination_settings.map((s, i) => 
+                                    i === index ? { ...s, exposure_time: value } : s
+                                  )
+                                }));
+                              }
+                            }}
+                            className="w-full px-2 py-1 text-xs bg-gray-600 border border-gray-500 rounded text-white"
+                            min="1"
+                            max="1000"
+                            disabled={isScanInProgress}
+                            placeholder="Exposure ms"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
+              
+              {scanParameters.illumination_settings.length > 1 && (
+                <div className="mt-2 p-2 bg-blue-900 bg-opacity-30 rounded border border-blue-500 text-xs">
+                  <div className="flex items-center text-blue-300 mb-1">
+                    <i className="fas fa-info-circle mr-1"></i>
+                    Multi-channel Acquisition
+                  </div>
+                  <div className="text-gray-300">
+                    Channels: {scanParameters.illumination_settings.map(s => 
+                      s.channel.replace('Fluorescence ', '').replace(' Ex', '').replace('BF LED matrix full', 'BF')
+                    ).join(', ')}
+                  </div>
+                  {scanParameters.illumination_settings.some((setting, index) => 
+                    scanParameters.illumination_settings.filter(s => s.channel === setting.channel).length > 1
+                  ) && (
+                    <div className="text-yellow-300 mt-1">
+                      <i className="fas fa-exclamation-triangle mr-1"></i>
+                      Warning: Duplicate channels detected
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             
             <div className="flex items-center space-x-4">
@@ -2718,6 +2843,8 @@ const MicroscopeMapDisplay = ({
             <div className="bg-gray-700 p-2 rounded text-xs">
               <div>Total scan area: {(scanParameters.Nx * scanParameters.dx_mm).toFixed(1)} × {(scanParameters.Ny * scanParameters.dy_mm).toFixed(1)} mm</div>
               <div>Total positions: {scanParameters.Nx * scanParameters.Ny}</div>
+              <div>Channels: {scanParameters.illumination_settings.length}</div>
+              <div>Total images: {scanParameters.Nx * scanParameters.Ny * scanParameters.illumination_settings.length}</div>
               <div>End position: ({(scanParameters.start_x_mm + (scanParameters.Nx-1) * scanParameters.dx_mm).toFixed(1)}, {(scanParameters.start_y_mm + (scanParameters.Ny-1) * scanParameters.dy_mm).toFixed(1)}) mm</div>
             </div>
             
@@ -2766,14 +2893,11 @@ const MicroscopeMapDisplay = ({
                   
                   try {
                     
-                    if (appendLog) appendLog(`Starting scan: ${scanParameters.Nx}×${scanParameters.Ny} positions from (${scanParameters.start_x_mm.toFixed(1)}, ${scanParameters.start_y_mm.toFixed(1)}) mm`);
-                    
-                    // Create illumination settings object properly
-                    const illuminationSettings = [{
-                      channel: scanParameters.channel,
-                      intensity: scanParameters.intensity,
-                      exposure_time: scanParameters.exposure_time
-                    }];
+                    if (appendLog) {
+                      const channelNames = scanParameters.illumination_settings.map(s => s.channel).join(', ');
+                      appendLog(`Starting scan: ${scanParameters.Nx}×${scanParameters.Ny} positions from (${scanParameters.start_x_mm.toFixed(1)}, ${scanParameters.start_y_mm.toFixed(1)}) mm`);
+                      appendLog(`Channels: ${channelNames}`);
+                    }
                     
                     const result = await microscopeControlService.normal_scan_with_stitching(
                       scanParameters.start_x_mm,
@@ -2782,7 +2906,7 @@ const MicroscopeMapDisplay = ({
                       scanParameters.Ny,
                       scanParameters.dx_mm,
                       scanParameters.dy_mm,
-                      illuminationSettings,
+                      scanParameters.illumination_settings,
                       scanParameters.do_contrast_autofocus,
                       scanParameters.do_reflection_af,
                       'scan_' + Date.now()
