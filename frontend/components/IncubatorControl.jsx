@@ -271,7 +271,7 @@ const IncubatorControl = ({
         // Check for conflicts on the target microscope
         const conflictSample = await checkMicroscopeConflict(microscopeNumber);
         if (conflictSample) {
-          setWarningMessage(`Conflict detected: There is already a sample on Microscope ${microscopeNumber} (${conflictSample.name}). Please contact the developer to resolve this issue.`);
+          setWarningMessage(`Conflict detected: There is already a sample resistered in incubator on Microscope ${microscopeNumber} (${conflictSample.name}).`);
           return;
         }
         
