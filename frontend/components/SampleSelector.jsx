@@ -276,17 +276,20 @@ const SampleSelector = ({
         const armService = roboticArmService || roboticArmServiceState;
         if (!armService) throw new Error("Robotic arm service not available");
         
-        addWorkflowMessage("Getting sample from slot to transfer station");
-        await incubatorControlService.get_sample_from_slot_to_transfer_station(incubatorSlot);
+        addWorkflowMessage("Getting sample from slot to transfer station and homing microscope stage simultaneously");
+        
+        // Start both operations concurrently
+        const [transferResult, homeResult] = await Promise.all([
+          incubatorControlService.get_sample_from_slot_to_transfer_station(incubatorSlot),
+          microscopeControlService.home_stage()
+        ]);
+        
         await updateSampleLocation(incubatorSlot, "incubator_station");
         addWorkflowMessage("Plate loaded onto transfer station");
+        addWorkflowMessage(`Microscope ${expectedMicroscopeNumber} stage homed successfully`);
         
         await armService.connect();
         await armService.light_on();
-        
-        addWorkflowMessage(`Homing microscope stage for Microscope ${expectedMicroscopeNumber}`);
-        await microscopeControlService.home_stage();
-        addWorkflowMessage(`Microscope ${expectedMicroscopeNumber} stage homed successfully`);
         
         await updateSampleLocation(incubatorSlot, "robotic_arm");
         addWorkflowMessage(`Transporting sample to microscope ${expectedMicroscopeNumber}`);

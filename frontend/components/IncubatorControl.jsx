@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
+import { tryGetService } from '../utils';
 
 const IncubatorControl = ({ 
   incubatorControlService, 
   appendLog,
   microscopeControlService,
   roboticArmService,
-  selectedMicroscopeId 
+  selectedMicroscopeId,
+  hyphaManager // Added to get specific microscope services
 }) => {
   // Example state for incubator parameters; adjust as needed.
   const [temperature, setTemperature] = useState(37);
@@ -158,6 +160,69 @@ const IncubatorControl = ({
     }
   };
 
+  // Helper function to get specific microscope service by number
+  const getSpecificMicroscopeService = async (microscopeNumber) => {
+    if (!hyphaManager) {
+      addWorkflowMessage("Error: HyphaManager not available");
+      throw new Error("HyphaManager not available");
+    }
+
+    const microscopeServiceIds = {
+      1: "reef-imaging/mirror-microscope-control-squid-1",
+      2: "reef-imaging/mirror-microscope-control-squid-2"
+    };
+
+    const targetMicroscopeId = microscopeServiceIds[microscopeNumber];
+    if (!targetMicroscopeId) {
+      throw new Error(`Invalid microscope number: ${microscopeNumber}`);
+    }
+
+    addWorkflowMessage(`Connecting to ${targetMicroscopeId}...`);
+    
+    try {
+      // Add timeout to prevent hanging
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Connection timeout after 15 seconds')), 15000)
+      );
+      
+      const servicePromise = tryGetService(
+        hyphaManager,
+        `Microscope ${microscopeNumber} Control`,
+        targetMicroscopeId,
+        null, // No local service for real microscopes
+        addWorkflowMessage,
+        null // No notification function here
+      );
+
+      const specificMicroscopeService = await Promise.race([servicePromise, timeoutPromise]);
+
+      if (!specificMicroscopeService) {
+        throw new Error(`Failed to connect to Microscope ${microscopeNumber} service - service returned null`);
+      }
+
+      // Verify the service is actually functional by testing a simple call
+      addWorkflowMessage(`Verifying connection to Microscope ${microscopeNumber}...`);
+      try {
+        // Test with a basic method that all microscope services should have
+        await specificMicroscopeService.get_status();
+        addWorkflowMessage(`✓ Successfully connected and verified Microscope ${microscopeNumber}`);
+      } catch (statusError) {
+        // If get_status fails, try a simpler check to see if essential methods exist
+        if (typeof specificMicroscopeService.home_stage !== 'function' || 
+            typeof specificMicroscopeService.return_stage !== 'function') {
+          throw new Error(`Service connected but missing essential methods (home_stage, return_stage)`);
+        }
+        addWorkflowMessage(`✓ Service connected to Microscope ${microscopeNumber} (basic verification passed)`);
+      }
+      
+      return specificMicroscopeService;
+    } catch (error) {
+      addWorkflowMessage(`✗ Failed to connect to Microscope ${microscopeNumber}: ${error.message}`);
+      appendLog(`Connection failed for ${targetMicroscopeId}: ${error.message}`);
+      throw error;
+    }
+  };
+
   // Helper function to check for microscope conflicts
   const checkMicroscopeConflict = async (microscopeNumber) => {
     try {
@@ -180,40 +245,103 @@ const IncubatorControl = ({
     clearWorkflowMessages();
     setCurrentOperation('transferring');
     
+    let specificMicroscopeService = null;
+    let armConnected = false;
+    let armLightOn = false;
+    
     try {
       addWorkflowMessage(`Preparing to transfer sample from Microscope ${microscopeNumber} to slot ${targetSlot}`);
       
-      if (!microscopeControlService) {
-        throw new Error("Microscope service not available");
+      // Service availability checks
+      if (!incubatorControlService) {
+        const errorMsg = `Incubator service not available. Service object: ${incubatorControlService}`;
+        addWorkflowMessage(`Debug: ${errorMsg}`);
+        throw new Error("Incubator service not available");
       }
       
       if (!roboticArmService) {
+        const errorMsg = `Robotic arm service not available. Service object: ${roboticArmService}`;
+        addWorkflowMessage(`Debug: ${errorMsg}`);
+        appendLog(`Transfer failed: Robotic arm service unavailable. This operation requires access to the robotic arm.`);
         throw new Error("Robotic arm service not available");
       }
+
+      // Get the specific microscope service for the target microscope
+      addWorkflowMessage(`Getting specific service for Microscope ${microscopeNumber}...`);
+      specificMicroscopeService = await getSpecificMicroscopeService(microscopeNumber);
       
-      addWorkflowMessage(`Homing microscope stage for Microscope ${microscopeNumber}`);
-      await microscopeControlService.home_stage();
-      addWorkflowMessage(`Microscope ${microscopeNumber} stage homed successfully`);
+      // CRITICAL SAFETY CHECK: Home the microscope stage first and verify success
+      addWorkflowMessage(`SAFETY CHECK: Homing microscope stage for Microscope ${microscopeNumber}...`);
+      try {
+        const homeResult = await specificMicroscopeService.home_stage();
+        if (homeResult && homeResult.success === false) {
+          throw new Error(`Microscope homing failed: ${homeResult.message || 'Unknown error'}`);
+        }
+        addWorkflowMessage(`✓ Microscope ${microscopeNumber} stage homed successfully - SAFE TO PROCEED`);
+      } catch (homeError) {
+        addWorkflowMessage(`✗ CRITICAL ERROR: Microscope homing failed - ${homeError.message}`);
+        appendLog(`SAFETY ABORT: Microscope ${microscopeNumber} failed to home. Robotic arm operations cancelled to prevent collision.`);
+        throw new Error(`Microscope homing failed: ${homeError.message}. Aborting for safety.`);
+      }
       
+      // Only proceed with robotic arm if microscope homing was successful
+      addWorkflowMessage(`Connecting to robotic arm (microscope safely homed)...`);
       await roboticArmService.connect();
+      armConnected = true;
+      
+      addWorkflowMessage(`Turning on robotic arm light...`);
       await roboticArmService.light_on();
+      armLightOn = true;
       
-      addWorkflowMessage(`Transporting sample from microscope ${microscopeNumber} to incubator`);
-      await roboticArmService.microscope_to_incubator(microscopeNumber);
-      addWorkflowMessage("Sample transported to incubator transfer station");
+      addWorkflowMessage(`Initiating sample transport from microscope ${microscopeNumber} to incubator...`);
+      const transportResult = await roboticArmService.microscope_to_incubator(microscopeNumber);
+      if (transportResult && transportResult.success === false) {
+        throw new Error(`Robotic arm transport failed: ${transportResult.message || 'Unknown error'}`);
+      }
+      addWorkflowMessage("✓ Sample transported to incubator transfer station");
       
+      addWorkflowMessage(`Moving sample from transfer station to slot ${targetSlot}...`);
       await incubatorControlService.put_sample_from_transfer_station_to_slot(targetSlot);
-      addWorkflowMessage(`Sample moved to incubator slot ${targetSlot}`);
+      addWorkflowMessage(`✓ Sample moved to incubator slot ${targetSlot}`);
       
-      await microscopeControlService.return_stage();
-      await roboticArmService.light_off();
-      await roboticArmService.disconnect();
+      // Return microscope stage to ready position
+      addWorkflowMessage(`Returning microscope ${microscopeNumber} stage to ready position...`);
+      await specificMicroscopeService.return_stage();
+      addWorkflowMessage(`✓ Microscope ${microscopeNumber} stage returned to ready position`);
       
-      addWorkflowMessage("Sample successfully transferred to incubator slot");
+      // Clean up robotic arm
+      if (armLightOn) {
+        await roboticArmService.light_off();
+        addWorkflowMessage("✓ Robotic arm light turned off");
+      }
+      if (armConnected) {
+        await roboticArmService.disconnect();
+        addWorkflowMessage("✓ Robotic arm disconnected");
+      }
+      
+      addWorkflowMessage("✓ Sample successfully transferred to incubator slot");
       setCurrentOperation(null);
       return true;
+      
     } catch (error) {
-      addWorkflowMessage(`Error during transfer: ${error.message}`);
+      addWorkflowMessage(`✗ Error during transfer: ${error.message}`);
+      appendLog(`Transfer operation failed: ${error.message}`);
+      
+      // Emergency cleanup - turn off robotic arm if it was activated
+      try {
+        if (armLightOn && roboticArmService) {
+          addWorkflowMessage("Emergency cleanup: Turning off robotic arm light...");
+          await roboticArmService.light_off();
+        }
+        if (armConnected && roboticArmService) {
+          addWorkflowMessage("Emergency cleanup: Disconnecting robotic arm...");
+          await roboticArmService.disconnect();
+        }
+      } catch (cleanupError) {
+        addWorkflowMessage(`Warning: Cleanup failed: ${cleanupError.message}`);
+        appendLog(`Warning: Emergency cleanup failed: ${cleanupError.message}`);
+      }
+      
       setCurrentOperation(null);
       throw error;
     }
@@ -383,6 +511,48 @@ const IncubatorControl = ({
         <h3 className="text-xl font-medium mb-4">Incubator Control</h3>
         <div id="incubator-control-content">
           <div className="incubator-settings">
+            {/* Service Status Indicator */}
+            <div className="mb-4 p-2 border rounded bg-gray-50">
+              <h4 className="text-sm font-medium mb-2">Service Status</h4>
+              <div className="grid grid-cols-1 gap-1 text-xs">
+                <div className="flex items-center">
+                  <i className={`fas ${incubatorControlService ? 'fa-check-circle text-green-500' : 'fa-times-circle text-red-500'} mr-2`}></i>
+                  <span>Incubator Service: {incubatorControlService ? 'Connected' : 'Disconnected'}</span>
+                </div>
+                <div className="flex items-center">
+                  <i className={`fas ${microscopeControlService ? 'fa-check-circle text-green-500' : 'fa-times-circle text-red-500'} mr-2`}></i>
+                  <span>Microscope Service: {microscopeControlService ? 'Connected' : 'Disconnected'}</span>
+                </div>
+                <div className="flex items-center">
+                  <i className={`fas ${roboticArmService ? 'fa-check-circle text-green-500' : 'fa-times-circle text-red-500'} mr-2`}></i>
+                  <span>Robotic Arm Service: {roboticArmService ? 'Connected' : 'Disconnected'}</span>
+                </div>
+                {selectedMicroscopeId && (
+                  <div className="flex items-center mt-1">
+                    <i className="fas fa-microscope text-blue-500 mr-2"></i>
+                    <span className="text-blue-600">Currently Selected: {selectedMicroscopeId}</span>
+                  </div>
+                )}
+                <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded text-blue-800">
+                  <div className="text-xs">
+                    <i className="fas fa-info-circle mr-1"></i>
+                    <strong>Transfer Operations:</strong>
+                    <br />• "From Microscope 1/2" will connect to specific microscope services
+                    <br />• Each operation verifies microscope safety before robotic arm movement
+                  </div>
+                </div>
+                {(!incubatorControlService || !roboticArmService || !hyphaManager) && (
+                  <div className="mt-2 p-2 bg-red-100 border border-red-300 rounded text-red-800">
+                    <i className="fas fa-exclamation-triangle mr-1"></i>
+                    <span className="text-xs">
+                      Transfer operations require: Incubator Service, Robotic Arm Service, and HyphaManager
+                      {!hyphaManager && <><br />• HyphaManager: Missing - cannot connect to specific microscopes</>}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+            
             <div className="mb-4">
               <label className="block text-sm font-medium">Temperature (°C):</label>
               <input
@@ -483,8 +653,8 @@ const IncubatorControl = ({
                     <option value="OUT">OUT</option>
                     <option value="Not Available">Not Available</option>
                     <option value="incubator_transfer_station">From Incubator Transfer Station</option>
-                    <option value="microscope1">From Microscope 1</option>
-                    <option value="microscope2">From Microscope 2</option>
+                    <option value="microscope1">From Microscope 1 (⚠️ Safety verified transfer)</option>
+                    <option value="microscope2">From Microscope 2 (⚠️ Safety verified transfer)</option>
                   </select>
                 </div>
                 <div>
@@ -602,8 +772,8 @@ const IncubatorControl = ({
                         <option value="OUT">OUT</option>
                         <option value="Not Available">Not Available</option>
                         <option value="incubator_transfer_station">From Incubator Transfer Station</option>
-                        <option value="microscope1">From Microscope 1</option>
-                        <option value="microscope2">From Microscope 2</option>
+                        <option value="microscope1">From Microscope 1 (⚠️ Safety verified transfer)</option>
+                        <option value="microscope2">From Microscope 2 (⚠️ Safety verified transfer)</option>
                       </select>
                     </div>
                     <div>
@@ -674,6 +844,7 @@ IncubatorControl.propTypes = {
   microscopeControlService: PropTypes.object,
   roboticArmService: PropTypes.object,
   selectedMicroscopeId: PropTypes.string,
+  hyphaManager: PropTypes.object,
 };
 
 export default IncubatorControl;

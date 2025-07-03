@@ -257,6 +257,14 @@ docs/                    # Documentation and diagrams
 - **Error Recovery**: Implement rollback procedures for failed sample transfer operations
 - **Sample Tracking**: Monitor sample locations (incubator_slot, robotic_arm, microscope1/2)
 
+#### Service Handling Safety Notices
+- **CRITICAL**: Always verify microscope homing success before robotic arm movement to prevent collisions
+- **Service Verification**: Use `get_status()` method to verify microscope service functionality, not `.api()`
+- **Specific Services**: Connect to specific microscope services (squid-1/squid-2) for transfer operations, not generic selected service
+- **Safety Abort**: Immediately abort robotic arm operations if microscope operations fail
+- **Emergency Cleanup**: Implement cleanup procedures to safely disconnect robotic arm on errors
+- **Service Validation**: Check for essential methods (`home_stage`, `return_stage`) before proceeding with operations
+
 ### 4.4. AI Agent Integration
 - Use vector embeddings for image similarity search
 - Use LLM agents for microscopy control code generation
@@ -473,7 +481,20 @@ const handleSampleOperation = async () => {
   
   try {
     addWorkflowMessage("Starting operation...");
-    await validateHardwareState();
+    
+    // CRITICAL: Verify microscope homing success before robotic arm movement
+    const homeResult = await specificMicroscopeService.home_stage();
+    if (homeResult && homeResult.success === false) {
+      throw new Error(`Microscope homing failed: ${homeResult.message}`);
+    }
+    addWorkflowMessage("✓ Microscope safely homed - proceeding with robotic arm");
+    
+    // Only proceed with robotic arm if microscope is safe
+    await roboticArmService.connect();
+    armConnected = true;
+    await roboticArmService.light_on();
+    armLightOn = true;
+    
     await coordinateWithServices();
     addWorkflowMessage("Operation completed successfully");
     setCurrentOperation(null);
@@ -484,6 +505,7 @@ const handleSampleOperation = async () => {
   }
 };
 ```
+Incase emergency, use 'roboticArmService.halt()'
 
 #### Async Error Handling Pattern
 ```python

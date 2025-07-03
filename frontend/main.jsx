@@ -316,6 +316,10 @@ const MicroscopeControl = () => {
           <IncubatorControl
             incubatorControlService={incubatorControlService}
             appendLog={appendLog}
+            microscopeControlService={microscopeControlService}
+            roboticArmService={roboticArmService}
+            selectedMicroscopeId={selectedMicroscopeId}
+            hyphaManager={hyphaManager}
           />
         );
       case 'dashboard':
