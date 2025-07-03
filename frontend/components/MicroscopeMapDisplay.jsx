@@ -92,9 +92,13 @@ const MicroscopeMapDisplay = ({
     Ny: 5,
     dx_mm: 0.85,
     dy_mm: 0.85,
-    channel: 'BF LED matrix full',
-    intensity: 50,
-    exposure_time: 100,
+    illumination_settings: [
+      {
+        channel: 'BF LED matrix full',
+        intensity: 50,
+        exposure_time: 100
+      }
+    ],
     do_contrast_autofocus: false,
     do_reflection_af: false
   });
@@ -114,32 +118,140 @@ const MicroscopeMapDisplay = ({
   const [isLayerDropdownOpen, setIsLayerDropdownOpen] = useState(false);
   const layerDropdownRef = useRef(null);
 
+  // Clear canvas confirmation dialog state
+  const [showClearCanvasConfirmation, setShowClearCanvasConfirmation] = useState(false);
+
+  // Calculate stage dimensions from configuration (moved early to avoid dependency issues)
+  const stageDimensions = useMemo(() => {
+    if (!microscopeConfiguration?.limits?.software_pos_limit) {
+      return { width: 100, height: 70 }; // Default dimensions in mm
+    }
+    const limits = microscopeConfiguration.limits.software_pos_limit;
+    const width = limits.x_positive - limits.x_negative;
+    const height = limits.y_positive - limits.y_negative;
+    return { 
+      width, 
+      height,
+      xMin: limits.x_negative,
+      xMax: limits.x_positive,
+      yMin: limits.y_negative || 0,
+      yMax: limits.y_positive
+    };
+  }, [microscopeConfiguration]);
+
+  // Calculate dynamic bounds for scan parameters based on microscope configuration
+  const scanBounds = useMemo(() => {
+    if (!stageDimensions || !microscopeConfiguration?.limits?.software_pos_limit) {
+      return {
+        xMin: 0, xMax: 200,
+        yMin: 0, yMax: 100
+      };
+    }
+    return {
+      xMin: stageDimensions.xMin,
+      xMax: stageDimensions.xMax,
+      yMin: stageDimensions.yMin,
+      yMax: stageDimensions.yMax
+    };
+  }, [stageDimensions, microscopeConfiguration]);
+
+  // Custom validation function for start positions that considers grid end position
+  const validateStartPosition = useCallback((value, isX = true) => {
+    const currentScanParams = scanParameters;
+    const endPosition = isX 
+      ? value + (currentScanParams.Nx - 1) * currentScanParams.dx_mm
+      : value + (currentScanParams.Ny - 1) * currentScanParams.dy_mm;
+    
+    const maxAllowed = isX ? scanBounds.xMax : scanBounds.yMax;
+    const minAllowed = isX ? scanBounds.xMin : scanBounds.yMin;
+    
+    if (value < minAllowed) {
+      return { isValid: false, value: null, error: `Start position must be at least ${minAllowed.toFixed(1)} mm` };
+    }
+    
+    if (endPosition > maxAllowed) {
+      const maxStartForGrid = maxAllowed - (isX ? (currentScanParams.Nx - 1) * currentScanParams.dx_mm : (currentScanParams.Ny - 1) * currentScanParams.dy_mm);
+      return { 
+        isValid: false, 
+        value: null, 
+        error: `Grid extends beyond stage limit. Max start position: ${maxStartForGrid.toFixed(1)} mm` 
+      };
+    }
+    
+    return { isValid: true, value: value, error: null };
+  }, [scanParameters, scanBounds]);
+
+  // Custom validation function for grid size that considers current start position
+  const validateGridSize = useCallback((value, isNx = true) => {
+    const currentScanParams = scanParameters;
+    const startPos = isNx ? currentScanParams.start_x_mm : currentScanParams.start_y_mm;
+    const stepSize = isNx ? currentScanParams.dx_mm : currentScanParams.dy_mm;
+    const endPosition = startPos + (value - 1) * stepSize;
+    
+    const maxAllowed = isNx ? scanBounds.xMax : scanBounds.yMax;
+    
+    if (value < 1) {
+      return { isValid: false, value: null, error: 'Grid size must be at least 1' };
+    }
+    
+    if (endPosition > maxAllowed) {
+      const maxGridSize = Math.floor((maxAllowed - startPos) / stepSize) + 1;
+      return { 
+        isValid: false, 
+        value: null, 
+        error: `Grid too large. Max size: ${maxGridSize} positions` 
+      };
+    }
+    
+    return { isValid: true, value: value, error: null };
+  }, [scanParameters, scanBounds]);
+
   // Validation hooks for scan parameters with "Enter to confirm" behavior
   const startXInput = useValidatedNumberInput(
     scanParameters.start_x_mm,
     (value) => setScanParameters(prev => ({ ...prev, start_x_mm: value })),
-    { min: 0, max: 200, allowFloat: true },
+    { 
+      min: scanBounds.xMin, 
+      max: scanBounds.xMax, 
+      allowFloat: true,
+      customValidation: (value) => validateStartPosition(value, true)
+    },
     showNotification
   );
 
   const startYInput = useValidatedNumberInput(
     scanParameters.start_y_mm,
     (value) => setScanParameters(prev => ({ ...prev, start_y_mm: value })),
-    { min: 0, max: 100, allowFloat: true },
+    { 
+      min: scanBounds.yMin, 
+      max: scanBounds.yMax, 
+      allowFloat: true,
+      customValidation: (value) => validateStartPosition(value, false)
+    },
     showNotification
   );
 
   const nxInput = useValidatedNumberInput(
     scanParameters.Nx,
     (value) => setScanParameters(prev => ({ ...prev, Nx: value })),
-    { min: 1, max: 50, allowFloat: false },
+    { 
+      min: 1, 
+      max: 50, 
+      allowFloat: false,
+      customValidation: (value) => validateGridSize(value, true)
+    },
     showNotification
   );
 
   const nyInput = useValidatedNumberInput(
     scanParameters.Ny,
     (value) => setScanParameters(prev => ({ ...prev, Ny: value })),
-    { min: 1, max: 50, allowFloat: false },
+    { 
+      min: 1, 
+      max: 50, 
+      allowFloat: false,
+      customValidation: (value) => validateGridSize(value, false)
+    },
     showNotification
   );
 
@@ -157,19 +269,7 @@ const MicroscopeMapDisplay = ({
     showNotification
   );
 
-  const intensityInput = useValidatedNumberInput(
-    scanParameters.intensity,
-    (value) => setScanParameters(prev => ({ ...prev, intensity: value })),
-    { min: 1, max: 100, allowFloat: false },
-    showNotification
-  );
 
-  const exposureInput = useValidatedNumberInput(
-    scanParameters.exposure_time,
-    (value) => setScanParameters(prev => ({ ...prev, exposure_time: value })),
-    { min: 1, max: 900, allowFloat: false },
-    showNotification
-  );
 
   // Validation hooks for quick scan parameters with "Enter to confirm" behavior
   const quickExposureInput = useValidatedNumberInput(
@@ -220,24 +320,6 @@ const MicroscopeMapDisplay = ({
   const canvasUpdateTimerRef = useRef(null);
   const lastCanvasRequestRef = useRef({ x: 0, y: 0, width: 0, height: 0, scale: 0 });
   const activeTileRequestsRef = useRef(new Set()); // Track active requests to prevent duplicates
-
-  // Calculate stage dimensions from configuration
-  const stageDimensions = useMemo(() => {
-    if (!microscopeConfiguration?.limits?.software_pos_limit) {
-      return { width: 100, height: 70 }; // Default dimensions in mm
-    }
-    const limits = microscopeConfiguration.limits.software_pos_limit;
-    const width = limits.x_positive - limits.x_negative;
-    const height = limits.y_positive - limits.y_negative;
-    return { 
-      width, 
-      height,
-      xMin: limits.x_negative,
-      xMax: limits.x_positive,
-      yMin: limits.y_negative || 0,
-      yMax: limits.y_positive
-    };
-  }, [microscopeConfiguration]);
 
   // Calculate pixelsPerMm from microscope configuration
   const pixelsPerMm = useMemo(() => {
@@ -1233,9 +1315,13 @@ const MicroscopeMapDisplay = ({
       // Update scan parameters with current microscope settings
       setScanParameters(prev => ({
         ...prev,
-        channel: channelName,
-        intensity: intensity,
-        exposure_time: exposure_time
+        illumination_settings: [
+          {
+            channel: channelName,
+            intensity: intensity,
+            exposure_time: exposure_time
+          }
+        ]
       }));
       
       if (appendLog) {
@@ -1409,6 +1495,29 @@ const MicroscopeMapDisplay = ({
       }
     }
   }, [visibleLayers.scanResults, loadStitchedTiles, appendLog, isSimulatedMicroscope]);
+
+  // Function to clear canvas after confirmation
+  const handleClearCanvas = useCallback(async () => {
+    if (!microscopeControlService) return;
+    
+    try {
+      const result = await microscopeControlService.reset_stitching_canvas();
+      if (result.success) {
+        setStitchedTiles([]);
+        activeTileRequestsRef.current.clear();
+        if (showNotification) showNotification('Scan canvas cleared', 'success');
+        if (appendLog) appendLog('Scan canvas cleared successfully');
+      } else {
+        if (showNotification) showNotification(`Failed to clear canvas: ${result.message}`, 'error');
+        if (appendLog) appendLog(`Failed to clear scan canvas: ${result.message}`);
+      }
+    } catch (error) {
+      if (showNotification) showNotification(`Failed to clear canvas: ${error.message}`, 'error');
+      if (appendLog) appendLog(`Failed to clear scan canvas: ${error.message}`);
+    } finally {
+      setShowClearCanvasConfirmation(false);
+    }
+  }, [microscopeControlService, showNotification, appendLog]);
   
   // Rectangle selection handlers
   const handleRectangleSelectionStart = useCallback((e) => {
@@ -1445,6 +1554,43 @@ const MicroscopeMapDisplay = ({
       Math.max(rectangleStart.y, rectangleEnd.y)
     );
     
+    // Check if the selected area is within stage bounds
+    if (topLeft.x < scanBounds.xMin || bottomRight.x > scanBounds.xMax ||
+        topLeft.y < scanBounds.yMin || bottomRight.y > scanBounds.yMax) {
+      
+      // Clamp the selection to stage bounds
+      const clampedTopLeft = {
+        x: Math.max(scanBounds.xMin, topLeft.x),
+        y: Math.max(scanBounds.yMin, topLeft.y)
+      };
+      const clampedBottomRight = {
+        x: Math.min(scanBounds.xMax, bottomRight.x),
+        y: Math.min(scanBounds.yMax, bottomRight.y)
+      };
+      
+      if (showNotification) {
+        showNotification(
+          `Selected area extends beyond stage limits. Adjusted to fit within bounds: ` +
+          `(${clampedTopLeft.x.toFixed(1)}, ${clampedTopLeft.y.toFixed(1)}) to ` +
+          `(${clampedBottomRight.x.toFixed(1)}, ${clampedBottomRight.y.toFixed(1)}) mm`,
+          'warning'
+        );
+      }
+      
+      if (appendLog) {
+        appendLog(`Grid selection clamped to stage bounds: ` +
+          `X: ${clampedTopLeft.x.toFixed(1)}-${clampedBottomRight.x.toFixed(1)} mm, ` +
+          `Y: ${clampedTopLeft.y.toFixed(1)}-${clampedBottomRight.y.toFixed(1)} mm`
+        );
+      }
+      
+      // Use clamped values
+      topLeft.x = clampedTopLeft.x;
+      topLeft.y = clampedTopLeft.y;
+      bottomRight.x = clampedBottomRight.x;
+      bottomRight.y = clampedBottomRight.y;
+    }
+    
     const width_mm = bottomRight.x - topLeft.x;
     const height_mm = bottomRight.y - topLeft.y;
     
@@ -1466,7 +1612,7 @@ const MicroscopeMapDisplay = ({
     setIsRectangleSelection(false);
     setRectangleStart(null);
     setRectangleEnd(null);
-  }, [rectangleStart, rectangleEnd, isRectangleSelection, displayToStageCoords, scanParameters.dx_mm, scanParameters.dy_mm, isSimulatedMicroscope]);
+  }, [rectangleStart, rectangleEnd, isRectangleSelection, displayToStageCoords, scanParameters.dx_mm, scanParameters.dy_mm, isSimulatedMicroscope, scanBounds, showNotification, appendLog]);
 
   // Effect to trigger tile loading when view changes (throttled for performance)
   useEffect(() => {
@@ -1770,20 +1916,9 @@ const MicroscopeMapDisplay = ({
                 </button>
                 
                 <button
-                  onClick={async () => {
+                  onClick={() => {
                     if (!microscopeControlService || isInteractionDisabled || isSimulatedMicroscope) return;
-                    try {
-                      const result = await microscopeControlService.reset_stitching_canvas();
-                      if (result.success) {
-                        setStitchedTiles([]);
-                        activeTileRequestsRef.current.clear();
-                        if (showNotification) showNotification('Scan canvas cleared', 'success');
-                        if (appendLog) appendLog('Scan canvas cleared successfully');
-                      }
-                    } catch (error) {
-                      if (showNotification) showNotification(`Failed to clear canvas: ${error.message}`, 'error');
-                      if (appendLog) appendLog(`Failed to clear scan canvas: ${error.message}`);
-                    }
+                    setShowClearCanvasConfirmation(true);
                   }}
                   className="px-2 py-1 text-xs bg-red-600 hover:bg-red-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
                   title={isSimulatedMicroscope ? "Canvas clearing not supported for simulated microscope" : "Clear scan results"}
@@ -2015,6 +2150,8 @@ const MicroscopeMapDisplay = ({
                   <>
                     <div>Start: ({topLeft.x.toFixed(1)}, {topLeft.y.toFixed(1)}) mm</div>
                     <div>Grid: {Nx} × {Ny} positions</div>
+                    <div>Channels: {scanParameters.illumination_settings.length}</div>
+                    <div>Total images: {Nx * Ny * scanParameters.illumination_settings.length}</div>
                     <div>Step: {scanParameters.dx_mm} × {scanParameters.dy_mm} mm</div>
                     <div>End: ({(topLeft.x + (Nx-1) * scanParameters.dx_mm).toFixed(1)}, {(topLeft.y + (Ny-1) * scanParameters.dy_mm).toFixed(1)}) mm</div>
                   </>
@@ -2233,13 +2370,16 @@ const MicroscopeMapDisplay = ({
           </div>
         )}
       </div>
-      
-      {/* Video contrast controls for FOV_FITTED mode */}
-      {mapViewMode === 'FOV_FITTED' && isWebRtcActive && (
-        <div className={`absolute bottom-2 right-2 bg-black bg-opacity-80 p-2 rounded text-white max-w-xs ${isHardwareInteractionDisabled ? 'opacity-75' : ''}`}>
+
+      {/* Video contrast controls - positioned below the video frame */}
+      {isWebRtcActive && (
+        <div 
+          className={`absolute bottom-2 right-2 bg-black bg-opacity-80 p-2 rounded text-white max-w-xs ${isHardwareInteractionDisabled ? 'opacity-75' : ''}`}
+          style={{ zIndex: 30 }}
+        >
           <div className="flex items-center justify-between mb-1">
             <div className="flex items-center space-x-2">
-              <span className="text-xs font-medium">Contrast</span>
+              <span className="text-xs font-medium">Video Contrast</span>
               {isDataChannelConnected && (
                 <i className="fas fa-circle text-green-500" style={{ fontSize: '4px' }} title="Metadata connected"></i>
               )}
@@ -2278,6 +2418,66 @@ const MicroscopeMapDisplay = ({
               )}
             </>
           )}
+        </div>
+      )}
+
+      {/* Clear Canvas Confirmation Dialog */}
+      {showClearCanvasConfirmation && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-800 border border-gray-600 rounded-lg shadow-xl max-w-md w-full text-white">
+            {/* Modal Header */}
+            <div className="flex justify-between items-center p-4 border-b border-gray-600">
+              <h3 className="text-lg font-semibold text-gray-200 flex items-center">
+                <i className="fas fa-exclamation-triangle text-red-400 mr-2"></i>
+                Clear Scan Canvas
+              </h3>
+              <button
+                onClick={() => setShowClearCanvasConfirmation(false)}
+                className="text-gray-400 hover:text-white text-xl font-bold w-6 h-6 flex items-center justify-center"
+                title="Close"
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-4">
+              <p className="text-gray-300 mb-4">
+                Are you sure you want to clear the scan canvas? This will permanently delete all scan results and cannot be undone.
+              </p>
+              <div className="bg-yellow-900 bg-opacity-30 border border-yellow-500 rounded-lg p-3 mb-4">
+                <div className="flex items-start">
+                  <i className="fas fa-info-circle text-yellow-400 mr-2 mt-0.5"></i>
+                  <div className="text-sm text-yellow-200">
+                    <p className="font-medium mb-1">This action will:</p>
+                    <ul className="list-disc list-inside space-y-1">
+                      <li>Remove all scan result images from the display</li>
+                      <li>Clear the scan data from microscope memory</li>
+                      <li>Reset the stitching canvas to empty state</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex justify-end space-x-3 p-4 border-t border-gray-600">
+              <button
+                onClick={() => setShowClearCanvasConfirmation(false)}
+                className="px-4 py-2 text-sm bg-gray-600 hover:bg-gray-500 text-white rounded focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
+              >
+                <i className="fas fa-times mr-1"></i>
+                Cancel
+              </button>
+              <button
+                onClick={handleClearCanvas}
+                className="px-4 py-2 text-sm bg-red-600 hover:bg-red-500 text-white rounded focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+              >
+                <i className="fas fa-trash mr-1"></i>
+                Clear Canvas
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -2412,88 +2612,114 @@ const MicroscopeMapDisplay = ({
           </div>
           
           <div className="flex justify-end space-x-2 mt-4">
-            <button
-              onClick={async () => {
-                if (!microscopeControlService || isQuickScanInProgress) return;
-                
-                // Check if WebRTC is active and stop it to prevent camera resource conflict
-                const wasWebRtcActive = isWebRtcActive;
-                if (wasWebRtcActive) {
-                  if (appendLog) appendLog('Stopping WebRTC stream to prevent camera resource conflict during quick scanning...');
+                          <button
+                onClick={async () => {
+                  if (!microscopeControlService) return;
+                  
+                  if (isQuickScanInProgress) {
+                    // Stop scan logic
+                    try {
+                      if (appendLog) appendLog('Stopping quick scan...');
+                      
+                      const result = await microscopeControlService.stop_scan_and_stitching();
+                      
+                      if (result.success) {
+                        if (showNotification) showNotification('Quick scan stop requested', 'success');
+                        if (appendLog) appendLog('Quick scan stop requested - scan will be interrupted');
+                        setIsQuickScanInProgress(false);
+                        if (setMicroscopeBusy) setMicroscopeBusy(false);
+                      } else {
+                        if (showNotification) showNotification(`Failed to stop quick scan: ${result.message}`, 'error');
+                        if (appendLog) appendLog(`Failed to stop quick scan: ${result.message}`);
+                      }
+                    } catch (error) {
+                      if (showNotification) showNotification(`Error stopping quick scan: ${error.message}`, 'error');
+                      if (appendLog) appendLog(`Error stopping quick scan: ${error.message}`);
+                    }
+                    return;
+                  }
+                  
+                  // Start scan logic
+                  // Check if WebRTC is active and stop it to prevent camera resource conflict
+                  const wasWebRtcActive = isWebRtcActive;
+                  if (wasWebRtcActive) {
+                    if (appendLog) appendLog('Stopping WebRTC stream to prevent camera resource conflict during quick scanning...');
+                    try {
+                      if (toggleWebRtcStream) {
+                        toggleWebRtcStream(); // This will stop the WebRTC stream
+                        // Wait a moment for the stream to fully stop
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                      } else {
+                        if (appendLog) appendLog('Warning: toggleWebRtcStream function not available, proceeding with quick scan...');
+                      }
+                    } catch (webRtcError) {
+                      if (appendLog) appendLog(`Warning: Failed to stop WebRTC stream: ${webRtcError.message}. Proceeding with quick scan...`);
+                    }
+                  }
+                  
+                  setIsQuickScanInProgress(true);
+                  if (setMicroscopeBusy) setMicroscopeBusy(true); // Also set global busy state
+                  
                   try {
-                    if (toggleWebRtcStream) {
-                      toggleWebRtcStream(); // This will stop the WebRTC stream
-                      // Wait a moment for the stream to fully stop
-                      await new Promise(resolve => setTimeout(resolve, 500));
-                    } else {
-                      if (appendLog) appendLog('Warning: toggleWebRtcStream function not available, proceeding with quick scan...');
-                    }
-                  } catch (webRtcError) {
-                    if (appendLog) appendLog(`Warning: Failed to stop WebRTC stream: ${webRtcError.message}. Proceeding with quick scan...`);
-                  }
-                }
-                
-                setIsQuickScanInProgress(true);
-                if (setMicroscopeBusy) setMicroscopeBusy(true); // Also set global busy state
-                
-                try {
-                  if (appendLog) appendLog(`Starting quick scan: ${quickScanParameters.wellplate_type}-well plate, ${quickScanParameters.velocity_mm_per_s}mm/s, ${quickScanParameters.fps_target}fps`);
-                  
-                  const result = await microscopeControlService.quick_scan_with_stitching(
-                    quickScanParameters.wellplate_type,
-                    quickScanParameters.exposure_time,
-                    quickScanParameters.intensity,
-                    quickScanParameters.velocity_mm_per_s,
-                    quickScanParameters.fps_target,
-                    'quick_scan_' + Date.now()
-                  );
-                  
-                  if (result.success) {
-                    if (showNotification) showNotification('Quick scan completed successfully', 'success');
-                    if (appendLog) {
-                      appendLog('Quick scan completed successfully');
-                      if (result.performance_metrics) {
-                        appendLog(`Scan time: ${result.performance_metrics.total_scan_time_seconds}s, frames acquired: ${result.performance_metrics.estimated_frames_acquired}`);
-                      }
-                      if (wasWebRtcActive) {
-                        appendLog('Note: WebRTC stream was stopped for scanning. Click "Start Live" to resume video stream if needed.');
-                      }
-                    }
-                    setShowQuickScanConfig(false);
-                    // Enable scan results layer if not already
-                    setVisibleLayers(prev => ({ ...prev, scanResults: true }));
+                    if (appendLog) appendLog(`Starting quick scan: ${quickScanParameters.wellplate_type}-well plate, ${quickScanParameters.velocity_mm_per_s}mm/s, ${quickScanParameters.fps_target}fps`);
                     
-                    // Refresh scan results display once after completion
-                    setTimeout(() => {
-                      refreshScanResults();
-                    }, 1000); // Wait 1 second then refresh
-                  } else {
-                    if (showNotification) showNotification(`Quick scan failed: ${result.message}`, 'error');
-                    if (appendLog) appendLog(`Quick scan failed: ${result.message}`);
+                    const result = await microscopeControlService.quick_scan_with_stitching(
+                      quickScanParameters.wellplate_type,
+                      quickScanParameters.exposure_time,
+                      quickScanParameters.intensity,
+                      quickScanParameters.velocity_mm_per_s,
+                      quickScanParameters.fps_target,
+                      'quick_scan_' + Date.now()
+                    );
+                    
+                    if (result.success) {
+                      if (showNotification) showNotification('Quick scan completed successfully', 'success');
+                      if (appendLog) {
+                        appendLog('Quick scan completed successfully');
+                        if (result.performance_metrics) {
+                          appendLog(`Scan time: ${result.performance_metrics.total_scan_time_seconds}s, frames acquired: ${result.performance_metrics.estimated_frames_acquired}`);
+                        }
+                        if (wasWebRtcActive) {
+                          appendLog('Note: WebRTC stream was stopped for scanning. Click "Start Live" to resume video stream if needed.');
+                        }
+                      }
+                      setShowQuickScanConfig(false);
+                      // Enable scan results layer if not already
+                      setVisibleLayers(prev => ({ ...prev, scanResults: true }));
+                      
+                      // Refresh scan results display once after completion
+                      setTimeout(() => {
+                        refreshScanResults();
+                      }, 1000); // Wait 1 second then refresh
+                    } else {
+                      if (showNotification) showNotification(`Quick scan failed: ${result.message}`, 'error');
+                      if (appendLog) appendLog(`Quick scan failed: ${result.message}`);
+                    }
+                  } catch (error) {
+                    if (showNotification) showNotification(`Quick scan error: ${error.message}`, 'error');
+                    if (appendLog) appendLog(`Quick scan error: ${error.message}`);
+                  } finally {
+                    setIsQuickScanInProgress(false);
+                    if (setMicroscopeBusy) setMicroscopeBusy(false); // Clear global busy state
                   }
-                } catch (error) {
-                  if (showNotification) showNotification(`Quick scan error: ${error.message}`, 'error');
-                  if (appendLog) appendLog(`Quick scan error: ${error.message}`);
-                } finally {
-                  setIsQuickScanInProgress(false);
-                  if (setMicroscopeBusy) setMicroscopeBusy(false); // Clear global busy state
-                }
-              }}
-              className="px-3 py-1 text-xs bg-green-600 hover:bg-green-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
-              disabled={!microscopeControlService || isQuickScanInProgress}
-            >
-              {isQuickScanInProgress ? (
-                <>
-                  <i className="fas fa-spinner fa-spin mr-1"></i>
-                  Quick Scanning...
-                </>
-              ) : (
-                <>
-                  <i className="fas fa-bolt mr-1"></i>
-                  Start Quick Scan
-                </>
-              )}
-            </button>
+                }}
+                className={`px-3 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed flex items-center ${
+                  isQuickScanInProgress ? 'bg-red-600 hover:bg-red-500' : 'bg-green-600 hover:bg-green-500'
+                }`}
+                disabled={!microscopeControlService}
+              >
+                {isQuickScanInProgress ? (
+                  <>
+                    <i className="fas fa-stop mr-1"></i>
+                    Stop Quick Scan
+                  </>
+                ) : (
+                  <>
+                    <i className="fas fa-bolt mr-1"></i>
+                    Start Quick Scan
+                  </>
+                )}
+              </button>
           </div>
         </div>
       )}
@@ -2636,60 +2862,187 @@ const MicroscopeMapDisplay = ({
             </div>
             
             <div>
-              <label className="block text-gray-300 font-medium mb-1">Channel</label>
-              <select
-                value={scanParameters.channel}
-                onChange={(e) => setScanParameters(prev => ({ ...prev, channel: e.target.value }))}
-                className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white"
-                disabled={isScanInProgress}
-              >
-                <option value="BF LED matrix full">BF LED matrix full</option>
-                <option value="Fluorescence 405 nm Ex">Fluorescence 405 nm Ex</option>
-                <option value="Fluorescence 488 nm Ex">Fluorescence 488 nm Ex</option>
-                <option value="Fluorescence 561 nm Ex">Fluorescence 561 nm Ex</option>
-                <option value="Fluorescence 638 nm Ex">Fluorescence 638 nm Ex</option>
-                <option value="Fluorescence 730 nm Ex">Fluorescence 730 nm Ex</option>
-              </select>
-            </div>
-            
-            <div className="flex space-x-4">
-              <div className="flex-1 input-validation-container">
-                <label className="block text-gray-300 font-medium mb-1">Intensity (%)</label>
-                <input
-                  type="number"
-                  value={intensityInput.inputValue}
-                  onChange={intensityInput.handleInputChange}
-                  onKeyDown={intensityInput.handleKeyDown}
-                  onBlur={intensityInput.handleBlur}
-                  className={getInputValidationClasses(
-                    intensityInput.isValid,
-                    intensityInput.hasUnsavedChanges,
-                    "w-full px-2 py-1 bg-gray-700 border rounded text-white"
-                  )}
-                  min="1"
-                  max="100"
-                  disabled={isScanInProgress}
-                  placeholder="1-100%"
-                />
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-gray-300 font-medium">Illumination Channels</label>
+                <div className="flex space-x-1">
+                  <button
+                    onClick={() => {
+                      if (isScanInProgress) return;
+                      loadCurrentMicroscopeSettings();
+                    }}
+                    className="px-2 py-1 text-xs bg-green-600 hover:bg-green-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={isScanInProgress || !microscopeControlService}
+                    title="Load current microscope settings"
+                  >
+                    <i className="fas fa-download mr-1"></i>
+                    Load Current
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (isScanInProgress) return;
+                      // Find a channel that's not already in use
+                      const availableChannels = [
+                        'BF LED matrix full',
+                        'Fluorescence 405 nm Ex',
+                        'Fluorescence 488 nm Ex',
+                        'Fluorescence 561 nm Ex',
+                        'Fluorescence 638 nm Ex',
+                        'Fluorescence 730 nm Ex'
+                      ];
+                      const usedChannels = scanParameters.illumination_settings.map(s => s.channel);
+                      const nextChannel = availableChannels.find(c => !usedChannels.includes(c)) || 'BF LED matrix full';
+                      
+                      setScanParameters(prev => ({
+                        ...prev,
+                        illumination_settings: [
+                          ...prev.illumination_settings,
+                          {
+                            channel: nextChannel,
+                            intensity: 50,
+                            exposure_time: 100
+                          }
+                        ]
+                      }));
+                    }}
+                    className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={isScanInProgress || scanParameters.illumination_settings.length >= 6}
+                    title="Add channel"
+                  >
+                    <i className="fas fa-plus mr-1"></i>
+                    Add Channel
+                  </button>
+                </div>
               </div>
-              <div className="flex-1 input-validation-container">
-                <label className="block text-gray-300 font-medium mb-1">Exposure (ms)</label>
-                <input
-                  type="number"
-                  value={exposureInput.inputValue}
-                  onChange={exposureInput.handleInputChange}
-                  onKeyDown={exposureInput.handleKeyDown}
-                  onBlur={exposureInput.handleBlur}
-                  className={getInputValidationClasses(
-                    exposureInput.isValid,
-                    exposureInput.hasUnsavedChanges,
-                    "w-full px-2 py-1 bg-gray-700 border rounded text-white"
-                  )}
-                  min="1"
-                  disabled={isScanInProgress}
-                  placeholder="1-5000ms"
-                />
+              
+              <div className="space-y-2 max-h-48 overflow-y-auto">
+                {scanParameters.illumination_settings.map((setting, index) => (
+                  <div key={index} className="bg-gray-700 p-2 rounded border border-gray-600">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs text-gray-300 font-medium">Channel {index + 1}</span>
+                      <button
+                        onClick={() => {
+                          if (isScanInProgress || scanParameters.illumination_settings.length <= 1) return;
+                          setScanParameters(prev => ({
+                            ...prev,
+                            illumination_settings: prev.illumination_settings.filter((_, i) => i !== index)
+                          }));
+                        }}
+                        className="px-1 py-0.5 text-xs bg-red-600 hover:bg-red-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={isScanInProgress || scanParameters.illumination_settings.length <= 1}
+                        title="Remove channel"
+                      >
+                        <i className="fas fa-times"></i>
+                      </button>
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <select
+                          value={setting.channel}
+                          onChange={(e) => {
+                            if (isScanInProgress) return;
+                            setScanParameters(prev => ({
+                              ...prev,
+                              illumination_settings: prev.illumination_settings.map((s, i) => 
+                                i === index ? { ...s, channel: e.target.value } : s
+                              )
+                            }));
+                          }}
+                          className={`w-full px-2 py-1 text-xs bg-gray-600 border rounded text-white ${
+                            scanParameters.illumination_settings.filter(s => s.channel === setting.channel).length > 1 
+                              ? 'border-yellow-500' 
+                              : 'border-gray-500'
+                          }`}
+                          disabled={isScanInProgress}
+                        >
+                          <option value="BF LED matrix full">BF LED matrix full</option>
+                          <option value="Fluorescence 405 nm Ex">Fluorescence 405 nm Ex</option>
+                          <option value="Fluorescence 488 nm Ex">Fluorescence 488 nm Ex</option>
+                          <option value="Fluorescence 561 nm Ex">Fluorescence 561 nm Ex</option>
+                          <option value="Fluorescence 638 nm Ex">Fluorescence 638 nm Ex</option>
+                          <option value="Fluorescence 730 nm Ex">Fluorescence 730 nm Ex</option>
+                        </select>
+                        {scanParameters.illumination_settings.filter(s => s.channel === setting.channel).length > 1 && (
+                          <div className="absolute -top-1 -right-1">
+                            <i className="fas fa-exclamation-triangle text-yellow-500 text-xs" title="Duplicate channel detected"></i>
+                          </div>
+                        )}
+                      </div>
+                      
+                      <div className="flex space-x-2">
+                        <div className="flex-1">
+                          <input
+                            type="number"
+                            value={setting.intensity}
+                            onChange={(e) => {
+                              if (isScanInProgress) return;
+                              const value = parseInt(e.target.value) || 0;
+                              if (value >= 1 && value <= 100) {
+                                setScanParameters(prev => ({
+                                  ...prev,
+                                  illumination_settings: prev.illumination_settings.map((s, i) => 
+                                    i === index ? { ...s, intensity: value } : s
+                                  )
+                                }));
+                              }
+                            }}
+                            className="w-full px-2 py-1 text-xs bg-gray-600 border border-gray-500 rounded text-white"
+                            min="1"
+                            max="100"
+                            disabled={isScanInProgress}
+                            placeholder="Intensity %"
+                          />
+                        </div>
+                        <div className="flex-1">
+                          <input
+                            type="number"
+                            value={setting.exposure_time}
+                            onChange={(e) => {
+                              if (isScanInProgress) return;
+                              const value = parseInt(e.target.value) || 0;
+                              if (value >= 1 && value <= 1000) {
+                                setScanParameters(prev => ({
+                                  ...prev,
+                                  illumination_settings: prev.illumination_settings.map((s, i) => 
+                                    i === index ? { ...s, exposure_time: value } : s
+                                  )
+                                }));
+                              }
+                            }}
+                            className="w-full px-2 py-1 text-xs bg-gray-600 border border-gray-500 rounded text-white"
+                            min="1"
+                            max="1000"
+                            disabled={isScanInProgress}
+                            placeholder="Exposure ms"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
+              
+              {scanParameters.illumination_settings.length > 1 && (
+                <div className="mt-2 p-2 bg-blue-900 bg-opacity-30 rounded border border-blue-500 text-xs">
+                  <div className="flex items-center text-blue-300 mb-1">
+                    <i className="fas fa-info-circle mr-1"></i>
+                    Multi-channel Acquisition
+                  </div>
+                  <div className="text-gray-300">
+                    Channels: {scanParameters.illumination_settings.map(s => 
+                      s.channel.replace('Fluorescence ', '').replace(' Ex', '').replace('BF LED matrix full', 'BF')
+                    ).join(', ')}
+                  </div>
+                  {scanParameters.illumination_settings.some((setting, index) => 
+                    scanParameters.illumination_settings.filter(s => s.channel === setting.channel).length > 1
+                  ) && (
+                    <div className="text-yellow-300 mt-1">
+                      <i className="fas fa-exclamation-triangle mr-1"></i>
+                      Warning: Duplicate channels detected
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             
             <div className="flex items-center space-x-4">
@@ -2718,7 +3071,31 @@ const MicroscopeMapDisplay = ({
             <div className="bg-gray-700 p-2 rounded text-xs">
               <div>Total scan area: {(scanParameters.Nx * scanParameters.dx_mm).toFixed(1)} × {(scanParameters.Ny * scanParameters.dy_mm).toFixed(1)} mm</div>
               <div>Total positions: {scanParameters.Nx * scanParameters.Ny}</div>
+              <div>Channels: {scanParameters.illumination_settings.length}</div>
+              <div>Total images: {scanParameters.Nx * scanParameters.Ny * scanParameters.illumination_settings.length}</div>
               <div>End position: ({(scanParameters.start_x_mm + (scanParameters.Nx-1) * scanParameters.dx_mm).toFixed(1)}, {(scanParameters.start_y_mm + (scanParameters.Ny-1) * scanParameters.dy_mm).toFixed(1)}) mm</div>
+            </div>
+            
+            <div className="bg-gray-600 p-2 rounded text-xs">
+              <div className="text-gray-300 font-medium mb-1">Stage Limits</div>
+              <div>X: {scanBounds.xMin.toFixed(1)} to {scanBounds.xMax.toFixed(1)} mm</div>
+              <div>Y: {scanBounds.yMin.toFixed(1)} to {scanBounds.yMax.toFixed(1)} mm</div>
+              {(() => {
+                const endX = scanParameters.start_x_mm + (scanParameters.Nx-1) * scanParameters.dx_mm;
+                const endY = scanParameters.start_y_mm + (scanParameters.Ny-1) * scanParameters.dy_mm;
+                const isWithinBounds = 
+                  scanParameters.start_x_mm >= scanBounds.xMin && endX <= scanBounds.xMax &&
+                  scanParameters.start_y_mm >= scanBounds.yMin && endY <= scanBounds.yMax;
+                
+                return (
+                  <div className={`mt-1 px-2 py-1 rounded text-xs font-medium ${
+                    isWithinBounds ? 'bg-green-700 text-green-100' : 'bg-red-700 text-red-100'
+                  }`}>
+                    <i className={`fas ${isWithinBounds ? 'fa-check-circle' : 'fa-exclamation-triangle'} mr-1`}></i>
+                    {isWithinBounds ? 'Grid within bounds' : 'Grid extends beyond stage limits'}
+                  </div>
+                );
+              })()}
             </div>
             
             {isRectangleSelection && (
@@ -2742,7 +3119,49 @@ const MicroscopeMapDisplay = ({
               </button>
               <button
                 onClick={async () => {
-                  if (!microscopeControlService || isScanInProgress) return;
+                  if (!microscopeControlService) return;
+                  
+                  if (isScanInProgress) {
+                    // Stop scan logic
+                    try {
+                      if (appendLog) appendLog('Stopping scan...');
+                      
+                      const result = await microscopeControlService.stop_scan_and_stitching();
+                      
+                      if (result.success) {
+                        if (showNotification) showNotification('Scan stop requested', 'success');
+                        if (appendLog) appendLog('Scan stop requested - scan will be interrupted');
+                        setIsScanInProgress(false);
+                        if (setMicroscopeBusy) setMicroscopeBusy(false);
+                      } else {
+                        if (showNotification) showNotification(`Failed to stop scan: ${result.message}`, 'error');
+                        if (appendLog) appendLog(`Failed to stop scan: ${result.message}`);
+                      }
+                    } catch (error) {
+                      if (showNotification) showNotification(`Error stopping scan: ${error.message}`, 'error');
+                      if (appendLog) appendLog(`Error stopping scan: ${error.message}`);
+                    }
+                    return;
+                  }
+                  
+                  // Start scan logic
+                  // Validate that the entire scan area is within stage bounds before starting
+                  const endX = scanParameters.start_x_mm + (scanParameters.Nx - 1) * scanParameters.dx_mm;
+                  const endY = scanParameters.start_y_mm + (scanParameters.Ny - 1) * scanParameters.dy_mm;
+                  
+                  if (scanParameters.start_x_mm < scanBounds.xMin || endX > scanBounds.xMax ||
+                      scanParameters.start_y_mm < scanBounds.yMin || endY > scanBounds.yMax) {
+                    
+                    const errorMsg = `Scan area extends beyond stage limits! ` +
+                      `Start: (${scanParameters.start_x_mm.toFixed(1)}, ${scanParameters.start_y_mm.toFixed(1)}) mm, ` +
+                      `End: (${endX.toFixed(1)}, ${endY.toFixed(1)}) mm. ` +
+                      `Stage limits: X: ${scanBounds.xMin.toFixed(1)}-${scanBounds.xMax.toFixed(1)} mm, ` +
+                      `Y: ${scanBounds.yMin.toFixed(1)}-${scanBounds.yMax.toFixed(1)} mm`;
+                    
+                    if (showNotification) showNotification(errorMsg, 'error');
+                    if (appendLog) appendLog(errorMsg);
+                    return;
+                  }
                   
                   // Check if WebRTC is active and stop it to prevent camera resource conflict
                   const wasWebRtcActive = isWebRtcActive;
@@ -2766,14 +3185,11 @@ const MicroscopeMapDisplay = ({
                   
                   try {
                     
-                    if (appendLog) appendLog(`Starting scan: ${scanParameters.Nx}×${scanParameters.Ny} positions from (${scanParameters.start_x_mm.toFixed(1)}, ${scanParameters.start_y_mm.toFixed(1)}) mm`);
-                    
-                    // Create illumination settings object properly
-                    const illuminationSettings = [{
-                      channel: scanParameters.channel,
-                      intensity: scanParameters.intensity,
-                      exposure_time: scanParameters.exposure_time
-                    }];
+                    if (appendLog) {
+                      const channelNames = scanParameters.illumination_settings.map(s => s.channel).join(', ');
+                      appendLog(`Starting scan: ${scanParameters.Nx}×${scanParameters.Ny} positions from (${scanParameters.start_x_mm.toFixed(1)}, ${scanParameters.start_y_mm.toFixed(1)}) mm`);
+                      appendLog(`Channels: ${channelNames}`);
+                    }
                     
                     const result = await microscopeControlService.normal_scan_with_stitching(
                       scanParameters.start_x_mm,
@@ -2782,7 +3198,7 @@ const MicroscopeMapDisplay = ({
                       scanParameters.Ny,
                       scanParameters.dx_mm,
                       scanParameters.dy_mm,
-                      illuminationSettings,
+                      scanParameters.illumination_settings,
                       scanParameters.do_contrast_autofocus,
                       scanParameters.do_reflection_af,
                       'scan_' + Date.now()
@@ -2819,13 +3235,15 @@ const MicroscopeMapDisplay = ({
                     if (setMicroscopeBusy) setMicroscopeBusy(false); // Clear global busy state
                   }
                 }}
-              className="px-3 py-1 text-xs bg-green-600 hover:bg-green-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
-              disabled={!microscopeControlService || isScanInProgress}
+              className={`px-3 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed flex items-center ${
+                isScanInProgress ? 'bg-red-600 hover:bg-red-500' : 'bg-green-600 hover:bg-green-500'
+              }`}
+              disabled={!microscopeControlService}
             >
               {isScanInProgress ? (
                 <>
-                  <i className="fas fa-spinner fa-spin mr-1"></i>
-                  Scanning...
+                  <i className="fas fa-stop mr-1"></i>
+                  Stop Scan
                 </>
               ) : (
                 <>
