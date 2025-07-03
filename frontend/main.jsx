@@ -320,6 +320,8 @@ const MicroscopeControl = () => {
             roboticArmService={roboticArmService}
             selectedMicroscopeId={selectedMicroscopeId}
             hyphaManager={hyphaManager}
+            currentOperation={currentOperation}
+            setCurrentOperation={setCurrentOperation}
           />
         );
       case 'dashboard':

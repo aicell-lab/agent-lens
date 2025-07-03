@@ -236,7 +236,7 @@ const Sidebar = ({
 
   return (
     <div className="sidebar-container">
-      <div className={`main-sidebar ${isMainSidebarCollapsed ? 'main-sidebar-collapsed' : ''}`}>
+      <div className={`main-sidebar ${isMainSidebarCollapsed ? 'main-sidebar-collapsed' : ''} ${currentOperation ? 'operation-in-progress' : ''}`} style={{ cursor: currentOperation ? 'not-allowed' : 'default' }}>
         <div className="sidebar-tabs">
           <button 
             className={`sidebar-tab ${activeTab === 'microscope' ? 'active' : ''}`}
@@ -348,7 +348,7 @@ const Sidebar = ({
       </div>
       
       {(activeTab === 'image-view' || activeTab === 'image-view-map') && (
-        <div className={`image-view-sidebar ${!isImageViewPanelOpen ? 'collapsed' : ''}`}>
+        <div className={`image-view-sidebar ${!isImageViewPanelOpen ? 'collapsed' : ''} ${currentOperation ? 'operation-in-progress' : ''}`} style={{ cursor: currentOperation ? 'not-allowed' : 'default' }}>
           <h3 className="image-view-sidebar-title">Select Image Gallery</h3>
           
           {/* Gallery Selection */}

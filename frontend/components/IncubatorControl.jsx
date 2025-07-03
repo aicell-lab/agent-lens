@@ -8,7 +8,9 @@ const IncubatorControl = ({
   microscopeControlService,
   roboticArmService,
   selectedMicroscopeId,
-  hyphaManager // Added to get specific microscope services
+  hyphaManager, // Added to get specific microscope services
+  currentOperation,
+  setCurrentOperation
 }) => {
   // Example state for incubator parameters; adjust as needed.
   const [temperature, setTemperature] = useState(37);
@@ -33,8 +35,7 @@ const IncubatorControl = ({
   // Warning message state
   const [warningMessage, setWarningMessage] = useState('');
   
-  // State for operation tracking
-  const [currentOperation, setCurrentOperation] = useState(null);
+  // State for workflow messages (currentOperation is now a prop)
   const [workflowMessages, setWorkflowMessages] = useState([]);
   
   // Helper functions for workflow messages
@@ -367,6 +368,7 @@ const IncubatorControl = ({
     // Handle special position workflows
     if (sampleForm.status === 'incubator_transfer_station') {
       try {
+        setCurrentOperation('transferring');
         clearWorkflowMessages();
         addWorkflowMessage(`Moving sample from transfer station to slot ${selectedSlotNumber}`);
         await incubatorControlService.put_sample_from_transfer_station_to_slot(selectedSlotNumber);
@@ -384,10 +386,12 @@ const IncubatorControl = ({
         appendLog(result);
         await fetchSlotInformation();
         setWarningMessage('');
+        setCurrentOperation(null); // Re-enable UI
         closeSidebar();
       } catch (error) {
         setWarningMessage(`Failed to transfer sample from transfer station: ${error.message}`);
         appendLog(`Failed to transfer sample from transfer station: ${error.message}`);
+        setCurrentOperation(null); // Re-enable UI even on error
       }
       return;
     }
@@ -491,10 +495,11 @@ const IncubatorControl = ({
       return (
         <button
           key={slotNumber}
-          style={{ backgroundColor: bgColor }}
-          className="w-8 h-8 m-1 rounded hover:opacity-80"
-          onDoubleClick={() => handleSlotDoubleClick(slot, slotNumber)}
-          title={`Slot ${slotNumber}${isOrange ? ` - ${slot.name}` : ' - Empty'}`}
+          style={{ backgroundColor: bgColor, cursor: currentOperation ? 'not-allowed' : 'pointer' }}
+          className={`w-8 h-8 m-1 rounded ${currentOperation ? 'opacity-50' : 'hover:opacity-80'}`}
+          onDoubleClick={() => !currentOperation && handleSlotDoubleClick(slot, slotNumber)}
+          disabled={currentOperation}
+          title={currentOperation ? 'Operation in progress' : `Slot ${slotNumber}${isOrange ? ` - ${slot.name}` : ' - Empty'}`}
         >
           {slotNumber}
         </button>
@@ -506,8 +511,36 @@ const IncubatorControl = ({
 
   return (
     <div className="control-view flex relative">
+      {/* Loading overlay to prevent interactions during operations */}
+      {currentOperation && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" style={{ cursor: 'not-allowed' }}>
+          <div className="bg-white p-6 rounded-lg shadow-lg max-w-md mx-4">
+            <div className="flex items-center mb-4">
+              <i className="fas fa-spinner fa-spin text-blue-500 mr-3 text-xl"></i>
+              <h3 className="text-lg font-semibold">Sample Operation in Progress</h3>
+            </div>
+            <p className="text-gray-600 mb-4">
+              Please wait while the sample transfer completes. Do not interact with the interface.
+            </p>
+            {workflowMessages.length > 0 && (
+              <div className="bg-blue-50 border border-blue-200 rounded p-3 max-h-32 overflow-y-auto">
+                <h6 className="text-sm font-semibold mb-2 text-blue-700">Current Progress:</h6>
+                <ul className="text-xs space-y-1">
+                  {workflowMessages.slice(0, 3).map((msg, index) => (
+                    <li key={index} className="text-blue-600">
+                      <i className="fas fa-circle-notch text-blue-500 mr-2"></i>
+                      {msg.message}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      
       {/* Main incubator control panel */}
-      <div className={`bg-white bg-opacity-95 p-6 rounded-lg shadow-lg border-l border-gray-300 box-border overflow-y-auto transition-all duration-300 ${sidebarOpen ? 'w-2/3' : 'w-full'}`}>
+      <div className={`bg-white bg-opacity-95 p-6 rounded-lg shadow-lg border-l border-gray-300 box-border overflow-y-auto transition-all duration-300 ${sidebarOpen ? 'w-2/3' : 'w-full'} ${currentOperation ? 'pointer-events-none' : ''}`} style={{ cursor: currentOperation ? 'not-allowed' : 'default' }}>
         <h3 className="text-xl font-medium mb-4">Incubator Control</h3>
         <div id="incubator-control-content">
           <div className="incubator-settings">
@@ -596,14 +629,16 @@ const IncubatorControl = ({
 
       {/* Right sidebar for slot management */}
       {sidebarOpen && (
-        <div className="w-1/3 bg-white bg-opacity-95 shadow-lg border-l border-gray-300 p-4 overflow-y-auto">
+        <div className={`w-1/3 bg-white bg-opacity-95 shadow-lg border-l border-gray-300 p-4 overflow-y-auto ${currentOperation ? 'pointer-events-none opacity-75' : ''}`} style={{ cursor: currentOperation ? 'not-allowed' : 'default' }}>
           <div className="flex justify-between items-center mb-4">
             <h4 className="text-lg font-bold">
               Slot {selectedSlotNumber} Management
             </h4>
             <button 
-              onClick={closeSidebar} 
-              className="text-red-500 hover:text-red-700 text-xl font-bold"
+              onClick={() => !currentOperation && closeSidebar()} 
+              className={`text-xl font-bold ${currentOperation ? 'text-gray-400 cursor-not-allowed' : 'text-red-500 hover:text-red-700'}`}
+              disabled={currentOperation}
+              title={currentOperation ? 'Cannot close during operation' : 'Close'}
             >
               ×
             </button>
@@ -845,6 +880,8 @@ IncubatorControl.propTypes = {
   roboticArmService: PropTypes.object,
   selectedMicroscopeId: PropTypes.string,
   hyphaManager: PropTypes.object,
+  currentOperation: PropTypes.string,
+  setCurrentOperation: PropTypes.func.isRequired,
 };
 
 export default IncubatorControl;

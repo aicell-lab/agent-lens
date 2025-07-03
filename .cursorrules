@@ -214,6 +214,9 @@ docs/                    # Documentation and diagrams
 - Implement proper loading states and error handling
 - Support keyboard shortcuts for common operations
 - Use notification system for user feedback
+- **Operation State Management**: Use global `currentOperation` state to disable UI during critical operations
+- **UI Blocking**: Implement full-screen overlays and disabled interactions during sample transfers
+- **Visual Feedback**: Show progress with spinners, workflow messages, and "not-allowed" cursors
 
 #### Input Validation UI/UX Requirements
 - **ALWAYS use validated inputs** for number fields to prevent NaN crashes
@@ -476,7 +479,7 @@ ComponentName.propTypes = {
 const handleSampleOperation = async () => {
   if (currentOperation !== null || microscopeBusy) return;
   
-  setCurrentOperation('loading'); // Prevent concurrent operations
+  setCurrentOperation('transferring'); // Prevent concurrent operations & disable UI
   clearWorkflowMessages();
   
   try {
@@ -497,15 +500,16 @@ const handleSampleOperation = async () => {
     
     await coordinateWithServices();
     addWorkflowMessage("Operation completed successfully");
-    setCurrentOperation(null);
+    setCurrentOperation(null); // Re-enable UI
   } catch (error) {
     addWorkflowMessage(`Error: ${error.message}`);
     await rollbackOperation();
-    setCurrentOperation(null);
+    setCurrentOperation(null); // Re-enable UI even on error
   }
 };
 ```
-Incase emergency, use 'roboticArmService.halt()'
+**UI Blocking**: When `currentOperation` is set, the entire interface is disabled with overlays and visual feedback.
+**Emergency**: Use 'roboticArmService.halt()' for immediate stop.
 
 #### Async Error Handling Pattern
 ```python
