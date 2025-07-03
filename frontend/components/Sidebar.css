@@ -20,6 +20,33 @@
   width: 60px; /* Collapsed width */
 }
 
+/* Disable interactions during operations */
+.operation-in-progress {
+  pointer-events: none;
+  opacity: 0.7;
+  cursor: not-allowed !important;
+}
+
+.operation-in-progress .sidebar-tab {
+  cursor: not-allowed !important;
+  opacity: 0.5;
+}
+
+.operation-in-progress .sidebar-submenu-tab {
+  cursor: not-allowed !important;
+  opacity: 0.5;
+}
+
+.operation-in-progress .gallery-option {
+  cursor: not-allowed !important;
+  opacity: 0.5;
+}
+
+.operation-in-progress .gallery-action-btn {
+  cursor: not-allowed !important;
+  opacity: 0.5;
+}
+
 .main-sidebar-collapsed .sidebar-tab span, 
 .main-sidebar-collapsed .sidebar-tab .microscope-toggle-icon {
   display: none; /* Hide text and specific icons when collapsed */
