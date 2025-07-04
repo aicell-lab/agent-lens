@@ -1351,6 +1351,7 @@ const MicroscopeControlPanel = ({
             isDataChannelConnected={isDataChannelConnected}
             isContrastControlsCollapsed={isContrastControlsCollapsed}
             setIsContrastControlsCollapsed={setIsContrastControlsCollapsed}
+            selectedMicroscopeId={selectedMicroscopeId}
             // Pass drag handlers
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
