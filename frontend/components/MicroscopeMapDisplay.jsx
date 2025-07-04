@@ -2712,31 +2712,47 @@ const MicroscopeMapDisplay = ({
           </div>
           
           <div className="flex justify-end space-x-2 mt-4">
-                          <button
-                onClick={async () => {
-                  if (!microscopeControlService) return;
-                  
-                  if (isQuickScanInProgress) {
-                    // Stop scan logic
-                    try {
-                      if (appendLog) appendLog('Stopping quick scan...');
-                      
-                      const result = await microscopeControlService.stop_scan_and_stitching();
-                      
-                      if (result.success) {
-                        if (showNotification) showNotification('Quick scan stop requested', 'success');
-                        if (appendLog) appendLog('Quick scan stop requested - scan will be interrupted');
-                        setIsQuickScanInProgress(false);
-                        if (setMicroscopeBusy) setMicroscopeBusy(false);
-                      } else {
-                        if (showNotification) showNotification(`Failed to stop quick scan: ${result.message}`, 'error');
-                        if (appendLog) appendLog(`Failed to stop quick scan: ${result.message}`);
-                      }
-                    } catch (error) {
-                      if (showNotification) showNotification(`Error stopping quick scan: ${error.message}`, 'error');
-                      if (appendLog) appendLog(`Error stopping quick scan: ${error.message}`);
+            <button
+              onClick={async () => {
+                if (!microscopeControlService) return;
+                
+                if (isQuickScanInProgress) {
+                  // Stop scan logic
+                  try {
+                    if (appendLog) appendLog('Stopping quick scan...');
+                    
+                    const result = await microscopeControlService.stop_scan_and_stitching();
+                    
+                    if (result.success) {
+                      if (showNotification) showNotification('Quick scan stop requested', 'success');
+                      if (appendLog) appendLog('Quick scan stop requested - scan will be interrupted');
+                      setIsQuickScanInProgress(false);
+                      if (setMicroscopeBusy) setMicroscopeBusy(false);
+                    } else {
+                      if (showNotification) showNotification(`Failed to stop quick scan: ${result.message}`, 'error');
+                      if (appendLog) appendLog(`Failed to stop quick scan: ${result.message}`);
                     }
-                    return;
+                  } catch (error) {
+                    if (showNotification) showNotification(`Error stopping quick scan: ${error.message}`, 'error');
+                    if (appendLog) appendLog(`Error stopping quick scan: ${error.message}`);
+                  }
+                  return;
+                }
+                
+                // Check if WebRTC is active and stop it to prevent camera resource conflict
+                const wasWebRtcActive = isWebRtcActive;
+                if (wasWebRtcActive) {
+                  if (appendLog) appendLog('Stopping WebRTC stream to prevent camera resource conflict during scanning...');
+                  try {
+                    if (toggleWebRtcStream) {
+                      toggleWebRtcStream(); // This will stop the WebRTC stream
+                      // Wait a moment for the stream to fully stop
+                      await new Promise(resolve => setTimeout(resolve, 500));
+                    } else {
+                      if (appendLog) appendLog('Warning: toggleWebRtcStream function not available, proceeding with scan...');
+                    }
+                  } catch (webRtcError) {
+                    if (appendLog) appendLog(`Warning: Failed to stop WebRTC stream: ${webRtcError.message}. Proceeding with quick scan...`);
                   }
                 }
                 
@@ -2771,55 +2787,18 @@ const MicroscopeMapDisplay = ({
                       if (wasWebRtcActive) {
                         appendLog('Note: WebRTC stream was stopped for scanning. Click "Start Live" to resume video stream if needed.');
                       }
-                    } catch (webRtcError) {
-                      if (appendLog) appendLog(`Warning: Failed to stop WebRTC stream: ${webRtcError.message}. Proceeding with quick scan...`);
                     }
-                  }
-                  
-                  setIsQuickScanInProgress(true);
-                  if (setMicroscopeBusy) setMicroscopeBusy(true); // Also set global busy state
-                  
-                  try {
-                    if (appendLog) appendLog(`Starting quick scan: ${quickScanParameters.wellplate_type}-well plate, ${quickScanParameters.velocity_mm_per_s}mm/s, ${quickScanParameters.fps_target}fps`);
+                    setShowQuickScanConfig(false);
+                    // Enable scan results layer if not already
+                    setVisibleLayers(prev => ({ ...prev, scanResults: true }));
                     
-                    const result = await microscopeControlService.quick_scan_with_stitching(
-                      quickScanParameters.wellplate_type,
-                      quickScanParameters.exposure_time,
-                      quickScanParameters.intensity,
-                      quickScanParameters.velocity_mm_per_s,
-                      quickScanParameters.fps_target,
-                      'quick_scan_' + Date.now()
-                    );
-                    
-                    if (result.success) {
-                      if (showNotification) showNotification('Quick scan completed successfully', 'success');
-                      if (appendLog) {
-                        appendLog('Quick scan completed successfully');
-                        if (result.performance_metrics) {
-                          appendLog(`Scan time: ${result.performance_metrics.total_scan_time_seconds}s, frames acquired: ${result.performance_metrics.estimated_frames_acquired}`);
-                        }
-                        if (wasWebRtcActive) {
-                          appendLog('Note: WebRTC stream was stopped for scanning. Click "Start Live" to resume video stream if needed.');
-                        }
-                      }
-                      setShowQuickScanConfig(false);
-                      // Enable scan results layer if not already
-                      setVisibleLayers(prev => ({ ...prev, scanResults: true }));
-                      
-                      // Refresh scan results display once after completion
-                      setTimeout(() => {
-                        refreshScanResults();
-                      }, 1000); // Wait 1 second then refresh
-                    } else {
-                      if (showNotification) showNotification(`Quick scan failed: ${result.message}`, 'error');
-                      if (appendLog) appendLog(`Quick scan failed: ${result.message}`);
-                    }
-                  } catch (error) {
-                    if (showNotification) showNotification(`Quick scan error: ${error.message}`, 'error');
-                    if (appendLog) appendLog(`Quick scan error: ${error.message}`);
-                  } finally {
-                    setIsQuickScanInProgress(false);
-                    if (setMicroscopeBusy) setMicroscopeBusy(false); // Clear global busy state
+                    // Refresh scan results display once after completion
+                    setTimeout(() => {
+                      refreshScanResults();
+                    }, 1000); // Wait 1 second then refresh
+                  } else {
+                    if (showNotification) showNotification(`Quick scan failed: ${result.message}`, 'error');
+                    if (appendLog) appendLog(`Quick scan failed: ${result.message}`);
                   }
                 } catch (error) {
                   if (showNotification) showNotification(`Quick scan error: ${error.message}`, 'error');
