@@ -1884,7 +1884,7 @@ const MicroscopeMapDisplay = ({
                               <button
                 onClick={() => {
                   if (isSimulatedMicroscope) return;
-                  if (showScanConfig || isRectangleSelection) {
+                  if (showScanConfig) {
                     // Close scan panel and cancel selection
                     setShowScanConfig(false);
                     setIsRectangleSelection(false);
@@ -1908,7 +1908,7 @@ const MicroscopeMapDisplay = ({
                   }
                 }}
                 className={`px-2 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed ${
-                  showScanConfig || isRectangleSelection ? 'bg-blue-600 hover:bg-blue-500' : 
+                  showScanConfig ? 'bg-blue-600 hover:bg-blue-500' : 
                   isScanInProgress ? 'bg-orange-600 hover:bg-orange-500' : 'bg-gray-700 hover:bg-gray-600'
                 }`}
                 title={isSimulatedMicroscope ? "Scanning not supported for simulated microscope" : 
@@ -1917,7 +1917,7 @@ const MicroscopeMapDisplay = ({
               >
                 <i className="fas fa-vector-square mr-1"></i>
                 {isScanInProgress ? (showScanConfig ? 'Close Scan Panel' : 'View Scan Progress') : 
-                 (showScanConfig || isRectangleSelection ? 'Cancel Scan Setup' : 'Scan Area')}
+                 (showScanConfig ? 'Close Scan Setup' : 'Scan Area')}
               </button>
                 
                 <button
