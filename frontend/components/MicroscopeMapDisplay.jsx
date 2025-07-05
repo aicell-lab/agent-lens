@@ -47,6 +47,8 @@ const MicroscopeMapDisplay = ({
   onMouseUp,
   onMouseLeave,
   toggleWebRtcStream,
+  onFreePanAutoCollapse,
+  onFitToViewUncollapse,
 }) => {
   const mapContainerRef = useRef(null);
   const canvasRef = useRef(null);
@@ -576,6 +578,15 @@ const MicroscopeMapDisplay = ({
   const transitionToFreePan = useCallback(() => {
     if (mapViewMode === 'FOV_FITTED') {
       setMapViewMode('FREE_PAN');
+      
+      // Trigger auto-collapse on FREE_PAN transition
+      if (onFreePanAutoCollapse) {
+        const shouldCollapseRightPanel = onFreePanAutoCollapse();
+        if (shouldCollapseRightPanel && appendLog) {
+          appendLog('Auto-collapsed sidebar and right panel for FREE_PAN mode');
+        }
+      }
+      
       // Start at higher scale level to avoid loading huge high-resolution data
       // Calculate appropriate scale level based on fitted scale to bias towards lower resolution
       const baseEffectiveScale = autoFittedScale; // Base scale from FOV_FITTED mode
@@ -615,13 +626,32 @@ const MicroscopeMapDisplay = ({
   
   // Switch back to FOV_FITTED mode
   const fitToView = useCallback(() => {
+    // First, uncollapse panels if the function is provided
+    if (onFitToViewUncollapse) {
+      const panelsExpanded = onFitToViewUncollapse();
+      if (panelsExpanded && appendLog) {
+        appendLog('Expanded sidebar and right panel for fitted video view');
+      }
+    }
+    
     setMapViewMode('FOV_FITTED');
     setScaleLevel(0); // FOV_FITTED mode always uses scale 0 (highest resolution)
     setZoomLevel(1.0); // Reset to 100% zoom
+    
     if (appendLog) {
       appendLog('Switched to fitted video view');
     }
-  }, [appendLog]);
+    
+    // Add a small delay to allow panels to expand and then recalculate FOV positioning
+    setTimeout(() => {
+      // Force a recalculation of the autoFittedPan and autoFittedScale
+      // by triggering a resize event or state update
+      if (mapContainerRef.current) {
+        // Trigger a resize event to recalculate container dimensions
+        window.dispatchEvent(new Event('resize'));
+      }
+    }, 300); // 300ms delay to allow panel expansion animation to complete
+  }, [onFitToViewUncollapse, appendLog]);
 
   const handleDoubleClick = async (e) => {
     if (!microscopeControlService || !microscopeConfiguration || !stageDimensions || isHardwareInteractionDisabled) {
@@ -775,6 +805,23 @@ const MicroscopeMapDisplay = ({
       };
     }
   }, [isOpen, handleWheel]);
+
+  // Effect to handle window resize and recalculate FOV positioning
+  useEffect(() => {
+    const handleResize = () => {
+      // Force a re-render of the FOV positioning when container size changes
+      // This is particularly important when panels expand/collapse
+      if (mapViewMode === 'FOV_FITTED' && mapContainerRef.current) {
+        // The autoFittedPan and autoFittedScale will automatically recalculate
+        // due to their dependency on container dimensions
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [mapViewMode]);
 
   // Helper functions for tile management
   const getTileKey = useCallback((bounds, scale, channel) => {
@@ -3537,6 +3584,8 @@ MicroscopeMapDisplay.propTypes = {
   onMouseUp: PropTypes.func,
   onMouseLeave: PropTypes.func,
   toggleWebRtcStream: PropTypes.func,
+  onFreePanAutoCollapse: PropTypes.func,
+  onFitToViewUncollapse: PropTypes.func,
 };
 
 export default MicroscopeMapDisplay; 

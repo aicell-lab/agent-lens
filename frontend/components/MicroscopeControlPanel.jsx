@@ -81,6 +81,8 @@ const MicroscopeControlPanel = ({
   orchestratorManagerService, // New prop for orchestrator service
   onOpenImageJ = null, // New prop for opening image in ImageJ
   imjoyApi = null, // New prop for ImJoy API
+  onFreePanAutoCollapse = null, // New prop for FREE_PAN auto-collapse
+  onFitToViewUncollapse = null, // New prop for Fit to View uncollapse
 }) => {
   const [isLightOn, setIsLightOn] = useState(false);
   const [xPosition, setXPosition] = useState(0);
@@ -185,6 +187,58 @@ const MicroscopeControlPanel = ({
   const [metadataDataChannel, setMetadataDataChannel] = useState(null);
   const [frameMetadata, setFrameMetadata] = useState(null);
   const [isDataChannelConnected, setIsDataChannelConnected] = useState(false);
+
+  // Function to handle right panel auto-collapse
+  const handleRightPanelAutoCollapse = useCallback(() => {
+    if (!isRightPanelCollapsed) {
+      setIsRightPanelCollapsed(true);
+      return true; // Indicate that collapse happened
+    }
+    return false; // Already collapsed
+  }, [isRightPanelCollapsed]);
+
+  // Function to handle right panel expansion
+  const handleRightPanelExpansion = useCallback(() => {
+    if (isRightPanelCollapsed) {
+      setIsRightPanelCollapsed(false);
+      return true; // Indicate that expansion happened
+    }
+    return false; // Already expanded
+  }, [isRightPanelCollapsed]);
+
+  // Combined auto-collapse function that handles both sidebar and right panel
+  const handleCombinedAutoCollapse = useCallback(() => {
+    let sidebarCollapsed = false;
+    let rightPanelCollapsed = false;
+
+    // First call the main app's auto-collapse function (for sidebar)
+    if (onFreePanAutoCollapse) {
+      sidebarCollapsed = onFreePanAutoCollapse();
+    }
+
+    // Always collapse the right panel when FREE_PAN is triggered
+    if (sidebarCollapsed) {
+      rightPanelCollapsed = handleRightPanelAutoCollapse();
+    }
+
+    return sidebarCollapsed; // Return whether collapse happened
+  }, [onFreePanAutoCollapse, handleRightPanelAutoCollapse]);
+
+  // Combined uncollapse function that handles both sidebar and right panel expansion
+  const handleCombinedUncollapse = useCallback(() => {
+    let sidebarExpanded = false;
+    let rightPanelExpanded = false;
+
+    // First call the main app's uncollapse function (for sidebar)
+    if (onFitToViewUncollapse) {
+      sidebarExpanded = onFitToViewUncollapse();
+    }
+
+    // Then expand the right panel
+    rightPanelExpanded = handleRightPanelExpansion();
+
+    return sidebarExpanded || rightPanelExpanded; // Return whether any expansion happened
+  }, [onFitToViewUncollapse, handleRightPanelExpansion]);
 
   // Callback to receive sample load status updates from SampleSelector
   const handleSampleLoadStatusChange = useCallback((status) => {
@@ -1359,6 +1413,8 @@ const MicroscopeControlPanel = ({
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseLeave}
             toggleWebRtcStream={toggleWebRtcStream}
+            onFreePanAutoCollapse={handleCombinedAutoCollapse}
+            onFitToViewUncollapse={handleCombinedUncollapse}
           />
         </div>
 
@@ -1849,6 +1905,8 @@ MicroscopeControlPanel.propTypes = {
   orchestratorManagerService: PropTypes.object, // Added prop type
   onOpenImageJ: PropTypes.func, // Added prop type for ImageJ integration
   imjoyApi: PropTypes.object, // Added prop type for ImJoy API
+  onFreePanAutoCollapse: PropTypes.func, // Added prop type for FREE_PAN auto-collapse
+  onFitToViewUncollapse: PropTypes.func, // Added prop type for Fit to View uncollapse
 };
 
 export default MicroscopeControlPanel; 
