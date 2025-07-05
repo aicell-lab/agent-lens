@@ -1338,6 +1338,7 @@ const MicroscopeControlPanel = ({
             microscopeBusy={microscopeBusy}
             setMicroscopeBusy={setMicroscopeBusy}
             currentOperation={currentOperation}
+            setCurrentOperation={setCurrentOperation}
             videoContrastMin={videoContrastMin}
             setVideoContrastMin={setVideoContrastMin}
             videoContrastMax={videoContrastMax}

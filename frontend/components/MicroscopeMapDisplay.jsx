@@ -27,6 +27,7 @@ const MicroscopeMapDisplay = ({
   microscopeBusy,
   setMicroscopeBusy,
   currentOperation,
+  setCurrentOperation,
   videoContrastMin,
   setVideoContrastMin,
   videoContrastMax,
@@ -2799,12 +2800,13 @@ const MicroscopeMapDisplay = ({
                     
                     const result = await microscopeControlService.stop_scan_and_stitching();
                     
-                    if (result.success) {
-                      if (showNotification) showNotification('Quick scan stop requested', 'success');
-                      if (appendLog) appendLog('Quick scan stop requested - scan will be interrupted');
-                      setIsQuickScanInProgress(false);
-                      if (setMicroscopeBusy) setMicroscopeBusy(false);
-                    } else {
+                                          if (result.success) {
+                        if (showNotification) showNotification('Quick scan stop requested', 'success');
+                        if (appendLog) appendLog('Quick scan stop requested - scan will be interrupted');
+                        setIsQuickScanInProgress(false);
+                        if (setMicroscopeBusy) setMicroscopeBusy(false);
+                        if (setCurrentOperation) setCurrentOperation(null); // Re-enable sidebar
+                      } else {
                       if (showNotification) showNotification(`Failed to stop quick scan: ${result.message}`, 'error');
                       if (appendLog) appendLog(`Failed to stop quick scan: ${result.message}`);
                     }
@@ -2834,6 +2836,7 @@ const MicroscopeMapDisplay = ({
                 
                 setIsQuickScanInProgress(true);
                 if (setMicroscopeBusy) setMicroscopeBusy(true); // Also set global busy state
+                if (setCurrentOperation) setCurrentOperation('quick_scanning'); // Disable sidebar during quick scanning
                 
                 try {
                   if (appendLog) appendLog(`Starting quick scan: ${quickScanParameters.wellplate_type}-well plate, ${quickScanParameters.n_stripes} stripes × ${quickScanParameters.stripe_width_mm}mm, scan velocity ${quickScanParameters.velocity_scan_mm_per_s}mm/s, ${quickScanParameters.fps_target}fps`);
@@ -2884,6 +2887,7 @@ const MicroscopeMapDisplay = ({
                 } finally {
                   setIsQuickScanInProgress(false);
                   if (setMicroscopeBusy) setMicroscopeBusy(false); // Clear global busy state
+                  if (setCurrentOperation) setCurrentOperation(null); // Re-enable sidebar
                 }
               }}
               className="px-3 py-1 text-xs bg-green-600 hover:bg-green-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
@@ -2933,6 +2937,9 @@ const MicroscopeMapDisplay = ({
                   } catch (error) {
                     if (showNotification) showNotification(`Error stopping scan: ${error.message}`, 'error');
                     if (appendLog) appendLog(`Error stopping quick scan: ${error.message}`);
+                  } finally {
+                    // Always re-enable sidebar even if stop fails
+                    if (setCurrentOperation) setCurrentOperation(null);
                   }
                 }}
                 className="px-3 py-1 text-xs bg-red-600 hover:bg-red-500 text-white rounded flex items-center"
@@ -3355,6 +3362,7 @@ const MicroscopeMapDisplay = ({
                         if (appendLog) appendLog('Scan stop requested - scan will be interrupted');
                         setIsScanInProgress(false);
                         if (setMicroscopeBusy) setMicroscopeBusy(false);
+                        if (setCurrentOperation) setCurrentOperation(null); // Re-enable sidebar
                       } else {
                         if (showNotification) showNotification(`Failed to stop scan: ${result.message}`, 'error');
                         if (appendLog) appendLog(`Failed to stop scan: ${result.message}`);
@@ -3404,6 +3412,7 @@ const MicroscopeMapDisplay = ({
                   
                   setIsScanInProgress(true);
                   if (setMicroscopeBusy) setMicroscopeBusy(true); // Also set global busy state
+                  if (setCurrentOperation) setCurrentOperation('scanning'); // Disable sidebar during scanning
                   
                   try {
                     
@@ -3455,6 +3464,7 @@ const MicroscopeMapDisplay = ({
                   } finally {
                     setIsScanInProgress(false);
                     if (setMicroscopeBusy) setMicroscopeBusy(false); // Clear global busy state
+                    if (setCurrentOperation) setCurrentOperation(null); // Re-enable sidebar
                   }
                 }}
               className={`px-3 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed flex items-center ${
@@ -3507,6 +3517,7 @@ MicroscopeMapDisplay.propTypes = {
   microscopeBusy: PropTypes.bool,
   setMicroscopeBusy: PropTypes.func,
   currentOperation: PropTypes.oneOfType([PropTypes.string, PropTypes.object]),
+  setCurrentOperation: PropTypes.func,
   videoContrastMin: PropTypes.number,
   setVideoContrastMin: PropTypes.func,
   videoContrastMax: PropTypes.number,
