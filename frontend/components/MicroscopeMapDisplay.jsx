@@ -114,7 +114,9 @@ const MicroscopeMapDisplay = ({
     n_stripes: 3,
     stripe_width_mm: 4,
     dy_mm: 0.85,
-    velocity_scan_mm_per_s: 3.0
+    velocity_scan_mm_per_s: 3.0,
+    do_contrast_autofocus: false,
+    do_reflection_af: false
   });
 
   // Layer dropdown state
@@ -2646,6 +2648,46 @@ const MicroscopeMapDisplay = ({
                   />
                 </div>
               </div>
+              {/* Autofocus selection */}
+              <div className="mt-2">
+                <div className="text-blue-300 font-medium mb-1"><i className="fas fa-bullseye mr-1"></i>Autofocus</div>
+                <div className="flex flex-col space-y-1">
+                  <label className="flex items-center text-xs">
+                    <input
+                      type="radio"
+                      name="quickscan-autofocus"
+                      checked={!quickScanParameters.do_contrast_autofocus && !quickScanParameters.do_reflection_af}
+                      onChange={() => setQuickScanParameters(prev => ({ ...prev, do_contrast_autofocus: false, do_reflection_af: false }))}
+                      disabled={isQuickScanInProgress}
+                      className="mr-2"
+                    />
+                    None
+                  </label>
+                  <label className="flex items-center text-xs">
+                    <input
+                      type="radio"
+                      name="quickscan-autofocus"
+                      checked={quickScanParameters.do_contrast_autofocus}
+                      onChange={() => setQuickScanParameters(prev => ({ ...prev, do_contrast_autofocus: true, do_reflection_af: false }))}
+                      disabled={isQuickScanInProgress}
+                      className="mr-2"
+                    />
+                    Contrast Autofocus
+                  </label>
+                  <label className="flex items-center text-xs">
+                    <input
+                      type="radio"
+                      name="quickscan-autofocus"
+                      checked={quickScanParameters.do_reflection_af}
+                      onChange={() => setQuickScanParameters(prev => ({ ...prev, do_contrast_autofocus: false, do_reflection_af: true }))}
+                      disabled={isQuickScanInProgress}
+                      className="mr-2"
+                    />
+                    Reflection Autofocus
+                  </label>
+                </div>
+                <div className="text-gray-400 text-xs mt-1">Only one autofocus mode can be enabled for quick scan.</div>
+              </div>
             </div>
 
             {/* Motion & Acquisition Settings */}
@@ -2762,17 +2804,19 @@ const MicroscopeMapDisplay = ({
                 try {
                   if (appendLog) appendLog(`Starting quick scan: ${quickScanParameters.wellplate_type}-well plate, ${quickScanParameters.n_stripes} stripes × ${quickScanParameters.stripe_width_mm}mm, scan velocity ${quickScanParameters.velocity_scan_mm_per_s}mm/s, ${quickScanParameters.fps_target}fps`);
                   
-                  const result = await microscopeControlService.quick_scan_with_stitching(
-                    quickScanParameters.wellplate_type,
-                    quickScanParameters.exposure_time,
-                    quickScanParameters.intensity,
-                    quickScanParameters.fps_target,
-                    'quick_scan_' + Date.now(),
-                    quickScanParameters.n_stripes,
-                    quickScanParameters.stripe_width_mm,
-                    quickScanParameters.dy_mm,
-                    quickScanParameters.velocity_scan_mm_per_s
-                  );
+                  const result = await microscopeControlService.quick_scan_with_stitching({
+                    wellplate_type: quickScanParameters.wellplate_type,
+                    exposure_time: quickScanParameters.exposure_time,
+                    intensity: quickScanParameters.intensity,
+                    fps_target: quickScanParameters.fps_target,
+                    action_ID: 'quick_scan_' + Date.now(),
+                    n_stripes: quickScanParameters.n_stripes,
+                    stripe_width_mm: quickScanParameters.stripe_width_mm,
+                    dy_mm: quickScanParameters.dy_mm,
+                    velocity_scan_mm_per_s: quickScanParameters.velocity_scan_mm_per_s,
+                    do_contrast_autofocus: quickScanParameters.do_contrast_autofocus,
+                    do_reflection_af: quickScanParameters.do_reflection_af
+                  });
                   
                   if (result.success) {
                     if (showNotification) showNotification('Quick scan completed successfully', 'success');
