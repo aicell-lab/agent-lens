@@ -1883,7 +1883,7 @@ const MicroscopeMapDisplay = ({
               <div className="flex items-center space-x-2">
                               <button
                 onClick={() => {
-                  if (isInteractionDisabled || isSimulatedMicroscope) return;
+                  if (isSimulatedMicroscope) return;
                   if (showScanConfig || isRectangleSelection) {
                     // Close scan panel and cancel selection
                     setShowScanConfig(false);
@@ -1898,26 +1898,31 @@ const MicroscopeMapDisplay = ({
                         appendLog('Switched to stage map view for scan area selection');
                       }
                     }
-                    // Open scan panel and load current microscope settings
-                    loadCurrentMicroscopeSettings();
+                    // Open scan panel and load current microscope settings (only if not scanning)
+                    if (!isScanInProgress) {
+                      loadCurrentMicroscopeSettings();
+                      // Automatically enable rectangle selection when opening scan panel (only if not scanning)
+                      setIsRectangleSelection(true);
+                    }
                     setShowScanConfig(true);
-                    // Automatically enable rectangle selection when opening scan panel
-                    setIsRectangleSelection(true);
                   }
                 }}
                 className={`px-2 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed ${
-                  showScanConfig || isRectangleSelection ? 'bg-blue-600 hover:bg-blue-500' : 'bg-gray-700 hover:bg-gray-600'
+                  showScanConfig || isRectangleSelection ? 'bg-blue-600 hover:bg-blue-500' : 
+                  isScanInProgress ? 'bg-orange-600 hover:bg-orange-500' : 'bg-gray-700 hover:bg-gray-600'
                 }`}
-                title={isSimulatedMicroscope ? "Scanning not supported for simulated microscope" : "Configure scan and select area (automatically switches to stage map view)"}
-                disabled={isInteractionDisabled || !microscopeControlService || isSimulatedMicroscope}
+                title={isSimulatedMicroscope ? "Scanning not supported for simulated microscope" : 
+                       isScanInProgress ? "View/stop current scan" : "Configure scan and select area (automatically switches to stage map view)"}
+                disabled={!microscopeControlService || isSimulatedMicroscope}
               >
                 <i className="fas fa-vector-square mr-1"></i>
-                {isScanInProgress ? 'Scanning...' : (showScanConfig || isRectangleSelection ? 'Cancel Scan Setup' : 'Scan Area')}
+                {isScanInProgress ? (showScanConfig ? 'Close Scan Panel' : 'View Scan Progress') : 
+                 (showScanConfig || isRectangleSelection ? 'Cancel Scan Setup' : 'Scan Area')}
               </button>
                 
                 <button
                   onClick={() => {
-                    if (isInteractionDisabled || isSimulatedMicroscope) return;
+                    if (isSimulatedMicroscope) return;
                     if (showQuickScanConfig) {
                       // Close quick scan panel
                       setShowQuickScanConfig(false);
@@ -1927,18 +1932,21 @@ const MicroscopeMapDisplay = ({
                       setIsRectangleSelection(false);
                       setRectangleStart(null);
                       setRectangleEnd(null);
-                      // Open quick scan panel
+                      // Open quick scan panel (always allow opening, even during scanning)
                       setShowQuickScanConfig(true);
                     }
                   }}
                   className={`px-2 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed ${
-                    showQuickScanConfig ? 'bg-green-600 hover:bg-green-500' : 'bg-gray-700 hover:bg-gray-600'
+                    showQuickScanConfig ? 'bg-green-600 hover:bg-green-500' : 
+                    isQuickScanInProgress ? 'bg-orange-600 hover:bg-orange-500' : 'bg-gray-700 hover:bg-gray-600'
                   }`}
-                  title={isSimulatedMicroscope ? "Quick scanning not supported for simulated microscope" : "Quick scan entire well plate with high-speed acquisition"}
-                  disabled={isInteractionDisabled || !microscopeControlService || isSimulatedMicroscope}
+                  title={isSimulatedMicroscope ? "Quick scanning not supported for simulated microscope" : 
+                         isQuickScanInProgress ? "View/stop current quick scan" : "Quick scan entire well plate with high-speed acquisition"}
+                  disabled={!microscopeControlService || isSimulatedMicroscope}
                 >
                   <i className="fas fa-bolt mr-1"></i>
-                  {isQuickScanInProgress ? 'Quick Scanning...' : (showQuickScanConfig ? 'Cancel Quick Scan' : 'Quick Scan')}
+                  {isQuickScanInProgress ? (showQuickScanConfig ? 'Close Quick Scan Panel' : 'View Quick Scan Progress') : 
+                   (showQuickScanConfig ? 'Cancel Quick Scan' : 'Quick Scan')}
                 </button>
                 
                 <button
@@ -1964,36 +1972,62 @@ const MicroscopeMapDisplay = ({
               {/* Scan buttons visible in FOV_FITTED mode */}
               <button
                 onClick={() => {
-                  if (isInteractionDisabled || isSimulatedMicroscope) return;
-                  // Automatically switch to FREE_PAN mode and open scan configuration
-                  transitionToFreePan();
-                  loadCurrentMicroscopeSettings();
-                  setShowScanConfig(true);
-                  setIsRectangleSelection(true);
-                  if (appendLog) {
-                    appendLog('Switched to stage map view for scan area selection');
+                  if (isSimulatedMicroscope) return;
+                  if (isScanInProgress && showScanConfig) {
+                    // Just close the panel if it's already open during scanning
+                    setShowScanConfig(false);
+                    setIsRectangleSelection(false);
+                    setRectangleStart(null);
+                    setRectangleEnd(null);
+                  } else if (isScanInProgress) {
+                    // Switch to FREE_PAN mode and open scan panel to view progress
+                    transitionToFreePan();
+                    setShowScanConfig(true);
+                    if (appendLog) {
+                      appendLog('Switched to stage map view to monitor scan progress');
+                    }
+                  } else {
+                    // Automatically switch to FREE_PAN mode and open scan configuration
+                    transitionToFreePan();
+                    loadCurrentMicroscopeSettings();
+                    setShowScanConfig(true);
+                    setIsRectangleSelection(true);
+                    if (appendLog) {
+                      appendLog('Switched to stage map view for scan area selection');
+                    }
                   }
                 }}
-                className="px-2 py-1 text-xs bg-green-600 hover:bg-green-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                title={isSimulatedMicroscope ? "Scanning not supported for simulated microscope" : "Switch to stage map and configure scan area"}
-                disabled={isInteractionDisabled || !microscopeControlService || isSimulatedMicroscope}
+                className={`px-2 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed ${
+                  isScanInProgress ? 'bg-orange-600 hover:bg-orange-500' : 'bg-green-600 hover:bg-green-500'
+                }`}
+                title={isSimulatedMicroscope ? "Scanning not supported for simulated microscope" : 
+                       isScanInProgress ? "View/stop current scan" : "Switch to stage map and configure scan area"}
+                disabled={!microscopeControlService || isSimulatedMicroscope}
               >
                 <i className="fas fa-vector-square mr-1"></i>
-                Scan Area
+                {isScanInProgress ? (showScanConfig ? 'Close Scan Panel' : 'View Scan Progress') : 'Scan Area'}
               </button>
               
               <button
                 onClick={() => {
-                  if (isInteractionDisabled || isSimulatedMicroscope) return;
-                  // Open quick scan configuration without switching view modes
-                  setShowQuickScanConfig(true);
+                  if (isSimulatedMicroscope) return;
+                  if (showQuickScanConfig) {
+                    // Close the panel if it's open
+                    setShowQuickScanConfig(false);
+                  } else {
+                    // Open quick scan configuration (always allow, even during scanning)
+                    setShowQuickScanConfig(true);
+                  }
                 }}
-                className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                title={isSimulatedMicroscope ? "Quick scanning not supported for simulated microscope" : "Quick scan entire well plate with high-speed acquisition"}
-                disabled={isInteractionDisabled || !microscopeControlService || isSimulatedMicroscope}
+                className={`px-2 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed ${
+                  isQuickScanInProgress ? 'bg-orange-600 hover:bg-orange-500' : 'bg-blue-600 hover:bg-blue-500'
+                }`}
+                title={isSimulatedMicroscope ? "Quick scanning not supported for simulated microscope" : 
+                       isQuickScanInProgress ? "View/stop current quick scan" : "Quick scan entire well plate with high-speed acquisition"}
+                disabled={!microscopeControlService || isSimulatedMicroscope}
               >
                 <i className="fas fa-bolt mr-1"></i>
-                Quick Scan
+                {isQuickScanInProgress ? (showQuickScanConfig ? 'Close Quick Scan Panel' : 'View Quick Scan Progress') : 'Quick Scan'}
               </button>
             </div>
           )}
@@ -3441,46 +3475,7 @@ const MicroscopeMapDisplay = ({
               )}
             </button>
             
-            {/* Stop button - only visible during scanning */}
-            {isScanInProgress && (
-              <button
-                onClick={async () => {
-                  if (!microscopeControlService) return;
-                  
-                  try {
-                    if (appendLog) appendLog('Attempting to stop scan...');
-                    
-                    // Try to stop the scan using the microscope control service
-                    if (microscopeControlService.stop_scan) {
-                      const result = await microscopeControlService.stop_scan_and_stitching();
-                      if (result.success) {
-                        if (showNotification) showNotification('Scan stopped successfully', 'warning');
-                        if (appendLog) appendLog('Scan stopped by user');
-                      } else {
-                        if (showNotification) showNotification(`Failed to stop scan: ${result.message}`, 'error');
-                        if (appendLog) appendLog(`Failed to stop scan: ${result.message}`);
-                      }
-                    } else if (microscopeControlService.halt_stage) {
-                      // Fallback: halt stage movement
-                      await microscopeControlService.halt_stage();
-                      if (showNotification) showNotification('Stage movement halted', 'warning');
-                      if (appendLog) appendLog('Stage movement halted - scan interrupted');
-                    } else {
-                      if (showNotification) showNotification('Stop scan function not available', 'warning');
-                      if (appendLog) appendLog('Warning: No stop scan method available on microscope service');
-                    }
-                  } catch (error) {
-                    if (showNotification) showNotification(`Error stopping scan: ${error.message}`, 'error');
-                    if (appendLog) appendLog(`Error stopping scan: ${error.message}`);
-                  }
-                }}
-                className="px-3 py-1 text-xs bg-red-600 hover:bg-red-500 text-white rounded flex items-center"
-                title="Stop scan"
-              >
-                <i className="fas fa-stop mr-1"></i>
-                Stop Scan
-              </button>
-            )}
+
           </div>
         </div>
       )}
