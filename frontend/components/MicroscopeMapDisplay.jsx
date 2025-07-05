@@ -383,6 +383,9 @@ const MicroscopeMapDisplay = ({
     return displayWidth * actualPixelSizeMm;
   }, [microscopeConfiguration]);
 
+  // Track container dimensions for memoized calculations
+  const [containerDimensions, setContainerDimensions] = useState({ width: 0, height: 0 });
+
   // Get current stage position from metadata or fallback
   const currentStagePosition = useMemo(() => {
     // Prefer WebRTC metadata when available
@@ -421,13 +424,12 @@ const MicroscopeMapDisplay = ({
   
   // Auto-calculate scale and pan for FOV_FITTED mode
   const autoFittedScale = useMemo(() => {
-    const container = mapContainerRef.current;
-    if (!container) return 1;
+    if (containerDimensions.width === 0 || containerDimensions.height === 0) return 1;
     
     // In FOV_FITTED mode, we want the FOV box to always appear as a consistent size
     // representing the video display area, regardless of microscope configuration loading
-    const containerWidth = container.clientWidth;
-    const containerHeight = container.clientHeight;
+    const containerWidth = containerDimensions.width;
+    const containerHeight = containerDimensions.height;
     
     // Use a fixed FOV display size that represents the video window
     // This should be consistent regardless of whether config is loaded
@@ -447,15 +449,14 @@ const MicroscopeMapDisplay = ({
     // Fallback: ensure a reasonable scale that shows a fixed-size FOV box
     // This prevents the "jumping" by providing a consistent fallback
     return videoDisplaySize / 400; // Assume 400px default FOV size
-  }, [currentStagePosition, stageDimensions, fovSize, pixelsPerMm]);
+  }, [containerDimensions, currentStagePosition, stageDimensions, fovSize, pixelsPerMm]);
   
   const autoFittedPan = useMemo(() => {
-    const container = mapContainerRef.current;
-    if (!container) return { x: 0, y: 0 };
+    if (containerDimensions.width === 0 || containerDimensions.height === 0) return { x: 0, y: 0 };
     
     // Always center the FOV in the container for FOV_FITTED mode
-    const containerWidth = container.clientWidth;
-    const containerHeight = container.clientHeight;
+    const containerWidth = containerDimensions.width;
+    const containerHeight = containerDimensions.height;
     
     // If we have real position data, center based on actual stage position
     if (currentStagePosition && stageDimensions && autoFittedScale) {
@@ -474,7 +475,7 @@ const MicroscopeMapDisplay = ({
       x: containerWidth / 2,
       y: containerHeight / 2
     };
-  }, [currentStagePosition, stageDimensions, pixelsPerMm, autoFittedScale]);
+  }, [containerDimensions, currentStagePosition, stageDimensions, pixelsPerMm, autoFittedScale]);
   
   // Use fitted values in FOV_FITTED mode, manual values in FREE_PAN mode
   const mapScale = mapViewMode === 'FOV_FITTED' ? autoFittedScale : calculatedMapScale;
@@ -482,16 +483,15 @@ const MicroscopeMapDisplay = ({
 
   // Calculate video frame position on the map
   const videoFramePosition = useMemo(() => {
-    const container = mapContainerRef.current;
-    if (!container) return null;
+    if (containerDimensions.width === 0 || containerDimensions.height === 0) return null;
     
          // In FOV_FITTED mode, always show a centered FOV box representing the video display
      if (mapViewMode === 'FOV_FITTED') {
-       const containerWidth = container.clientWidth;
-       const containerHeight = container.clientHeight;
+       const containerWidth = containerDimensions.width;
+       const containerHeight = containerDimensions.height;
        
        // Fixed FOV box size for consistent video display representation
-       const videoDisplaySize = Math.min(containerWidth, containerHeight) * 0.85; // 85% of container to better fill the space
+       const videoDisplaySize = Math.min(containerWidth, containerHeight) * 0.9; // 90% of container to better fill the space
       
       return {
         x: containerWidth / 2,
@@ -514,7 +514,7 @@ const MicroscopeMapDisplay = ({
       width: fovSize * pixelsPerMm * mapScale,
       height: fovSize * pixelsPerMm * mapScale
     };
-  }, [mapViewMode, currentStagePosition, stageDimensions, mapScale, effectivePan, fovSize, pixelsPerMm]);
+  }, [containerDimensions, mapViewMode, currentStagePosition, stageDimensions, mapScale, effectivePan, fovSize, pixelsPerMm]);
 
   // Split interaction controls: hardware vs map browsing
   const isHardwareInteractionDisabled = microscopeBusy || currentOperation !== null || isScanInProgress || isQuickScanInProgress;
@@ -642,15 +642,9 @@ const MicroscopeMapDisplay = ({
       appendLog('Switched to fitted video view');
     }
     
-    // Add a small delay to allow panels to expand and then recalculate FOV positioning
-    setTimeout(() => {
-      // Force a recalculation of the autoFittedPan and autoFittedScale
-      // by triggering a resize event or state update
-      if (mapContainerRef.current) {
-        // Trigger a resize event to recalculate container dimensions
-        window.dispatchEvent(new Event('resize'));
-      }
-    }, 300); // 300ms delay to allow panel expansion animation to complete
+    // Container dimensions will be automatically updated by ResizeObserver
+    // No need for setTimeout hack - memoized calculations will recalculate
+    // when containerDimensions state updates
   }, [onFitToViewUncollapse, appendLog]);
 
   const handleDoubleClick = async (e) => {
@@ -806,6 +800,32 @@ const MicroscopeMapDisplay = ({
     }
   }, [isOpen, handleWheel]);
 
+  // Effect to track container dimension changes
+  useEffect(() => {
+    const container = mapContainerRef.current;
+    if (!container) return;
+
+    // Update initial dimensions
+    setContainerDimensions({
+      width: container.clientWidth,
+      height: container.clientHeight
+    });
+
+    // Use ResizeObserver to detect container size changes
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        setContainerDimensions({ width, height });
+      }
+    });
+
+    resizeObserver.observe(container);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [isOpen]); // Re-run when component opens/closes
+
   // Effect to handle window resize and recalculate FOV positioning
   useEffect(() => {
     const handleResize = () => {
@@ -814,6 +834,10 @@ const MicroscopeMapDisplay = ({
       if (mapViewMode === 'FOV_FITTED' && mapContainerRef.current) {
         // The autoFittedPan and autoFittedScale will automatically recalculate
         // due to their dependency on container dimensions
+        setContainerDimensions({
+          width: mapContainerRef.current.clientWidth,
+          height: mapContainerRef.current.clientHeight
+        });
       }
     };
 
