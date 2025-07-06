@@ -343,12 +343,166 @@ const MicroscopeMapDisplay = ({
     }
   });
   
+  // Timepoint management
+  const [availableTimepoints, setAvailableTimepoints] = useState([0]); // Default to timepoint 0
+  const [selectedTimepoint, setSelectedTimepoint] = useState(0);
+  const [selectedScanTimepoint, setSelectedScanTimepoint] = useState(0); // For scan configuration
+  const [createNewTimepoint, setCreateNewTimepoint] = useState(false); // For scan configuration
+  
   // Tile-based canvas state (replacing single stitchedCanvasData)
   const [stitchedTiles, setStitchedTiles] = useState([]); // Array of tile objects
   const [isLoadingCanvas, setIsLoadingCanvas] = useState(false);
   const canvasUpdateTimerRef = useRef(null);
   const lastCanvasRequestRef = useRef({ x: 0, y: 0, width: 0, height: 0, scale: 0 });
   const activeTileRequestsRef = useRef(new Set()); // Track active requests to prevent duplicates
+  
+  // Timepoint management functions
+  const loadAvailableTimepoints = async () => {
+    if (!microscopeControlService) return;
+    
+    try {
+      // Check if the service has the get_available_timepoints method
+      if (typeof microscopeControlService.get_zarr_timepoints !== 'function') {
+        console.warn('get_available_timepoints method not available on service');
+        // Use default timepoint if method is not available
+        setAvailableTimepoints([0]);
+        setSelectedTimepoint(0);
+        return;
+      }
+      
+      const result = await microscopeControlService.get_zarr_timepoints();
+      if (result && result.success) {
+        setAvailableTimepoints(result.available_timepoints);
+        // If current selected timepoint is not in available list, select the first one
+        if (!result.available_timepoints.includes(selectedTimepoint)) {
+          setSelectedTimepoint(result.available_timepoints[0] || 0);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load available timepoints:', error);
+      if (showNotification) {
+        showNotification('Failed to load available timepoints', 'error');
+      }
+      // Fallback to default timepoint on error
+      setAvailableTimepoints([0]);
+      setSelectedTimepoint(0);
+    }
+  };
+  
+  const createTimepoint = async (timepoint) => {
+    if (!microscopeControlService) return false;
+    
+    try {
+      // Check if the service has the create_timepoint method
+      if (typeof microscopeControlService.create_zarr_timepoint !== 'function') {
+        console.warn('create_timepoint method not available on service');
+        if (showNotification) {
+          showNotification('Create timepoint not supported by this service', 'error');
+        }
+        return false;
+      }
+      
+      const result = await microscopeControlService.create_zarr_timepoint(timepoint);
+      if (result && result.success) {
+        if (showNotification) {
+          showNotification(`Created timepoint ${timepoint}`, 'success');
+        }
+        await loadAvailableTimepoints(); // Refresh the list
+        return true;
+      } else {
+        if (showNotification) {
+          showNotification(result?.message || `Failed to create timepoint ${timepoint}`, 'error');
+        }
+        return false;
+      }
+    } catch (error) {
+      console.error('Failed to create timepoint:', error);
+      if (showNotification) {
+        showNotification('Failed to create timepoint', 'error');
+      }
+      return false;
+    }
+  };
+  
+  const removeTimepoint = async (timepoint) => {
+    if (!microscopeControlService) return false;
+    
+    try {
+      // Check if the service has the remove_timepoint method
+      if (typeof microscopeControlService.remove_zarr_timepoint !== 'function') {
+        console.warn('remove_timepoint method not available on service');
+        if (showNotification) {
+          showNotification('Remove timepoint not supported by this service', 'error');
+        }
+        return false;
+      }
+      
+      const result = await microscopeControlService.remove_zarr_timepoint(timepoint);
+      if (result && result.success) {
+        if (showNotification) {
+          showNotification(`Removed timepoint ${timepoint}`, 'success');
+        }
+        await loadAvailableTimepoints(); // Refresh the list
+        return true;
+      } else {
+        if (showNotification) {
+          showNotification(result?.message || `Failed to remove timepoint ${timepoint}`, 'error');
+        }
+        return false;
+      }
+    } catch (error) {
+      console.error('Failed to remove timepoint:', error);
+      if (showNotification) {
+        showNotification('Failed to remove timepoint', 'error');
+      }
+      return false;
+    }
+  };
+  
+  const clearTimepoint = async (timepoint) => {
+    if (!microscopeControlService) return false;
+    
+    try {
+      // Check if the service has the clear_timepoint method
+      if (typeof microscopeControlService.clear_timepoint !== 'function') {
+        console.warn('clear_timepoint method not available on service');
+        if (showNotification) {
+          showNotification('Clear timepoint not supported by this service', 'error');
+        }
+        return false;
+      }
+      
+      const result = await microscopeControlService.clear_zarr_timepoint(timepoint);
+      if (result && result.success) {
+        if (showNotification) {
+          showNotification(`Cleared timepoint ${timepoint}`, 'success');
+        }
+        // Refresh canvas tiles for the current timepoint
+        if (timepoint === selectedTimepoint) {
+          await refreshCanvasView();
+        }
+        return true;
+      } else {
+        if (showNotification) {
+          showNotification(result?.message || `Failed to clear timepoint ${timepoint}`, 'error');
+        }
+        return false;
+      }
+    } catch (error) {
+      console.error('Failed to clear timepoint:', error);
+      if (showNotification) {
+        showNotification('Failed to clear timepoint', 'error');
+      }
+      return false;
+    }
+  };
+
+  // Load available timepoints when Layers dropdown is opened
+  useEffect(() => {
+    if (isLayerDropdownOpen && microscopeControlService) {
+      loadAvailableTimepoints();
+    }
+  }, [isLayerDropdownOpen, microscopeControlService]);
 
   // Calculate pixelsPerMm from microscope configuration
   const pixelsPerMm = useMemo(() => {
@@ -1529,6 +1683,7 @@ const MicroscopeMapDisplay = ({
         height_mm,
         scaleLevel,
         activeChannel,
+        selectedTimepoint,
         'base64'
       );
       
@@ -1564,7 +1719,7 @@ const MicroscopeMapDisplay = ({
         setIsLoadingCanvas(false);
       }
     }
-  }, [microscopeControlService, visibleLayers.scanResults, visibleLayers.channels, mapViewMode, scaleLevel, displayToStageCoords, stageDimensions, pixelsPerMm, isRegionCovered, getTileKey, addOrUpdateTile, appendLog, isSimulatedMicroscope]);
+  }, [microscopeControlService, visibleLayers.scanResults, visibleLayers.channels, mapViewMode, scaleLevel, displayToStageCoords, stageDimensions, pixelsPerMm, isRegionCovered, getTileKey, addOrUpdateTile, appendLog, isSimulatedMicroscope, selectedTimepoint]);
   
   // Debounce tile loading - only load after user stops interacting for 1 second
   const scheduleTileUpdate = useCallback(() => {
@@ -1593,6 +1748,26 @@ const MicroscopeMapDisplay = ({
       }
     }
   }, [visibleLayers.scanResults, loadStitchedTiles, appendLog, isSimulatedMicroscope]);
+
+  // Function to refresh canvas view (can be used by timepoint operations)
+  const refreshCanvasView = useCallback(() => {
+    if (!isSimulatedMicroscope) {
+      // Clear active requests
+      activeTileRequestsRef.current.clear();
+      
+      // Clear all existing tiles to force reload of fresh data
+      setStitchedTiles([]);
+      
+      // Force immediate tile loading after clearing tiles
+      setTimeout(() => {
+        loadStitchedTiles();
+      }, 100); // Small delay to ensure state is updated
+      
+      if (appendLog) {
+        appendLog('Refreshing canvas view');
+      }
+    }
+  }, [loadStitchedTiles, appendLog, isSimulatedMicroscope]);
 
   // Function to clear canvas after confirmation
   const handleClearCanvas = useCallback(async () => {
@@ -1945,6 +2120,92 @@ const MicroscopeMapDisplay = ({
                           {channel}
                         </label>
                       ))}
+                      
+                      <div className="text-xs text-gray-300 font-semibold mb-1 mt-2 border-t border-gray-700 pt-2">Timepoints</div>
+                      
+                      {/* Timepoint selection */}
+                      <div className="flex items-center mb-2">
+                        <label className="text-white text-xs mr-2">Current:</label>
+                        <select
+                          value={selectedTimepoint}
+                          onChange={(e) => {
+                            const newTimepoint = parseInt(e.target.value);
+                            setSelectedTimepoint(newTimepoint);
+                            // Refresh canvas view to show the new timepoint
+                            refreshCanvasView();
+                          }}
+                          className="bg-gray-600 text-white text-xs px-2 py-1 rounded flex-1"
+                          disabled={!microscopeControlService}
+                        >
+                          {availableTimepoints.map(timepoint => (
+                            <option key={timepoint} value={timepoint}>
+                              T{timepoint}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      
+                      {/* Timepoint controls */}
+                      <div className="flex space-x-1 mb-2">
+                        <button
+                          onClick={async () => {
+                            const nextTimepoint = Math.max(...availableTimepoints, -1) + 1;
+                            const success = await createTimepoint(nextTimepoint);
+                            if (success) {
+                              setSelectedTimepoint(nextTimepoint);
+                              // Refresh canvas view to show the new timepoint
+                              refreshCanvasView();
+                            }
+                          }}
+                          className="px-2 py-1 text-xs bg-green-600 hover:bg-green-500 text-white rounded disabled:opacity-50"
+                          disabled={!microscopeControlService}
+                          title="Create new timepoint"
+                        >
+                          <i className="fas fa-plus"></i>
+                        </button>
+                        
+                        <button
+                          onClick={async () => {
+                            if (availableTimepoints.length <= 1) {
+                              showNotification('Cannot remove the last timepoint', 'error');
+                              return;
+                            }
+                            const success = await removeTimepoint(selectedTimepoint);
+                            if (success) {
+                              // Auto-select the first available timepoint
+                              const remainingTimepoints = availableTimepoints.filter(t => t !== selectedTimepoint);
+                              if (remainingTimepoints.length > 0) {
+                                setSelectedTimepoint(remainingTimepoints[0]);
+                                // Refresh canvas view to show the new timepoint
+                                refreshCanvasView();
+                              }
+                            }
+                          }}
+                          className="px-2 py-1 text-xs bg-red-600 hover:bg-red-500 text-white rounded disabled:opacity-50"
+                          disabled={!microscopeControlService || availableTimepoints.length <= 1}
+                          title="Remove current timepoint"
+                        >
+                          <i className="fas fa-trash"></i>
+                        </button>
+                        
+                        <button
+                          onClick={async () => {
+                            const success = await clearTimepoint(selectedTimepoint);
+                            if (success) {
+                              // Canvas view will be refreshed by the clearTimepoint function
+                            }
+                          }}
+                          className="px-2 py-1 text-xs bg-yellow-600 hover:bg-yellow-500 text-white rounded disabled:opacity-50"
+                          disabled={!microscopeControlService}
+                          title="Clear data from current timepoint"
+                        >
+                          <i className="fas fa-eraser"></i>
+                        </button>
+                      </div>
+                      
+                      <div className="text-xs text-gray-400 mb-1">
+                        {availableTimepoints.length} timepoint{availableTimepoints.length !== 1 ? 's' : ''} available
+                      </div>
                     </>
                   )}
                   </div>
@@ -2796,6 +3057,47 @@ const MicroscopeMapDisplay = ({
               </div>
             </div>
 
+            {/* Timepoint Selection */}
+            <div className="bg-gray-700 p-2 rounded">
+              <div className="text-purple-300 font-medium mb-2"><i className="fas fa-clock mr-1"></i>Timepoint Selection</div>
+              <div className="flex items-center space-x-2 mb-2">
+                <label className="flex items-center text-xs">
+                  <input
+                    type="radio"
+                    name="quickscan-timepoint"
+                    checked={!createNewTimepoint}
+                    onChange={() => setCreateNewTimepoint(false)}
+                    disabled={isQuickScanInProgress}
+                    className="mr-2"
+                  />
+                  Use existing
+                </label>
+                <select
+                  value={selectedScanTimepoint}
+                  onChange={(e) => setSelectedScanTimepoint(parseInt(e.target.value))}
+                  className="flex-1 px-2 py-1 bg-gray-600 border border-gray-600 rounded text-white text-xs"
+                  disabled={isQuickScanInProgress || createNewTimepoint}
+                >
+                  {availableTimepoints.map(timepoint => (
+                    <option key={timepoint} value={timepoint}>
+                      T{timepoint}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <label className="flex items-center text-xs">
+                <input
+                  type="radio"
+                  name="quickscan-timepoint"
+                  checked={createNewTimepoint}
+                  onChange={() => setCreateNewTimepoint(true)}
+                  disabled={isQuickScanInProgress}
+                  className="mr-2"
+                />
+                Create new timepoint (T{Math.max(...availableTimepoints, -1) + 1})
+              </label>
+            </div>
+
             {/* Motion & Acquisition Settings */}
             <div className="bg-gray-700 p-2 rounded">
               <div className="text-yellow-300 font-medium mb-2"><i className="fas fa-tachometer-alt mr-1"></i>Motion & Acquisition</div>
@@ -2910,6 +3212,16 @@ const MicroscopeMapDisplay = ({
                 if (setCurrentOperation) setCurrentOperation('quick_scanning'); // Disable sidebar during quick scanning
                 
                 try {
+                  // Determine timepoint to use
+                  let timepointToUse;
+                  if (createNewTimepoint) {
+                    timepointToUse = Math.max(...availableTimepoints, -1) + 1;
+                    if (appendLog) appendLog(`Creating new timepoint T${timepointToUse} for quick scan`);
+                  } else {
+                    timepointToUse = selectedScanTimepoint;
+                    if (appendLog) appendLog(`Using existing timepoint T${timepointToUse} for quick scan`);
+                  }
+                  
                   if (appendLog) appendLog(`Starting quick scan: ${quickScanParameters.wellplate_type}-well plate, ${quickScanParameters.n_stripes} stripes × ${quickScanParameters.stripe_width_mm}mm, scan velocity ${quickScanParameters.velocity_scan_mm_per_s}mm/s, ${quickScanParameters.fps_target}fps`);
                   
                   const result = await microscopeControlService.quick_scan_with_stitching({
@@ -2924,7 +3236,7 @@ const MicroscopeMapDisplay = ({
                     velocity_scan_mm_per_s: quickScanParameters.velocity_scan_mm_per_s,
                     do_contrast_autofocus: quickScanParameters.do_contrast_autofocus,
                     do_reflection_af: quickScanParameters.do_reflection_af
-                  });
+                  }, timepointToUse);
                   
                   if (result.success) {
                     if (showNotification) showNotification('Quick scan completed successfully', 'success');
@@ -2943,6 +3255,14 @@ const MicroscopeMapDisplay = ({
                     setShowQuickScanConfig(false);
                     // Enable scan results layer if not already
                     setVisibleLayers(prev => ({ ...prev, scanResults: true }));
+                    
+                    // Refresh available timepoints and select the new one if created
+                    await loadAvailableTimepoints();
+                    if (createNewTimepoint) {
+                      setSelectedTimepoint(timepointToUse);
+                      setSelectedScanTimepoint(timepointToUse);
+                      setCreateNewTimepoint(false);
+                    }
                     
                     // Refresh scan results display once after completion
                     setTimeout(() => {
@@ -3159,6 +3479,47 @@ const MicroscopeMapDisplay = ({
                   />
                 </div>
               </div>
+            </div>
+            
+            {/* Timepoint Selection */}
+            <div className="bg-gray-700 p-2 rounded">
+              <div className="text-purple-300 font-medium mb-2"><i className="fas fa-clock mr-1"></i>Timepoint Selection</div>
+              <div className="flex items-center space-x-2 mb-2">
+                <label className="flex items-center text-xs">
+                  <input
+                    type="radio"
+                    name="scan-timepoint"
+                    checked={!createNewTimepoint}
+                    onChange={() => setCreateNewTimepoint(false)}
+                    disabled={isScanInProgress}
+                    className="mr-2"
+                  />
+                  Use existing
+                </label>
+                <select
+                  value={selectedScanTimepoint}
+                  onChange={(e) => setSelectedScanTimepoint(parseInt(e.target.value))}
+                  className="flex-1 px-2 py-1 bg-gray-600 border border-gray-600 rounded text-white text-xs"
+                  disabled={isScanInProgress || createNewTimepoint}
+                >
+                  {availableTimepoints.map(timepoint => (
+                    <option key={timepoint} value={timepoint}>
+                      T{timepoint}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <label className="flex items-center text-xs">
+                <input
+                  type="radio"
+                  name="scan-timepoint"
+                  checked={createNewTimepoint}
+                  onChange={() => setCreateNewTimepoint(true)}
+                  disabled={isScanInProgress}
+                  className="mr-2"
+                />
+                Create new timepoint (T{Math.max(...availableTimepoints, -1) + 1})
+              </label>
             </div>
             
             <div>
@@ -3486,6 +3847,15 @@ const MicroscopeMapDisplay = ({
                   if (setCurrentOperation) setCurrentOperation('scanning'); // Disable sidebar during scanning
                   
                   try {
+                    // Determine timepoint to use
+                    let timepointToUse;
+                    if (createNewTimepoint) {
+                      timepointToUse = Math.max(...availableTimepoints, -1) + 1;
+                      if (appendLog) appendLog(`Creating new timepoint T${timepointToUse} for scan`);
+                    } else {
+                      timepointToUse = selectedScanTimepoint;
+                      if (appendLog) appendLog(`Using existing timepoint T${timepointToUse} for scan`);
+                    }
                     
                     if (appendLog) {
                       const channelNames = scanParameters.illumination_settings.map(s => s.channel).join(', ');
@@ -3503,7 +3873,8 @@ const MicroscopeMapDisplay = ({
                       scanParameters.illumination_settings,
                       scanParameters.do_contrast_autofocus,
                       scanParameters.do_reflection_af,
-                      'scan_' + Date.now()
+                      'scan_' + Date.now(),
+                      timepointToUse
                     );
                     
                     if (result.success) {
@@ -3520,6 +3891,14 @@ const MicroscopeMapDisplay = ({
                       setRectangleEnd(null);
                       // Enable scan results layer if not already
                       setVisibleLayers(prev => ({ ...prev, scanResults: true }));
+                      
+                      // Refresh available timepoints and select the new one if created
+                      await loadAvailableTimepoints();
+                      if (createNewTimepoint) {
+                        setSelectedTimepoint(timepointToUse);
+                        setSelectedScanTimepoint(timepointToUse);
+                        setCreateNewTimepoint(false);
+                      }
                       
                       // Refresh scan results display once after completion
                       setTimeout(() => {
