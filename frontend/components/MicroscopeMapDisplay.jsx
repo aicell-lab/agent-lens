@@ -464,7 +464,7 @@ const MicroscopeMapDisplay = ({
     
     try {
       // Check if the service has the clear_timepoint method
-      if (typeof microscopeControlService.clear_timepoint !== 'function') {
+      if (typeof microscopeControlService.clear_zarr_timepoint !== 'function') {
         console.warn('clear_timepoint method not available on service');
         if (showNotification) {
           showNotification('Clear timepoint not supported by this service', 'error');
@@ -3235,8 +3235,9 @@ const MicroscopeMapDisplay = ({
                     dy_mm: quickScanParameters.dy_mm,
                     velocity_scan_mm_per_s: quickScanParameters.velocity_scan_mm_per_s,
                     do_contrast_autofocus: quickScanParameters.do_contrast_autofocus,
-                    do_reflection_af: quickScanParameters.do_reflection_af
-                  }, timepointToUse);
+                    do_reflection_af: quickScanParameters.do_reflection_af,
+                    timepoint: timepointToUse
+                  });
                   
                   if (result.success) {
                     if (showNotification) showNotification('Quick scan completed successfully', 'success');
