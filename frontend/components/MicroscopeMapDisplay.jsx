@@ -504,6 +504,14 @@ const MicroscopeMapDisplay = ({
     }
   }, [isLayerDropdownOpen, microscopeControlService]);
 
+  // Keep selectedScanTimepoint in sync with selectedTimepoint
+  useEffect(() => {
+    // Only sync if selectedTimepoint is valid and different from selectedScanTimepoint
+    if (availableTimepoints.includes(selectedTimepoint) && selectedScanTimepoint !== selectedTimepoint) {
+      setSelectedScanTimepoint(selectedTimepoint);
+    }
+  }, [selectedTimepoint, availableTimepoints, selectedScanTimepoint]);
+
   // Calculate pixelsPerMm from microscope configuration
   const pixelsPerMm = useMemo(() => {
     if (!microscopeConfiguration?.optics?.calculated_pixel_size_mm || !microscopeConfiguration?.acquisition?.crop_width) {
@@ -2131,6 +2139,7 @@ const MicroscopeMapDisplay = ({
                           onChange={(e) => {
                             const newTimepoint = parseInt(e.target.value);
                             setSelectedTimepoint(newTimepoint);
+                            setSelectedScanTimepoint(newTimepoint); // Keep scan timepoint in sync
                             // Refresh canvas view to show the new timepoint
                             refreshCanvasView();
                           }}
@@ -2153,6 +2162,7 @@ const MicroscopeMapDisplay = ({
                             const success = await createTimepoint(nextTimepoint);
                             if (success) {
                               setSelectedTimepoint(nextTimepoint);
+                              setSelectedScanTimepoint(nextTimepoint); // Keep scan timepoint in sync
                               // Refresh canvas view to show the new timepoint
                               refreshCanvasView();
                             }
@@ -2176,6 +2186,7 @@ const MicroscopeMapDisplay = ({
                               const remainingTimepoints = availableTimepoints.filter(t => t !== selectedTimepoint);
                               if (remainingTimepoints.length > 0) {
                                 setSelectedTimepoint(remainingTimepoints[0]);
+                                setSelectedScanTimepoint(remainingTimepoints[0]); // Keep scan timepoint in sync
                                 // Refresh canvas view to show the new timepoint
                                 refreshCanvasView();
                               }
