@@ -319,6 +319,7 @@ async def register_service(args: dict) -> None:
     token = os.getenv("AGENT_LENS_WORKSPACE_TOKEN")
     server = await connect_to_server(
         {
+            "client_id": "sam-model-server",
             "server_url": args.server_url,
             "token": token,
             "workspace": "agent-lens",
