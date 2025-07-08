@@ -110,8 +110,11 @@ const MicroscopeMapDisplay = ({
     wellplate_type: '96',
     exposure_time: 4,
     intensity: 100,
-    velocity_mm_per_s: 10,
-    fps_target: 20
+    fps_target: 5,
+    n_stripes: 3,
+    stripe_width_mm: 4,
+    dy_mm: 0.85,
+    velocity_scan_mm_per_s: 3.0
   });
 
   // Layer dropdown state
@@ -286,17 +289,38 @@ const MicroscopeMapDisplay = ({
     showNotification
   );
 
-  const quickVelocityInput = useValidatedNumberInput(
-    quickScanParameters.velocity_mm_per_s,
-    (value) => setQuickScanParameters(prev => ({ ...prev, velocity_mm_per_s: value })),
-    { min: 1, max: 50, allowFloat: true },
-    showNotification
-  );
-
   const quickFpsInput = useValidatedNumberInput(
     quickScanParameters.fps_target,
     (value) => setQuickScanParameters(prev => ({ ...prev, fps_target: value })),
     { min: 1, max: 60, allowFloat: false },
+    showNotification
+  );
+
+  const quickStripesInput = useValidatedNumberInput(
+    quickScanParameters.n_stripes,
+    (value) => setQuickScanParameters(prev => ({ ...prev, n_stripes: value })),
+    { min: 1, max: 10, allowFloat: false },
+    showNotification
+  );
+
+  const quickStripeWidthInput = useValidatedNumberInput(
+    quickScanParameters.stripe_width_mm,
+    (value) => setQuickScanParameters(prev => ({ ...prev, stripe_width_mm: value })),
+    { min: 0.5, max: 10.0, allowFloat: true },
+    showNotification
+  );
+
+  const quickDyInput = useValidatedNumberInput(
+    quickScanParameters.dy_mm,
+    (value) => setQuickScanParameters(prev => ({ ...prev, dy_mm: value })),
+    { min: 0.1, max: 5.0, allowFloat: true },
+    showNotification
+  );
+
+  const quickVelocityInput = useValidatedNumberInput(
+    quickScanParameters.velocity_scan_mm_per_s,
+    (value) => setQuickScanParameters(prev => ({ ...prev, velocity_scan_mm_per_s: value })),
+    { min: 1, max: 30, allowFloat: true },
     showNotification
   );
   
@@ -2511,215 +2535,335 @@ const MicroscopeMapDisplay = ({
                 <option value="384">384-well plate</option>
               </select>
             </div>
-            
-            <div className="flex space-x-4">
-              <div className="flex-1 input-validation-container">
-                <label className="block text-gray-300 font-medium mb-1">Exposure (ms)</label>
+
+            {/* Stripe Pattern Configuration */}
+            <div className="bg-gray-700 p-2 rounded">
+              <div className="text-blue-300 font-medium mb-2"><i className="fas fa-grip-lines mr-1"></i>Stripe Pattern</div>
+              <div className="flex space-x-2 mb-2">
+                <div className="w-1/2 input-validation-container">
+                  <label className="block text-gray-300 font-medium mb-1">Stripes per Well</label>
+                  <input
+                    type="number"
+                    value={quickStripesInput.inputValue}
+                    onChange={quickStripesInput.handleInputChange}
+                    onKeyDown={quickStripesInput.handleKeyDown}
+                    onBlur={quickStripesInput.handleBlur}
+                    className={getInputValidationClasses(
+                      quickStripesInput.isValid,
+                      quickStripesInput.hasUnsavedChanges,
+                      "w-full px-2 py-1 bg-gray-600 border rounded text-white text-xs"
+                    )}
+                    min="1"
+                    max="10"
+                    disabled={isQuickScanInProgress}
+                    placeholder="1-10"
+                  />
+                </div>
+                <div className="w-1/2 input-validation-container">
+                  <label className="block text-gray-300 font-medium mb-1">Stripe Width (mm)</label>
+                  <input
+                    type="number"
+                    value={quickStripeWidthInput.inputValue}
+                    onChange={quickStripeWidthInput.handleInputChange}
+                    onKeyDown={quickStripeWidthInput.handleKeyDown}
+                    onBlur={quickStripeWidthInput.handleBlur}
+                    className={getInputValidationClasses(
+                      quickStripeWidthInput.isValid,
+                      quickStripeWidthInput.hasUnsavedChanges,
+                      "w-full px-2 py-1 bg-gray-600 border rounded text-white text-xs"
+                    )}
+                    min="0.5"
+                    max="10.0"
+                    step="0.1"
+                    disabled={isQuickScanInProgress}
+                    placeholder="0.5-10.0"
+                  />
+                </div>
+              </div>
+              <div className="input-validation-container">
+                <label className="block text-gray-300 font-medium mb-1">Y Increment (mm)</label>
                 <input
                   type="number"
-                  value={quickExposureInput.inputValue}
-                  onChange={quickExposureInput.handleInputChange}
-                  onKeyDown={quickExposureInput.handleKeyDown}
-                  onBlur={quickExposureInput.handleBlur}
+                  value={quickDyInput.inputValue}
+                  onChange={quickDyInput.handleInputChange}
+                  onKeyDown={quickDyInput.handleKeyDown}
+                  onBlur={quickDyInput.handleBlur}
                   className={getInputValidationClasses(
-                    quickExposureInput.isValid,
-                    quickExposureInput.hasUnsavedChanges,
-                    "w-full px-2 py-1 bg-gray-700 border rounded text-white"
+                    quickDyInput.isValid,
+                    quickDyInput.hasUnsavedChanges,
+                    "w-full px-2 py-1 bg-gray-600 border rounded text-white text-xs"
                   )}
-                  min="1"
-                  max="30"
+                  min="0.1"
+                  max="5.0"
                   step="0.1"
                   disabled={isQuickScanInProgress}
-                  placeholder="1-30ms"
-                />
-              </div>
-              <div className="flex-1 input-validation-container">
-                <label className="block text-gray-300 font-medium mb-1">Intensity (%)</label>
-                <input
-                  type="number"
-                  value={quickIntensityInput.inputValue}
-                  onChange={quickIntensityInput.handleInputChange}
-                  onKeyDown={quickIntensityInput.handleKeyDown}
-                  onBlur={quickIntensityInput.handleBlur}
-                  className={getInputValidationClasses(
-                    quickIntensityInput.isValid,
-                    quickIntensityInput.hasUnsavedChanges,
-                    "w-full px-2 py-1 bg-gray-700 border rounded text-white"
-                  )}
-                  min="1"
-                  max="100"
-                  disabled={isQuickScanInProgress}
-                  placeholder="1-100%"
+                  placeholder="0.1-5.0"
                 />
               </div>
             </div>
             
-            <div className="flex space-x-4">
-              <div className="flex-1 input-validation-container">
-                <label className="block text-gray-300 font-medium mb-1">Velocity (mm/s)</label>
-                <input
-                  type="number"
-                  value={quickVelocityInput.inputValue}
-                  onChange={quickVelocityInput.handleInputChange}
-                  onKeyDown={quickVelocityInput.handleKeyDown}
-                  onBlur={quickVelocityInput.handleBlur}
-                  className={getInputValidationClasses(
-                    quickVelocityInput.isValid,
-                    quickVelocityInput.hasUnsavedChanges,
-                    "w-full px-2 py-1 bg-gray-700 border rounded text-white"
-                  )}
-                  min="1"
-                  max="50"
-                  step="0.1"
-                  disabled={isQuickScanInProgress}
-                  placeholder="1-50 mm/s"
-                />
+            {/* Camera & Illumination Settings */}
+            <div className="bg-gray-700 p-2 rounded">
+              <div className="text-green-300 font-medium mb-2"><i className="fas fa-camera mr-1"></i>Camera & Light</div>
+              <div className="flex space-x-2 mb-2">
+                <div className="flex-1 input-validation-container">
+                  <label className="block text-gray-300 font-medium mb-1">Exposure (ms)</label>
+                  <input
+                    type="number"
+                    value={quickExposureInput.inputValue}
+                    onChange={quickExposureInput.handleInputChange}
+                    onKeyDown={quickExposureInput.handleKeyDown}
+                    onBlur={quickExposureInput.handleBlur}
+                    className={getInputValidationClasses(
+                      quickExposureInput.isValid,
+                      quickExposureInput.hasUnsavedChanges,
+                      "w-full px-2 py-1 bg-gray-600 border rounded text-white text-xs"
+                    )}
+                    min="1"
+                    max="30"
+                    step="0.1"
+                    disabled={isQuickScanInProgress}
+                    placeholder="1-30ms"
+                  />
+                </div>
+                <div className="flex-1 input-validation-container">
+                  <label className="block text-gray-300 font-medium mb-1">Intensity (%)</label>
+                  <input
+                    type="number"
+                    value={quickIntensityInput.inputValue}
+                    onChange={quickIntensityInput.handleInputChange}
+                    onKeyDown={quickIntensityInput.handleKeyDown}
+                    onBlur={quickIntensityInput.handleBlur}
+                    className={getInputValidationClasses(
+                      quickIntensityInput.isValid,
+                      quickIntensityInput.hasUnsavedChanges,
+                      "w-full px-2 py-1 bg-gray-600 border rounded text-white text-xs"
+                    )}
+                    min="0"
+                    max="100"
+                    disabled={isQuickScanInProgress}
+                    placeholder="0-100%"
+                  />
+                </div>
               </div>
-              <div className="flex-1 input-validation-container">
-                <label className="block text-gray-300 font-medium mb-1">Target FPS</label>
-                <input
-                  type="number"
-                  value={quickFpsInput.inputValue}
-                  onChange={quickFpsInput.handleInputChange}
-                  onKeyDown={quickFpsInput.handleKeyDown}
-                  onBlur={quickFpsInput.handleBlur}
-                  className={getInputValidationClasses(
-                    quickFpsInput.isValid,
-                    quickFpsInput.hasUnsavedChanges,
-                    "w-full px-2 py-1 bg-gray-700 border rounded text-white"
-                  )}
-                  min="1"
-                  max="60"
-                  disabled={isQuickScanInProgress}
-                  placeholder="1-60 fps"
-                />
+            </div>
+
+            {/* Motion & Acquisition Settings */}
+            <div className="bg-gray-700 p-2 rounded">
+              <div className="text-yellow-300 font-medium mb-2"><i className="fas fa-tachometer-alt mr-1"></i>Motion & Acquisition</div>
+              <div className="flex space-x-2">
+                <div className="flex-1 input-validation-container">
+                  <label className="block text-gray-300 font-medium mb-1">Scan Velocity (mm/s)</label>
+                  <input
+                    type="number"
+                    value={quickVelocityInput.inputValue}
+                    onChange={quickVelocityInput.handleInputChange}
+                    onKeyDown={quickVelocityInput.handleKeyDown}
+                    onBlur={quickVelocityInput.handleBlur}
+                    className={getInputValidationClasses(
+                      quickVelocityInput.isValid,
+                      quickVelocityInput.hasUnsavedChanges,
+                      "w-full px-2 py-1 bg-gray-600 border rounded text-white text-xs"
+                    )}
+                    min="1"
+                    max="30"
+                    step="0.1"
+                    disabled={isQuickScanInProgress}
+                    placeholder="1-30 mm/s"
+                  />
+                </div>
+                <div className="flex-1 input-validation-container">
+                  <label className="block text-gray-300 font-medium mb-1">Target FPS</label>
+                  <input
+                    type="number"
+                    value={quickFpsInput.inputValue}
+                    onChange={quickFpsInput.handleInputChange}
+                    onKeyDown={quickFpsInput.handleKeyDown}
+                    onBlur={quickFpsInput.handleBlur}
+                    className={getInputValidationClasses(
+                      quickFpsInput.isValid,
+                      quickFpsInput.hasUnsavedChanges,
+                      "w-full px-2 py-1 bg-gray-600 border rounded text-white text-xs"
+                    )}
+                    min="1"
+                    max="60"
+                    disabled={isQuickScanInProgress}
+                    placeholder="1-60 fps"
+                  />
+                </div>
               </div>
             </div>
             
             <div className="bg-gray-700 p-2 rounded text-xs">
               <div className="text-yellow-300 font-medium mb-1"><i className="fas fa-info-circle mr-1"></i>Quick Scan Info</div>
               <div>• Brightfield channel only</div>
-              <div>• High-speed continuous movement</div>
+              <div>• {quickScanParameters.n_stripes}-stripe × {quickScanParameters.stripe_width_mm}mm serpentine pattern per well</div>
               <div>• Maximum exposure: 30ms</div>
               <div>• Scans entire {quickScanParameters.wellplate_type}-well plate</div>
               <div>• Estimated scan time: {(() => {
                 const wellplateSizes = { '6': 6, '12': 12, '24': 24, '96': 96, '384': 384 };
                 const wells = wellplateSizes[quickScanParameters.wellplate_type] || 96;
-                const estimatedTimeSeconds = wells * 1; // Rough estimate: 1 seconds per well
-                return estimatedTimeSeconds < 60 ? `${estimatedTimeSeconds}s` : `${Math.round(estimatedTimeSeconds/60)}min`;
+                const stripesPerWell = quickScanParameters.n_stripes;
+                const timePerStripe = quickScanParameters.stripe_width_mm / quickScanParameters.velocity_scan_mm_per_s;
+                const estimatedTimeSeconds = wells * stripesPerWell * timePerStripe * 1.5; // 1.5x factor for movement overhead
+                return estimatedTimeSeconds < 60 ? `${Math.round(estimatedTimeSeconds)}s` : `${Math.round(estimatedTimeSeconds/60)}min`;
               })()}</div>
             </div>
           </div>
           
           <div className="flex justify-end space-x-2 mt-4">
-                          <button
+            <button
+              onClick={async () => {
+                if (!microscopeControlService) return;
+                
+                if (isQuickScanInProgress) {
+                  // Stop scan logic
+                  try {
+                    if (appendLog) appendLog('Stopping quick scan...');
+                    
+                    const result = await microscopeControlService.stop_scan_and_stitching();
+                    
+                    if (result.success) {
+                      if (showNotification) showNotification('Quick scan stop requested', 'success');
+                      if (appendLog) appendLog('Quick scan stop requested - scan will be interrupted');
+                      setIsQuickScanInProgress(false);
+                      if (setMicroscopeBusy) setMicroscopeBusy(false);
+                    } else {
+                      if (showNotification) showNotification(`Failed to stop quick scan: ${result.message}`, 'error');
+                      if (appendLog) appendLog(`Failed to stop quick scan: ${result.message}`);
+                    }
+                  } catch (error) {
+                    if (showNotification) showNotification(`Error stopping quick scan: ${error.message}`, 'error');
+                    if (appendLog) appendLog(`Error stopping quick scan: ${error.message}`);
+                  }
+                  return;
+                }
+                
+                // Check if WebRTC is active and stop it to prevent camera resource conflict
+                const wasWebRtcActive = isWebRtcActive;
+                if (wasWebRtcActive) {
+                  if (appendLog) appendLog('Stopping WebRTC stream to prevent camera resource conflict during scanning...');
+                  try {
+                    if (toggleWebRtcStream) {
+                      toggleWebRtcStream(); // This will stop the WebRTC stream
+                      // Wait a moment for the stream to fully stop
+                      await new Promise(resolve => setTimeout(resolve, 500));
+                    } else {
+                      if (appendLog) appendLog('Warning: toggleWebRtcStream function not available, proceeding with scan...');
+                    }
+                  } catch (webRtcError) {
+                    if (appendLog) appendLog(`Warning: Failed to stop WebRTC stream: ${webRtcError.message}. Proceeding with quick scan...`);
+                  }
+                }
+                
+                setIsQuickScanInProgress(true);
+                if (setMicroscopeBusy) setMicroscopeBusy(true); // Also set global busy state
+                
+                try {
+                  if (appendLog) appendLog(`Starting quick scan: ${quickScanParameters.wellplate_type}-well plate, ${quickScanParameters.n_stripes} stripes × ${quickScanParameters.stripe_width_mm}mm, scan velocity ${quickScanParameters.velocity_scan_mm_per_s}mm/s, ${quickScanParameters.fps_target}fps`);
+                  
+                  const result = await microscopeControlService.quick_scan_with_stitching(
+                    quickScanParameters.wellplate_type,
+                    quickScanParameters.exposure_time,
+                    quickScanParameters.intensity,
+                    quickScanParameters.fps_target,
+                    'quick_scan_' + Date.now(),
+                    quickScanParameters.n_stripes,
+                    quickScanParameters.stripe_width_mm,
+                    quickScanParameters.dy_mm,
+                    quickScanParameters.velocity_scan_mm_per_s
+                  );
+                  
+                  if (result.success) {
+                    if (showNotification) showNotification('Quick scan completed successfully', 'success');
+                    if (appendLog) {
+                      appendLog('Quick scan completed successfully');
+                      if (result.performance_metrics) {
+                        appendLog(`Scan time: ${result.performance_metrics.total_scan_time_seconds}s, frames acquired: ${result.performance_metrics.estimated_frames_acquired}`);
+                        if (result.scan_parameters) {
+                          appendLog(`Pattern: ${result.scan_parameters.stripes_per_well} stripes × ${result.scan_parameters.stripe_width_mm}mm per well, ${result.scan_parameters.wells_scanned} wells scanned`);
+                        }
+                      }
+                      if (wasWebRtcActive) {
+                        appendLog('Note: WebRTC stream was stopped for scanning. Click "Start Live" to resume video stream if needed.');
+                      }
+                    }
+                    setShowQuickScanConfig(false);
+                    // Enable scan results layer if not already
+                    setVisibleLayers(prev => ({ ...prev, scanResults: true }));
+                    
+                    // Refresh scan results display once after completion
+                    setTimeout(() => {
+                      refreshScanResults();
+                    }, 1000); // Wait 1 second then refresh
+                  } else {
+                    if (showNotification) showNotification(`Quick scan failed: ${result.message}`, 'error');
+                    if (appendLog) appendLog(`Quick scan failed: ${result.message}`);
+                  }
+                } catch (error) {
+                  if (showNotification) showNotification(`Quick scan error: ${error.message}`, 'error');
+                  if (appendLog) appendLog(`Quick scan error: ${error.message}`);
+                } finally {
+                  setIsQuickScanInProgress(false);
+                  if (setMicroscopeBusy) setMicroscopeBusy(false); // Clear global busy state
+                }
+              }}
+              className="px-3 py-1 text-xs bg-green-600 hover:bg-green-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+              disabled={!microscopeControlService || isQuickScanInProgress}
+            >
+              {isQuickScanInProgress ? (
+                <>
+                  <i className="fas fa-spinner fa-spin mr-1"></i>
+                  Quick Scanning...
+                </>
+              ) : (
+                <>
+                  <i className="fas fa-bolt mr-1"></i>
+                  Start Quick Scan
+                </>
+              )}
+            </button>
+            
+            {/* Stop button - only visible during scanning */}
+            {isQuickScanInProgress && (
+              <button
                 onClick={async () => {
                   if (!microscopeControlService) return;
                   
-                  if (isQuickScanInProgress) {
-                    // Stop scan logic
-                    try {
-                      if (appendLog) appendLog('Stopping quick scan...');
-                      
-                      const result = await microscopeControlService.stop_scan_and_stitching();
-                      
-                      if (result.success) {
-                        if (showNotification) showNotification('Quick scan stop requested', 'success');
-                        if (appendLog) appendLog('Quick scan stop requested - scan will be interrupted');
-                        setIsQuickScanInProgress(false);
-                        if (setMicroscopeBusy) setMicroscopeBusy(false);
-                      } else {
-                        if (showNotification) showNotification(`Failed to stop quick scan: ${result.message}`, 'error');
-                        if (appendLog) appendLog(`Failed to stop quick scan: ${result.message}`);
-                      }
-                    } catch (error) {
-                      if (showNotification) showNotification(`Error stopping quick scan: ${error.message}`, 'error');
-                      if (appendLog) appendLog(`Error stopping quick scan: ${error.message}`);
-                    }
-                    return;
-                  }
-                  
-                  // Start scan logic
-                  // Check if WebRTC is active and stop it to prevent camera resource conflict
-                  const wasWebRtcActive = isWebRtcActive;
-                  if (wasWebRtcActive) {
-                    if (appendLog) appendLog('Stopping WebRTC stream to prevent camera resource conflict during quick scanning...');
-                    try {
-                      if (toggleWebRtcStream) {
-                        toggleWebRtcStream(); // This will stop the WebRTC stream
-                        // Wait a moment for the stream to fully stop
-                        await new Promise(resolve => setTimeout(resolve, 500));
-                      } else {
-                        if (appendLog) appendLog('Warning: toggleWebRtcStream function not available, proceeding with quick scan...');
-                      }
-                    } catch (webRtcError) {
-                      if (appendLog) appendLog(`Warning: Failed to stop WebRTC stream: ${webRtcError.message}. Proceeding with quick scan...`);
-                    }
-                  }
-                  
-                  setIsQuickScanInProgress(true);
-                  if (setMicroscopeBusy) setMicroscopeBusy(true); // Also set global busy state
-                  
                   try {
-                    if (appendLog) appendLog(`Starting quick scan: ${quickScanParameters.wellplate_type}-well plate, ${quickScanParameters.velocity_mm_per_s}mm/s, ${quickScanParameters.fps_target}fps`);
+                    if (appendLog) appendLog('Attempting to stop quick scan...');
                     
-                    const result = await microscopeControlService.quick_scan_with_stitching(
-                      quickScanParameters.wellplate_type,
-                      quickScanParameters.exposure_time,
-                      quickScanParameters.intensity,
-                      quickScanParameters.velocity_mm_per_s,
-                      quickScanParameters.fps_target,
-                      'quick_scan_' + Date.now()
-                    );
-                    
-                    if (result.success) {
-                      if (showNotification) showNotification('Quick scan completed successfully', 'success');
-                      if (appendLog) {
-                        appendLog('Quick scan completed successfully');
-                        if (result.performance_metrics) {
-                          appendLog(`Scan time: ${result.performance_metrics.total_scan_time_seconds}s, frames acquired: ${result.performance_metrics.estimated_frames_acquired}`);
-                        }
-                        if (wasWebRtcActive) {
-                          appendLog('Note: WebRTC stream was stopped for scanning. Click "Start Live" to resume video stream if needed.');
-                        }
+                    // Try to stop the scan using the microscope control service
+                    if (microscopeControlService.stop_scan) {
+                      const result = await microscopeControlService.stop_scan_and_stitching();
+                      if (result.success) {
+                        if (showNotification) showNotification('Quick scan stopped successfully', 'warning');
+                        if (appendLog) appendLog('Quick scan stopped by user');
+                      } else {
+                        if (showNotification) showNotification(`Failed to stop scan: ${result.message}`, 'error');
+                        if (appendLog) appendLog(`Failed to stop scan: ${result.message}`);
                       }
-                      setShowQuickScanConfig(false);
-                      // Enable scan results layer if not already
-                      setVisibleLayers(prev => ({ ...prev, scanResults: true }));
-                      
-                      // Refresh scan results display once after completion
-                      setTimeout(() => {
-                        refreshScanResults();
-                      }, 1000); // Wait 1 second then refresh
+                    } else if (microscopeControlService.halt_stage) {
+                      // Fallback: halt stage movement
+                      await microscopeControlService.halt_stage();
+                      if (showNotification) showNotification('Stage movement halted', 'warning');
+                      if (appendLog) appendLog('Stage movement halted - quick scan interrupted');
                     } else {
-                      if (showNotification) showNotification(`Quick scan failed: ${result.message}`, 'error');
-                      if (appendLog) appendLog(`Quick scan failed: ${result.message}`);
+                      if (showNotification) showNotification('Stop scan function not available', 'warning');
+                      if (appendLog) appendLog('Warning: No stop scan method available on microscope service');
                     }
                   } catch (error) {
-                    if (showNotification) showNotification(`Quick scan error: ${error.message}`, 'error');
-                    if (appendLog) appendLog(`Quick scan error: ${error.message}`);
-                  } finally {
-                    setIsQuickScanInProgress(false);
-                    if (setMicroscopeBusy) setMicroscopeBusy(false); // Clear global busy state
+                    if (showNotification) showNotification(`Error stopping scan: ${error.message}`, 'error');
+                    if (appendLog) appendLog(`Error stopping quick scan: ${error.message}`);
                   }
                 }}
-                className={`px-3 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed flex items-center ${
-                  isQuickScanInProgress ? 'bg-red-600 hover:bg-red-500' : 'bg-green-600 hover:bg-green-500'
-                }`}
-                disabled={!microscopeControlService}
+                className="px-3 py-1 text-xs bg-red-600 hover:bg-red-500 text-white rounded flex items-center"
+                title="Stop quick scan"
               >
-                {isQuickScanInProgress ? (
-                  <>
-                    <i className="fas fa-stop mr-1"></i>
-                    Stop Quick Scan
-                  </>
-                ) : (
-                  <>
-                    <i className="fas fa-bolt mr-1"></i>
-                    Start Quick Scan
-                  </>
-                )}
+                <i className="fas fa-stop mr-1"></i>
+                Stop Scan
               </button>
+            )}
           </div>
         </div>
       )}
@@ -3252,6 +3396,47 @@ const MicroscopeMapDisplay = ({
                 </>
               )}
             </button>
+            
+            {/* Stop button - only visible during scanning */}
+            {isScanInProgress && (
+              <button
+                onClick={async () => {
+                  if (!microscopeControlService) return;
+                  
+                  try {
+                    if (appendLog) appendLog('Attempting to stop scan...');
+                    
+                    // Try to stop the scan using the microscope control service
+                    if (microscopeControlService.stop_scan) {
+                      const result = await microscopeControlService.stop_scan_and_stitching();
+                      if (result.success) {
+                        if (showNotification) showNotification('Scan stopped successfully', 'warning');
+                        if (appendLog) appendLog('Scan stopped by user');
+                      } else {
+                        if (showNotification) showNotification(`Failed to stop scan: ${result.message}`, 'error');
+                        if (appendLog) appendLog(`Failed to stop scan: ${result.message}`);
+                      }
+                    } else if (microscopeControlService.halt_stage) {
+                      // Fallback: halt stage movement
+                      await microscopeControlService.halt_stage();
+                      if (showNotification) showNotification('Stage movement halted', 'warning');
+                      if (appendLog) appendLog('Stage movement halted - scan interrupted');
+                    } else {
+                      if (showNotification) showNotification('Stop scan function not available', 'warning');
+                      if (appendLog) appendLog('Warning: No stop scan method available on microscope service');
+                    }
+                  } catch (error) {
+                    if (showNotification) showNotification(`Error stopping scan: ${error.message}`, 'error');
+                    if (appendLog) appendLog(`Error stopping scan: ${error.message}`);
+                  }
+                }}
+                className="px-3 py-1 text-xs bg-red-600 hover:bg-red-500 text-white rounded flex items-center"
+                title="Stop scan"
+              >
+                <i className="fas fa-stop mr-1"></i>
+                Stop Scan
+              </button>
+            )}
           </div>
         </div>
       )}

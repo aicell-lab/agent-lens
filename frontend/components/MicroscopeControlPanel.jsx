@@ -373,7 +373,7 @@ const MicroscopeControlPanel = ({
       initAndSyncValues();
 
       // Periodic fetch only updates actuals
-      const interval = setInterval(fetchStatusAndUpdateActuals, 1000);
+      const interval = setInterval(fetchStatusAndUpdateActuals, 300);
       return () => clearInterval(interval);
     }
   }, [microscopeControlService, illuminationChannel]); // Re-run if service or channel changes to re-sync
