@@ -1,6 +1,6 @@
 services:
   agent-lens:
-    image: ghcr.io/aicell-lab/agent-lens:sha-6d8e81b
+    image: ghcr.io/aicell-lab/agent-lens:sha-9924996
     container_name: agent-lens
     environment:
       - WORKSPACE_TOKEN=${AGENT_LENS_WORKSPACE_TOKEN}
@@ -19,6 +19,13 @@ services:
       retries: 1
       start_period: 120s
     restart: on-failure
+    stop_grace_period: 30s
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 20s
+        max_attempts: 3
+        window: 120s
     user: "1000:1000"
     security_opt:
       - no-new-privileges:true
@@ -26,7 +33,7 @@ services:
       - ALL
 
   squid-control:
-    image: ghcr.io/aicell-lab/squid-control:sha-e11a56b
+    image: ghcr.io/aicell-lab/squid-control:sha-9c5e475
     container_name: squid-control
     network_mode: "host"
     ports:
@@ -49,6 +56,13 @@ services:
       retries: 1
       start_period: 120s
     restart: on-failure
+    stop_grace_period: 30s
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 20s
+        max_attempts: 3
+        window: 120s
     user: "1000:1000"
     security_opt:
       - no-new-privileges:true

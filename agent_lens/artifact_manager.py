@@ -24,7 +24,7 @@ import time
 from asyncio import Lock
 import threading
 import json
-
+import uuid
 # Configure logging
 import logging
 import logging.handlers
@@ -409,7 +409,7 @@ class ZarrTileManager:
                     raise ValueError("Workspace token not provided and not found in .env")
             
             self.artifact_manager_server = await connect_to_server({
-                "name": "zarr-tile-client",
+                "client_id": f"zarr-tile-client-{uuid.uuid4()}",
                 "server_url": server_url,
                 "token": token,
             })
