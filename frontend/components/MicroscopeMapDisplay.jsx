@@ -126,8 +126,167 @@ const MicroscopeMapDisplay = ({
   const [isLayerDropdownOpen, setIsLayerDropdownOpen] = useState(false);
   const layerDropdownRef = useRef(null);
 
+  // Layer visibility management (moved early to avoid dependency issues)
+  const [visibleLayers, setVisibleLayers] = useState({
+    wellPlate: true,
+    scanResults: true,
+    channels: {
+      'BF LED matrix full': true,
+      'Fluorescence 405 nm Ex': false,
+      'Fluorescence 488 nm Ex': false,
+      'Fluorescence 561 nm Ex': false,
+      'Fluorescence 638 nm Ex': false,
+      'Fluorescence 730 nm Ex': false
+    }
+  });
+
+  // Tile-based canvas state (replacing single stitchedCanvasData)
+  const [stitchedTiles, setStitchedTiles] = useState([]); // Array of tile objects
+  const [isLoadingCanvas, setIsLoadingCanvas] = useState(false);
+  const canvasUpdateTimerRef = useRef(null);
+  const lastCanvasRequestRef = useRef({ x: 0, y: 0, width: 0, height: 0, scale: 0 });
+  const activeTileRequestsRef = useRef(new Set()); // Track active requests to prevent duplicates
+
+  // Function to refresh scan results (moved early to avoid dependency issues)
+  const refreshScanResults = useCallback(() => {
+    if (visibleLayers.scanResults && !isSimulatedMicroscope) {
+      // Clear active requests
+      activeTileRequestsRef.current.clear();
+      
+      // Clear all existing tiles to force reload of fresh data
+      setStitchedTiles([]);
+      
+      if (appendLog) {
+        appendLog('Refreshing scan results display - cleared cache');
+      }
+    }
+  }, [visibleLayers.scanResults, appendLog, isSimulatedMicroscope]);
+
+  // Fileset management state
+  const [filesets, setFilesets] = useState([]);
+  const [activeFileset, setActiveFileset] = useState(null);
+  const [isLoadingFilesets, setIsLoadingFilesets] = useState(false);
+  const [showCreateFilesetDialog, setShowCreateFilesetDialog] = useState(false);
+  const [showUploadDatasetDialog, setShowUploadDatasetDialog] = useState(false);
+  const [newFilesetName, setNewFilesetName] = useState('');
+  const [uploadDatasetName, setUploadDatasetName] = useState('');
+  const [uploadDatasetDescription, setUploadDatasetDescription] = useState('');
+  const [includeAcquisitionSettings, setIncludeAcquisitionSettings] = useState(true);
+
   // Clear canvas confirmation dialog state
   const [showClearCanvasConfirmation, setShowClearCanvasConfirmation] = useState(false);
+
+  // Fileset management functions
+  const loadFilesets = useCallback(async () => {
+    if (!microscopeControlService || isSimulatedMicroscope) return;
+    
+    setIsLoadingFilesets(true);
+    try {
+      const result = await microscopeControlService.list_zarr_filesets();
+      if (result.success !== false) {
+        setFilesets(result.filesets || []);
+        setActiveFileset(result.active_fileset || null);
+        if (appendLog) {
+          appendLog(`Loaded ${result.total_count} zarr filesets, active: ${result.active_fileset || 'none'}`);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load filesets:', error);
+      if (appendLog) appendLog(`Failed to load filesets: ${error.message}`);
+    } finally {
+      setIsLoadingFilesets(false);
+    }
+  }, [microscopeControlService, isSimulatedMicroscope, appendLog]);
+
+  const createFileset = useCallback(async (name) => {
+    if (!microscopeControlService || !name.trim()) return;
+    
+    try {
+      const result = await microscopeControlService.create_zarr_fileset(name.trim());
+      if (result.success !== false) {
+        if (showNotification) showNotification(`Created fileset: ${name}`, 'success');
+        if (appendLog) appendLog(`Created zarr fileset: ${name}`);
+        await loadFilesets(); // Refresh the list
+      } else {
+        if (showNotification) showNotification(`Failed to create fileset: ${result.message}`, 'error');
+        if (appendLog) appendLog(`Failed to create fileset: ${result.message}`);
+      }
+    } catch (error) {
+      if (showNotification) showNotification(`Error creating fileset: ${error.message}`, 'error');
+      if (appendLog) appendLog(`Error creating fileset: ${error.message}`);
+    }
+  }, [microscopeControlService, showNotification, appendLog]);
+
+  const setActiveFilesetHandler = useCallback(async (filesetName) => {
+    if (!microscopeControlService || !filesetName) return;
+    
+    try {
+      const result = await microscopeControlService.set_active_zarr_fileset(filesetName);
+      if (result.success !== false) {
+        if (showNotification) showNotification(`Activated fileset: ${filesetName}`, 'success');
+        if (appendLog) appendLog(`Set active zarr fileset: ${filesetName}`);
+        await loadFilesets(); // Refresh the list
+        // Refresh scan results if visible
+        if (visibleLayers.scanResults) {
+          setTimeout(() => {
+            refreshScanResults();
+          }, 500);
+        }
+      } else {
+        if (showNotification) showNotification(`Failed to activate fileset: ${result.message}`, 'error');
+        if (appendLog) appendLog(`Failed to activate fileset: ${result.message}`);
+      }
+    } catch (error) {
+      if (showNotification) showNotification(`Error activating fileset: ${error.message}`, 'error');
+      if (appendLog) appendLog(`Error activating fileset: ${error.message}`);
+    }
+  }, [microscopeControlService, showNotification, appendLog, visibleLayers.scanResults, refreshScanResults]);
+
+  const removeFileset = useCallback(async (filesetName) => {
+    if (!microscopeControlService || !filesetName) return;
+    
+    try {
+      const result = await microscopeControlService.remove_zarr_fileset(filesetName);
+      if (result.success !== false) {
+        if (showNotification) showNotification(`Removed fileset: ${filesetName}`, 'success');
+        if (appendLog) appendLog(`Removed zarr fileset: ${filesetName}`);
+        await loadFilesets(); // Refresh the list
+      } else {
+        if (showNotification) showNotification(`Failed to remove fileset: ${result.message}`, 'error');
+        if (appendLog) appendLog(`Failed to remove fileset: ${result.message}`);
+      }
+    } catch (error) {
+      if (showNotification) showNotification(`Error removing fileset: ${error.message}`, 'error');
+      if (appendLog) appendLog(`Error removing fileset: ${error.message}`);
+    }
+  }, [microscopeControlService, showNotification, appendLog]);
+
+  const uploadDataset = useCallback(async (datasetName, description, includeSettings) => {
+    if (!microscopeControlService || !datasetName.trim()) return;
+    
+    try {
+      const result = await microscopeControlService.upload_zarr_dataset(
+        datasetName.trim(),
+        description.trim(),
+        includeSettings
+      );
+      if (result.success) {
+        if (showNotification) showNotification(`Uploaded dataset: ${datasetName}`, 'success');
+        if (appendLog) {
+          appendLog(`Uploaded zarr dataset: ${datasetName}`);
+          if (result.export_info) {
+            appendLog(`Dataset size: ${result.export_info.estimated_zip_size_mb?.toFixed(1)} MB`);
+          }
+        }
+      } else {
+        if (showNotification) showNotification(`Failed to upload dataset: ${result.message}`, 'error');
+        if (appendLog) appendLog(`Failed to upload dataset: ${result.message}`);
+      }
+    } catch (error) {
+      if (showNotification) showNotification(`Error uploading dataset: ${error.message}`, 'error');
+      if (appendLog) appendLog(`Error uploading dataset: ${error.message}`);
+    }
+  }, [microscopeControlService, showNotification, appendLog]);
 
   // Calculate stage dimensions from configuration (moved early to avoid dependency issues)
   const stageDimensions = useMemo(() => {
@@ -329,29 +488,6 @@ const MicroscopeMapDisplay = ({
     showNotification
   );
   
-  // Layer visibility management
-  const [visibleLayers, setVisibleLayers] = useState({
-    wellPlate: true,
-    scanResults: true,
-    channels: {
-      'BF LED matrix full': true,
-      'Fluorescence 405 nm Ex': false,
-      'Fluorescence 488 nm Ex': false,
-      'Fluorescence 561 nm Ex': false,
-      'Fluorescence 638 nm Ex': false,
-      'Fluorescence 730 nm Ex': false
-    }
-  });
-
-  // Tile-based canvas state (replacing single stitchedCanvasData)
-  const [stitchedTiles, setStitchedTiles] = useState([]); // Array of tile objects
-  const [isLoadingCanvas, setIsLoadingCanvas] = useState(false);
-  const canvasUpdateTimerRef = useRef(null);
-  const lastCanvasRequestRef = useRef({ x: 0, y: 0, width: 0, height: 0, scale: 0 });
-  const activeTileRequestsRef = useRef(new Set()); // Track active requests to prevent duplicates
-  
-
-
   // Calculate pixelsPerMm from microscope configuration
   const pixelsPerMm = useMemo(() => {
     if (!microscopeConfiguration?.optics?.calculated_pixel_size_mm || !microscopeConfiguration?.acquisition?.crop_width) {
@@ -1534,6 +1670,7 @@ const MicroscopeMapDisplay = ({
         height_mm,
         scaleLevel,
         activeChannel,
+        0, // timepoint index
         'base64'
       );
       
@@ -1579,26 +1716,6 @@ const MicroscopeMapDisplay = ({
     canvasUpdateTimerRef.current = setTimeout(loadStitchedTiles, 1000); // Wait 1 second after user stops
   }, [loadStitchedTiles]);
   
-  // Function to refresh scan results
-  const refreshScanResults = useCallback(() => {
-    if (visibleLayers.scanResults && !isSimulatedMicroscope) {
-      // Clear active requests
-      activeTileRequestsRef.current.clear();
-      
-      // Clear all existing tiles to force reload of fresh data
-      setStitchedTiles([]);
-      
-      // Force immediate tile loading after clearing tiles
-      setTimeout(() => {
-        loadStitchedTiles();
-      }, 100); // Small delay to ensure state is updated
-      
-      if (appendLog) {
-        appendLog('Refreshing scan results display - cleared cache');
-      }
-    }
-  }, [visibleLayers.scanResults, loadStitchedTiles, appendLog, isSimulatedMicroscope]);
-
   // Function to refresh canvas view (can be used by timepoint operations)
   const refreshCanvasView = useCallback(() => {
     if (!isSimulatedMicroscope) {
@@ -1804,6 +1921,13 @@ const MicroscopeMapDisplay = ({
     }
   }, [isLayerDropdownOpen]);
 
+  // Load filesets when layer dropdown is opened
+  useEffect(() => {
+    if (isLayerDropdownOpen && !isSimulatedMicroscope) {
+      loadFilesets();
+    }
+  }, [isLayerDropdownOpen, isSimulatedMicroscope]);
+
   // Cleanup timeouts on unmount
   useEffect(() => {
     return () => {
@@ -1927,53 +2051,141 @@ const MicroscopeMapDisplay = ({
                 </button>
                 
                 {isLayerDropdownOpen && (
-                  <div className="absolute top-full right-0 mt-1 bg-gray-800 rounded shadow-lg p-2 min-w-[200px] z-20">
-                  <div className="text-xs text-gray-300 font-semibold mb-2">Map Layers</div>
-                  
-                  <label className="flex items-center text-white text-xs mb-1 hover:bg-gray-700 p-1 rounded cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={visibleLayers.wellPlate}
-                      onChange={(e) => setVisibleLayers(prev => ({ ...prev, wellPlate: e.target.checked }))}
-                      className="mr-2"
-                    />
-                    96-Well Plate Grid
-                  </label>
-                  
-                  <label className="flex items-center text-white text-xs mb-2 hover:bg-gray-700 p-1 rounded cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={visibleLayers.scanResults}
-                      onChange={(e) => setVisibleLayers(prev => ({ ...prev, scanResults: e.target.checked }))}
-                      className="mr-2"
-                    />
-                    Scan Results
-                  </label>
-                  
-                  {visibleLayers.scanResults && (
-                    <>
-                      <div className="text-xs text-gray-300 font-semibold mb-1 mt-2 border-t border-gray-700 pt-2">Channels</div>
-                      {Object.entries(visibleLayers.channels).map(([channel, isVisible]) => (
-                        <label key={channel} className="flex items-center text-white text-xs mb-1 hover:bg-gray-700 p-1 rounded cursor-pointer">
+                  <div className="absolute top-full right-0 mt-1 bg-gray-800 rounded shadow-lg p-4 min-w-[480px] z-20">
+                    {/* Map Layers Section */}
+                    <div className="mb-4">
+                      <div className="text-sm text-gray-300 font-semibold mb-2">Map Layers</div>
+                      <div className="flex flex-wrap gap-2">
+                        <label className="flex items-center text-white text-xs hover:bg-gray-700 p-2 rounded cursor-pointer">
                           <input
-                            type="radio"
-                            name="channel"
-                            checked={isVisible}
-                            onChange={() => setVisibleLayers(prev => ({
-                              ...prev,
-                              channels: Object.fromEntries(
-                                Object.keys(prev.channels).map(ch => [ch, ch === channel])
-                              )
-                            }))}
+                            type="checkbox"
+                            checked={visibleLayers.wellPlate}
+                            onChange={(e) => setVisibleLayers(prev => ({ ...prev, wellPlate: e.target.checked }))}
                             className="mr-2"
                           />
-                          {channel}
+                          96-Well Plate Grid
                         </label>
-                      ))}
-                      
+                        <label className="flex items-center text-white text-xs hover:bg-gray-700 p-2 rounded cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={visibleLayers.scanResults}
+                            onChange={(e) => setVisibleLayers(prev => ({ ...prev, scanResults: e.target.checked }))}
+                            className="mr-2"
+                          />
+                          Scan Results
+                        </label>
+                      </div>
+                    </div>
 
-                    </>
-                  )}
+                    {/* Main Content Area */}
+                    <div className="flex gap-4">
+                      {/* Fileset Selection (Left Side) */}
+                      <div className="flex-1">
+                        <div className="text-sm text-gray-300 font-semibold mb-2 flex items-center justify-between">
+                          <span>Zarr Filesets</span>
+                          {isLoadingFilesets && <i className="fas fa-spinner fa-spin text-xs"></i>}
+                        </div>
+                        
+                        {!isSimulatedMicroscope ? (
+                          <div className="space-y-2">
+                            {/* Fileset List */}
+                            <div className="bg-gray-700 rounded p-2 max-h-40 overflow-y-auto">
+                              {filesets.length > 0 ? (
+                                filesets.map((fileset) => (
+                                  <div
+                                    key={fileset.name}
+                                    className={`flex items-center justify-between p-2 rounded text-xs hover:bg-gray-600 cursor-pointer ${
+                                      fileset.is_active ? 'bg-blue-600 text-white' : 'text-gray-300'
+                                    }`}
+                                    onClick={() => !fileset.is_active && setActiveFilesetHandler(fileset.name)}
+                                  >
+                                    <div className="flex-1">
+                                      <div className="font-medium">{fileset.name}</div>
+                                      <div className="text-xs opacity-75">
+                                        {fileset.channels} channels • {fileset.timepoints} timepoints
+                                        {fileset.is_active && <span className="ml-1 text-green-300">• Active</span>}
+                                        {!fileset.loaded && <span className="ml-1 text-orange-300">• Not loaded</span>}
+                                      </div>
+                                    </div>
+                                    {!fileset.is_active && (
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          removeFileset(fileset.name);
+                                        }}
+                                        className="text-red-400 hover:text-red-300 ml-2"
+                                        title="Remove fileset"
+                                      >
+                                        <i className="fas fa-trash text-xs"></i>
+                                      </button>
+                                    )}
+                                  </div>
+                                ))
+                              ) : (
+                                <div className="text-xs text-gray-400 p-2 text-center">
+                                  {isLoadingFilesets ? 'Loading...' : 'No filesets available'}
+                                </div>
+                              )}
+                            </div>
+                            
+                            {/* Fileset Actions */}
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => setShowCreateFilesetDialog(true)}
+                                className="flex-1 px-2 py-1 text-xs bg-green-600 hover:bg-green-500 text-white rounded"
+                              >
+                                <i className="fas fa-plus mr-1"></i>
+                                Create
+                              </button>
+                              <button
+                                onClick={() => setShowUploadDatasetDialog(true)}
+                                className="flex-1 px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded"
+                              >
+                                <i className="fas fa-upload mr-1"></i>
+                                Upload
+                              </button>
+                              <button
+                                onClick={() => loadFilesets()}
+                                className="px-2 py-1 text-xs bg-gray-600 hover:bg-gray-500 text-white rounded"
+                              >
+                                <i className="fas fa-refresh mr-1"></i>
+                                Refresh
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-xs text-gray-400 p-2 text-center">
+                            Dataset management not available for simulated microscope
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Channel Selection (Right Side) */}
+                      {visibleLayers.scanResults && (
+                        <div className="flex-1">
+                          <div className="text-sm text-gray-300 font-semibold mb-2">Channels</div>
+                          <div className="bg-gray-700 rounded p-2 max-h-40 overflow-y-auto">
+                            {Object.entries(visibleLayers.channels).map(([channel, isVisible]) => (
+                              <label key={channel} className="flex items-center text-white text-xs mb-1 hover:bg-gray-600 p-1 rounded cursor-pointer">
+                                <input
+                                  type="radio"
+                                  name="channel"
+                                  checked={isVisible}
+                                  onChange={() => setVisibleLayers(prev => ({
+                                    ...prev,
+                                    channels: Object.fromEntries(
+                                      Object.keys(prev.channels).map(ch => [ch, ch === channel])
+                                    )
+                                  }))}
+                                  className="mr-2"
+                                />
+                                {channel}
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -2634,6 +2846,195 @@ const MicroscopeMapDisplay = ({
               >
                 <i className="fas fa-trash mr-1"></i>
                 Clear Canvas
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create Fileset Dialog */}
+      {showCreateFilesetDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-800 border border-gray-600 rounded-lg shadow-xl max-w-md w-full text-white">
+            <div className="flex justify-between items-center p-4 border-b border-gray-600">
+              <h3 className="text-lg font-semibold text-gray-200 flex items-center">
+                <i className="fas fa-plus text-green-400 mr-2"></i>
+                Create New Fileset
+              </h3>
+              <button
+                onClick={() => {
+                  setShowCreateFilesetDialog(false);
+                  setNewFilesetName('');
+                }}
+                className="text-gray-400 hover:text-white text-xl font-bold w-6 h-6 flex items-center justify-center"
+                title="Close"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="p-4">
+              <div className="mb-4">
+                <label className="block text-gray-300 font-medium mb-2">Fileset Name</label>
+                <input
+                  type="text"
+                  value={newFilesetName}
+                  onChange={(e) => setNewFilesetName(e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter fileset name"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && newFilesetName.trim()) {
+                      createFileset(newFilesetName);
+                      setShowCreateFilesetDialog(false);
+                      setNewFilesetName('');
+                    }
+                  }}
+                />
+              </div>
+              <div className="bg-blue-900 bg-opacity-30 border border-blue-500 rounded-lg p-3 mb-4">
+                <div className="flex items-start">
+                  <i className="fas fa-info-circle text-blue-400 mr-2 mt-0.5"></i>
+                  <div className="text-sm text-blue-200">
+                    <p className="font-medium mb-1">About Filesets:</p>
+                    <ul className="list-disc list-inside space-y-1">
+                      <li>Filesets store zarr-format microscopy data</li>
+                      <li>Each fileset can contain multiple channels and timepoints</li>
+                      <li>Only one fileset can be active at a time</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-3 p-4 border-t border-gray-600">
+              <button
+                onClick={() => {
+                  setShowCreateFilesetDialog(false);
+                  setNewFilesetName('');
+                }}
+                className="px-4 py-2 text-sm bg-gray-600 hover:bg-gray-500 text-white rounded focus:outline-none focus:ring-2 focus:ring-gray-500"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (newFilesetName.trim()) {
+                    createFileset(newFilesetName);
+                    setShowCreateFilesetDialog(false);
+                    setNewFilesetName('');
+                  }
+                }}
+                className="px-4 py-2 text-sm bg-green-600 hover:bg-green-500 text-white rounded focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50"
+                disabled={!newFilesetName.trim()}
+              >
+                <i className="fas fa-plus mr-1"></i>
+                Create Fileset
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Upload Dataset Dialog */}
+      {showUploadDatasetDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-800 border border-gray-600 rounded-lg shadow-xl max-w-md w-full text-white">
+            <div className="flex justify-between items-center p-4 border-b border-gray-600">
+              <h3 className="text-lg font-semibold text-gray-200 flex items-center">
+                <i className="fas fa-upload text-blue-400 mr-2"></i>
+                Upload Dataset
+              </h3>
+              <button
+                onClick={() => {
+                  setShowUploadDatasetDialog(false);
+                  setUploadDatasetName('');
+                  setUploadDatasetDescription('');
+                  setIncludeAcquisitionSettings(true);
+                }}
+                className="text-gray-400 hover:text-white text-xl font-bold w-6 h-6 flex items-center justify-center"
+                title="Close"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="p-4">
+              <div className="mb-4">
+                <label className="block text-gray-300 font-medium mb-2">Dataset Name</label>
+                <input
+                  type="text"
+                  value={uploadDatasetName}
+                  onChange={(e) => setUploadDatasetName(e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter dataset name"
+                />
+              </div>
+              
+              <div className="mb-4">
+                <label className="block text-gray-300 font-medium mb-2">Description (optional)</label>
+                <textarea
+                  value={uploadDatasetDescription}
+                  onChange={(e) => setUploadDatasetDescription(e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  rows="3"
+                  placeholder="Enter dataset description"
+                />
+              </div>
+              
+              <div className="mb-4">
+                <label className="flex items-center text-gray-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={includeAcquisitionSettings}
+                    onChange={(e) => setIncludeAcquisitionSettings(e.target.checked)}
+                    className="mr-2"
+                  />
+                  Include acquisition settings as metadata
+                </label>
+              </div>
+              
+              <div className="bg-yellow-900 bg-opacity-30 border border-yellow-500 rounded-lg p-3 mb-4">
+                <div className="flex items-start">
+                  <i className="fas fa-exclamation-triangle text-yellow-400 mr-2 mt-0.5"></i>
+                  <div className="text-sm text-yellow-200">
+                    <p className="font-medium mb-1">Upload Information:</p>
+                    <ul className="list-disc list-inside space-y-1">
+                      <li>Uploads current zarr canvas data</li>
+                      <li>Dataset will be stored in the artifact manager</li>
+                      <li>Large datasets may take time to upload</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-3 p-4 border-t border-gray-600">
+              <button
+                onClick={() => {
+                  setShowUploadDatasetDialog(false);
+                  setUploadDatasetName('');
+                  setUploadDatasetDescription('');
+                  setIncludeAcquisitionSettings(true);
+                }}
+                className="px-4 py-2 text-sm bg-gray-600 hover:bg-gray-500 text-white rounded focus:outline-none focus:ring-2 focus:ring-gray-500"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (uploadDatasetName.trim()) {
+                    uploadDataset(uploadDatasetName, uploadDatasetDescription, includeAcquisitionSettings);
+                    setShowUploadDatasetDialog(false);
+                    setUploadDatasetName('');
+                    setUploadDatasetDescription('');
+                    setIncludeAcquisitionSettings(true);
+                  }
+                }}
+                className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                disabled={!uploadDatasetName.trim()}
+              >
+                <i className="fas fa-upload mr-1"></i>
+                Upload Dataset
               </button>
             </div>
           </div>
@@ -3547,7 +3948,8 @@ const MicroscopeMapDisplay = ({
                       scanParameters.illumination_settings,
                       scanParameters.do_contrast_autofocus,
                       scanParameters.do_reflection_af,
-                      'scan_' + Date.now()
+                      'scan_' + Date.now(),
+                      0, // timepoint index
                     );
                     
                     if (result.success) {

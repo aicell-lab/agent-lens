@@ -197,6 +197,7 @@ docs/                    # Documentation and diagrams
 - **MANDATORY**: Use `useValidatedNumberInput` hook for all number input fields to prevent NaN crashes
 - Implement "Enter to confirm" behavior for better UX and data integrity
 - Use consistent validation styling with `input-validation-container` pattern
+- **AVOID HOISTING/DEPENDENCY ISSUES**: Always define all state variables and functions that are dependencies of `useCallback`, `useMemo`, or other hooks *before* the hooks that use them. This prevents runtime errors like 'Cannot access X before initialization'.
 
 ### 3.3. Performance Optimization
 - Use Zarr format for efficient large image data handling
