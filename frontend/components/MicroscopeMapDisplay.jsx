@@ -529,7 +529,8 @@ const MicroscopeMapDisplay = ({
   const handleMapPanning = (e) => {
     if (mapViewMode !== 'FREE_PAN' || isMapBrowsingDisabled) return;
     
-    if (isRectangleSelection) {
+    // During active scanning, disable rectangle selection to allow map browsing
+    if (isRectangleSelection && !isScanInProgress && !isQuickScanInProgress) {
       handleRectangleSelectionStart(e);
       return;
     }
@@ -541,7 +542,8 @@ const MicroscopeMapDisplay = ({
   };
 
   const handleMapPanMove = (e) => {
-    if (isRectangleSelection && rectangleStart) {
+    // During active scanning, disable rectangle selection to allow map browsing
+    if (isRectangleSelection && rectangleStart && !isScanInProgress && !isQuickScanInProgress) {
       handleRectangleSelectionMove(e);
       return;
     }
@@ -560,7 +562,8 @@ const MicroscopeMapDisplay = ({
   };
 
   const handleMapPanEnd = () => {
-    if (isRectangleSelection && rectangleStart) {
+    // During active scanning, disable rectangle selection to allow map browsing
+    if (isRectangleSelection && rectangleStart && !isScanInProgress && !isQuickScanInProgress) {
       handleRectangleSelectionEnd();
       return;
     }
@@ -2138,7 +2141,7 @@ const MicroscopeMapDisplay = ({
             ? 'cursor-not-allowed microscope-map-disabled' 
             : mapViewMode === 'FOV_FITTED' 
               ? (isHardwareInteractionDisabled ? 'cursor-not-allowed' : 'cursor-grab')
-              : isRectangleSelection
+              : (isRectangleSelection && !isScanInProgress && !isQuickScanInProgress)
                 ? (isHardwareInteractionDisabled ? 'cursor-not-allowed' : 'cursor-crosshair')
                 : 'cursor-move'
         } ${isDragging || isPanning ? 'cursor-grabbing' : ''}`}
@@ -2151,7 +2154,7 @@ const MicroscopeMapDisplay = ({
             userSelect: 'none',
             transition: isDragging || isPanning ? 'none' : 'transform 0.3s ease-out',
             opacity: isMapBrowsingDisabled ? 0.75 : 1,
-            cursor: isRectangleSelection && mapViewMode === 'FREE_PAN' && !isHardwareInteractionDisabled ? 'crosshair' : undefined
+            cursor: (isRectangleSelection && !isScanInProgress && !isQuickScanInProgress) && mapViewMode === 'FREE_PAN' && !isHardwareInteractionDisabled ? 'crosshair' : undefined
           }}
       >
         {/* Map canvas for FREE_PAN mode */}
@@ -2205,7 +2208,7 @@ const MicroscopeMapDisplay = ({
         {mapViewMode === 'FREE_PAN' && render96WellPlate()}
         
         {/* Rectangle selection active indicator */}
-        {mapViewMode === 'FREE_PAN' && isRectangleSelection && !rectangleStart && (
+        {mapViewMode === 'FREE_PAN' && isRectangleSelection && !rectangleStart && !isScanInProgress && !isQuickScanInProgress && (
           <div className="absolute top-16 left-1/2 transform -translate-x-1/2 bg-blue-600 bg-opacity-90 text-white px-4 py-2 rounded-lg border border-blue-400 animate-pulse" style={{ zIndex: 30 }}>
             <div className="flex items-center space-x-2">
               <i className="fas fa-vector-square text-lg"></i>
@@ -2218,7 +2221,7 @@ const MicroscopeMapDisplay = ({
         )}
 
         {/* Rectangle selection overlay */}
-        {mapViewMode === 'FREE_PAN' && isRectangleSelection && rectangleStart && rectangleEnd && (
+        {mapViewMode === 'FREE_PAN' && isRectangleSelection && rectangleStart && rectangleEnd && !isScanInProgress && !isQuickScanInProgress && (
           <>
             <div
               className="absolute border-2 border-blue-400 bg-blue-400 bg-opacity-20 pointer-events-none"
@@ -2935,6 +2938,11 @@ const MicroscopeMapDisplay = ({
                 if (setMicroscopeBusy) setMicroscopeBusy(true); // Also set global busy state
                 if (setCurrentOperation) setCurrentOperation('quick_scanning'); // Disable sidebar during quick scanning
                 
+                // Disable rectangle selection during scanning to allow map browsing
+                setIsRectangleSelection(false);
+                setRectangleStart(null);
+                setRectangleEnd(null);
+                
                 try {
 
                   
@@ -3514,6 +3522,11 @@ const MicroscopeMapDisplay = ({
                   setIsScanInProgress(true);
                   if (setMicroscopeBusy) setMicroscopeBusy(true); // Also set global busy state
                   if (setCurrentOperation) setCurrentOperation('scanning'); // Disable sidebar during scanning
+                  
+                  // Disable rectangle selection during scanning to allow map browsing
+                  setIsRectangleSelection(false);
+                  setRectangleStart(null);
+                  setRectangleEnd(null);
                   
                   try {
                     
