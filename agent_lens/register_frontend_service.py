@@ -21,6 +21,7 @@ import asyncio
 from fastapi.middleware.gzip import GZipMiddleware
 import hashlib
 import time
+import uuid
 from starlette.requests import ClientDisconnect  # Import at the top of the function or module
 from starlette.responses import Response as StarletteResponse # Import for 499 response
 
@@ -66,7 +67,7 @@ WORKSPACE_TOKEN = os.getenv("WORKSPACE_TOKEN")
 async def get_artifact_manager():
     """Get a new connection to the artifact manager."""
     api = await connect_to_server(
-        {"name": "test-client", "server_url": SERVER_URL, "token": WORKSPACE_TOKEN}
+        {"client_id": f"test-client-{uuid.uuid4()}", "server_url": SERVER_URL, "token": WORKSPACE_TOKEN}
     )
     artifact_manager = await api.get_service("public/artifact-manager")
     return api, artifact_manager

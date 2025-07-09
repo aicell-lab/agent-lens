@@ -11,6 +11,7 @@ import os
 import asyncio
 from dotenv import load_dotenv
 from hypha_rpc import connect_to_server
+import uuid
 from agent_lens import (
     register_frontend_service,
     # register_sam_service,
@@ -77,7 +78,8 @@ async def connect_server(args):
     token = get_token(is_workspace)
 
     server = await connect_to_server(
-        {
+        {   
+            "client_id": f"agent-lens-frontend-{uuid.uuid4()}",
             "server_url": args.server_url,
             "token": token,
             "method_timeout": 500,

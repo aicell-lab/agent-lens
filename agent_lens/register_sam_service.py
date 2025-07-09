@@ -13,6 +13,7 @@ from hypha_rpc import connect_to_server, login
 from kaibu_utils import mask_to_features
 from segment_anything import SamPredictor, sam_model_registry, SamAutomaticMaskGenerator
 import cv2
+import uuid
 import base64
 
 
@@ -319,6 +320,7 @@ async def register_service(args: dict) -> None:
     token = os.getenv("AGENT_LENS_WORKSPACE_TOKEN")
     server = await connect_to_server(
         {
+            "client_id": f"sam-model-server-{uuid.uuid4()}",
             "server_url": args.server_url,
             "token": token,
             "workspace": "agent-lens",

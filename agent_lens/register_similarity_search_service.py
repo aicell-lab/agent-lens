@@ -597,6 +597,7 @@ async def setup():
         return
         
     server = await connect_to_server({
+        "client_id": "image-text-similarity-search",
         "server_url": server_url, 
         "token": token, 
         "workspace": workspace_name
@@ -607,6 +608,7 @@ async def setup():
     local_workspace_name = os.getenv("REEF_LOCAL_WORKSPACE")
 
     local_server = await connect_to_server({
+        "client_id": "image-text-similarity-search",
         "server_url": local_server_url, 
         "token": local_token, 
         "workspace": local_workspace_name
