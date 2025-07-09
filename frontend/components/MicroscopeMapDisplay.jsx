@@ -1087,7 +1087,7 @@ const MicroscopeMapDisplay = ({
       // Trigger cleanup of old tiles after a delay to allow new ones to load
       const cleanupTimer = setTimeout(() => {
         cleanupOldTiles(scaleLevel, activeChannel);
-      }, 2000);
+      }, 1000);
       
       return () => clearTimeout(cleanupTimer);
     }
@@ -1956,6 +1956,23 @@ const MicroscopeMapDisplay = ({
       }
     };
   }, []);
+
+  // Effect to periodically refresh tiles during scan/quick scan in FREE_PAN mode
+  useEffect(() => {
+    let intervalId = null;
+    if (
+      mapViewMode === 'FREE_PAN' &&
+      (isScanInProgress || isQuickScanInProgress)
+    ) {
+      // Set needsTileReload every 3 seconds
+      intervalId = setInterval(() => {
+        setNeedsTileReload(true);
+      }, 3000);
+    }
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [mapViewMode, isScanInProgress, isQuickScanInProgress]);
 
   if (!isOpen) return null;
 
