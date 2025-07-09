@@ -143,6 +143,7 @@ const MicroscopeMapDisplay = ({
   // Tile-based canvas state (replacing single stitchedCanvasData)
   const [stitchedTiles, setStitchedTiles] = useState([]); // Array of tile objects
   const [isLoadingCanvas, setIsLoadingCanvas] = useState(false);
+  const [needsTileReload, setNeedsTileReload] = useState(false); // Flag to trigger tile loading after refresh
   const canvasUpdateTimerRef = useRef(null);
   const lastCanvasRequestRef = useRef({ x: 0, y: 0, width: 0, height: 0, scale: 0 });
   const activeTileRequestsRef = useRef(new Set()); // Track active requests to prevent duplicates
@@ -159,6 +160,9 @@ const MicroscopeMapDisplay = ({
       if (appendLog) {
         appendLog('Refreshing scan results display - cleared cache');
       }
+      
+      // Set a flag to trigger tile loading after tiles are cleared
+      setNeedsTileReload(true);
     }
   }, [visibleLayers.scanResults, appendLog, isSimulatedMicroscope]);
 
@@ -230,7 +234,7 @@ const MicroscopeMapDisplay = ({
         if (visibleLayers.scanResults) {
           setTimeout(() => {
             refreshScanResults();
-          }, 500);
+          }, 100);
         }
       } else {
         if (showNotification) showNotification(`Failed to activate fileset: ${result.message}`, 'error');
@@ -1904,6 +1908,19 @@ const MicroscopeMapDisplay = ({
       scheduleTileUpdate();
     }
   }, [isOpen, mapViewMode, visibleLayers.scanResults, scheduleTileUpdate]);
+
+  // Effect to trigger tile loading when needsTileReload is set
+  useEffect(() => {
+    if (needsTileReload && mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
+      // Reset the flag
+      setNeedsTileReload(false);
+      
+      // Trigger tile loading after a short delay to ensure tiles are cleared
+      setTimeout(() => {
+        scheduleTileUpdate();
+      }, 100);
+    }
+  }, [needsTileReload, mapViewMode, visibleLayers.scanResults, scheduleTileUpdate]);
 
   // Click outside handler for layer dropdown
   useEffect(() => {
