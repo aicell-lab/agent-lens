@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import PropTypes from 'prop-types';
-import { validateNumberInput, useValidatedNumberInput, getInputValidationClasses } from '../utils'; // Import validation utilities
+import { useValidatedNumberInput, getInputValidationClasses } from '../utils'; // Import validation utilities
 import './MicroscopeMapDisplay.css';
 
 const MicroscopeMapDisplay = ({
   isOpen,
-  onClose,
   microscopeConfiguration,
   isWebRtcActive,
   videoRef,
@@ -171,10 +170,7 @@ const MicroscopeMapDisplay = ({
   const [activeFileset, setActiveFileset] = useState(null);
   const [isLoadingFilesets, setIsLoadingFilesets] = useState(false);
   const [showCreateFilesetDialog, setShowCreateFilesetDialog] = useState(false);
-  const [showUploadDatasetDialog, setShowUploadDatasetDialog] = useState(false);
   const [newFilesetName, setNewFilesetName] = useState('');
-  const [uploadDatasetName, setUploadDatasetName] = useState('');
-  const [uploadDatasetDescription, setUploadDatasetDescription] = useState('');
   const [includeAcquisitionSettings, setIncludeAcquisitionSettings] = useState(true);
 
   // Clear canvas confirmation dialog state
@@ -265,19 +261,19 @@ const MicroscopeMapDisplay = ({
     }
   }, [microscopeControlService, showNotification, appendLog]);
 
-  const uploadDataset = useCallback(async (datasetName, description, includeSettings) => {
-    if (!microscopeControlService || !datasetName.trim()) return;
+  const uploadDataset = useCallback(async () => {
+    if (!microscopeControlService || !activeFileset) return;
     
     try {
       const result = await microscopeControlService.upload_zarr_dataset(
-        datasetName.trim(),
-        description.trim(),
-        includeSettings
+        activeFileset,
+        '', // No description
+        includeAcquisitionSettings
       );
       if (result.success) {
-        if (showNotification) showNotification(`Uploaded dataset: ${datasetName}`, 'success');
+        if (showNotification) showNotification(`Uploaded dataset: ${activeFileset}`, 'success');
         if (appendLog) {
-          appendLog(`Uploaded zarr dataset: ${datasetName}`);
+          appendLog(`Uploaded zarr dataset: ${activeFileset}`);
           if (result.export_info) {
             appendLog(`Dataset size: ${result.export_info.estimated_zip_size_mb?.toFixed(1)} MB`);
           }
@@ -290,7 +286,7 @@ const MicroscopeMapDisplay = ({
       if (showNotification) showNotification(`Error uploading dataset: ${error.message}`, 'error');
       if (appendLog) appendLog(`Error uploading dataset: ${error.message}`);
     }
-  }, [microscopeControlService, showNotification, appendLog]);
+  }, [microscopeControlService, activeFileset, includeAcquisitionSettings, showNotification, appendLog]);
 
   // Calculate stage dimensions from configuration (moved early to avoid dependency issues)
   const stageDimensions = useMemo(() => {
@@ -2163,28 +2159,43 @@ const MicroscopeMapDisplay = ({
                             </div>
                             
                             {/* Fileset Actions */}
-                            <div className="flex gap-2">
-                              <button
-                                onClick={() => setShowCreateFilesetDialog(true)}
-                                className="flex-1 px-2 py-1 text-xs bg-green-600 hover:bg-green-500 text-white rounded"
-                              >
-                                <i className="fas fa-plus mr-1"></i>
-                                Create
-                              </button>
-                              <button
-                                onClick={() => setShowUploadDatasetDialog(true)}
-                                className="flex-1 px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded"
-                              >
-                                <i className="fas fa-upload mr-1"></i>
-                                Upload
-                              </button>
-                              <button
-                                onClick={() => loadFilesets()}
-                                className="px-2 py-1 text-xs bg-gray-600 hover:bg-gray-500 text-white rounded"
-                              >
-                                <i className="fas fa-refresh mr-1"></i>
-                                Refresh
-                              </button>
+                            <div className="space-y-2">
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => setShowCreateFilesetDialog(true)}
+                                  className="flex-1 px-2 py-1 text-xs bg-green-600 hover:bg-green-500 text-white rounded"
+                                >
+                                  <i className="fas fa-plus mr-1"></i>
+                                  Create
+                                </button>
+                                <button
+                                  onClick={() => uploadDataset()}
+                                  className="flex-1 px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded disabled:opacity-50"
+                                  disabled={!activeFileset}
+                                  title={!activeFileset ? "Select an active fileset to upload" : "Upload active fileset data"}
+                                >
+                                  <i className="fas fa-upload mr-1"></i>
+                                  Upload
+                                </button>
+                                <button
+                                  onClick={() => loadFilesets()}
+                                  className="px-2 py-1 text-xs bg-gray-600 hover:bg-gray-500 text-white rounded"
+                                >
+                                  <i className="fas fa-refresh mr-1"></i>
+                                  Refresh
+                                </button>
+                              </div>
+                              <div className="flex items-center text-xs text-gray-300">
+                                <label className="flex items-center cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={includeAcquisitionSettings}
+                                    onChange={(e) => setIncludeAcquisitionSettings(e.target.checked)}
+                                    className="mr-1"
+                                  />
+                                  Include acquisition settings
+                                </label>
+                              </div>
                             </div>
                           </div>
                         ) : (
@@ -2969,111 +2980,7 @@ const MicroscopeMapDisplay = ({
         </div>
       )}
 
-      {/* Upload Dataset Dialog */}
-      {showUploadDatasetDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-gray-800 border border-gray-600 rounded-lg shadow-xl max-w-md w-full text-white">
-            <div className="flex justify-between items-center p-4 border-b border-gray-600">
-              <h3 className="text-lg font-semibold text-gray-200 flex items-center">
-                <i className="fas fa-upload text-blue-400 mr-2"></i>
-                Upload Dataset
-              </h3>
-              <button
-                onClick={() => {
-                  setShowUploadDatasetDialog(false);
-                  setUploadDatasetName('');
-                  setUploadDatasetDescription('');
-                  setIncludeAcquisitionSettings(true);
-                }}
-                className="text-gray-400 hover:text-white text-xl font-bold w-6 h-6 flex items-center justify-center"
-                title="Close"
-              >
-                ×
-              </button>
-            </div>
 
-            <div className="p-4">
-              <div className="mb-4">
-                <label className="block text-gray-300 font-medium mb-2">Dataset Name</label>
-                <input
-                  type="text"
-                  value={uploadDatasetName}
-                  onChange={(e) => setUploadDatasetName(e.target.value)}
-                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Enter dataset name"
-                />
-              </div>
-              
-              <div className="mb-4">
-                <label className="block text-gray-300 font-medium mb-2">Description (optional)</label>
-                <textarea
-                  value={uploadDatasetDescription}
-                  onChange={(e) => setUploadDatasetDescription(e.target.value)}
-                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  rows="3"
-                  placeholder="Enter dataset description"
-                />
-              </div>
-              
-              <div className="mb-4">
-                <label className="flex items-center text-gray-300 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={includeAcquisitionSettings}
-                    onChange={(e) => setIncludeAcquisitionSettings(e.target.checked)}
-                    className="mr-2"
-                  />
-                  Include acquisition settings as metadata
-                </label>
-              </div>
-              
-              <div className="bg-yellow-900 bg-opacity-30 border border-yellow-500 rounded-lg p-3 mb-4">
-                <div className="flex items-start">
-                  <i className="fas fa-exclamation-triangle text-yellow-400 mr-2 mt-0.5"></i>
-                  <div className="text-sm text-yellow-200">
-                    <p className="font-medium mb-1">Upload Information:</p>
-                    <ul className="list-disc list-inside space-y-1">
-                      <li>Uploads current zarr canvas data</li>
-                      <li>Dataset will be stored in the artifact manager</li>
-                      <li>Large datasets may take time to upload</li>
-                    </ul>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex justify-end space-x-3 p-4 border-t border-gray-600">
-              <button
-                onClick={() => {
-                  setShowUploadDatasetDialog(false);
-                  setUploadDatasetName('');
-                  setUploadDatasetDescription('');
-                  setIncludeAcquisitionSettings(true);
-                }}
-                className="px-4 py-2 text-sm bg-gray-600 hover:bg-gray-500 text-white rounded focus:outline-none focus:ring-2 focus:ring-gray-500"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  if (uploadDatasetName.trim()) {
-                    uploadDataset(uploadDatasetName, uploadDatasetDescription, includeAcquisitionSettings);
-                    setShowUploadDatasetDialog(false);
-                    setUploadDatasetName('');
-                    setUploadDatasetDescription('');
-                    setIncludeAcquisitionSettings(true);
-                  }
-                }}
-                className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
-                disabled={!uploadDatasetName.trim()}
-              >
-                <i className="fas fa-upload mr-1"></i>
-                Upload Dataset
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Quick Scan Configuration Side Panel */}
       {showQuickScanConfig && (
@@ -4046,7 +3953,6 @@ const MicroscopeMapDisplay = ({
 
 MicroscopeMapDisplay.propTypes = {
   isOpen: PropTypes.bool.isRequired,
-  onClose: PropTypes.func.isRequired,
   microscopeConfiguration: PropTypes.object,
   isWebRtcActive: PropTypes.bool,
   videoRef: PropTypes.object,
