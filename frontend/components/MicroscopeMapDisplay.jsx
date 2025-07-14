@@ -52,7 +52,6 @@ const MicroscopeMapDisplay = ({
   const mapContainerRef = useRef(null);
   const canvasRef = useRef(null);
   const mapVideoRef = useRef(null);
-  const dragImageDisplayRef = useRef(null);
   
   // Check if using simulated microscope - disable scanning features
   const isSimulatedMicroscope = selectedMicroscopeId === 'agent-lens/squid-control-reef';
@@ -165,67 +164,72 @@ const MicroscopeMapDisplay = ({
     }
   }, [visibleLayers.scanResults, appendLog, isSimulatedMicroscope]);
 
-  // Fileset management state
-  const [filesets, setFilesets] = useState([]);
-  const [activeFileset, setActiveFileset] = useState(null);
-  const [isLoadingFilesets, setIsLoadingFilesets] = useState(false);
-  const [showCreateFilesetDialog, setShowCreateFilesetDialog] = useState(false);
-  const [newFilesetName, setNewFilesetName] = useState('');
-  const [includeAcquisitionSettings, setIncludeAcquisitionSettings] = useState(true);
-
   // Clear canvas confirmation dialog state
   const [showClearCanvasConfirmation, setShowClearCanvasConfirmation] = useState(false);
 
-  // Fileset management functions
-  const loadFilesets = useCallback(async () => {
+  // Experiment management state (replacing fileset management)
+  const [experiments, setExperiments] = useState([]);
+  const [activeExperiment, setActiveExperiment] = useState(null);
+  const [isLoadingExperiments, setIsLoadingExperiments] = useState(false);
+  const [showCreateExperimentDialog, setShowCreateExperimentDialog] = useState(false);
+  const [newExperimentName, setNewExperimentName] = useState('');
+  const [experimentInfo, setExperimentInfo] = useState(null);
+
+  // Well selection state for scanning
+  const [selectedWells, setSelectedWells] = useState(['A1']); // Default to A1
+  const [wellPlateType, setWellPlateType] = useState('96'); // Default to 96-well
+  const [wellPaddingMm, setWellPaddingMm] = useState(2.0); // Default padding
+
+  // Experiment management functions (replacing fileset functions)
+  const loadExperiments = useCallback(async () => {
     if (!microscopeControlService || isSimulatedMicroscope) return;
     
-    setIsLoadingFilesets(true);
+    setIsLoadingExperiments(true);
     try {
-      const result = await microscopeControlService.list_zarr_filesets();
+      const result = await microscopeControlService.list_experiments();
       if (result.success !== false) {
-        setFilesets(result.filesets || []);
-        setActiveFileset(result.active_fileset || null);
+        setExperiments(result.experiments || []);
+        setActiveExperiment(result.active_experiment || null);
         if (appendLog) {
-          appendLog(`Loaded ${result.total_count} zarr filesets, active: ${result.active_fileset || 'none'}`);
+          appendLog(`Loaded ${result.total_count} experiments, active: ${result.active_experiment || 'none'}`);
         }
       }
     } catch (error) {
-      console.error('Failed to load filesets:', error);
-      if (appendLog) appendLog(`Failed to load filesets: ${error.message}`);
+      console.error('Failed to load experiments:', error);
+      if (appendLog) appendLog(`Failed to load experiments: ${error.message}`);
     } finally {
-      setIsLoadingFilesets(false);
+      setIsLoadingExperiments(false);
     }
   }, [microscopeControlService, isSimulatedMicroscope, appendLog]);
 
-  const createFileset = useCallback(async (name) => {
+  const createExperiment = useCallback(async (name) => {
     if (!microscopeControlService || !name.trim()) return;
     
     try {
-      const result = await microscopeControlService.create_zarr_fileset(name.trim());
+      const result = await microscopeControlService.create_experiment(name.trim());
       if (result.success !== false) {
-        if (showNotification) showNotification(`Created fileset: ${name}`, 'success');
-        if (appendLog) appendLog(`Created zarr fileset: ${name}`);
-        await loadFilesets(); // Refresh the list
+        if (showNotification) showNotification(`Created experiment: ${name}`, 'success');
+        if (appendLog) appendLog(`Created experiment: ${name}`);
+        await loadExperiments(); // Refresh the list
       } else {
-        if (showNotification) showNotification(`Failed to create fileset: ${result.message}`, 'error');
-        if (appendLog) appendLog(`Failed to create fileset: ${result.message}`);
+        if (showNotification) showNotification(`Failed to create experiment: ${result.message}`, 'error');
+        if (appendLog) appendLog(`Failed to create experiment: ${result.message}`);
       }
     } catch (error) {
-      if (showNotification) showNotification(`Error creating fileset: ${error.message}`, 'error');
-      if (appendLog) appendLog(`Error creating fileset: ${error.message}`);
+      if (showNotification) showNotification(`Error creating experiment: ${error.message}`, 'error');
+      if (appendLog) appendLog(`Error creating experiment: ${error.message}`);
     }
-  }, [microscopeControlService, showNotification, appendLog]);
+  }, [microscopeControlService, showNotification, appendLog, loadExperiments]);
 
-  const setActiveFilesetHandler = useCallback(async (filesetName) => {
-    if (!microscopeControlService || !filesetName) return;
+  const setActiveExperimentHandler = useCallback(async (experimentName) => {
+    if (!microscopeControlService || !experimentName) return;
     
     try {
-      const result = await microscopeControlService.set_active_zarr_fileset(filesetName);
+      const result = await microscopeControlService.set_active_experiment(experimentName);
       if (result.success !== false) {
-        if (showNotification) showNotification(`Activated fileset: ${filesetName}`, 'success');
-        if (appendLog) appendLog(`Set active zarr fileset: ${filesetName}`);
-        await loadFilesets(); // Refresh the list
+        if (showNotification) showNotification(`Activated experiment: ${experimentName}`, 'success');
+        if (appendLog) appendLog(`Set active experiment: ${experimentName}`);
+        await loadExperiments(); // Refresh the list
         // Refresh scan results if visible
         if (visibleLayers.scanResults) {
           setTimeout(() => {
@@ -233,60 +237,76 @@ const MicroscopeMapDisplay = ({
           }, 100);
         }
       } else {
-        if (showNotification) showNotification(`Failed to activate fileset: ${result.message}`, 'error');
-        if (appendLog) appendLog(`Failed to activate fileset: ${result.message}`);
+        if (showNotification) showNotification(`Failed to activate experiment: ${result.message}`, 'error');
+        if (appendLog) appendLog(`Failed to activate experiment: ${result.message}`);
       }
     } catch (error) {
-      if (showNotification) showNotification(`Error activating fileset: ${error.message}`, 'error');
-      if (appendLog) appendLog(`Error activating fileset: ${error.message}`);
+      if (showNotification) showNotification(`Error activating experiment: ${error.message}`, 'error');
+      if (appendLog) appendLog(`Error activating experiment: ${error.message}`);
     }
-  }, [microscopeControlService, showNotification, appendLog, visibleLayers.scanResults, refreshScanResults]);
+  }, [microscopeControlService, showNotification, appendLog, loadExperiments, visibleLayers.scanResults, refreshScanResults]);
 
-  const removeFileset = useCallback(async (filesetName) => {
-    if (!microscopeControlService || !filesetName) return;
+  const removeExperiment = useCallback(async (experimentName) => {
+    if (!microscopeControlService || !experimentName) return;
     
     try {
-      const result = await microscopeControlService.remove_zarr_fileset(filesetName);
+      const result = await microscopeControlService.remove_experiment(experimentName);
       if (result.success !== false) {
-        if (showNotification) showNotification(`Removed fileset: ${filesetName}`, 'success');
-        if (appendLog) appendLog(`Removed zarr fileset: ${filesetName}`);
-        await loadFilesets(); // Refresh the list
+        if (showNotification) showNotification(`Removed experiment: ${experimentName}`, 'success');
+        if (appendLog) appendLog(`Removed experiment: ${experimentName}`);
+        await loadExperiments(); // Refresh the list
       } else {
-        if (showNotification) showNotification(`Failed to remove fileset: ${result.message}`, 'error');
-        if (appendLog) appendLog(`Failed to remove fileset: ${result.message}`);
+        if (showNotification) showNotification(`Failed to remove experiment: ${result.message}`, 'error');
+        if (appendLog) appendLog(`Failed to remove experiment: ${result.message}`);
       }
     } catch (error) {
-      if (showNotification) showNotification(`Error removing fileset: ${error.message}`, 'error');
-      if (appendLog) appendLog(`Error removing fileset: ${error.message}`);
+      if (showNotification) showNotification(`Error removing experiment: ${error.message}`, 'error');
+      if (appendLog) appendLog(`Error removing experiment: ${error.message}`);
     }
-  }, [microscopeControlService, showNotification, appendLog]);
+  }, [microscopeControlService, showNotification, appendLog, loadExperiments]);
 
-  const uploadDataset = useCallback(async () => {
-    if (!microscopeControlService || !activeFileset) return;
+  const resetExperiment = useCallback(async (experimentName) => {
+    if (!microscopeControlService || !experimentName) return;
     
     try {
-      const result = await microscopeControlService.upload_zarr_dataset(
-        activeFileset,
-        '', // No description
-        includeAcquisitionSettings
-      );
-      if (result.success) {
-        if (showNotification) showNotification(`Uploaded dataset: ${activeFileset}`, 'success');
-        if (appendLog) {
-          appendLog(`Uploaded zarr dataset: ${activeFileset}`);
-          if (result.export_info) {
-            appendLog(`Dataset size: ${result.export_info.estimated_zip_size_mb?.toFixed(1)} MB`);
-          }
+      const result = await microscopeControlService.reset_experiment(experimentName);
+      if (result.success !== false) {
+        if (showNotification) showNotification(`Reset experiment: ${experimentName}`, 'success');
+        if (appendLog) appendLog(`Reset experiment: ${experimentName}`);
+        await loadExperiments(); // Refresh the list
+        // Refresh scan results if visible
+        if (visibleLayers.scanResults) {
+          setTimeout(() => {
+            refreshScanResults();
+          }, 100);
         }
       } else {
-        if (showNotification) showNotification(`Failed to upload dataset: ${result.message}`, 'error');
-        if (appendLog) appendLog(`Failed to upload dataset: ${result.message}`);
+        if (showNotification) showNotification(`Failed to reset experiment: ${result.message}`, 'error');
+        if (appendLog) appendLog(`Failed to reset experiment: ${result.message}`);
       }
     } catch (error) {
-      if (showNotification) showNotification(`Error uploading dataset: ${error.message}`, 'error');
-      if (appendLog) appendLog(`Error uploading dataset: ${error.message}`);
+      if (showNotification) showNotification(`Error resetting experiment: ${error.message}`, 'error');
+      if (appendLog) appendLog(`Error resetting experiment: ${error.message}`);
     }
-  }, [microscopeControlService, activeFileset, includeAcquisitionSettings, showNotification, appendLog]);
+  }, [microscopeControlService, showNotification, appendLog, loadExperiments, visibleLayers.scanResults, refreshScanResults]);
+
+  const getExperimentInfo = useCallback(async (experimentName) => {
+    if (!microscopeControlService || !experimentName) return;
+    
+    try {
+      const result = await microscopeControlService.get_experiment_info(experimentName);
+      if (result.success !== false) {
+        setExperimentInfo(result);
+        if (appendLog) appendLog(`Loaded experiment info for: ${experimentName}`);
+      } else {
+        if (showNotification) showNotification(`Failed to get experiment info: ${result.message}`, 'error');
+        if (appendLog) appendLog(`Failed to get experiment info: ${result.message}`);
+      }
+    } catch (error) {
+      if (showNotification) showNotification(`Error getting experiment info: ${error.message}`, 'error');
+      if (appendLog) appendLog(`Error getting experiment info: ${error.message}`);
+    }
+  }, [microscopeControlService, showNotification, appendLog]);
 
   // Calculate stage dimensions from configuration (moved early to avoid dependency issues)
   const stageDimensions = useMemo(() => {
@@ -998,7 +1018,7 @@ const MicroscopeMapDisplay = ({
     if (!visibleLayers.scanResults) return [];
     
     const activeChannel = Object.entries(visibleLayers.channels)
-      .find(([_, isVisible]) => isVisible)?.[0] || 'BF LED matrix full';
+      .find(([, isVisible]) => isVisible)?.[0] || 'BF LED matrix full';
     
     // Get tiles for current scale and channel
     const currentScaleTiles = stitchedTiles.filter(tile => 
@@ -1211,24 +1231,58 @@ const MicroscopeMapDisplay = ({
     ctx.restore();
   }, [isOpen, stageDimensions, mapScale, effectivePan, visibleLayers.wellPlate, containerSize]);
 
-  // Render 96-well plate overlay
+  // Helper function to get well plate configuration
+  const getWellPlateConfig = useCallback(() => {
+    if (!microscopeConfiguration?.wellplate?.formats) return null;
+    
+    const formatKey = wellPlateType === '96' ? '96_well' : 
+                     wellPlateType === '48' ? '48_well' : 
+                     wellPlateType === '24' ? '24_well' : '96_well';
+    
+    return microscopeConfiguration.wellplate.formats[formatKey];
+  }, [microscopeConfiguration, wellPlateType]);
+
+  // Helper function to get well plate layout
+  const getWellPlateLayout = useCallback(() => {
+    const layouts = {
+      '96': { rows: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'], cols: Array.from({ length: 12 }, (_, i) => i + 1) },
+      '48': { rows: ['A', 'B', 'C', 'D', 'E', 'F'], cols: Array.from({ length: 8 }, (_, i) => i + 1) },
+      '24': { rows: ['A', 'B', 'C', 'D'], cols: Array.from({ length: 6 }, (_, i) => i + 1) }
+    };
+    return layouts[wellPlateType] || layouts['96'];
+  }, [wellPlateType]);
+
+  // Handle well click for selection
+  const handleWellClick = useCallback((wellId) => {
+    if (isSimulatedMicroscope) return;
+    
+    setSelectedWells(prev => {
+      if (prev.includes(wellId)) {
+        // Remove well if already selected
+        return prev.filter(w => w !== wellId);
+      } else {
+        // Add well to selection
+        return [...prev, wellId];
+      }
+    });
+  }, [isSimulatedMicroscope]);
+
+  // Render well plate overlay with interactive wells
   const render96WellPlate = () => {
     if (!visibleLayers.wellPlate || !microscopeConfiguration) {
       return null;
     }
     
-    // Use the correct configuration path from wellplate.formats
-    const wellConfig = microscopeConfiguration?.wellplate?.formats?.['96_well'];
-    
+    const wellConfig = getWellPlateConfig();
     if (!wellConfig) {
       return null;
     }
     
     const { well_size_mm, well_spacing_mm, a1_x_mm, a1_y_mm } = wellConfig;
+    const layout = getWellPlateLayout();
     
-    // Calculate 96-well plate border dimensions
-    const rows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
-    const cols = Array.from({ length: 12 }, (_, i) => i + 1);
+    // Calculate well plate border dimensions
+    const { rows, cols } = layout;
     
     // Calculate plate boundary in stage coordinates
     const plateMargin = well_size_mm / 2 + 3; // Add 3mm margin around wells for better visual spacing
@@ -1254,6 +1308,10 @@ const MicroscopeMapDisplay = ({
     
     rows.forEach((row, rowIndex) => {
       cols.forEach((col, colIndex) => {
+        const wellId = `${row}${col}`;
+        const isSelected = selectedWells.includes(wellId);
+        const hasData = experimentInfo?.wells && experimentInfo.wells.includes(wellId);
+        
         // a1_x_mm and a1_y_mm already include offsets, don't add them again
         const centerX = a1_x_mm + colIndex * well_spacing_mm;
         const centerY = a1_y_mm + rowIndex * well_spacing_mm;
@@ -1264,14 +1322,16 @@ const MicroscopeMapDisplay = ({
         const displayRadius = (well_size_mm / 2) * pixelsPerMm * mapScale;
         
         wells.push(
-          <g key={`${row}${col}`}>
+          <g key={wellId}>
             <circle
               cx={displayX}
               cy={displayY}
               r={displayRadius}
               fill="none"
               stroke="rgba(255, 255, 255, 0.6)"
-              strokeWidth="1"
+              strokeWidth={isSelected ? "2" : "1"}
+              style={{ cursor: isSimulatedMicroscope ? 'default' : 'pointer' }}
+              onClick={() => !isSimulatedMicroscope && handleWellClick(wellId)}
             />
             {scaleLevel >= 2 && (
               <text
@@ -1279,10 +1339,11 @@ const MicroscopeMapDisplay = ({
                 y={displayY}
                 textAnchor="middle"
                 dominantBaseline="middle"
-                fill="rgba(255, 255, 255, 0.4)"
+                fill="rgba(255, 255, 255, 0.8)"
                 fontSize={`${Math.min(12, 6 + scaleLevel * 2)}px`}
+                style={{ cursor: isSimulatedMicroscope ? 'default' : 'pointer', pointerEvents: 'none' }}
               >
-                {row}{col}
+                {wellId}
               </text>
             )}
           </g>
@@ -1299,8 +1360,8 @@ const MicroscopeMapDisplay = ({
           left: 0,
           width: '100%',
           height: '100%',
-          pointerEvents: 'none',
-          zIndex: 5 // 96-well plate overlay above scan results
+          pointerEvents: isSimulatedMicroscope ? 'none' : 'auto', // Allow clicks for well selection
+          zIndex: 5 // Well plate overlay above scan results
         }}
       >
         {/* 96-well plate rectangular border */}
@@ -1446,15 +1507,6 @@ const MicroscopeMapDisplay = ({
     );
   };
 
-  // Handle mouse leave to cancel drag operation
-  const handleMouseLeave = useCallback(() => {
-    if (isDragging) {
-      setIsDragging(false);
-      setDragTransform({ x: 0, y: 0 });
-      appendLog('Drag move canceled: mouse left display area');
-    }
-  }, [isDragging, appendLog]);
-  
   // Helper function to convert display coordinates to stage coordinates
   const displayToStageCoords = useCallback((displayX, displayY) => {
     if (mapViewMode === 'FOV_FITTED') {
@@ -1663,14 +1715,20 @@ const MicroscopeMapDisplay = ({
     setIsLoadingCanvas(true);
     
     try {
+      // Calculate center coordinates for the new get_stitched_region API
+      const centerX = clampedTopLeft.x + (width_mm / 2);
+      const centerY = clampedTopLeft.y + (height_mm / 2);
+      
       const result = await microscopeControlService.get_stitched_region(
-        clampedTopLeft.x,
-        clampedTopLeft.y,
+        centerX,
+        centerY,
         width_mm,
         height_mm,
+        wellPlateType, // wellplate_type parameter
         scaleLevel,
         activeChannel,
         0, // timepoint index
+        wellPaddingMm, // well_padding_mm parameter
         'base64'
       );
       
@@ -1736,28 +1794,30 @@ const MicroscopeMapDisplay = ({
     }
   }, [loadStitchedTiles, appendLog, isSimulatedMicroscope]);
 
-  // Function to clear canvas after confirmation
-  const handleClearCanvas = useCallback(async () => {
-    if (!microscopeControlService) return;
+  // Function to reset experiment after confirmation
+  const handleResetExperiment = useCallback(async () => {
+    if (!microscopeControlService || !activeExperiment) return;
     
     try {
-      const result = await microscopeControlService.reset_stitching_canvas();
-      if (result.success) {
+      const result = await microscopeControlService.reset_experiment(activeExperiment);
+      if (result.success !== false) {
         setStitchedTiles([]);
         activeTileRequestsRef.current.clear();
-        if (showNotification) showNotification('Scan canvas cleared', 'success');
-        if (appendLog) appendLog('Scan canvas cleared successfully');
+        if (showNotification) showNotification(`Experiment '${activeExperiment}' reset successfully`, 'success');
+        if (appendLog) appendLog(`Experiment '${activeExperiment}' reset successfully`);
+        // Refresh experiments list
+        await loadExperiments();
       } else {
-        if (showNotification) showNotification(`Failed to clear canvas: ${result.message}`, 'error');
-        if (appendLog) appendLog(`Failed to clear scan canvas: ${result.message}`);
+        if (showNotification) showNotification(`Failed to reset experiment: ${result.message}`, 'error');
+        if (appendLog) appendLog(`Failed to reset experiment: ${result.message}`);
       }
     } catch (error) {
-      if (showNotification) showNotification(`Failed to clear canvas: ${error.message}`, 'error');
-      if (appendLog) appendLog(`Failed to clear scan canvas: ${error.message}`);
+      if (showNotification) showNotification(`Failed to reset experiment: ${error.message}`, 'error');
+      if (appendLog) appendLog(`Failed to reset experiment: ${error.message}`);
     } finally {
       setShowClearCanvasConfirmation(false);
     }
-  }, [microscopeControlService, showNotification, appendLog]);
+  }, [microscopeControlService, activeExperiment, showNotification, appendLog, loadExperiments]);
   
   // Rectangle selection handlers
   const handleRectangleSelectionStart = useCallback((e) => {
@@ -1934,12 +1994,16 @@ const MicroscopeMapDisplay = ({
     }
   }, [isLayerDropdownOpen]);
 
-  // Load filesets when layer dropdown is opened
+  // Load experiments when layer dropdown is opened
   useEffect(() => {
     if (isLayerDropdownOpen && !isSimulatedMicroscope) {
-      loadFilesets();
+      loadExperiments();
+      // Also get experiment info for the active experiment
+      if (activeExperiment) {
+        getExperimentInfo(activeExperiment);
+      }
     }
-  }, [isLayerDropdownOpen, isSimulatedMicroscope]);
+  }, [isLayerDropdownOpen, isSimulatedMicroscope, loadExperiments, activeExperiment, getExperimentInfo]);
 
   // Cleanup timeouts on unmount
   useEffect(() => {
@@ -2109,98 +2173,98 @@ const MicroscopeMapDisplay = ({
 
                     {/* Main Content Area */}
                     <div className="flex gap-4">
-                      {/* Fileset Selection (Left Side) */}
+                      {/* Experiment Selection (Left Side) */}
                       <div className="flex-1">
                         <div className="text-sm text-gray-300 font-semibold mb-2 flex items-center justify-between">
-                          <span>Zarr Filesets</span>
-                          {isLoadingFilesets && <i className="fas fa-spinner fa-spin text-xs"></i>}
+                          <span>Experiments</span>
+                          {isLoadingExperiments && <i className="fas fa-spinner fa-spin text-xs"></i>}
                         </div>
                         
                         {!isSimulatedMicroscope ? (
                           <div className="space-y-2">
-                            {/* Fileset List */}
+                            {/* Experiment List */}
                             <div className="bg-gray-700 rounded p-2 max-h-40 overflow-y-auto">
-                              {filesets.length > 0 ? (
-                                filesets.map((fileset) => (
+                              {experiments.length > 0 ? (
+                                experiments.map((experiment) => (
                                   <div
-                                    key={fileset.name}
+                                    key={experiment.name}
                                     className={`flex items-center justify-between p-2 rounded text-xs hover:bg-gray-600 cursor-pointer ${
-                                      fileset.is_active ? 'bg-blue-600 text-white' : 'text-gray-300'
+                                      experiment.name === activeExperiment ? 'bg-blue-600 text-white' : 'text-gray-300'
                                     }`}
-                                    onClick={() => !fileset.is_active && setActiveFilesetHandler(fileset.name)}
+                                    onClick={() => experiment.name !== activeExperiment && setActiveExperimentHandler(experiment.name)}
                                   >
                                     <div className="flex-1">
-                                      <div className="font-medium">{fileset.name}</div>
+                                      <div className="font-medium">{experiment.name}</div>
                                       <div className="text-xs opacity-75">
-                                        {fileset.channels} channels • {fileset.timepoints} timepoints
-                                        {fileset.is_active && <span className="ml-1 text-green-300">• Active</span>}
-                                        {!fileset.loaded && <span className="ml-1 text-orange-300">• Not loaded</span>}
+                                        {experiment.wells_with_data || 0} wells • {experiment.total_timepoints || 0} timepoints
+                                        {experiment.name === activeExperiment && <span className="ml-1 text-green-300">• Active</span>}
                                       </div>
                                     </div>
-                                    {!fileset.is_active && (
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          removeFileset(fileset.name);
-                                        }}
-                                        className="text-red-400 hover:text-red-300 ml-2"
-                                        title="Remove fileset"
-                                      >
-                                        <i className="fas fa-trash text-xs"></i>
-                                      </button>
+                                    {experiment.name !== activeExperiment && (
+                                      <div className="flex space-x-1">
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            resetExperiment(experiment.name);
+                                          }}
+                                          className="text-yellow-400 hover:text-yellow-300"
+                                          title="Reset experiment (clear data)"
+                                        >
+                                          <i className="fas fa-undo text-xs"></i>
+                                        </button>
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            removeExperiment(experiment.name);
+                                          }}
+                                          className="text-red-400 hover:text-red-300"
+                                          title="Remove experiment"
+                                        >
+                                          <i className="fas fa-trash text-xs"></i>
+                                        </button>
+                                      </div>
                                     )}
                                   </div>
                                 ))
                               ) : (
                                 <div className="text-xs text-gray-400 p-2 text-center">
-                                  {isLoadingFilesets ? 'Loading...' : 'No filesets available'}
+                                  {isLoadingExperiments ? 'Loading...' : 'No experiments available'}
                                 </div>
                               )}
                             </div>
                             
-                            {/* Fileset Actions */}
+                            {/* Experiment Actions */}
                             <div className="space-y-2">
                               <div className="flex gap-2">
                                 <button
-                                  onClick={() => setShowCreateFilesetDialog(true)}
+                                  onClick={() => setShowCreateExperimentDialog(true)}
                                   className="flex-1 px-2 py-1 text-xs bg-green-600 hover:bg-green-500 text-white rounded"
                                 >
                                   <i className="fas fa-plus mr-1"></i>
                                   Create
                                 </button>
                                 <button
-                                  onClick={() => uploadDataset()}
+                                  onClick={() => getExperimentInfo(activeExperiment)}
                                   className="flex-1 px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded disabled:opacity-50"
-                                  disabled={!activeFileset}
-                                  title={!activeFileset ? "Select an active fileset to upload" : "Upload active fileset data"}
+                                  disabled={!activeExperiment}
+                                  title={!activeExperiment ? "Select an active experiment to view info" : "View experiment information"}
                                 >
-                                  <i className="fas fa-upload mr-1"></i>
-                                  Upload
+                                  <i className="fas fa-info mr-1"></i>
+                                  Info
                                 </button>
                                 <button
-                                  onClick={() => loadFilesets()}
+                                  onClick={() => loadExperiments()}
                                   className="px-2 py-1 text-xs bg-gray-600 hover:bg-gray-500 text-white rounded"
                                 >
                                   <i className="fas fa-refresh mr-1"></i>
                                   Refresh
                                 </button>
                               </div>
-                              <div className="flex items-center text-xs text-gray-300">
-                                <label className="flex items-center cursor-pointer">
-                                  <input
-                                    type="checkbox"
-                                    checked={includeAcquisitionSettings}
-                                    onChange={(e) => setIncludeAcquisitionSettings(e.target.checked)}
-                                    className="mr-1"
-                                  />
-                                  Include acquisition settings
-                                </label>
-                              </div>
                             </div>
                           </div>
                         ) : (
                           <div className="text-xs text-gray-400 p-2 text-center">
-                            Dataset management not available for simulated microscope
+                            Experiment management not available for simulated microscope
                           </div>
                         )}
                       </div>
@@ -2235,9 +2299,57 @@ const MicroscopeMapDisplay = ({
                 )}
               </div>
               
-              {/* Scan controls */}
+              {/* Well Selection and Scan controls */}
               <div className="flex items-center space-x-2">
-                              <button
+                {/* Well Plate Type Selector */}
+                <div className="flex items-center space-x-1">
+                  <label className="text-white text-xs">Plate:</label>
+                  <select
+                    value={wellPlateType}
+                    onChange={(e) => setWellPlateType(e.target.value)}
+                    className="px-1 py-0.5 text-xs bg-gray-700 border border-gray-600 rounded text-white"
+                    disabled={isSimulatedMicroscope}
+                  >
+                    <option value="96">96-well</option>
+                    <option value="48">48-well</option>
+                    <option value="24">24-well</option>
+                  </select>
+                </div>
+
+                                 {/* Selected Wells Display */}
+                 <div className="flex items-center space-x-1">
+                   <label className="text-white text-xs">Wells:</label>
+                   <div className="px-2 py-0.5 text-xs bg-gray-700 border border-gray-600 rounded text-white min-w-[60px]">
+                     {selectedWells.length > 0 ? selectedWells.join(', ') : 'None'}
+                   </div>
+                   <button
+                     onClick={() => setSelectedWells(['A1'])}
+                     className="px-1 py-0.5 text-xs bg-gray-600 hover:bg-gray-500 text-white rounded"
+                     title="Reset to A1"
+                     disabled={isSimulatedMicroscope}
+                   >
+                     <i className="fas fa-undo text-xs"></i>
+                   </button>
+                 </div>
+
+                 {/* Well Padding Control */}
+                 <div className="flex items-center space-x-1">
+                   <label className="text-white text-xs">Padding:</label>
+                   <input
+                     type="number"
+                     value={wellPaddingMm}
+                     onChange={(e) => setWellPaddingMm(parseFloat(e.target.value) || 2.0)}
+                     className="w-12 px-1 py-0.5 text-xs bg-gray-700 border border-gray-600 rounded text-white"
+                     min="0"
+                     max="10"
+                     step="0.1"
+                     disabled={isSimulatedMicroscope}
+                     title="Well padding in mm"
+                   />
+                   <span className="text-gray-400 text-xs">mm</span>
+                 </div>
+                
+                <button
                 onClick={() => {
                   if (isSimulatedMicroscope) return;
                   if (showScanConfig) {
@@ -2307,15 +2419,15 @@ const MicroscopeMapDisplay = ({
                 
                 <button
                   onClick={() => {
-                    if (!microscopeControlService || isInteractionDisabled || isSimulatedMicroscope) return;
+                    if (!microscopeControlService || isInteractionDisabled || isSimulatedMicroscope || !activeExperiment) return;
                     setShowClearCanvasConfirmation(true);
                   }}
                   className="px-2 py-1 text-xs bg-red-600 hover:bg-red-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                  title={isSimulatedMicroscope ? "Canvas clearing not supported for simulated microscope" : "Clear scan results"}
-                  disabled={isInteractionDisabled || !microscopeControlService || isSimulatedMicroscope}
+                  title={isSimulatedMicroscope ? "Experiment reset not supported for simulated microscope" : !activeExperiment ? "No active experiment to reset" : "Reset active experiment (clear all data)"}
+                  disabled={isInteractionDisabled || !microscopeControlService || isSimulatedMicroscope || !activeExperiment}
                 >
-                  <i className="fas fa-trash mr-1"></i>
-                  Clear Canvas
+                  <i className="fas fa-undo mr-1"></i>
+                  Reset Experiment
                 </button>
               </div>
             </>
@@ -2461,7 +2573,7 @@ const MicroscopeMapDisplay = ({
           </div>
         )}
         
-        {/* 96-well plate overlay for FREE_PAN mode */}
+        {/* Well plate overlay for FREE_PAN mode */}
         {mapViewMode === 'FREE_PAN' && render96WellPlate()}
         
         {/* Rectangle selection active indicator */}
@@ -2785,6 +2897,7 @@ const MicroscopeMapDisplay = ({
             )}
           </div>
         )}
+
       </div>
 
       {/* Video contrast controls - positioned below the video frame */}
@@ -2837,7 +2950,7 @@ const MicroscopeMapDisplay = ({
         </div>
       )}
 
-      {/* Clear Canvas Confirmation Dialog */}
+      {/* Reset Experiment Confirmation Dialog */}
       {showClearCanvasConfirmation && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-gray-800 border border-gray-600 rounded-lg shadow-xl max-w-md w-full text-white">
@@ -2845,7 +2958,7 @@ const MicroscopeMapDisplay = ({
             <div className="flex justify-between items-center p-4 border-b border-gray-600">
               <h3 className="text-lg font-semibold text-gray-200 flex items-center">
                 <i className="fas fa-exclamation-triangle text-red-400 mr-2"></i>
-                Clear Scan Canvas
+                Reset Experiment
               </h3>
               <button
                 onClick={() => setShowClearCanvasConfirmation(false)}
@@ -2859,7 +2972,7 @@ const MicroscopeMapDisplay = ({
             {/* Modal Body */}
             <div className="p-4">
               <p className="text-gray-300 mb-4">
-                Are you sure you want to clear the scan canvas? This will permanently delete all scan results and cannot be undone.
+                Are you sure you want to reset experiment "{activeExperiment}"? This will permanently delete all experiment data and cannot be undone.
               </p>
               <div className="bg-yellow-900 bg-opacity-30 border border-yellow-500 rounded-lg p-3 mb-4">
                 <div className="flex items-start">
@@ -2867,9 +2980,10 @@ const MicroscopeMapDisplay = ({
                   <div className="text-sm text-yellow-200">
                     <p className="font-medium mb-1">This action will:</p>
                     <ul className="list-disc list-inside space-y-1">
-                      <li>Remove all scan result images from the display</li>
-                      <li>Clear the scan data from microscope memory</li>
-                      <li>Reset the stitching canvas to empty state</li>
+                      <li>Remove all scan result images from all wells</li>
+                      <li>Clear all experiment data from storage</li>
+                      <li>Reset the experiment to empty state</li>
+                      <li>Keep the experiment structure for future use</li>
                     </ul>
                   </div>
                 </div>
@@ -2886,30 +3000,30 @@ const MicroscopeMapDisplay = ({
                 Cancel
               </button>
               <button
-                onClick={handleClearCanvas}
+                onClick={handleResetExperiment}
                 className="px-4 py-2 text-sm bg-red-600 hover:bg-red-500 text-white rounded focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
               >
-                <i className="fas fa-trash mr-1"></i>
-                Clear Canvas
+                <i className="fas fa-undo mr-1"></i>
+                Reset Experiment
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Create Fileset Dialog */}
-      {showCreateFilesetDialog && (
+      {/* Create Experiment Dialog */}
+      {showCreateExperimentDialog && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-gray-800 border border-gray-600 rounded-lg shadow-xl max-w-md w-full text-white">
             <div className="flex justify-between items-center p-4 border-b border-gray-600">
               <h3 className="text-lg font-semibold text-gray-200 flex items-center">
                 <i className="fas fa-plus text-green-400 mr-2"></i>
-                Create New Fileset
+                Create New Experiment
               </h3>
               <button
                 onClick={() => {
-                  setShowCreateFilesetDialog(false);
-                  setNewFilesetName('');
+                  setShowCreateExperimentDialog(false);
+                  setNewExperimentName('');
                 }}
                 className="text-gray-400 hover:text-white text-xl font-bold w-6 h-6 flex items-center justify-center"
                 title="Close"
@@ -2920,18 +3034,18 @@ const MicroscopeMapDisplay = ({
 
             <div className="p-4">
               <div className="mb-4">
-                <label className="block text-gray-300 font-medium mb-2">Fileset Name</label>
+                <label className="block text-gray-300 font-medium mb-2">Experiment Name</label>
                 <input
                   type="text"
-                  value={newFilesetName}
-                  onChange={(e) => setNewFilesetName(e.target.value)}
+                  value={newExperimentName}
+                  onChange={(e) => setNewExperimentName(e.target.value)}
                   className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Enter fileset name"
+                  placeholder="Enter experiment name"
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && newFilesetName.trim()) {
-                      createFileset(newFilesetName);
-                      setShowCreateFilesetDialog(false);
-                      setNewFilesetName('');
+                    if (e.key === 'Enter' && newExperimentName.trim()) {
+                      createExperiment(newExperimentName);
+                      setShowCreateExperimentDialog(false);
+                      setNewExperimentName('');
                     }
                   }}
                 />
@@ -2940,11 +3054,12 @@ const MicroscopeMapDisplay = ({
                 <div className="flex items-start">
                   <i className="fas fa-info-circle text-blue-400 mr-2 mt-0.5"></i>
                   <div className="text-sm text-blue-200">
-                    <p className="font-medium mb-1">About Filesets:</p>
+                    <p className="font-medium mb-1">About Experiments:</p>
                     <ul className="list-disc list-inside space-y-1">
-                      <li>Filesets store zarr-format microscopy data</li>
-                      <li>Each fileset can contain multiple channels and timepoints</li>
-                      <li>Only one fileset can be active at a time</li>
+                      <li>Experiments organize well-separated microscopy data</li>
+                      <li>Each well has its own canvas within the experiment</li>
+                      <li>Only one experiment can be active at a time</li>
+                      <li>Better scalability and data organization</li>
                     </ul>
                   </div>
                 </div>
@@ -2954,8 +3069,8 @@ const MicroscopeMapDisplay = ({
             <div className="flex justify-end space-x-3 p-4 border-t border-gray-600">
               <button
                 onClick={() => {
-                  setShowCreateFilesetDialog(false);
-                  setNewFilesetName('');
+                  setShowCreateExperimentDialog(false);
+                  setNewExperimentName('');
                 }}
                 className="px-4 py-2 text-sm bg-gray-600 hover:bg-gray-500 text-white rounded focus:outline-none focus:ring-2 focus:ring-gray-500"
               >
@@ -2963,17 +3078,17 @@ const MicroscopeMapDisplay = ({
               </button>
               <button
                 onClick={() => {
-                  if (newFilesetName.trim()) {
-                    createFileset(newFilesetName);
-                    setShowCreateFilesetDialog(false);
-                    setNewFilesetName('');
+                  if (newExperimentName.trim()) {
+                    createExperiment(newExperimentName);
+                    setShowCreateExperimentDialog(false);
+                    setNewExperimentName('');
                   }
                 }}
                 className="px-4 py-2 text-sm bg-green-600 hover:bg-green-500 text-white rounded focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50"
-                disabled={!newFilesetName.trim()}
+                disabled={!newExperimentName.trim()}
               >
                 <i className="fas fa-plus mr-1"></i>
-                Create Fileset
+                Create Experiment
               </button>
             </div>
           </div>
@@ -3301,7 +3416,9 @@ const MicroscopeMapDisplay = ({
                       dy_mm: quickScanParameters.dy_mm,
                       velocity_scan_mm_per_s: quickScanParameters.velocity_scan_mm_per_s,
                       do_contrast_autofocus: quickScanParameters.do_contrast_autofocus,
-                      do_reflection_af: quickScanParameters.do_reflection_af
+                      do_reflection_af: quickScanParameters.do_reflection_af,
+                      experiment_name: activeExperiment, // Use active experiment
+                      well_padding_mm: wellPaddingMm // Add well padding parameter
                     });
                   
                   if (result.success) {
@@ -3891,6 +4008,10 @@ const MicroscopeMapDisplay = ({
                       scanParameters.do_reflection_af,
                       'scan_' + Date.now(),
                       0, // timepoint index
+                      activeExperiment, // experiment_name parameter
+                      selectedWells, // wells_to_scan parameter
+                      wellPlateType, // wellplate_type parameter
+                      wellPaddingMm // well_padding_mm parameter
                     );
                     
                     if (result.success) {
