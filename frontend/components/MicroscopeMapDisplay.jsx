@@ -65,6 +65,7 @@ const MicroscopeMapDisplay = ({
       setIsRectangleSelection(false);
       setRectangleStart(null);
       setRectangleEnd(null);
+      setDragSelectedWell(null);
     }
   }, [isSimulatedMicroscope]);
   
@@ -179,6 +180,107 @@ const MicroscopeMapDisplay = ({
   const [selectedWells, setSelectedWells] = useState(['A1']); // Default to A1
   const [wellPlateType, setWellPlateType] = useState('96'); // Default to 96-well
   const [wellPaddingMm, setWellPaddingMm] = useState(2.0); // Default padding
+
+  // Helper function to get well plate configuration
+  const getWellPlateConfig = useCallback(() => {
+    if (!microscopeConfiguration?.wellplate?.formats) return null;
+    
+    const formatKey = wellPlateType === '96' ? '96_well' : 
+                     wellPlateType === '48' ? '48_well' : 
+                     wellPlateType === '24' ? '24_well' : '96_well';
+    
+    return microscopeConfiguration.wellplate.formats[formatKey];
+  }, [microscopeConfiguration, wellPlateType]);
+
+  // Helper function to get well plate layout
+  const getWellPlateLayout = useCallback(() => {
+    const layouts = {
+      '96': { rows: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'], cols: Array.from({ length: 12 }, (_, i) => i + 1) },
+      '48': { rows: ['A', 'B', 'C', 'D', 'E', 'F'], cols: Array.from({ length: 8 }, (_, i) => i + 1) },
+      '24': { rows: ['A', 'B', 'C', 'D'], cols: Array.from({ length: 6 }, (_, i) => i + 1) }
+    };
+    return layouts[wellPlateType] || layouts['96'];
+  }, [wellPlateType]);
+
+  // State to track the well being selected during drag operations
+  const [dragSelectedWell, setDragSelectedWell] = useState(null);
+
+  // Helper function to detect which well a stage coordinate belongs to
+  const detectWellFromStageCoords = useCallback((stageX, stageY) => {
+    const wellConfig = getWellPlateConfig();
+    if (!wellConfig) return null;
+    
+    const { well_size_mm, well_spacing_mm, a1_x_mm, a1_y_mm } = wellConfig;
+    const layout = getWellPlateLayout();
+    const { rows, cols } = layout;
+    
+    // Find the closest well by checking distance to each well center
+    let closestWell = null;
+    let minDistance = Infinity;
+    
+    rows.forEach((row, rowIndex) => {
+      cols.forEach((col, colIndex) => {
+        const wellId = `${row}${col}`;
+        const wellCenterX = a1_x_mm + colIndex * well_spacing_mm;
+        const wellCenterY = a1_y_mm + rowIndex * well_spacing_mm;
+        
+        // Check if point is within well boundaries (considering well padding)
+        const wellRadius = (well_size_mm / 2) + wellPaddingMm;
+        const distance = Math.sqrt(
+          Math.pow(stageX - wellCenterX, 2) + Math.pow(stageY - wellCenterY, 2)
+        );
+        
+        if (distance <= wellRadius && distance < minDistance) {
+          minDistance = distance;
+          closestWell = {
+            id: wellId,
+            centerX: wellCenterX,
+            centerY: wellCenterY,
+            rowIndex,
+            colIndex,
+            radius: wellRadius
+          };
+        }
+      });
+    });
+    
+    return closestWell;
+  }, [getWellPlateConfig, getWellPlateLayout, wellPaddingMm]);
+
+  // Helper function to get well boundaries in stage coordinates
+  const getWellBoundaries = useCallback((wellInfo) => {
+    if (!wellInfo) return null;
+    
+    const { centerX, centerY, radius } = wellInfo;
+    return {
+      xMin: centerX - radius,
+      xMax: centerX + radius,
+      yMin: centerY - radius,
+      yMax: centerY + radius,
+      centerX,
+      centerY
+    };
+  }, []);
+
+  // Helper function to clamp coordinates to well boundaries
+  const clampToWellBoundaries = useCallback((stageX, stageY, wellBoundaries) => {
+    if (!wellBoundaries) return { x: stageX, y: stageY };
+    
+    return {
+      x: Math.max(wellBoundaries.xMin, Math.min(wellBoundaries.xMax, stageX)),
+      y: Math.max(wellBoundaries.yMin, Math.min(wellBoundaries.yMax, stageY))
+    };
+  }, []);
+
+  // Helper function to convert absolute stage coordinates to relative (well-centered) coordinates
+  const stageToRelativeCoords = useCallback((stageX, stageY, wellInfo) => {
+    if (!wellInfo) return { x: stageX, y: stageY };
+    
+    return {
+      x: stageX - wellInfo.centerX,
+      y: stageY - wellInfo.centerY
+    };
+  }, []);
 
   // Experiment management functions (replacing fileset functions)
   const loadExperiments = useCallback(async () => {
@@ -1231,27 +1333,6 @@ const MicroscopeMapDisplay = ({
     ctx.restore();
   }, [isOpen, stageDimensions, mapScale, effectivePan, visibleLayers.wellPlate, containerSize]);
 
-  // Helper function to get well plate configuration
-  const getWellPlateConfig = useCallback(() => {
-    if (!microscopeConfiguration?.wellplate?.formats) return null;
-    
-    const formatKey = wellPlateType === '96' ? '96_well' : 
-                     wellPlateType === '48' ? '48_well' : 
-                     wellPlateType === '24' ? '24_well' : '96_well';
-    
-    return microscopeConfiguration.wellplate.formats[formatKey];
-  }, [microscopeConfiguration, wellPlateType]);
-
-  // Helper function to get well plate layout
-  const getWellPlateLayout = useCallback(() => {
-    const layouts = {
-      '96': { rows: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'], cols: Array.from({ length: 12 }, (_, i) => i + 1) },
-      '48': { rows: ['A', 'B', 'C', 'D', 'E', 'F'], cols: Array.from({ length: 8 }, (_, i) => i + 1) },
-      '24': { rows: ['A', 'B', 'C', 'D'], cols: Array.from({ length: 6 }, (_, i) => i + 1) }
-    };
-    return layouts[wellPlateType] || layouts['96'];
-  }, [wellPlateType]);
-
   // Handle well click for selection
   const handleWellClick = useCallback((wellId) => {
     if (isSimulatedMicroscope) return;
@@ -1544,8 +1625,22 @@ const MicroscopeMapDisplay = ({
     const positions = [];
     for (let i = 0; i < scanParameters.Nx; i++) {
       for (let j = 0; j < scanParameters.Ny; j++) {
-        const stageX = scanParameters.start_x_mm + i * scanParameters.dx_mm;
-        const stageY = scanParameters.start_y_mm + j * scanParameters.dy_mm;
+        // Calculate relative position
+        const relativeX = scanParameters.start_x_mm + i * scanParameters.dx_mm;
+        const relativeY = scanParameters.start_y_mm + j * scanParameters.dy_mm;
+        
+        // Convert to absolute stage coordinates
+        // If we have a selected well, the scan parameters are relative to well center
+        let stageX, stageY;
+        if (dragSelectedWell) {
+          // Convert relative coordinates back to absolute
+          stageX = dragSelectedWell.centerX + relativeX;
+          stageY = dragSelectedWell.centerY + relativeY;
+        } else {
+          // Fallback: treat as absolute coordinates
+          stageX = relativeX;
+          stageY = relativeY;
+        }
         
         const displayCoords = stageToDisplayCoords(stageX, stageY);
         const fovDisplaySize = fovSize * pixelsPerMm * mapScale;
@@ -1562,7 +1657,7 @@ const MicroscopeMapDisplay = ({
       }
     }
     return positions;
-  }, [scanParameters, fovSize, pixelsPerMm, mapScale, stageToDisplayCoords]);
+  }, [scanParameters, fovSize, pixelsPerMm, mapScale, stageToDisplayCoords, dragSelectedWell]);
   
   // Helper function to get intensity/exposure pair from status object (similar to MicroscopeControlPanel)
   const getIntensityExposurePairFromStatus = (status, channel) => {
@@ -1827,22 +1922,47 @@ const MicroscopeMapDisplay = ({
     const startX = e.clientX - rect.left;
     const startY = e.clientY - rect.top;
     
+    // Convert display coordinates to stage coordinates to detect the well
+    const stageCoords = displayToStageCoords(startX, startY);
+    const detectedWell = detectWellFromStageCoords(stageCoords.x, stageCoords.y);
+    
+    if (!detectedWell) {
+      if (showNotification) {
+        showNotification('Please start selection within a well boundary', 'warning');
+      }
+      return;
+    }
+    
+    // Store the selected well for this drag operation
+    setDragSelectedWell(detectedWell);
     setRectangleStart({ x: startX, y: startY });
     setRectangleEnd({ x: startX, y: startY });
-  }, [isRectangleSelection, isHardwareInteractionDisabled, isSimulatedMicroscope]);
+    
+    if (appendLog) {
+      appendLog(`Started scan area selection in well ${detectedWell.id}`);
+    }
+  }, [isRectangleSelection, isHardwareInteractionDisabled, isSimulatedMicroscope, displayToStageCoords, detectWellFromStageCoords, showNotification, appendLog]);
   
   const handleRectangleSelectionMove = useCallback((e) => {
-    if (!rectangleStart || !isRectangleSelection || isSimulatedMicroscope) return;
+    if (!rectangleStart || !isRectangleSelection || isSimulatedMicroscope || !dragSelectedWell) return;
     
     const rect = mapContainerRef.current.getBoundingClientRect();
     const currentX = e.clientX - rect.left;
     const currentY = e.clientY - rect.top;
     
-    setRectangleEnd({ x: currentX, y: currentY });
-  }, [rectangleStart, isRectangleSelection, isSimulatedMicroscope]);
+    // Convert to stage coordinates and clamp to well boundaries
+    const stageCoords = displayToStageCoords(currentX, currentY);
+    const wellBoundaries = getWellBoundaries(dragSelectedWell);
+    const clampedStageCoords = clampToWellBoundaries(stageCoords.x, stageCoords.y, wellBoundaries);
+    
+    // Convert back to display coordinates
+    const clampedDisplayCoords = stageToDisplayCoords(clampedStageCoords.x, clampedStageCoords.y);
+    
+    setRectangleEnd({ x: clampedDisplayCoords.x, y: clampedDisplayCoords.y });
+  }, [rectangleStart, isRectangleSelection, isSimulatedMicroscope, dragSelectedWell, displayToStageCoords, getWellBoundaries, clampToWellBoundaries, stageToDisplayCoords]);
   
   const handleRectangleSelectionEnd = useCallback((e) => {
-    if (!rectangleStart || !rectangleEnd || !isRectangleSelection || isSimulatedMicroscope) return;
+    if (!rectangleStart || !rectangleEnd || !isRectangleSelection || isSimulatedMicroscope || !dragSelectedWell) return;
     
     // Convert rectangle corners to stage coordinates
     const topLeft = displayToStageCoords(
@@ -1854,65 +1974,41 @@ const MicroscopeMapDisplay = ({
       Math.max(rectangleStart.y, rectangleEnd.y)
     );
     
-    // Check if the selected area is within stage bounds
-    if (topLeft.x < scanBounds.xMin || bottomRight.x > scanBounds.xMax ||
-        topLeft.y < scanBounds.yMin || bottomRight.y > scanBounds.yMax) {
-      
-      // Clamp the selection to stage bounds
-      const clampedTopLeft = {
-        x: Math.max(scanBounds.xMin, topLeft.x),
-        y: Math.max(scanBounds.yMin, topLeft.y)
-      };
-      const clampedBottomRight = {
-        x: Math.min(scanBounds.xMax, bottomRight.x),
-        y: Math.min(scanBounds.yMax, bottomRight.y)
-      };
-      
-      if (showNotification) {
-        showNotification(
-          `Selected area extends beyond stage limits. Adjusted to fit within bounds: ` +
-          `(${clampedTopLeft.x.toFixed(1)}, ${clampedTopLeft.y.toFixed(1)}) to ` +
-          `(${clampedBottomRight.x.toFixed(1)}, ${clampedBottomRight.y.toFixed(1)}) mm`,
-          'warning'
-        );
-      }
-      
-      if (appendLog) {
-        appendLog(`Grid selection clamped to stage bounds: ` +
-          `X: ${clampedTopLeft.x.toFixed(1)}-${clampedBottomRight.x.toFixed(1)} mm, ` +
-          `Y: ${clampedTopLeft.y.toFixed(1)}-${clampedBottomRight.y.toFixed(1)} mm`
-        );
-      }
-      
-      // Use clamped values
-      topLeft.x = clampedTopLeft.x;
-      topLeft.y = clampedTopLeft.y;
-      bottomRight.x = clampedBottomRight.x;
-      bottomRight.y = clampedBottomRight.y;
-    }
+    // Convert absolute stage coordinates to relative coordinates (relative to well center)
+    const relativeTopLeft = stageToRelativeCoords(topLeft.x, topLeft.y, dragSelectedWell);
+    // const relativeBottomRight = stageToRelativeCoords(bottomRight.x, bottomRight.y, dragSelectedWell);
     
     const width_mm = bottomRight.x - topLeft.x;
     const height_mm = bottomRight.y - topLeft.y;
     
     // Calculate grid parameters
-    const Nx = Math.round(width_mm / scanParameters.dx_mm);
-    const Ny = Math.round(height_mm / scanParameters.dy_mm);
+    const Nx = Math.max(1, Math.round(width_mm / scanParameters.dx_mm));
+    const Ny = Math.max(1, Math.round(height_mm / scanParameters.dy_mm));
     
-    // Update scan parameters
+    // Update scan parameters with RELATIVE coordinates
     setScanParameters(prev => ({
       ...prev,
-      start_x_mm: topLeft.x,
-      start_y_mm: topLeft.y,
+      start_x_mm: relativeTopLeft.x, // Now relative to well center
+      start_y_mm: relativeTopLeft.y, // Now relative to well center
       Nx: Math.max(1, Nx),
       Ny: Math.max(1, Ny)
     }));
     
-    // Show configuration window
-    setShowScanConfig(true);
+    // Update selected wells to include the detected well
+    setSelectedWells([dragSelectedWell.id]);
+    
+    if (appendLog) {
+      appendLog(`Grid selection in well ${dragSelectedWell.id}: ` +
+        `relative start (${relativeTopLeft.x.toFixed(1)}, ${relativeTopLeft.y.toFixed(1)}) mm, ` +
+        `${Nx}×${Ny} positions, step ${scanParameters.dx_mm}×${scanParameters.dy_mm} mm`
+      );
+    }
+    
+    // Only exit selection mode, do NOT clear rectangleStart/rectangleEnd/dragSelectedWell
+    // This keeps the grid visible but makes it non-interactive (fixed)
     setIsRectangleSelection(false);
-    setRectangleStart(null);
-    setRectangleEnd(null);
-  }, [rectangleStart, rectangleEnd, isRectangleSelection, displayToStageCoords, scanParameters.dx_mm, scanParameters.dy_mm, isSimulatedMicroscope, scanBounds, showNotification, appendLog]);
+    setShowScanConfig(true);
+  }, [rectangleStart, rectangleEnd, isRectangleSelection, displayToStageCoords, scanParameters.dx_mm, scanParameters.dy_mm, isSimulatedMicroscope, dragSelectedWell, stageToRelativeCoords, appendLog]);
 
   // Effect to trigger tile loading when view changes (throttled for performance)
   useEffect(() => {
@@ -2316,7 +2412,7 @@ const MicroscopeMapDisplay = ({
                   </select>
                 </div>
 
-                                 {/* Selected Wells Display */}
+                {/* Selected Wells Display */}
                  <div className="flex items-center space-x-1">
                    <label className="text-white text-xs">Wells:</label>
                    <div className="px-2 py-0.5 text-xs bg-gray-700 border border-gray-600 rounded text-white min-w-[60px]">
@@ -2358,6 +2454,7 @@ const MicroscopeMapDisplay = ({
                     setIsRectangleSelection(false);
                     setRectangleStart(null);
                     setRectangleEnd(null);
+                    setDragSelectedWell(null);
                   } else {
                     // Automatically switch to FREE_PAN mode if in FOV_FITTED mode
                     if (mapViewMode === 'FOV_FITTED') {
@@ -2370,6 +2467,10 @@ const MicroscopeMapDisplay = ({
                     if (!isScanInProgress) {
                       loadCurrentMicroscopeSettings();
                       // Automatically enable rectangle selection when opening scan panel (only if not scanning)
+                      // Clear any existing selection first
+                      setRectangleStart(null);
+                      setRectangleEnd(null);
+                      setDragSelectedWell(null);
                       setIsRectangleSelection(true);
                     }
                     setShowScanConfig(true);
@@ -2400,6 +2501,7 @@ const MicroscopeMapDisplay = ({
                       setIsRectangleSelection(false);
                       setRectangleStart(null);
                       setRectangleEnd(null);
+                      setDragSelectedWell(null);
                       // Open quick scan panel (always allow opening, even during scanning)
                       setShowQuickScanConfig(true);
                     }
@@ -2459,6 +2561,10 @@ const MicroscopeMapDisplay = ({
                     transitionToFreePan();
                     loadCurrentMicroscopeSettings();
                     setShowScanConfig(true);
+                    // Clear any existing selection first
+                    setRectangleStart(null);
+                    setRectangleEnd(null);
+                    setDragSelectedWell(null);
                     setIsRectangleSelection(true);
                     if (appendLog) {
                       appendLog('Switched to stage map view for scan area selection');
@@ -2589,11 +2695,41 @@ const MicroscopeMapDisplay = ({
           </div>
         )}
 
-        {/* Rectangle selection overlay */}
+        {/* Rectangle selection overlay - only show during active selection */}
         {mapViewMode === 'FREE_PAN' && isRectangleSelection && rectangleStart && rectangleEnd && !isScanInProgress && !isQuickScanInProgress && (
           <>
+            {/* Well boundary indicator */}
+            {dragSelectedWell && (() => {
+              const wellBoundaries = getWellBoundaries(dragSelectedWell);
+              if (!wellBoundaries) return null;
+              
+              const wellDisplayTopLeft = stageToDisplayCoords(wellBoundaries.xMin, wellBoundaries.yMin);
+              const wellDisplayBottomRight = stageToDisplayCoords(wellBoundaries.xMax, wellBoundaries.yMax);
+              
+              return (
+                <div
+                  className="absolute border-2 border-yellow-300 bg-yellow-300 bg-opacity-10 pointer-events-none"
+                  style={{
+                    left: `${wellDisplayTopLeft.x}px`,
+                    top: `${wellDisplayTopLeft.y}px`,
+                    width: `${wellDisplayBottomRight.x - wellDisplayTopLeft.x}px`,
+                    height: `${wellDisplayBottomRight.y - wellDisplayTopLeft.y}px`,
+                    zIndex: 28 // Below selection rectangle
+                  }}
+                >
+                  <div className="absolute top-0 left-0 text-yellow-300 text-xs bg-black bg-opacity-60 px-1 rounded-br">
+                    Well {dragSelectedWell.id}
+                  </div>
+                </div>
+              );
+            })()}
+            
             <div
-              className="absolute border-2 border-blue-400 bg-blue-400 bg-opacity-20 pointer-events-none"
+              className={`absolute border-2 bg-opacity-20 pointer-events-none ${
+                isRectangleSelection 
+                  ? 'border-blue-400 bg-blue-400' // Active selection - blue
+                  : 'border-green-400 bg-green-400' // Fixed grid preview - green
+              }`}
               style={{
                 left: `${Math.min(rectangleStart.x, rectangleEnd.x)}px`,
                 top: `${Math.min(rectangleStart.y, rectangleEnd.y)}px`,
@@ -2674,14 +2810,22 @@ const MicroscopeMapDisplay = ({
                 const Nx = Math.max(1, Math.round(width_mm / scanParameters.dx_mm));
                 const Ny = Math.max(1, Math.round(height_mm / scanParameters.dy_mm));
                 
+                // Calculate relative coordinates for display
+                const relativeTopLeft = dragSelectedWell 
+                  ? stageToRelativeCoords(topLeft.x, topLeft.y, dragSelectedWell)
+                  : { x: topLeft.x, y: topLeft.y };
+                const relativeEndX = relativeTopLeft.x + (Nx-1) * scanParameters.dx_mm;
+                const relativeEndY = relativeTopLeft.y + (Ny-1) * scanParameters.dy_mm;
+                
                 return (
                   <>
-                    <div>Start: ({topLeft.x.toFixed(1)}, {topLeft.y.toFixed(1)}) mm</div>
+                    <div>Well: {dragSelectedWell?.id || 'Unknown'}</div>
+                    <div>Relative start: ({relativeTopLeft.x.toFixed(1)}, {relativeTopLeft.y.toFixed(1)}) mm</div>
                     <div>Grid: {Nx} × {Ny} positions</div>
                     <div>Channels: {scanParameters.illumination_settings.length}</div>
                     <div>Total images: {Nx * Ny * scanParameters.illumination_settings.length}</div>
                     <div>Step: {scanParameters.dx_mm} × {scanParameters.dy_mm} mm</div>
-                    <div>End: ({(topLeft.x + (Nx-1) * scanParameters.dx_mm).toFixed(1)}, {(topLeft.y + (Ny-1) * scanParameters.dy_mm).toFixed(1)}) mm</div>
+                    <div>Relative end: ({relativeEndX.toFixed(1)}, {relativeEndY.toFixed(1)}) mm</div>
                   </>
                 );
               })()}
@@ -3399,6 +3543,7 @@ const MicroscopeMapDisplay = ({
                 setIsRectangleSelection(false);
                 setRectangleStart(null);
                 setRectangleEnd(null);
+                setDragSelectedWell(null);
                 
                 try {
 
@@ -3525,7 +3670,12 @@ const MicroscopeMapDisplay = ({
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold text-gray-200">Scan Configuration</h3>
             <button
-              onClick={() => setShowScanConfig(false)}
+              onClick={() => {
+                setShowScanConfig(false);
+                setRectangleStart(null);
+                setRectangleEnd(null);
+                setDragSelectedWell(null);
+              }}
               className="text-gray-400 hover:text-white p-1"
               title="Close"
             >
@@ -3873,27 +4023,6 @@ const MicroscopeMapDisplay = ({
               <div>End position: ({(scanParameters.start_x_mm + (scanParameters.Nx-1) * scanParameters.dx_mm).toFixed(1)}, {(scanParameters.start_y_mm + (scanParameters.Ny-1) * scanParameters.dy_mm).toFixed(1)}) mm</div>
             </div>
             
-            <div className="bg-gray-600 p-2 rounded text-xs">
-              <div className="text-gray-300 font-medium mb-1">Stage Limits</div>
-              <div>X: {scanBounds.xMin.toFixed(1)} to {scanBounds.xMax.toFixed(1)} mm</div>
-              <div>Y: {scanBounds.yMin.toFixed(1)} to {scanBounds.yMax.toFixed(1)} mm</div>
-              {(() => {
-                const endX = scanParameters.start_x_mm + (scanParameters.Nx-1) * scanParameters.dx_mm;
-                const endY = scanParameters.start_y_mm + (scanParameters.Ny-1) * scanParameters.dy_mm;
-                const isWithinBounds = 
-                  scanParameters.start_x_mm >= scanBounds.xMin && endX <= scanBounds.xMax &&
-                  scanParameters.start_y_mm >= scanBounds.yMin && endY <= scanBounds.yMax;
-                
-                return (
-                  <div className={`mt-1 px-2 py-1 rounded text-xs font-medium ${
-                    isWithinBounds ? 'bg-green-700 text-green-100' : 'bg-red-700 text-red-100'
-                  }`}>
-                    <i className={`fas ${isWithinBounds ? 'fa-check-circle' : 'fa-exclamation-triangle'} mr-1`}></i>
-                    {isWithinBounds ? 'Grid within bounds' : 'Grid extends beyond stage limits'}
-                  </div>
-                );
-              })()}
-            </div>
             
             {isRectangleSelection && (
               <div className="bg-blue-900 bg-opacity-50 p-2 rounded text-xs border border-blue-500">
@@ -3905,7 +4034,22 @@ const MicroscopeMapDisplay = ({
           
                       <div className="flex justify-end space-x-2 mt-4">
               <button
-                onClick={() => !isScanInProgress && setIsRectangleSelection(!isRectangleSelection)}
+                onClick={() => {
+                  if (isScanInProgress) return;
+                  if (isRectangleSelection) {
+                    // Stop rectangle selection
+                    setIsRectangleSelection(false);
+                    setRectangleStart(null);
+                    setRectangleEnd(null);
+                    setDragSelectedWell(null);
+                  } else {
+                    // Start rectangle selection - clear any existing selection first
+                    setRectangleStart(null);
+                    setRectangleEnd(null);
+                    setDragSelectedWell(null);
+                    setIsRectangleSelection(true);
+                  }
+                }}
                 className={`px-3 py-1 text-xs rounded disabled:opacity-50 disabled:cursor-not-allowed ${
                   isRectangleSelection ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-gray-600 hover:bg-gray-500 text-white'
                 }`}
@@ -3942,24 +4086,7 @@ const MicroscopeMapDisplay = ({
                     return;
                   }
                   
-                  // Start scan logic
-                  // Validate that the entire scan area is within stage bounds before starting
-                  const endX = scanParameters.start_x_mm + (scanParameters.Nx - 1) * scanParameters.dx_mm;
-                  const endY = scanParameters.start_y_mm + (scanParameters.Ny - 1) * scanParameters.dy_mm;
-                  
-                  if (scanParameters.start_x_mm < scanBounds.xMin || endX > scanBounds.xMax ||
-                      scanParameters.start_y_mm < scanBounds.yMin || endY > scanBounds.yMax) {
-                    
-                    const errorMsg = `Scan area extends beyond stage limits! ` +
-                      `Start: (${scanParameters.start_x_mm.toFixed(1)}, ${scanParameters.start_y_mm.toFixed(1)}) mm, ` +
-                      `End: (${endX.toFixed(1)}, ${endY.toFixed(1)}) mm. ` +
-                      `Stage limits: X: ${scanBounds.xMin.toFixed(1)}-${scanBounds.xMax.toFixed(1)} mm, ` +
-                      `Y: ${scanBounds.yMin.toFixed(1)}-${scanBounds.yMax.toFixed(1)} mm`;
-                    
-                    if (showNotification) showNotification(errorMsg, 'error');
-                    if (appendLog) appendLog(errorMsg);
-                    return;
-                  }
+
                   
                   // Check if WebRTC is active and stop it to prevent camera resource conflict
                   const wasWebRtcActive = isWebRtcActive;
