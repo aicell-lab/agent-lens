@@ -3550,21 +3550,21 @@ const MicroscopeMapDisplay = ({
                   
                   if (appendLog) appendLog(`Starting quick scan: ${quickScanParameters.wellplate_type}-well plate, ${quickScanParameters.n_stripes} stripes × ${quickScanParameters.stripe_width_mm}mm, scan velocity ${quickScanParameters.velocity_scan_mm_per_s}mm/s, ${quickScanParameters.fps_target}fps`);
                   
-                      const result = await microscopeControlService.quick_scan_with_stitching({
-                      wellplate_type: quickScanParameters.wellplate_type,
-                      exposure_time: quickScanParameters.exposure_time,
-                      intensity: quickScanParameters.intensity,
-                      fps_target: quickScanParameters.fps_target,
-                      action_ID: 'quick_scan_' + Date.now(),
-                      n_stripes: quickScanParameters.n_stripes,
-                      stripe_width_mm: quickScanParameters.stripe_width_mm,
-                      dy_mm: quickScanParameters.dy_mm,
-                      velocity_scan_mm_per_s: quickScanParameters.velocity_scan_mm_per_s,
-                      do_contrast_autofocus: quickScanParameters.do_contrast_autofocus,
-                      do_reflection_af: quickScanParameters.do_reflection_af,
-                      experiment_name: activeExperiment, // Use active experiment
-                      well_padding_mm: wellPaddingMm // Add well padding parameter
-                    });
+                      const result = await microscopeControlService.quick_scan_with_stitching(
+                      quickScanParameters.wellplate_type,
+                      quickScanParameters.exposure_time,
+                      quickScanParameters.intensity,
+                      quickScanParameters.fps_target,
+                      'quick_scan_' + Date.now(),
+                      quickScanParameters.n_stripes,
+                      quickScanParameters.stripe_width_mm,
+                      quickScanParameters.dy_mm,
+                      quickScanParameters.velocity_scan_mm_per_s,
+                      quickScanParameters.do_contrast_autofocus,
+                      quickScanParameters.do_reflection_af,
+                      activeExperiment, // Use active experiment
+                      wellPaddingMm // Add well padding parameter
+                    );
                   
                   if (result.success) {
                     if (showNotification) showNotification('Quick scan completed successfully', 'success');
