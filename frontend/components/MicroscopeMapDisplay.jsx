@@ -179,7 +179,7 @@ const MicroscopeMapDisplay = ({
   // Well selection state for scanning
   const [selectedWells, setSelectedWells] = useState(['A1']); // Default to A1
   const [wellPlateType, setWellPlateType] = useState('96'); // Default to 96-well
-  const [wellPaddingMm, setWellPaddingMm] = useState(2.0); // Default padding
+  const [wellPaddingMm, setWellPaddingMm] = useState(1.0); // Default padding
 
   // Helper function to get well plate configuration
   const getWellPlateConfig = useCallback(() => {
@@ -2520,9 +2520,7 @@ const MicroscopeMapDisplay = ({
                   </select>
                 </div>
 
-
-
-                 {/* Well Padding Control */}
+                 {/* Well Padding Control
                  <div className="flex items-center space-x-1">
                    <label className="text-white text-xs">Padding:</label>
                    <input
@@ -2537,7 +2535,7 @@ const MicroscopeMapDisplay = ({
                      title="Well padding in mm"
                    />
                    <span className="text-gray-400 text-xs">mm</span>
-                 </div>
+                 </div> */}
                 
                 <button
                 onClick={() => {
