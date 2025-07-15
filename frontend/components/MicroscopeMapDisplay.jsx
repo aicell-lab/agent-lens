@@ -2130,6 +2130,114 @@ const MicroscopeMapDisplay = ({
     };
   }, [mapViewMode, isScanInProgress, isQuickScanInProgress]);
 
+  // Helper: get well plate layout for grid
+  const getWellPlateGridLabels = useCallback(() => {
+    const layout = getWellPlateLayout();
+    return {
+      rows: layout.rows,
+      cols: layout.cols
+    };
+  }, [getWellPlateLayout]);
+
+  // Helper: get wellId from row/col index
+  const getWellIdFromIndex = useCallback((rowIdx, colIdx) => {
+    const layout = getWellPlateLayout();
+    return `${layout.rows[rowIdx]}${layout.cols[colIdx]}`;
+  }, [getWellPlateLayout]);
+
+  // Helper: get row/col index from wellId
+  const getIndexFromWellId = useCallback((wellId) => {
+    const layout = getWellPlateLayout();
+    const row = layout.rows.findIndex(r => wellId.startsWith(r));
+    const col = layout.cols.findIndex(c => wellId.endsWith(c.toString()));
+    return [row, col];
+  }, [getWellPlateLayout]);
+
+  // State for drag selection in grid
+  const [gridDragStart, setGridDragStart] = useState(null);
+  const [gridDragEnd, setGridDragEnd] = useState(null);
+  const [isGridDragging, setIsGridDragging] = useState(false);
+
+  // Compute selected cells for grid drag
+  const gridSelectedCells = useMemo(() => {
+    if (!gridDragStart || !gridDragEnd) return {};
+    const layout = getWellPlateLayout();
+    const r1 = Math.min(gridDragStart[0], gridDragEnd[0]);
+    const c1 = Math.min(gridDragStart[1], gridDragEnd[1]);
+    const r2 = Math.max(gridDragStart[0], gridDragEnd[0]);
+    const c2 = Math.max(gridDragStart[1], gridDragEnd[1]);
+    const selected = {};
+    for (let r = r1; r <= r2; r++) {
+      for (let c = c1; c <= c2; c++) {
+        selected[`${r}-${c}`] = true;
+      }
+    }
+    return selected;
+  }, [gridDragStart, gridDragEnd, getWellPlateLayout]);
+
+  // Mouse handlers for grid selection
+  const handleGridCellMouseDown = (rowIdx, colIdx) => {
+    setGridDragStart([rowIdx, colIdx]);
+    setGridDragEnd([rowIdx, colIdx]);
+    setIsGridDragging(true);
+  };
+  const handleGridCellMouseEnter = (rowIdx, colIdx) => {
+    if (isGridDragging) {
+      setGridDragEnd([rowIdx, colIdx]);
+    }
+  };
+  useEffect(() => {
+    const handleMouseUp = () => {
+      if (isGridDragging && gridDragStart && gridDragEnd) {
+        // Compute all selected wells
+        const layout = getWellPlateLayout();
+        const r1 = Math.min(gridDragStart[0], gridDragEnd[0]);
+        const c1 = Math.min(gridDragStart[1], gridDragEnd[1]);
+        const r2 = Math.max(gridDragStart[0], gridDragEnd[0]);
+        const c2 = Math.max(gridDragStart[1], gridDragEnd[1]);
+        const newSelected = [];
+        for (let r = r1; r <= r2; r++) {
+          for (let c = c1; c <= c2; c++) {
+            newSelected.push(getWellIdFromIndex(r, c));
+          }
+        }
+        // Add to previous selection (union)
+        setSelectedWells(prev => Array.from(new Set([...prev, ...newSelected])));
+      }
+      setIsGridDragging(false);
+      setGridDragStart(null);
+      setGridDragEnd(null);
+    };
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => window.removeEventListener('mouseup', handleMouseUp);
+  }, [isGridDragging, gridDragStart, gridDragEnd, getWellIdFromIndex, getWellPlateLayout]);
+
+  // In scan start button handler, pass selectedWells to normal_scan_with_stitching
+
+  // Helper: calculate FOV positions for a given well center
+  const calculateFOVPositionsForWell = useCallback((wellInfo) => {
+    if (!scanParameters || !fovSize || !pixelsPerMm || !mapScale || !wellInfo) return [];
+    const positions = [];
+    for (let i = 0; i < scanParameters.Nx; i++) {
+      for (let j = 0; j < scanParameters.Ny; j++) {
+        const stageX = wellInfo.centerX + scanParameters.start_x_mm + i * scanParameters.dx_mm;
+        const stageY = wellInfo.centerY + scanParameters.start_y_mm + j * scanParameters.dy_mm;
+        const displayCoords = stageToDisplayCoords(stageX, stageY);
+        const fovDisplaySize = fovSize * pixelsPerMm * mapScale;
+        positions.push({
+          x: displayCoords.x - fovDisplaySize / 2,
+          y: displayCoords.y - fovDisplaySize / 2,
+          width: fovDisplaySize,
+          height: fovDisplaySize,
+          stageX,
+          stageY,
+          index: i * scanParameters.Ny + j
+        });
+      }
+    }
+    return positions;
+  }, [scanParameters, fovSize, pixelsPerMm, mapScale, stageToDisplayCoords]);
+
   if (!isOpen) return null;
 
   return (
@@ -2412,21 +2520,7 @@ const MicroscopeMapDisplay = ({
                   </select>
                 </div>
 
-                {/* Selected Wells Display */}
-                 <div className="flex items-center space-x-1">
-                   <label className="text-white text-xs">Wells:</label>
-                   <div className="px-2 py-0.5 text-xs bg-gray-700 border border-gray-600 rounded text-white min-w-[60px]">
-                     {selectedWells.length > 0 ? selectedWells.join(', ') : 'None'}
-                   </div>
-                   <button
-                     onClick={() => setSelectedWells(['A1'])}
-                     className="px-1 py-0.5 text-xs bg-gray-600 hover:bg-gray-500 text-white rounded"
-                     title="Reset to A1"
-                     disabled={isSimulatedMicroscope}
-                   >
-                     <i className="fas fa-undo text-xs"></i>
-                   </button>
-                 </div>
+
 
                  {/* Well Padding Control */}
                  <div className="flex items-center space-x-1">
@@ -2835,35 +2929,46 @@ const MicroscopeMapDisplay = ({
 
         {/* FOV boxes preview during scan configuration */}
         {mapViewMode === 'FREE_PAN' && showScanConfig && (() => {
-          const fovPositions = calculateFOVPositions();
-          return fovPositions.map((fov, index) => (
-            <div
-              key={`fov-${index}`}
-              className="absolute border border-green-400 bg-green-400 bg-opacity-10 pointer-events-none"
-              style={{
-                left: `${fov.x}px`,
-                top: `${fov.y}px`,
-                width: `${fov.width}px`,
-                height: `${fov.height}px`,
-                zIndex: 25 // Above scan results but below selection rectangle
-              }}
-            >
-              {/* Show position number for each FOV if zoom is high enough */}
-              {fov.width > 30 && (
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <span className="text-green-300 text-xs font-bold bg-black bg-opacity-60 px-1 rounded">
-                    {fov.index + 1}
-                  </span>
-                </div>
-              )}
-              {/* Show stage coordinates if FOV is large enough */}
-              {fov.width > 50 && (
-                <div className="absolute top-0 left-0 text-green-300 text-xs bg-black bg-opacity-60 px-1 rounded-br">
-                  {fov.stageX.toFixed(1)}, {fov.stageY.toFixed(1)}
-                </div>
-              )}
-            </div>
-          ));
+          // For each selected well, show FOV grid overlay
+          const layout = getWellPlateLayout();
+          const wellConfig = getWellPlateConfig();
+          if (!wellConfig) return null;
+          return selectedWells.map(wellId => {
+            // Find well center
+            const rowIdx = layout.rows.findIndex(r => wellId.startsWith(r));
+            const colIdx = layout.cols.findIndex(c => wellId.endsWith(c.toString()));
+            if (rowIdx === -1 || colIdx === -1) return null;
+            const centerX = wellConfig.a1_x_mm + colIdx * wellConfig.well_spacing_mm;
+            const centerY = wellConfig.a1_y_mm + rowIdx * wellConfig.well_spacing_mm;
+            const wellInfo = { id: wellId, centerX, centerY };
+            const fovPositions = calculateFOVPositionsForWell(wellInfo);
+            return fovPositions.map((fov, index) => (
+              <div
+                key={`fov-${wellId}-${index}`}
+                className="absolute border border-green-400 bg-green-400 bg-opacity-10 pointer-events-none"
+                style={{
+                  left: `${fov.x}px`,
+                  top: `${fov.y}px`,
+                  width: `${fov.width}px`,
+                  height: `${fov.height}px`,
+                  zIndex: 25
+                }}
+              >
+                {fov.width > 30 && (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <span className="text-green-300 text-xs font-bold bg-black bg-opacity-60 px-1 rounded">
+                      {fov.index + 1}
+                    </span>
+                  </div>
+                )}
+                {fov.width > 50 && (
+                  <div className="absolute top-0 left-0 text-green-300 text-xs bg-black bg-opacity-60 px-1 rounded-br">
+                    {fov.stageX.toFixed(1)}, {fov.stageY.toFixed(1)}
+                  </div>
+                )}
+              </div>
+            ));
+          });
         })()}
         
         {/* Current video frame position indicator */}
@@ -3682,7 +3787,52 @@ const MicroscopeMapDisplay = ({
               <i className="fas fa-times"></i>
             </button>
           </div>
-          
+          {/* --- Multi-well Selection Grid UI --- */}
+          <div className="scan-well-plate-grid-container">
+            <div className="flex flex-col w-full items-center">
+              <div className="flex w-full items-center mb-1">
+                <span className="text-xs text-gray-300 mr-2">Selected: {selectedWells.length}</span>
+                <button
+                  onClick={() => setSelectedWells([])}
+                  className="ml-auto px-2 py-1 text-xs bg-gray-600 hover:bg-gray-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Clear all well selections"
+                  disabled={selectedWells.length === 0}
+                >
+                  <i className="fas fa-refresh mr-1"></i>Refresh
+                </button>
+              </div>
+              <div className="scan-well-plate-grid">
+                <div className="scan-grid-col-labels">
+                  <div></div>
+                  {getWellPlateGridLabels().cols.map((label, colIdx) => (
+                    <div key={`col-${label}`} className="scan-grid-label">{label}</div>
+                  ))}
+                </div>
+                {getWellPlateGridLabels().rows.map((rowLabel, rowIdx) => (
+                  <div key={`row-${rowIdx}`} className="scan-grid-row">
+                    <div className="scan-grid-label">{rowLabel}</div>
+                    {getWellPlateGridLabels().cols.map((colLabel, colIdx) => {
+                      const wellId = getWellIdFromIndex(rowIdx, colIdx);
+                      const isSelected = selectedWells.includes(wellId);
+                      const isDragSelected = gridSelectedCells[`${rowIdx}-${colIdx}`];
+                      return (
+                        <div
+                          key={`cell-${rowIdx}-${colIdx}`}
+                          className={`scan-grid-cell${isSelected || isDragSelected ? ' selected' : ''}`}
+                          onMouseDown={() => handleGridCellMouseDown(rowIdx, colIdx)}
+                          onMouseEnter={() => handleGridCellMouseEnter(rowIdx, colIdx)}
+                          style={{ userSelect: 'none' }}
+                        >
+                          {/* Optionally show wellId or leave blank for cleaner look */}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
           <div className="space-y-3 text-xs">
             <div>
               <label className="block text-gray-300 font-medium mb-1">Start Position (mm)</label>
@@ -4136,7 +4286,7 @@ const MicroscopeMapDisplay = ({
                       'scan_' + Date.now(),
                       0, // timepoint index
                       activeExperiment, // experiment_name parameter
-                      selectedWells, // wells_to_scan parameter
+                      selectedWells, // <-- now supports multi-well
                       wellPlateType, // wellplate_type parameter
                       wellPaddingMm // well_padding_mm parameter
                     );
