@@ -3,13 +3,13 @@ import PropTypes from 'prop-types';
 import './Sidebar.css';
 import SampleSelector from './SampleSelector';
 
-const Sidebar = ({ 
+const Sidebar = React.forwardRef(({ 
   activeTab, 
   onTabChange, 
   onMicroscopeSelect, 
   selectedMicroscopeId,
   currentOperation, // Added prop to disable navigation during sample operations
-}) => {
+}, ref) => {
   // State for microscope dropdown
   const [isMicroscopeDropdownOpen, setIsMicroscopeDropdownOpen] = useState(true);
 
@@ -234,6 +234,26 @@ const Sidebar = ({
     }
   };
 
+  // Function to collapse sidebar from parent (for FREE_PAN auto-collapse)
+  const collapseSidebar = () => {
+    if (!currentOperation && !isMainSidebarCollapsed) {
+      setIsMainSidebarCollapsed(true);
+    }
+  };
+
+  // Function to expand sidebar from parent (for Fit to View)
+  const expandSidebar = () => {
+    if (!currentOperation && isMainSidebarCollapsed) {
+      setIsMainSidebarCollapsed(false);
+    }
+  };
+
+  // Expose collapse and expand functions to parent via useImperativeHandle
+  React.useImperativeHandle(ref, () => ({
+    collapseSidebar,
+    expandSidebar
+  }), [currentOperation, isMainSidebarCollapsed]);
+
   return (
     <div className="sidebar-container">
       <div className={`main-sidebar ${isMainSidebarCollapsed ? 'main-sidebar-collapsed' : ''} ${currentOperation ? 'operation-in-progress' : ''}`} style={{ cursor: currentOperation ? 'not-allowed' : 'default' }}>
@@ -441,7 +461,7 @@ const Sidebar = ({
       )}
     </div>
   );
-};
+});
 
 Sidebar.propTypes = {
   activeTab: PropTypes.string.isRequired,
