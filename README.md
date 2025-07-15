@@ -53,6 +53,7 @@ Built for research laboratories, Agent-Lens combines modern web technologies wit
 - **High-resolution Display**: OpenLayers-based pan/zoom interface
 - **Annotation Tools**: Points, polygons, and custom markers
 - **Data Management**: Zarr-based efficient storage and retrieval
+- **Interactive Image Map**: Pan/zoomable stage map with well plate overlay, scan area selection, and multi-well support
 
 ### 🏭 **Hardware Integration**
 - **Robotic Automation**: Automated sample handling and transfer
@@ -210,6 +211,17 @@ agent-lens/
 - Real-time hardware control with safety mechanisms
 - Multi-axis positioning and automated movements
 - Channel management and illumination control
+
+### **Microscope Image Map**
+- **Interactive Stage Map**: Visualize the entire microscope stage with pan and zoom controls.
+- **Well Plate Overlay**: See 96, 48, or 24-well plate layouts directly on the map.
+- **Scan Area Selection**: Click and drag to select scan regions within wells, with visual feedback.
+- **Multi-Well Support**: Select multiple wells for batch scanning or time-lapse imaging.
+- **Live Video Integration**: See the current field of view (FOV) and live video position on the map.
+- **Scan Results Overlay**: View stitched scan results as image tiles, with channel selection and layer controls.
+- **Experiment Management**: Organize scan data by experiment, with per-well canvases and metadata.
+
+The image map is powered by the `MicroscopeMapDisplay` React component, integrated into the main control panel. It provides a seamless experience for both real and simulated microscopes, supporting advanced workflows like multi-well scanning and experiment-based data management.
 
 ### **AI Segmentation Engine**
 - Multiple model support (SAM, custom models)

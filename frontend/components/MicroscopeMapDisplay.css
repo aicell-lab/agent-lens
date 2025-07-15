@@ -303,3 +303,83 @@ input[type="checkbox"]:disabled + span {
     box-shadow: 0 2px 12px rgba(251, 146, 60, 0.6);
   }
 }
+
+/* Multi-well selection grid for Scan Configuration panel */
+.scan-well-plate-grid-container {
+  margin-top: 0.5rem;
+  margin-bottom: 1rem;
+  user-select: none;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.scan-well-plate-grid {
+  display: grid;
+  grid-template-columns: auto repeat(12, 1fr);
+  gap: 1px;
+  border: 1px solid #374151;
+  padding: 2px;
+  background-color: #23272f;
+  width: 100%;
+  max-width: 260px; /* was 340px */
+  border-radius: 0.5rem;
+}
+
+.scan-grid-row {
+  display: contents;
+}
+
+.scan-grid-col-labels {
+  display: contents;
+}
+
+.scan-grid-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  font-size: 0.65rem;
+  font-weight: bold;
+  background-color: #374151;
+  color: #cbd5e1;
+  min-width: 14px;
+  text-align: center;
+  border-radius: 0.25rem;
+}
+
+.scan-grid-cell {
+  padding: 3px;
+  border: 1px solid #374151;
+  background-color: #23272f;
+  text-align: center;
+  cursor: pointer;
+  font-size: 0.6rem;
+  transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+  min-width: 14px;
+  min-height: 14px;
+  border-radius: 0.25rem;
+  color: #cbd5e1;
+}
+
+.scan-grid-cell:hover {
+  background-color: #334155;
+}
+
+.scan-grid-cell.selected {
+  background-color: #2563eb;
+  color: #fff;
+  border-color: #1d4ed8;
+}
+
+.scan-grid-cell:disabled {
+  background-color: #1e293b;
+  cursor: not-allowed;
+  color: #64748b;
+}
+
+/* Ensure the first cell in the column labels row (top-left empty cell) is styled like other labels */
+.scan-well-plate-grid > .scan-grid-col-labels > div:first-child {
+  background-color: #374151;
+  border: none;
+}
