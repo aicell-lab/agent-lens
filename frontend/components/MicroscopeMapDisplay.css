@@ -383,3 +383,34 @@ input[type="checkbox"]:disabled + span {
   background-color: #374151;
   border: none;
 }
+
+/* Browse Data Modal styles */
+.browse-data-modal {
+  max-width: 900px;
+  width: 100%;
+  background: #23272f;
+  border-radius: 0.75rem;
+  box-shadow: 0 4px 32px rgba(0,0,0,0.5);
+  border: 1px solid #374151;
+  overflow: hidden;
+}
+.browse-data-modal-header {
+  padding: 1rem;
+  border-bottom: 1px solid #374151;
+  background: #1a1a1a;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.browse-data-modal-body {
+  display: flex;
+  flex-direction: row;
+  min-height: 350px;
+}
+.browse-data-modal-col {
+  flex: 1;
+  padding: 1.5rem;
+}
+.browse-data-modal-col:not(:last-child) {
+  border-right: 1px solid #374151;
+}

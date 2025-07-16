@@ -2238,6 +2238,9 @@ const MicroscopeMapDisplay = ({
     return positions;
   }, [scanParameters, fovSize, pixelsPerMm, mapScale, stageToDisplayCoords]);
 
+  // Add state for browse data modal
+  const [showBrowseDataModal, setShowBrowseDataModal] = useState(false);
+
   if (!isOpen) return null;
 
   return (
@@ -2651,6 +2654,16 @@ const MicroscopeMapDisplay = ({
                 >
                   <i className="fas fa-undo mr-1"></i>
                   Reset Experiment
+                </button>
+                {/* New Browse Data Button */}
+                <button
+                  onClick={() => setShowBrowseDataModal(true)}
+                  className="px-2 py-1 text-xs bg-blue-700 hover:bg-blue-600 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Browse imaging data for this microscope"
+                  disabled={isInteractionDisabled || !microscopeControlService || isSimulatedMicroscope}
+                >
+                  <i className="fas fa-database mr-1"></i>
+                  Browse Data
                 </button>
               </div>
             </>
@@ -3370,8 +3383,6 @@ const MicroscopeMapDisplay = ({
           </div>
         </div>
       )}
-
-
 
       {/* Quick Scan Configuration Side Panel */}
       {showQuickScanConfig && (
@@ -4369,6 +4380,40 @@ const MicroscopeMapDisplay = ({
             </button>
             
 
+          </div>
+        </div>
+      )}
+      {/* Browse Data Modal */}
+      {showBrowseDataModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-800 border border-gray-600 rounded-lg shadow-xl max-w-3xl w-full text-white">
+            {/* Modal Header */}
+            <div className="flex justify-between items-center p-4 border-b border-gray-600">
+              <h3 className="text-lg font-semibold text-gray-200 flex items-center">
+                <i className="fas fa-database text-blue-400 mr-2"></i>
+                Browse Imaging Data
+              </h3>
+              <button
+                onClick={() => setShowBrowseDataModal(false)}
+                className="text-gray-400 hover:text-white text-xl font-bold w-6 h-6 flex items-center justify-center"
+                title="Close"
+              >
+                ×
+              </button>
+            </div>
+            {/* Modal Body: Two columns */}
+            <div className="flex flex-row divide-x divide-gray-700" style={{ minHeight: '350px' }}>
+              {/* Experiments List (Left) */}
+              <div className="flex-1 p-4">
+                <div className="text-gray-300 font-medium mb-2">Experiments</div>
+                {/* TODO: List experiments here */}
+              </div>
+              {/* Datasets List (Right) */}
+              <div className="flex-1 p-4">
+                <div className="text-gray-300 font-medium mb-2">Datasets</div>
+                {/* TODO: List datasets for selected experiment here */}
+              </div>
+            </div>
           </div>
         </div>
       )}
