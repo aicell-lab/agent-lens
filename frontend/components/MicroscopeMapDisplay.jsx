@@ -2447,6 +2447,36 @@ const MicroscopeMapDisplay = ({
                                   Create
                                 </button>
                                 <button
+                                  onClick={async () => {
+                                    if (!activeExperiment || !microscopeControlService) return;
+                                    // Show notification that upload started
+                                    if (showNotification) showNotification('Upload started in background', 'info');
+                                    try {
+                                      const result = await microscopeControlService.upload_zarr_dataset(
+                                        activeExperiment,
+                                        '', // description (optional, empty for now)
+                                        true // include_acquisition_settings
+                                      );
+                                      if (result && result.success) {
+                                        if (showNotification) showNotification('Upload completed successfully', 'success');
+                                        if (appendLog) appendLog(`Upload completed: ${result.dataset_name}`);
+                                      } else {
+                                        if (showNotification) showNotification(`Upload failed: ${result?.message || 'Unknown error'}`, 'error');
+                                        if (appendLog) appendLog(`Upload failed: ${result?.message || 'Unknown error'}`);
+                                      }
+                                    } catch (error) {
+                                      if (showNotification) showNotification(`Upload error: ${error.message}`, 'error');
+                                      if (appendLog) appendLog(`Upload error: ${error.message}`);
+                                    }
+                                  }}
+                                  className="flex-1 px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded disabled:opacity-50"
+                                  disabled={!activeExperiment}
+                                  title={!activeExperiment ? "Select an active experiment to upload" : "Upload experiment data to artifact manager"}
+                                >
+                                  <i className="fas fa-upload mr-1"></i>
+                                  Upload
+                                </button>
+                                <button
                                   onClick={() => getExperimentInfo(activeExperiment)}
                                   className="flex-1 px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded disabled:opacity-50"
                                   disabled={!activeExperiment}
