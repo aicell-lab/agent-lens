@@ -2544,8 +2544,8 @@ const MicroscopeMapDisplay = ({
                     disabled={isSimulatedMicroscope}
                   >
                     <option value="96">96-well</option>
-                    <option value="48">48-well</option>
-                    <option value="24">24-well</option>
+                    <option value="96">only 96-well for now</option>
+
                   </select>
                 </div>
 
