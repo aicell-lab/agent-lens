@@ -2400,7 +2400,6 @@ const MicroscopeMapDisplay = ({
                                     <div className="flex-1">
                                       <div className="font-medium">{experiment.name}</div>
                                       <div className="text-xs opacity-75">
-                                        {experiment.wells_with_data || 0} wells • {experiment.total_timepoints || 0} timepoints
                                         {experiment.name === activeExperiment && <span className="ml-1 text-green-300">• Active</span>}
                                       </div>
                                     </div>
