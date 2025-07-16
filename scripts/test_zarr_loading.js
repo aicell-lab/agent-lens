@@ -40,7 +40,7 @@ async function printGroupStructure(baseUrl, path = '', indent = '') {
     let chunkInfo = '';
     if (zarray && zarray.shape && zarray.chunks) {
       const nChunks = countChunks(zarray.shape, zarray.chunks);
-      chunkInfo = ` | shape: [${zarray.shape.join(', ')}], chunks: [${zarray.chunks.join(', ')}], #chunks: ${nChunks}`;
+      chunkInfo = ` | shape: [${zarray.shape.join(', ')}], chunks: [${zarray.chunks.join(', ')}], #Theoretical chunks: ${nChunks}`;
     }
     console.log(`${indent}Array: ${path || '/'}${zattrs ? ' (has .zattrs)' : ''}${chunkInfo}`);
   }
