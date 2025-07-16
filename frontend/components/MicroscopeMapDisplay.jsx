@@ -2241,6 +2241,63 @@ const MicroscopeMapDisplay = ({
   // Add state for browse data modal
   const [showBrowseDataModal, setShowBrowseDataModal] = useState(false);
 
+  // Add state for gallery and dataset browsing
+  const [galleries, setGalleries] = useState([]);
+  const [galleriesLoading, setGalleriesLoading] = useState(false);
+  const [galleriesError, setGalleriesError] = useState(null);
+  const [selectedGallery, setSelectedGallery] = useState(null);
+  const [datasets, setDatasets] = useState([]);
+  const [datasetsLoading, setDatasetsLoading] = useState(false);
+  const [datasetsError, setDatasetsError] = useState(null);
+
+  // Fetch galleries when modal opens or microscope changes
+  useEffect(() => {
+    if (!showBrowseDataModal || !selectedMicroscopeId) return;
+    setGalleriesLoading(true);
+    setGalleriesError(null);
+    setGalleries([]);
+    setSelectedGallery(null);
+    setDatasets([]);
+    setDatasetsError(null);
+    const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
+    fetch(`/agent-lens/apps/${serviceId}/list-microscope-galleries?microscope_service_id=${encodeURIComponent(selectedMicroscopeId)}`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          setGalleries(data.galleries || []);
+        } else {
+          setGalleriesError(data.error || 'Failed to load galleries');
+          console.error(data.error);
+        }
+      })
+      .catch(e => setGalleriesError(e.message))
+      .finally(() => setGalleriesLoading(false));
+  }, [showBrowseDataModal, selectedMicroscopeId]);
+
+  // Fetch datasets when a gallery is selected
+  useEffect(() => {
+    if (!selectedGallery) {
+      setDatasets([]);
+      setDatasetsError(null);
+      return;
+    }
+    setDatasetsLoading(true);
+    setDatasetsError(null);
+    setDatasets([]);
+    const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
+    fetch(`/agent-lens/apps/${serviceId}/list-gallery-datasets?gallery_id=${encodeURIComponent(selectedGallery.id)}`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          setDatasets(data.datasets || []);
+        } else {
+          setDatasetsError(data.error || 'Failed to load datasets');
+        }
+      })
+      .catch(e => setDatasetsError(e.message))
+      .finally(() => setDatasetsLoading(false));
+  }, [selectedGallery, selectedMicroscopeId]);
+
   if (!isOpen) return null;
 
   return (
@@ -4401,17 +4458,51 @@ const MicroscopeMapDisplay = ({
                 ×
               </button>
             </div>
+            {/* Notice */}
+            <div className="bg-blue-900 bg-opacity-40 text-blue-200 text-xs p-2 px-4 border-b border-blue-700">
+              This is for data browsing, for management, please go to <a href="https://hypha.aicell.io/agent-lens#artifacts" target="_blank" rel="noopener noreferrer" className="underline text-blue-300">https://hypha.aicell.io/agent-lens#artifacts</a> if you have access.
+            </div>
             {/* Modal Body: Two columns */}
             <div className="flex flex-row divide-x divide-gray-700" style={{ minHeight: '350px' }}>
-              {/* Experiments List (Left) */}
-              <div className="flex-1 p-4">
-                <div className="text-gray-300 font-medium mb-2">Experiments</div>
-                {/* TODO: List experiments here */}
+              {/* Experiments/Galleries List (Left) */}
+              <div className="flex-1 p-4 overflow-y-auto">
+                <div className="text-gray-300 font-medium mb-2">Galleries</div>
+                {galleriesLoading && <div className="text-xs text-gray-400">Loading galleries...</div>}
+                {galleriesError && <div className="text-xs text-red-400">{galleriesError}</div>}
+                {!galleriesLoading && !galleriesError && galleries.length === 0 && (
+                  <div className="text-xs text-gray-400">No galleries found for this microscope.</div>
+                )}
+                <ul className="space-y-1">
+                  {galleries.map(gal => (
+                    <li key={gal.id}>
+                      <button
+                        className={`w-full text-left px-2 py-1 rounded ${selectedGallery && selectedGallery.id === gal.id ? 'bg-blue-700 text-white' : 'bg-gray-700 text-gray-200 hover:bg-blue-800'}`}
+                        onClick={() => setSelectedGallery(gal)}
+                      >
+                        {gal.manifest?.name || gal.alias || gal.id}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
               </div>
               {/* Datasets List (Right) */}
-              <div className="flex-1 p-4">
+              <div className="flex-1 p-4 overflow-y-auto">
                 <div className="text-gray-300 font-medium mb-2">Datasets</div>
-                {/* TODO: List datasets for selected experiment here */}
+                {!selectedGallery && <div className="text-xs text-gray-400">Select a gallery to view datasets.</div>}
+                {datasetsLoading && <div className="text-xs text-gray-400">Loading datasets...</div>}
+                {datasetsError && <div className="text-xs text-red-400">{datasetsError}</div>}
+                {!datasetsLoading && !datasetsError && selectedGallery && datasets.length === 0 && (
+                  <div className="text-xs text-gray-400">No datasets found in this gallery.</div>
+                )}
+                <ul className="space-y-1">
+                  {datasets.map(ds => (
+                    <li key={ds.id}>
+                      <div className="px-2 py-1 rounded bg-gray-700 text-gray-200">
+                        {ds.manifest?.name || ds.alias || ds.id}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
               </div>
             </div>
           </div>

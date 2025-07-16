@@ -211,18 +211,6 @@ class AgentLensArtifactManager:
         files = await self._svc.list_files(dataset_id)
         return files
 
-    async def navigate_collections(self, parent_id=None):
-        """
-        Navigate through collections and datasets.
-
-        Args:
-            parent_id (str, optional): The ID of the parent collection. Defaults to None for top-level collections.
-
-        Returns:
-            list: A list of collections and datasets under the specified parent.
-        """
-        collections = await self._svc.list(artifact_id=parent_id)
-        return collections
 
     async def get_file_details(self, dataset_id, file_path):
         """
@@ -301,32 +289,21 @@ class AgentLensArtifactManager:
         This includes both standard microscope galleries and experiment-based galleries.
         Returns a list of gallery info dicts.
         """
-        import re
         try:
             # List all collections in the agent-lens workspace (top-level)
-            all_collections = await self.navigate_collections(parent_id=None)
+            all_collections = await self._svc.list()
+            logger.info(f"Microscope service ID: {microscope_service_id}")
+            #logger.info(f"All collections: {all_collections}")
             galleries = []
-
-            # Check if microscope service ID ends with a number (for experiment-based galleries)
-            number_match = re.search(r'-(\d+)$', microscope_service_id)
 
             for coll in all_collections:
                 manifest = coll.get('manifest', {})
-                alias = coll.get('alias', '')
-
-                # Standard gallery: alias matches microscope-gallery-{microscope_service_id}
-                if alias == f"agent-lens/microscope-gallery-{microscope_service_id}":
-                    galleries.append(coll)
-                # Experiment-based gallery (for microscope IDs ending with numbers)
-                elif number_match:
-                    gallery_number = number_match.group(1)
-                    if alias.startswith(f"agent-lens/{gallery_number}-"):
-                        # Check manifest for matching microscope_service_id
-                        if manifest.get('microscope_service_id') == microscope_service_id:
-                            galleries.append(coll)
-                # Fallback: check manifest field
-                elif manifest.get('microscope_service_id') == microscope_service_id:
-                    galleries.append(coll)
+                manifest_microscope_id = manifest.get('microscope_service_id')
+                if manifest_microscope_id:
+                    # Match if manifest id is a substring or suffix of the provided id
+                    if manifest_microscope_id in microscope_service_id or microscope_service_id.endswith(manifest_microscope_id):
+                        galleries.append(coll)
+                        continue
 
             return {
                 "success": True,
@@ -351,16 +328,12 @@ class AgentLensArtifactManager:
             gallery = None
             if gallery_id:
                 # Try to read the gallery directly
-                try:
-                    gallery = await self._svc.get(gallery_id)
-                except Exception as e:
-                    logger.warning(f"Could not get gallery info directly: {e}")
-                    gallery = None
+                gallery = await self._svc.read(artifact_id=gallery_id)
             else:
                 # Use microscope_service_id and/or experiment_id to find the gallery
                 if microscope_service_id is None and experiment_id is None:
                     raise Exception("You must provide either gallery_id, microscope_service_id, or experiment_id.")
-                # For now, use list_microscope_galleries to find the gallery
+                # Use the same logic as before to find the gallery
                 galleries_result = await self.list_microscope_galleries(microscope_service_id)
                 galleries = galleries_result.get('galleries', [])
                 if not galleries:
@@ -369,7 +342,7 @@ class AgentLensArtifactManager:
             if not gallery:
                 raise Exception("Gallery not found.")
             # List datasets in the gallery
-            datasets = await self._svc.list(parent_id=gallery["id"])
+            datasets = await self._svc.list(gallery["id"])
             return {
                 "success": True,
                 "gallery_id": gallery["id"],

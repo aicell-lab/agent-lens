@@ -1302,6 +1302,48 @@ def get_frontend_api():
                 "message": f"Error setting up gallery map: {str(e)}"
             }
 
+    #########################################################################################
+    # These endpoints are used by new microscope map display
+    #########################################################################################
+    @app.get("/list-microscope-galleries")
+    async def list_microscope_galleries_endpoint(microscope_service_id: str):
+        """
+        Endpoint to list all galleries (collections) for a given microscope's service ID.
+        Returns a list of gallery info dicts.
+        """
+        try:
+            result = await artifact_manager_instance.list_microscope_galleries(microscope_service_id)
+            return result
+        except Exception as e:
+            logger.error(f"Error in /list-microscope-galleries: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return {"success": False, "error": str(e)}
+
+    @app.get("/list-gallery-datasets")
+    async def list_gallery_datasets_endpoint(
+        gallery_id: str = None,
+        microscope_service_id: str = None,
+        experiment_id: str = None
+    ):
+        """
+        Endpoint to list all datasets in a gallery (collection).
+        You can specify the gallery by its artifact ID, or provide microscope_service_id and/or experiment_id to find the gallery.
+        Returns a list of datasets in the gallery.
+        """
+        try:
+            result = await artifact_manager_instance.list_gallery_datasets(
+                gallery_id=gallery_id,
+                microscope_service_id=microscope_service_id,
+                experiment_id=experiment_id
+            )
+            return result
+        except Exception as e:
+            logger.error(f"Error in /list-gallery-datasets: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return {"success": False, "error": str(e)}
+
     async def serve_fastapi(args):
         await app(args["scope"], args["receive"], args["send"])
 
