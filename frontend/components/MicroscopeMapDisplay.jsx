@@ -205,6 +205,9 @@ const MicroscopeMapDisplay = ({
   // State to track the well being selected during drag operations
   const [dragSelectedWell, setDragSelectedWell] = useState(null);
 
+  // Add state for historical data mode
+  const [isHistoricalDataMode, setIsHistoricalDataMode] = useState(false);
+
   // Helper function to detect which well a stage coordinate belongs to
   const detectWellFromStageCoords = useCallback((stageX, stageY) => {
     const wellConfig = getWellPlateConfig();
@@ -777,7 +780,7 @@ const MicroscopeMapDisplay = ({
   }, [containerDimensions, mapViewMode, currentStagePosition, stageDimensions, mapScale, effectivePan, fovSize, pixelsPerMm]);
 
   // Split interaction controls: hardware vs map browsing
-  const isHardwareInteractionDisabled = microscopeBusy || currentOperation !== null || isScanInProgress || isQuickScanInProgress;
+  const isHardwareInteractionDisabled = isHistoricalDataMode || microscopeBusy || currentOperation !== null || isScanInProgress || isQuickScanInProgress;
   const isMapBrowsingDisabled = false; // Allow map browsing during all operations for real-time scan result viewing
   
   // Legacy compatibility - some UI elements still use the general disabled state
@@ -1751,6 +1754,10 @@ const MicroscopeMapDisplay = ({
 
   // Intelligent tile-based loading function
   const loadStitchedTiles = useCallback(async () => {
+    if (isHistoricalDataMode) {
+      // In historical data mode, do not load tiles from microscope
+      return;
+    }
     if (!microscopeControlService || !visibleLayers.scanResults || mapViewMode !== 'FREE_PAN' || isSimulatedMicroscope) {
       return;
     }
@@ -1859,7 +1866,7 @@ const MicroscopeMapDisplay = ({
         setIsLoadingCanvas(false);
       }
     }
-  }, [microscopeControlService, visibleLayers.scanResults, visibleLayers.channels, mapViewMode, scaleLevel, displayToStageCoords, stageDimensions, pixelsPerMm, isRegionCovered, getTileKey, addOrUpdateTile, appendLog, isSimulatedMicroscope]);
+  }, [isHistoricalDataMode, microscopeControlService, visibleLayers.scanResults, visibleLayers.channels, mapViewMode, scaleLevel, displayToStageCoords, stageDimensions, pixelsPerMm, isRegionCovered, getTileKey, addOrUpdateTile, appendLog, isSimulatedMicroscope]);
   
   // Debounce tile loading - only load after user stops interacting for 1 second
   const scheduleTileUpdate = useCallback(() => {
@@ -2298,6 +2305,9 @@ const MicroscopeMapDisplay = ({
       .finally(() => setDatasetsLoading(false));
   }, [selectedGallery, selectedMicroscopeId]);
 
+  // Add state for selected dataset in historical mode
+  const [selectedHistoricalDataset, setSelectedHistoricalDataset] = useState(null);
+
   if (!isOpen) return null;
 
   return (
@@ -2663,7 +2673,7 @@ const MicroscopeMapDisplay = ({
                 }`}
                 title={isSimulatedMicroscope ? "Scanning not supported for simulated microscope" : 
                        isScanInProgress ? "View/stop current scan" : "Configure scan and select area (automatically switches to stage map view)"}
-                disabled={!microscopeControlService || isSimulatedMicroscope}
+                disabled={!microscopeControlService || isSimulatedMicroscope || isHistoricalDataMode}
               >
                 <i className="fas fa-vector-square mr-1"></i>
                 {isScanInProgress ? (showScanConfig ? 'Close Scan Panel' : 'View Scan Progress') : 
@@ -2693,7 +2703,7 @@ const MicroscopeMapDisplay = ({
                   }`}
                   title={isSimulatedMicroscope ? "Quick scanning not supported for simulated microscope" : 
                          isQuickScanInProgress ? "View/stop current quick scan" : "Quick scan entire well plate with high-speed acquisition"}
-                  disabled={!microscopeControlService || isSimulatedMicroscope}
+                  disabled={!microscopeControlService || isSimulatedMicroscope || isHistoricalDataMode}
                 >
                   <i className="fas fa-bolt mr-1"></i>
                   {isQuickScanInProgress ? (showQuickScanConfig ? 'Close Quick Scan Panel' : 'View Quick Scan Progress') : 
@@ -2714,13 +2724,24 @@ const MicroscopeMapDisplay = ({
                 </button>
                 {/* New Browse Data Button */}
                 <button
-                  onClick={() => setShowBrowseDataModal(true)}
-                  className="px-2 py-1 text-xs bg-blue-700 hover:bg-blue-600 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                  title="Browse imaging data for this microscope"
-                  disabled={isInteractionDisabled || !microscopeControlService || isSimulatedMicroscope}
+                  onClick={() => {
+                    if (isHistoricalDataMode) {
+                      setIsHistoricalDataMode(false); // Exit historical data mode
+                      setStitchedTiles([]); // Optionally clear tiles to force reload
+                    } else {
+                      setShowBrowseDataModal(true);
+                    }
+                  }}
+                  className={`px-2 py-1 text-xs rounded disabled:opacity-50 disabled:cursor-not-allowed ${
+                    isHistoricalDataMode
+                      ? 'bg-yellow-700 hover:bg-yellow-600 text-white border-2 border-yellow-400' // Style for exit mode
+                      : 'bg-blue-700 hover:bg-blue-600 text-white'
+                  }`}
+                  title={isHistoricalDataMode ? 'Exit historical data map mode' : 'Browse imaging data for this microscope'}
+                  disabled={!microscopeControlService || isSimulatedMicroscope}
                 >
-                  <i className="fas fa-database mr-1"></i>
-                  Browse Data
+                  <i className={`fas ${isHistoricalDataMode ? 'fa-sign-out-alt' : 'fa-database'} mr-1`}></i>
+                  {isHistoricalDataMode ? 'Exit Data Map' : 'Browse Data'}
                 </button>
               </div>
             </>
@@ -3069,7 +3090,7 @@ const MicroscopeMapDisplay = ({
         })()}
         
         {/* Current video frame position indicator */}
-        {videoFramePosition && (
+        {videoFramePosition && !isHistoricalDataMode && (
           <div
             className="absolute border-2 border-yellow-400 pointer-events-none"
             style={{
@@ -3223,7 +3244,7 @@ const MicroscopeMapDisplay = ({
         )}
         
         {/* Stage position info for FREE_PAN mode */}
-        {mapViewMode === 'FREE_PAN' && currentStagePosition && (
+        {mapViewMode === 'FREE_PAN' && currentStagePosition && !isHistoricalDataMode && (
           <div className="absolute bottom-4 left-4 bg-black bg-opacity-80 text-white p-2 rounded text-xs">
             <div>Stage Position:</div>
             <div>X: {currentStagePosition.x.toFixed(3)}mm</div>
@@ -4484,6 +4505,21 @@ const MicroscopeMapDisplay = ({
                     </li>
                   ))}
                 </ul>
+                {/* View Gallery in Map Button */}
+                <div className="mt-4 flex justify-end">
+                  <button
+                    className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={!selectedGallery}
+                    onClick={() => {
+                      setShowBrowseDataModal(false);
+                      setIsHistoricalDataMode(true);
+                      setStitchedTiles([]); // Clear all loaded tiles
+                    }}
+                  >
+                    <i className="fas fa-map-marked-alt mr-1"></i>
+                    View Gallery in Map
+                  </button>
+                </div>
               </div>
               {/* Datasets List (Right) */}
               <div className="flex-1 p-4 overflow-y-auto">
@@ -4505,6 +4541,28 @@ const MicroscopeMapDisplay = ({
                 </ul>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {isHistoricalDataMode && selectedGallery && datasets.length > 0 && (
+        <div className="historical-timeline-container">
+          <div className="historical-timeline-line">
+            {datasets.map((ds, idx) => {
+              const isSelected = selectedHistoricalDataset && selectedHistoricalDataset.id === ds.id;
+              return (
+                <div
+                  key={ds.id}
+                  className={`historical-timeline-point${isSelected ? ' selected' : ''}`}
+                  style={{ left: `${(idx / (datasets.length - 1)) * 100}%` }}
+                  onClick={() => setSelectedHistoricalDataset(ds)}
+                  title={ds.manifest?.name || ds.alias || ds.id}
+                >
+                  <div className="historical-timeline-dot" />
+                  <div className="historical-timeline-label">{ds.id}</div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
