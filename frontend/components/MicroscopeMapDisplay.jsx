@@ -4466,7 +4466,7 @@ const MicroscopeMapDisplay = ({
             <div className="flex flex-row divide-x divide-gray-700" style={{ minHeight: '350px' }}>
               {/* Experiments/Galleries List (Left) */}
               <div className="flex-1 p-4 overflow-y-auto">
-                <div className="text-gray-300 font-medium mb-2">Galleries</div>
+                <div className="text-gray-300 font-medium mb-2">Experiment Galleries</div>
                 {galleriesLoading && <div className="text-xs text-gray-400">Loading galleries...</div>}
                 {galleriesError && <div className="text-xs text-red-400">{galleriesError}</div>}
                 {!galleriesLoading && !galleriesError && galleries.length === 0 && (
