@@ -478,3 +478,113 @@ input[type="checkbox"]:disabled + span {
   color: #fbbf24;
   font-weight: bold;
 }
+
+/* Historical Timepoint Controls */
+.historical-timepoint-container {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 60px; /* Position above the timeline */
+  height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 59;
+  pointer-events: auto;
+  background: rgba(30, 41, 59, 0.95);
+  border-top: 1px solid #374151;
+  padding: 8px 16px;
+}
+
+.historical-timepoint-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  max-width: 400px;
+}
+
+.historical-timepoint-label {
+  font-size: 12px;
+  color: #cbd5e1;
+  font-weight: 500;
+  min-width: 80px;
+  text-align: center;
+}
+
+.historical-timepoint-slider {
+  flex: 1;
+  height: 6px;
+  background: #374151;
+  border-radius: 3px;
+  outline: none;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.historical-timepoint-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  background: #60a5fa;
+  border-radius: 50%;
+  border: 2px solid #2563eb;
+  cursor: pointer;
+  transition: background 0.2s, border 0.2s;
+}
+
+.historical-timepoint-slider::-webkit-slider-thumb:hover {
+  background: #93c5fd;
+  border-color: #3b82f6;
+}
+
+.historical-timepoint-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  background: #60a5fa;
+  border-radius: 50%;
+  border: 2px solid #2563eb;
+  cursor: pointer;
+  transition: background 0.2s, border 0.2s;
+}
+
+.historical-timepoint-slider::-moz-range-thumb:hover {
+  background: #93c5fd;
+  border-color: #3b82f6;
+}
+
+.historical-timepoint-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+.historical-timepoint-btn {
+  width: 28px;
+  height: 28px;
+  background: #374151;
+  border: 1px solid #4b5563;
+  border-radius: 4px;
+  color: #cbd5e1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  transition: background 0.2s, border 0.2s, color 0.2s;
+}
+
+.historical-timepoint-btn:hover:not(:disabled) {
+  background: #4b5563;
+  border-color: #60a5fa;
+  color: #fbbf24;
+}
+
+.historical-timepoint-btn:disabled {
+  background: #1f2937;
+  border-color: #374151;
+  color: #6b7280;
+  cursor: not-allowed;
+  opacity: 0.5;
+}
