@@ -2187,10 +2187,10 @@ const MicroscopeMapDisplay = ({
           return;
         }
         
-        // Call the historical data loader
+        // Call the historical data loader with absolute stage coordinates (following Python get_stitched_region pattern)
         const result = await artifactZarrLoaderRef.current.getHistoricalStitchedRegion(
-          centerX - detectedWell.centerX, // Convert to well-relative coordinates
-          centerY - detectedWell.centerY, // Convert to well-relative coordinates
+          centerX, // Use absolute stage coordinates (like live microscope mode)
+          centerY, // Use absolute stage coordinates (like live microscope mode)
           width_mm,
           height_mm,
           wellPlateType,
@@ -2199,15 +2199,21 @@ const MicroscopeMapDisplay = ({
           0, // Use fixed timepoint 0
           'base64',
           selectedHistoricalDataset.id,
-          detectedWell.id
+          detectedWell.id,
+          getWellPlateConfig() // Pass the actual well plate configuration
         );
         
         if (result.success) {
+          // Use the bounds returned from the historical data loader for proper positioning
+          const historicalBounds = result.metadata.bounds || bounds;
+          const historicalWidth_mm = result.metadata.region_mm?.width || width_mm;
+          const historicalHeight_mm = result.metadata.region_mm?.height || height_mm;
+          
           const newTile = {
             data: `data:image/png;base64,${result.data}`,
-            bounds,
-            width_mm,
-            height_mm,
+            bounds: historicalBounds,
+            width_mm: historicalWidth_mm,
+            height_mm: historicalHeight_mm,
             scale: scaleLevel,
             channel: activeChannel,
             timestamp: Date.now(),
