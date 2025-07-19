@@ -178,7 +178,7 @@ const MicroscopeMapDisplay = ({
   const [experimentInfo, setExperimentInfo] = useState(null);
 
   // Well selection state for scanning
-  const [selectedWells, setSelectedWells] = useState(['A1']); // Default to A1
+  const [selectedWells, setSelectedWells] = useState([]); // Start with no wells selected
   const [wellPlateType, setWellPlateType] = useState('96'); // Default to 96-well
   const [wellPaddingMm, setWellPaddingMm] = useState(1.0); // Default padding
 
