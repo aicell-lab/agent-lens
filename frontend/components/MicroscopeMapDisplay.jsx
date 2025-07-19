@@ -1938,7 +1938,9 @@ const MicroscopeMapDisplay = ({
   const getIndexFromWellId = useCallback((wellId) => {
     const layout = getWellPlateLayout();
     const row = layout.rows.findIndex(r => wellId.startsWith(r));
-    const col = layout.cols.findIndex(c => wellId.endsWith(c.toString()));
+    // Extract the column number from the well ID (everything after the row letter)
+    const colNumber = parseInt(wellId.substring(1));
+    const col = layout.cols.findIndex(c => c === colNumber);
     return [row, col];
   }, [getWellPlateLayout]);
 
@@ -2006,6 +2008,7 @@ const MicroscopeMapDisplay = ({
   // Helper: calculate FOV positions for a given well center
   const calculateFOVPositionsForWell = useCallback((wellInfo) => {
     if (!scanParameters || !fovSize || !pixelsPerMm || !mapScale || !wellInfo) return [];
+    
     const positions = [];
     for (let i = 0; i < scanParameters.Nx; i++) {
       for (let j = 0; j < scanParameters.Ny; j++) {
@@ -2013,6 +2016,7 @@ const MicroscopeMapDisplay = ({
         const stageY = wellInfo.centerY + scanParameters.start_y_mm + j * scanParameters.dy_mm;
         const displayCoords = stageToDisplayCoords(stageX, stageY);
         const fovDisplaySize = fovSize * pixelsPerMm * mapScale;
+        
         positions.push({
           x: displayCoords.x - fovDisplaySize / 2,
           y: displayCoords.y - fovDisplaySize / 2,
@@ -3214,26 +3218,30 @@ const MicroscopeMapDisplay = ({
           const wellConfig = getWellPlateConfig();
           if (!wellConfig) return null;
           return selectedWells.map(wellId => {
-            // Find well center
+            // Find well center - fix the parsing logic for multi-digit column numbers
             const rowIdx = layout.rows.findIndex(r => wellId.startsWith(r));
-            const colIdx = layout.cols.findIndex(c => wellId.endsWith(c.toString()));
+            // Extract the column number from the well ID (everything after the row letter)
+            const colNumber = parseInt(wellId.substring(1));
+            const colIdx = layout.cols.findIndex(c => c === colNumber);
             if (rowIdx === -1 || colIdx === -1) return null;
             const centerX = wellConfig.a1_x_mm + colIdx * wellConfig.well_spacing_mm;
             const centerY = wellConfig.a1_y_mm + rowIdx * wellConfig.well_spacing_mm;
             const wellInfo = { id: wellId, centerX, centerY };
+            
             const fovPositions = calculateFOVPositionsForWell(wellInfo);
+            
             return fovPositions.map((fov, index) => (
-              <div
-                key={`fov-${wellId}-${index}`}
-                className="absolute border border-green-400 bg-green-400 bg-opacity-10 pointer-events-none"
-                style={{
-                  left: `${fov.x}px`,
-                  top: `${fov.y}px`,
-                  width: `${fov.width}px`,
-                  height: `${fov.height}px`,
-                  zIndex: 25
-                }}
-              >
+                <div
+                  key={`fov-${wellId}-${index}`}
+                  className="absolute border border-green-400 bg-green-400 bg-opacity-10 pointer-events-none"
+                  style={{
+                    left: `${fov.x}px`,
+                    top: `${fov.y}px`,
+                    width: `${fov.width}px`,
+                    height: `${fov.height}px`,
+                    zIndex: 25
+                  }}
+                >
                 {fov.width > 30 && (
                   <div className="absolute inset-0 flex items-center justify-center">
                     <span className="text-green-300 text-xs font-bold bg-black bg-opacity-60 px-1 rounded">
