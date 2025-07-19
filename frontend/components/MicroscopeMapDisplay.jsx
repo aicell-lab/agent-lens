@@ -168,6 +168,7 @@ const MicroscopeMapDisplay = ({
 
   // Clear canvas confirmation dialog state
   const [showClearCanvasConfirmation, setShowClearCanvasConfirmation] = useState(false);
+  const [experimentToReset, setExperimentToReset] = useState(null);
 
   // Experiment management state (replacing fileset management)
   const [experiments, setExperiments] = useState([]);
@@ -371,30 +372,7 @@ const MicroscopeMapDisplay = ({
     }
   }, [microscopeControlService, showNotification, appendLog, loadExperiments]);
 
-  const resetExperiment = useCallback(async (experimentName) => {
-    if (!microscopeControlService || !experimentName) return;
-    
-    try {
-      const result = await microscopeControlService.reset_experiment(experimentName);
-      if (result.success !== false) {
-        if (showNotification) showNotification(`Reset experiment: ${experimentName}`, 'success');
-        if (appendLog) appendLog(`Reset experiment: ${experimentName}`);
-        await loadExperiments(); // Refresh the list
-        // Refresh scan results if visible
-        if (visibleLayers.scanResults) {
-          setTimeout(() => {
-            refreshScanResults();
-          }, 100);
-        }
-      } else {
-        if (showNotification) showNotification(`Failed to reset experiment: ${result.message}`, 'error');
-        if (appendLog) appendLog(`Failed to reset experiment: ${result.message}`);
-      }
-    } catch (error) {
-      if (showNotification) showNotification(`Error resetting experiment: ${error.message}`, 'error');
-      if (appendLog) appendLog(`Error resetting experiment: ${error.message}`);
-    }
-  }, [microscopeControlService, showNotification, appendLog, loadExperiments, visibleLayers.scanResults, refreshScanResults]);
+
 
   const getExperimentInfo = useCallback(async (experimentName) => {
     if (!microscopeControlService || !experimentName) return;
@@ -1742,15 +1720,15 @@ const MicroscopeMapDisplay = ({
 
   // Function to reset experiment after confirmation
   const handleResetExperiment = useCallback(async () => {
-    if (!microscopeControlService || !activeExperiment) return;
+    if (!microscopeControlService || !experimentToReset) return;
     
     try {
-      const result = await microscopeControlService.reset_experiment(activeExperiment);
+      const result = await microscopeControlService.reset_experiment(experimentToReset);
       if (result.success !== false) {
         setStitchedTiles([]);
         activeTileRequestsRef.current.clear();
-        if (showNotification) showNotification(`Experiment '${activeExperiment}' reset successfully`, 'success');
-        if (appendLog) appendLog(`Experiment '${activeExperiment}' reset successfully`);
+        if (showNotification) showNotification(`Experiment '${experimentToReset}' reset successfully`, 'success');
+        if (appendLog) appendLog(`Experiment '${experimentToReset}' reset successfully`);
         // Refresh experiments list
         await loadExperiments();
       } else {
@@ -1762,8 +1740,9 @@ const MicroscopeMapDisplay = ({
       if (appendLog) appendLog(`Failed to reset experiment: ${error.message}`);
     } finally {
       setShowClearCanvasConfirmation(false);
+      setExperimentToReset(null);
     }
-  }, [microscopeControlService, activeExperiment, showNotification, appendLog, loadExperiments]);
+  }, [microscopeControlService, experimentToReset, showNotification, appendLog, loadExperiments]);
   
   // Rectangle selection handlers
   const handleRectangleSelectionStart = useCallback((e) => {
@@ -2644,7 +2623,8 @@ const MicroscopeMapDisplay = ({
                                         <button
                                           onClick={(e) => {
                                             e.stopPropagation();
-                                            resetExperiment(experiment.name);
+                                            setExperimentToReset(experiment.name);
+                                            setShowClearCanvasConfirmation(true);
                                           }}
                                           className="text-yellow-400 hover:text-yellow-300"
                                           title="Reset experiment (clear data)"
@@ -2876,18 +2856,7 @@ const MicroscopeMapDisplay = ({
                    (showQuickScanConfig ? 'Cancel Quick Scan' : 'Quick Scan')}
                 </button>
                 
-                <button
-                  onClick={() => {
-                    if (!microscopeControlService || isInteractionDisabled || isSimulatedMicroscope || !activeExperiment) return;
-                    setShowClearCanvasConfirmation(true);
-                  }}
-                  className="px-2 py-1 text-xs bg-red-600 hover:bg-red-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                  title={isSimulatedMicroscope ? "Experiment reset not supported for simulated microscope" : !activeExperiment ? "No active experiment to reset" : "Reset active experiment (clear all data)"}
-                  disabled={isInteractionDisabled || !microscopeControlService || isSimulatedMicroscope || !activeExperiment}
-                >
-                  <i className="fas fa-undo mr-1"></i>
-                  Reset Experiment
-                </button>
+
                 {/* New Browse Data Button */}
                 <button
                   onClick={() => {
@@ -3509,7 +3478,7 @@ const MicroscopeMapDisplay = ({
             {/* Modal Body */}
             <div className="p-4">
               <p className="text-gray-300 mb-4">
-                Are you sure you want to reset experiment "{activeExperiment}"? This will permanently delete all experiment data and cannot be undone.
+                Are you sure you want to reset experiment "{experimentToReset}"? This will permanently delete all experiment data and cannot be undone.
               </p>
               <div className="bg-yellow-900 bg-opacity-30 border border-yellow-500 rounded-lg p-3 mb-4">
                 <div className="flex items-start">
@@ -3530,7 +3499,10 @@ const MicroscopeMapDisplay = ({
             {/* Modal Footer */}
             <div className="flex justify-end space-x-3 p-4 border-t border-gray-600">
               <button
-                onClick={() => setShowClearCanvasConfirmation(false)}
+                onClick={() => {
+                  setShowClearCanvasConfirmation(false);
+                  setExperimentToReset(null);
+                }}
                 className="px-4 py-2 text-sm bg-gray-600 hover:bg-gray-500 text-white rounded focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
               >
                 <i className="fas fa-times mr-1"></i>
