@@ -3626,8 +3626,8 @@ const MicroscopeMapDisplay = ({
 
       {/* Quick Scan Configuration Side Panel */}
       {showQuickScanConfig && (
-        <div className="absolute top-12 right-2 bg-gray-800 border border-gray-600 rounded-lg shadow-xl w-80 p-4 z-50 text-white">
-          <div className="flex items-center justify-between mb-3">
+        <div className="absolute top-12 right-2 bg-gray-800 border border-gray-600 rounded-lg shadow-xl w-80 z-50 text-white scan-config-panel">
+          <div className="flex items-center justify-between p-4 border-b border-gray-600 flex-shrink-0">
             <h3 className="text-sm font-semibold text-gray-200">Quick Scan Configuration</h3>
             <button
               onClick={() => setShowQuickScanConfig(false)}
@@ -3638,419 +3638,338 @@ const MicroscopeMapDisplay = ({
             </button>
           </div>
           
-          <div className="space-y-3 text-xs">
-            <div>
-              <label className="block text-gray-300 font-medium mb-1">Well Plate Type</label>
-              <select
-                value={quickScanParameters.wellplate_type}
-                onChange={(e) => setQuickScanParameters(prev => ({ ...prev, wellplate_type: e.target.value }))}
-                className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white"
-                disabled={isQuickScanInProgress}
-              >
-                <option value="6">6-well plate</option>
-                <option value="12">12-well plate</option>
-                <option value="24">24-well plate</option>
-                <option value="96">96-well plate</option>
-                <option value="384">384-well plate</option>
-              </select>
-            </div>
-
-            {/* Stripe Pattern Configuration */}
-            <div className="bg-gray-700 p-2 rounded">
-              <div className="text-blue-300 font-medium mb-2"><i className="fas fa-grip-lines mr-1"></i>Stripe Pattern</div>
-              <div className="flex space-x-2 mb-2">
-                <div className="w-1/2 input-validation-container">
-                  <label className="block text-gray-300 font-medium mb-1">Stripes per Well</label>
-                  <input
-                    type="number"
-                    value={quickStripesInput.inputValue}
-                    onChange={quickStripesInput.handleInputChange}
-                    onKeyDown={quickStripesInput.handleKeyDown}
-                    onBlur={quickStripesInput.handleBlur}
-                    className={getInputValidationClasses(
-                      quickStripesInput.isValid,
-                      quickStripesInput.hasUnsavedChanges,
-                      "w-full px-2 py-1 bg-gray-600 border rounded text-white text-xs"
-                    )}
-                    min="1"
-                    max="10"
-                    disabled={isQuickScanInProgress}
-                    placeholder="1-10"
-                  />
-                </div>
-                <div className="w-1/2 input-validation-container">
-                  <label className="block text-gray-300 font-medium mb-1">Stripe Width (mm)</label>
-                  <input
-                    type="number"
-                    value={quickStripeWidthInput.inputValue}
-                    onChange={quickStripeWidthInput.handleInputChange}
-                    onKeyDown={quickStripeWidthInput.handleKeyDown}
-                    onBlur={quickStripeWidthInput.handleBlur}
-                    className={getInputValidationClasses(
-                      quickStripeWidthInput.isValid,
-                      quickStripeWidthInput.hasUnsavedChanges,
-                      "w-full px-2 py-1 bg-gray-600 border rounded text-white text-xs"
-                    )}
-                    min="0.5"
-                    max="10.0"
-                    step="0.1"
-                    disabled={isQuickScanInProgress}
-                    placeholder="0.5-10.0"
-                  />
-                </div>
-              </div>
-              <div className="input-validation-container">
-                <label className="block text-gray-300 font-medium mb-1">Y Increment (mm)</label>
-                <input
-                  type="number"
-                  value={quickDyInput.inputValue}
-                  onChange={quickDyInput.handleInputChange}
-                  onKeyDown={quickDyInput.handleKeyDown}
-                  onBlur={quickDyInput.handleBlur}
-                  className={getInputValidationClasses(
-                    quickDyInput.isValid,
-                    quickDyInput.hasUnsavedChanges,
-                    "w-full px-2 py-1 bg-gray-600 border rounded text-white text-xs"
-                  )}
-                  min="0.1"
-                  max="5.0"
-                  step="0.1"
+          <div className="p-3 scan-config-content">
+            <div className="space-y-2 text-xs">
+              <div>
+                <label className="block text-gray-300 font-medium mb-1">Well Plate Type</label>
+                <select
+                  value={quickScanParameters.wellplate_type}
+                  onChange={(e) => setQuickScanParameters(prev => ({ ...prev, wellplate_type: e.target.value }))}
+                  className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white"
                   disabled={isQuickScanInProgress}
-                  placeholder="0.1-5.0"
-                />
+                >
+                  <option value="6">6-well plate</option>
+                  <option value="12">12-well plate</option>
+                  <option value="24">24-well plate</option>
+                  <option value="96">96-well plate</option>
+                  <option value="384">384-well plate</option>
+                </select>
               </div>
-            </div>
-            
-            {/* Camera & Illumination Settings */}
-            <div className="bg-gray-700 p-2 rounded">
-              <div className="text-green-300 font-medium mb-2"><i className="fas fa-camera mr-1"></i>Camera & Light</div>
-              <div className="flex space-x-2 mb-2">
-                <div className="flex-1 input-validation-container">
-                  <label className="block text-gray-300 font-medium mb-1">Exposure (ms)</label>
+
+              {/* Stripe Pattern Configuration */}
+              <div className="bg-gray-700 p-2 rounded">
+                <div className="text-blue-300 font-medium mb-1"><i className="fas fa-grip-lines mr-1"></i>Stripe Pattern</div>
+                <div className="flex space-x-2 mb-1">
+                  <div className="w-1/2 input-validation-container">
+                    <label className="block text-gray-300 font-medium mb-1">Stripes per Well</label>
+                    <input
+                      type="number"
+                      value={quickStripesInput.inputValue}
+                      onChange={quickStripesInput.handleInputChange}
+                      onKeyDown={quickStripesInput.handleKeyDown}
+                      onBlur={quickStripesInput.handleBlur}
+                      className={getInputValidationClasses(
+                        quickStripesInput.isValid,
+                        quickStripesInput.hasUnsavedChanges,
+                        "w-full px-2 py-1 bg-gray-600 border rounded text-white text-xs"
+                      )}
+                      min="1"
+                      max="10"
+                      disabled={isQuickScanInProgress}
+                      placeholder="1-10"
+                    />
+                  </div>
+                  <div className="w-1/2 input-validation-container">
+                    <label className="block text-gray-300 font-medium mb-1">Stripe Width (mm)</label>
+                    <input
+                      type="number"
+                      value={quickStripeWidthInput.inputValue}
+                      onChange={quickStripeWidthInput.handleInputChange}
+                      onKeyDown={quickStripeWidthInput.handleKeyDown}
+                      onBlur={quickStripeWidthInput.handleBlur}
+                      className={getInputValidationClasses(
+                        quickStripeWidthInput.isValid,
+                        quickStripeWidthInput.hasUnsavedChanges,
+                        "w-full px-2 py-1 bg-gray-600 border rounded text-white text-xs"
+                      )}
+                      min="0.5"
+                      max="10.0"
+                      step="0.1"
+                      disabled={isQuickScanInProgress}
+                      placeholder="0.5-10.0"
+                    />
+                  </div>
+                </div>
+                <div className="input-validation-container">
+                  <label className="block text-gray-300 font-medium mb-1">Y Increment (mm)</label>
                   <input
                     type="number"
-                    value={quickExposureInput.inputValue}
-                    onChange={quickExposureInput.handleInputChange}
-                    onKeyDown={quickExposureInput.handleKeyDown}
-                    onBlur={quickExposureInput.handleBlur}
+                    value={quickDyInput.inputValue}
+                    onChange={quickDyInput.handleInputChange}
+                    onKeyDown={quickDyInput.handleKeyDown}
+                    onBlur={quickDyInput.handleBlur}
                     className={getInputValidationClasses(
-                      quickExposureInput.isValid,
-                      quickExposureInput.hasUnsavedChanges,
+                      quickDyInput.isValid,
+                      quickDyInput.hasUnsavedChanges,
                       "w-full px-2 py-1 bg-gray-600 border rounded text-white text-xs"
                     )}
-                    min="1"
-                    max="30"
+                    min="0.1"
+                    max="5.0"
                     step="0.1"
                     disabled={isQuickScanInProgress}
-                    placeholder="1-30ms"
-                  />
-                </div>
-                <div className="flex-1 input-validation-container">
-                  <label className="block text-gray-300 font-medium mb-1">Intensity (%)</label>
-                  <input
-                    type="number"
-                    value={quickIntensityInput.inputValue}
-                    onChange={quickIntensityInput.handleInputChange}
-                    onKeyDown={quickIntensityInput.handleKeyDown}
-                    onBlur={quickIntensityInput.handleBlur}
-                    className={getInputValidationClasses(
-                      quickIntensityInput.isValid,
-                      quickIntensityInput.hasUnsavedChanges,
-                      "w-full px-2 py-1 bg-gray-600 border rounded text-white text-xs"
-                    )}
-                    min="0"
-                    max="100"
-                    disabled={isQuickScanInProgress}
-                    placeholder="0-100%"
+                    placeholder="0.1-5.0"
                   />
                 </div>
               </div>
-              {/* Autofocus selection */}
-              <div className="mt-2">
-                <div className="text-blue-300 font-medium mb-1"><i className="fas fa-bullseye mr-1"></i>Autofocus</div>
-                <div className="flex flex-col space-y-1">
-                  <label className="flex items-center text-xs">
+              
+              {/* Camera & Illumination Settings */}
+              <div className="bg-gray-700 p-2 rounded">
+                <div className="text-green-300 font-medium mb-1"><i className="fas fa-camera mr-1"></i>Camera & Light</div>
+                <div className="flex space-x-2 mb-1">
+                  <div className="flex-1 input-validation-container">
+                    <label className="block text-gray-300 font-medium mb-1">Exposure (ms)</label>
                     <input
-                      type="radio"
-                      name="quickscan-autofocus"
-                      checked={!quickScanParameters.do_contrast_autofocus && !quickScanParameters.do_reflection_af}
-                      onChange={() => setQuickScanParameters(prev => ({ ...prev, do_contrast_autofocus: false, do_reflection_af: false }))}
+                      type="number"
+                      value={quickExposureInput.inputValue}
+                      onChange={quickExposureInput.handleInputChange}
+                      onKeyDown={quickExposureInput.handleKeyDown}
+                      onBlur={quickExposureInput.handleBlur}
+                      className={getInputValidationClasses(
+                        quickExposureInput.isValid,
+                        quickExposureInput.hasUnsavedChanges,
+                        "w-full px-2 py-1 bg-gray-600 border rounded text-white text-xs"
+                      )}
+                      min="1"
+                      max="30"
+                      step="0.1"
                       disabled={isQuickScanInProgress}
-                      className="mr-2"
+                      placeholder="1-30ms"
                     />
-                    None
-                  </label>
-                  <label className="flex items-center text-xs">
+                  </div>
+                  <div className="flex-1 input-validation-container">
+                    <label className="block text-gray-300 font-medium mb-1">Intensity (%)</label>
                     <input
-                      type="radio"
-                      name="quickscan-autofocus"
-                      checked={quickScanParameters.do_contrast_autofocus}
-                      onChange={() => setQuickScanParameters(prev => ({ ...prev, do_contrast_autofocus: true, do_reflection_af: false }))}
+                      type="number"
+                      value={quickIntensityInput.inputValue}
+                      onChange={quickIntensityInput.handleInputChange}
+                      onKeyDown={quickIntensityInput.handleKeyDown}
+                      onBlur={quickIntensityInput.handleBlur}
+                      className={getInputValidationClasses(
+                        quickIntensityInput.isValid,
+                        quickIntensityInput.hasUnsavedChanges,
+                        "w-full px-2 py-1 bg-gray-600 border rounded text-white text-xs"
+                      )}
+                      min="0"
+                      max="100"
                       disabled={isQuickScanInProgress}
-                      className="mr-2"
+                      placeholder="0-100%"
                     />
-                    Contrast Autofocus
-                  </label>
-                  <label className="flex items-center text-xs">
-                    <input
-                      type="radio"
-                      name="quickscan-autofocus"
-                      checked={quickScanParameters.do_reflection_af}
-                      onChange={() => setQuickScanParameters(prev => ({ ...prev, do_contrast_autofocus: false, do_reflection_af: true }))}
-                      disabled={isQuickScanInProgress}
-                      className="mr-2"
-                    />
-                    Reflection Autofocus
-                  </label>
+                  </div>
                 </div>
-                <div className="text-gray-400 text-xs mt-1">Only one autofocus mode can be enabled for quick scan.</div>
+                {/* Autofocus selection */}
+                <div className="mt-1">
+                  <div className="text-blue-300 font-medium mb-1"><i className="fas fa-bullseye mr-1"></i>Autofocus</div>
+                  <div className="flex flex-col space-y-1">
+                    <label className="flex items-center text-xs">
+                      <input
+                        type="radio"
+                        name="quickscan-autofocus"
+                        checked={!quickScanParameters.do_contrast_autofocus && !quickScanParameters.do_reflection_af}
+                        onChange={() => setQuickScanParameters(prev => ({ ...prev, do_contrast_autofocus: false, do_reflection_af: false }))}
+                        disabled={isQuickScanInProgress}
+                        className="mr-2"
+                      />
+                      None
+                    </label>
+                    <label className="flex items-center text-xs">
+                      <input
+                        type="radio"
+                        name="quickscan-autofocus"
+                        checked={quickScanParameters.do_contrast_autofocus}
+                        onChange={() => setQuickScanParameters(prev => ({ ...prev, do_contrast_autofocus: true, do_reflection_af: false }))}
+                        disabled={isQuickScanInProgress}
+                        className="mr-2"
+                      />
+                      Contrast Autofocus
+                    </label>
+                    <label className="flex items-center text-xs">
+                      <input
+                        type="radio"
+                        name="quickscan-autofocus"
+                        checked={quickScanParameters.do_reflection_af}
+                        onChange={() => setQuickScanParameters(prev => ({ ...prev, do_contrast_autofocus: false, do_reflection_af: true }))}
+                        disabled={isQuickScanInProgress}
+                        className="mr-2"
+                      />
+                      Reflection Autofocus
+                    </label>
+                  </div>
+                  <div className="text-gray-400 text-xs mt-1">Only one autofocus mode can be enabled for quick scan.</div>
+                </div>
               </div>
-            </div>
 
-
-
-            {/* Motion & Acquisition Settings */}
-            <div className="bg-gray-700 p-2 rounded">
-              <div className="text-yellow-300 font-medium mb-2"><i className="fas fa-tachometer-alt mr-1"></i>Motion & Acquisition</div>
-              <div className="flex space-x-2">
-                <div className="flex-1 input-validation-container">
-                  <label className="block text-gray-300 font-medium mb-1">Scan Velocity (mm/s)</label>
-                  <input
-                    type="number"
-                    value={quickVelocityInput.inputValue}
-                    onChange={quickVelocityInput.handleInputChange}
-                    onKeyDown={quickVelocityInput.handleKeyDown}
-                    onBlur={quickVelocityInput.handleBlur}
-                    className={getInputValidationClasses(
-                      quickVelocityInput.isValid,
-                      quickVelocityInput.hasUnsavedChanges,
-                      "w-full px-2 py-1 bg-gray-600 border rounded text-white text-xs"
-                    )}
-                    min="1"
-                    max="30"
-                    step="0.1"
-                    disabled={isQuickScanInProgress}
-                    placeholder="1-30 mm/s"
-                  />
+              {/* Motion & Acquisition Settings */}
+              <div className="bg-gray-700 p-2 rounded">
+                <div className="text-yellow-300 font-medium mb-1"><i className="fas fa-tachometer-alt mr-1"></i>Motion & Acquisition</div>
+                <div className="flex space-x-2">
+                  <div className="flex-1 input-validation-container">
+                    <label className="block text-gray-300 font-medium mb-1">Scan Velocity (mm/s)</label>
+                    <input
+                      type="number"
+                      value={quickVelocityInput.inputValue}
+                      onChange={quickVelocityInput.handleInputChange}
+                      onKeyDown={quickVelocityInput.handleKeyDown}
+                      onBlur={quickVelocityInput.handleBlur}
+                      className={getInputValidationClasses(
+                        quickVelocityInput.isValid,
+                        quickVelocityInput.hasUnsavedChanges,
+                        "w-full px-2 py-1 bg-gray-600 border rounded text-white text-xs"
+                      )}
+                      min="1"
+                      max="30"
+                      step="0.1"
+                      disabled={isQuickScanInProgress}
+                      placeholder="1-30 mm/s"
+                    />
+                  </div>
+                  <div className="flex-1 input-validation-container">
+                    <label className="block text-gray-300 font-medium mb-1">Target FPS</label>
+                    <input
+                      type="number"
+                      value={quickFpsInput.inputValue}
+                      onChange={quickFpsInput.handleInputChange}
+                      onKeyDown={quickFpsInput.handleKeyDown}
+                      onBlur={quickFpsInput.handleBlur}
+                      className={getInputValidationClasses(
+                        quickFpsInput.isValid,
+                        quickFpsInput.hasUnsavedChanges,
+                        "w-full px-2 py-1 bg-gray-600 border rounded text-white text-xs"
+                      )}
+                      min="1"
+                      max="60"
+                      disabled={isQuickScanInProgress}
+                      placeholder="1-60 fps"
+                    />
+                  </div>
                 </div>
-                <div className="flex-1 input-validation-container">
-                  <label className="block text-gray-300 font-medium mb-1">Target FPS</label>
-                  <input
-                    type="number"
-                    value={quickFpsInput.inputValue}
-                    onChange={quickFpsInput.handleInputChange}
-                    onKeyDown={quickFpsInput.handleKeyDown}
-                    onBlur={quickFpsInput.handleBlur}
-                    className={getInputValidationClasses(
-                      quickFpsInput.isValid,
-                      quickFpsInput.hasUnsavedChanges,
-                      "w-full px-2 py-1 bg-gray-600 border rounded text-white text-xs"
-                    )}
-                    min="1"
-                    max="60"
-                    disabled={isQuickScanInProgress}
-                    placeholder="1-60 fps"
-                  />
-                </div>
+              </div>
+              
+              <div className="bg-gray-700 p-2 rounded text-xs">
+                <div className="text-yellow-300 font-medium mb-1"><i className="fas fa-info-circle mr-1"></i>Quick Scan Info</div>
+                <div>• Brightfield channel only</div>
+                <div>• {quickScanParameters.n_stripes}-stripe × {quickScanParameters.stripe_width_mm}mm serpentine pattern per well</div>
+                <div>• Maximum exposure: 30ms</div>
+                <div>• Scans entire {quickScanParameters.wellplate_type}-well plate</div>
+                <div>• Estimated scan time: {(() => {
+                  const wellplateSizes = { '6': 6, '12': 12, '24': 24, '96': 96, '384': 384 };
+                  const wells = wellplateSizes[quickScanParameters.wellplate_type] || 96;
+                  const stripesPerWell = quickScanParameters.n_stripes;
+                  const timePerStripe = quickScanParameters.stripe_width_mm / quickScanParameters.velocity_scan_mm_per_s;
+                  const estimatedTimeSeconds = wells * stripesPerWell * timePerStripe * 1.5; // 1.5x factor for movement overhead
+                  return estimatedTimeSeconds < 60 ? `${Math.round(estimatedTimeSeconds)}s` : `${Math.round(estimatedTimeSeconds/60)}min`;
+                })()}</div>
               </div>
             </div>
             
-            <div className="bg-gray-700 p-2 rounded text-xs">
-              <div className="text-yellow-300 font-medium mb-1"><i className="fas fa-info-circle mr-1"></i>Quick Scan Info</div>
-              <div>• Brightfield channel only</div>
-              <div>• {quickScanParameters.n_stripes}-stripe × {quickScanParameters.stripe_width_mm}mm serpentine pattern per well</div>
-              <div>• Maximum exposure: 30ms</div>
-              <div>• Scans entire {quickScanParameters.wellplate_type}-well plate</div>
-              <div>• Estimated scan time: {(() => {
-                const wellplateSizes = { '6': 6, '12': 12, '24': 24, '96': 96, '384': 384 };
-                const wells = wellplateSizes[quickScanParameters.wellplate_type] || 96;
-                const stripesPerWell = quickScanParameters.n_stripes;
-                const timePerStripe = quickScanParameters.stripe_width_mm / quickScanParameters.velocity_scan_mm_per_s;
-                const estimatedTimeSeconds = wells * stripesPerWell * timePerStripe * 1.5; // 1.5x factor for movement overhead
-                return estimatedTimeSeconds < 60 ? `${Math.round(estimatedTimeSeconds)}s` : `${Math.round(estimatedTimeSeconds/60)}min`;
-              })()}</div>
-            </div>
-          </div>
-          
-          <div className="flex justify-end space-x-2 mt-4">
-            <button
-              onClick={async () => {
-                if (!microscopeControlService) return;
-                
-                if (isQuickScanInProgress) {
-                  // Stop scan logic
-                  try {
-                    if (appendLog) appendLog('Stopping quick scan...');
-                    
-                    const result = await microscopeControlService.stop_scan_and_stitching();
-                    
-                                          if (result.success) {
-                        if (showNotification) showNotification('Quick scan stop requested', 'success');
-                        if (appendLog) appendLog('Quick scan stop requested - scan will be interrupted');
-                        setIsQuickScanInProgress(false);
-                        if (setMicroscopeBusy) setMicroscopeBusy(false);
-                        if (setCurrentOperation) setCurrentOperation(null); // Re-enable sidebar
-                      } else {
-                      if (showNotification) showNotification(`Failed to stop quick scan: ${result.message}`, 'error');
-                      if (appendLog) appendLog(`Failed to stop quick scan: ${result.message}`);
-                    }
-                  } catch (error) {
-                    if (showNotification) showNotification(`Error stopping quick scan: ${error.message}`, 'error');
-                    if (appendLog) appendLog(`Error stopping quick scan: ${error.message}`);
-                  }
-                  return;
-                }
-                
-                // Check if WebRTC is active and stop it to prevent camera resource conflict
-                const wasWebRtcActive = isWebRtcActive;
-                if (wasWebRtcActive) {
-                  if (appendLog) appendLog('Stopping WebRTC stream to prevent camera resource conflict during scanning...');
-                  try {
-                    if (toggleWebRtcStream) {
-                      toggleWebRtcStream(); // This will stop the WebRTC stream
-                      // Wait a moment for the stream to fully stop
-                      await new Promise(resolve => setTimeout(resolve, 500));
-                    } else {
-                      if (appendLog) appendLog('Warning: toggleWebRtcStream function not available, proceeding with scan...');
-                    }
-                  } catch (webRtcError) {
-                    if (appendLog) appendLog(`Warning: Failed to stop WebRTC stream: ${webRtcError.message}. Proceeding with quick scan...`);
-                  }
-                }
-                
-                setIsQuickScanInProgress(true);
-                if (setMicroscopeBusy) setMicroscopeBusy(true); // Also set global busy state
-                if (setCurrentOperation) setCurrentOperation('quick_scanning'); // Disable sidebar during quick scanning
-                
-                // Disable rectangle selection during scanning to allow map browsing
-                setIsRectangleSelection(false);
-                setRectangleStart(null);
-                setRectangleEnd(null);
-                setDragSelectedWell(null);
-                
-                try {
-
-                  
-                  if (appendLog) appendLog(`Starting quick scan: ${quickScanParameters.wellplate_type}-well plate, ${quickScanParameters.n_stripes} stripes × ${quickScanParameters.stripe_width_mm}mm, scan velocity ${quickScanParameters.velocity_scan_mm_per_s}mm/s, ${quickScanParameters.fps_target}fps`);
-                  
-                      const result = await microscopeControlService.quick_scan_with_stitching(
-                      quickScanParameters.wellplate_type,
-                      quickScanParameters.exposure_time,
-                      quickScanParameters.intensity,
-                      quickScanParameters.fps_target,
-                      'quick_scan_' + Date.now(),
-                      quickScanParameters.n_stripes,
-                      quickScanParameters.stripe_width_mm,
-                      quickScanParameters.dy_mm,
-                      quickScanParameters.velocity_scan_mm_per_s,
-                      quickScanParameters.do_contrast_autofocus,
-                      quickScanParameters.do_reflection_af,
-                      activeExperiment, // Use active experiment
-                      wellPaddingMm // Add well padding parameter
-                    );
-                  
-                  if (result.success) {
-                    if (showNotification) showNotification('Quick scan completed successfully', 'success');
-                    if (appendLog) {
-                      appendLog('Quick scan completed successfully');
-                      if (result.performance_metrics) {
-                        appendLog(`Scan time: ${result.performance_metrics.total_scan_time_seconds}s, frames acquired: ${result.performance_metrics.estimated_frames_acquired}`);
-                        if (result.scan_parameters) {
-                          appendLog(`Pattern: ${result.scan_parameters.stripes_per_well} stripes × ${result.scan_parameters.stripe_width_mm}mm per well, ${result.scan_parameters.wells_scanned} wells scanned`);
-                        }
-                      }
-                      if (wasWebRtcActive) {
-                        appendLog('Note: WebRTC stream was stopped for scanning. Click "Start Live" to resume video stream if needed.');
-                      }
-                    }
-                    setShowQuickScanConfig(false);
-                    // Enable scan results layer if not already
-                    setVisibleLayers(prev => ({ ...prev, scanResults: true }));
-                    
-                    // Refresh scan results display once after completion
-                    setTimeout(() => {
-                      refreshScanResults();
-                    }, 1000); // Wait 1 second then refresh
-                  } else {
-                    if (showNotification) showNotification(`Quick scan failed: ${result.message}`, 'error');
-                    if (appendLog) appendLog(`Quick scan failed: ${result.message}`);
-                  }
-                } catch (error) {
-                  if (showNotification) showNotification(`Quick scan error: ${error.message}`, 'error');
-                  if (appendLog) appendLog(`Quick scan error: ${error.message}`);
-                } finally {
-                  setIsQuickScanInProgress(false);
-                  if (setMicroscopeBusy) setMicroscopeBusy(false); // Clear global busy state
-                  if (setCurrentOperation) setCurrentOperation(null); // Re-enable sidebar
-                }
-              }}
-              className="px-3 py-1 text-xs bg-green-600 hover:bg-green-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
-              disabled={!microscopeControlService || isQuickScanInProgress}
-            >
-              {isQuickScanInProgress ? (
-                <>
-                  <i className="fas fa-spinner fa-spin mr-1"></i>
-                  Quick Scanning...
-                </>
-              ) : (
-                <>
-                  <i className="fas fa-bolt mr-1"></i>
-                  Start Quick Scan
-                </>
-              )}
-            </button>
-            
-            {/* Stop button - only visible during scanning */}
-            {isQuickScanInProgress && (
+            <div className="flex justify-end space-x-2 mt-3">
               <button
                 onClick={async () => {
                   if (!microscopeControlService) return;
                   
-                  try {
-                    if (appendLog) appendLog('Attempting to stop quick scan...');
-                    
-                    // Try to stop the scan using the microscope control service
-                    if (microscopeControlService.stop_scan) {
+                  if (isQuickScanInProgress) {
+                    // Stop scan logic
+                    try {
+                      if (appendLog) appendLog('Stopping quick scan...');
+                      
                       const result = await microscopeControlService.stop_scan_and_stitching();
+                      
                       if (result.success) {
-                        if (showNotification) showNotification('Quick scan stopped successfully', 'warning');
-                        if (appendLog) appendLog('Quick scan stopped by user');
+                        if (showNotification) showNotification('Quick scan stop requested', 'success');
+                        setIsQuickScanInProgress(false);
+                        if (appendLog) appendLog('Quick scan stopped successfully');
                       } else {
-                        if (showNotification) showNotification(`Failed to stop scan: ${result.message}`, 'error');
-                        if (appendLog) appendLog(`Failed to stop scan: ${result.message}`);
+                        if (showNotification) showNotification('Failed to stop quick scan', 'error');
+                        if (appendLog) appendLog(`Quick scan stop failed: ${result.message}`);
                       }
-                    } else if (microscopeControlService.halt_stage) {
-                      // Fallback: halt stage movement
-                      await microscopeControlService.halt_stage();
-                      if (showNotification) showNotification('Stage movement halted', 'warning');
-                      if (appendLog) appendLog('Stage movement halted - quick scan interrupted');
-                    } else {
-                      if (showNotification) showNotification('Stop scan function not available', 'warning');
-                      if (appendLog) appendLog('Warning: No stop scan method available on microscope service');
+                    } catch (error) {
+                      if (showNotification) showNotification('Error stopping quick scan', 'error');
+                      if (appendLog) appendLog(`Quick scan stop error: ${error.message}`);
                     }
-                  } catch (error) {
-                    if (showNotification) showNotification(`Error stopping scan: ${error.message}`, 'error');
-                    if (appendLog) appendLog(`Error stopping quick scan: ${error.message}`);
-                  } finally {
-                    // Always re-enable sidebar even if stop fails
-                    if (setCurrentOperation) setCurrentOperation(null);
+                  } else {
+                    // Start scan logic
+                    try {
+                      if (appendLog) appendLog('Starting quick scan...');
+                      
+                      const result = await microscopeControlService.start_quick_scan(quickScanParameters);
+                      
+                      if (result.success) {
+                        if (showNotification) showNotification('Quick scan started', 'success');
+                        setIsQuickScanInProgress(true);
+                        if (appendLog) appendLog('Quick scan started successfully');
+                      } else {
+                        if (showNotification) showNotification('Failed to start quick scan', 'error');
+                        if (appendLog) appendLog(`Quick scan start failed: ${result.message}`);
+                      }
+                    } catch (error) {
+                      if (showNotification) showNotification('Error starting quick scan', 'error');
+                      if (appendLog) appendLog(`Quick scan start error: ${error.message}`);
+                    }
                   }
                 }}
-                className="px-3 py-1 text-xs bg-red-600 hover:bg-red-500 text-white rounded flex items-center"
-                title="Stop quick scan"
+                className="px-3 py-1 text-xs bg-green-600 hover:bg-green-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+                disabled={!microscopeControlService || isQuickScanInProgress}
               >
-                <i className="fas fa-stop mr-1"></i>
-                Stop Scan
+                {isQuickScanInProgress ? (
+                  <>
+                    <i className="fas fa-spinner fa-spin mr-1"></i>
+                    Quick Scanning...
+                  </>
+                ) : (
+                  <>
+                    <i className="fas fa-bolt mr-1"></i>
+                    Start Quick Scan
+                  </>
+                )}
               </button>
-            )}
+              
+              {/* Stop button - only visible during scanning */}
+              {isQuickScanInProgress && (
+                <button
+                  onClick={async () => {
+                    try {
+                      if (appendLog) appendLog('Stopping quick scan...');
+                      
+                      const result = await microscopeControlService.stop_scan_and_stitching();
+                      
+                      if (result.success) {
+                        if (showNotification) showNotification('Quick scan stopped', 'success');
+                        setIsQuickScanInProgress(false);
+                        if (appendLog) appendLog('Quick scan stopped successfully');
+                      } else {
+                        if (showNotification) showNotification('Failed to stop quick scan', 'error');
+                        if (appendLog) appendLog(`Quick scan stop failed: ${result.message}`);
+                      }
+                    } catch (error) {
+                      if (showNotification) showNotification('Error stopping quick scan', 'error');
+                      if (appendLog) appendLog(`Quick scan stop error: ${error.message}`);
+                    }
+                  }}
+                  className="px-3 py-1 text-xs bg-red-600 hover:bg-red-500 text-white rounded flex items-center"
+                  title="Stop quick scan"
+                >
+                  <i className="fas fa-stop mr-1"></i>
+                  Stop Scan
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
 
       {/* Scan Configuration Side Panel */}
       {showScanConfig && (
-        <div className="absolute top-12 right-2 bg-gray-800 border border-gray-600 rounded-lg shadow-xl w-80 p-4 z-50 text-white">
-          <div className="flex items-center justify-between mb-3">
+        <div className="absolute top-12 right-2 bg-gray-800 border border-gray-600 rounded-lg shadow-xl w-80 z-50 text-white scan-config-panel">
+          <div className="flex items-center justify-between p-3 border-b border-gray-600 flex-shrink-0">
             <h3 className="text-sm font-semibold text-gray-200">Scan Configuration</h3>
             <button
               onClick={() => {
@@ -4065,561 +3984,564 @@ const MicroscopeMapDisplay = ({
               <i className="fas fa-times"></i>
             </button>
           </div>
-          {/* --- Multi-well Selection Grid UI --- */}
-          <div className="scan-well-plate-grid-container">
-            <div className="flex flex-col w-full items-center">
-              <div className="flex w-full items-center mb-1">
-                <span className="text-xs text-gray-300 mr-2">Selected: {selectedWells.length}</span>
-                <button
-                  onClick={() => setSelectedWells([])}
-                  className="ml-auto px-2 py-1 text-xs bg-gray-600 hover:bg-gray-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                  title="Clear all well selections"
-                  disabled={selectedWells.length === 0}
-                >
-                  <i className="fas fa-refresh mr-1"></i>Refresh
-                </button>
-              </div>
-              <div className="scan-well-plate-grid">
-                <div className="scan-grid-col-labels">
-                  <div></div>
-                  {getWellPlateGridLabels().cols.map((label, colIdx) => (
-                    <div key={`col-${label}`} className="scan-grid-label">{label}</div>
+          
+          <div className="p-3 scan-config-content">
+            {/* --- Multi-well Selection Grid UI --- */}
+            <div className="scan-well-plate-grid-container">
+              <div className="flex flex-col w-full items-center">
+                <div className="flex w-full items-center mb-1">
+                  <span className="text-xs text-gray-300 mr-2">Selected: {selectedWells.length}</span>
+                  <button
+                    onClick={() => setSelectedWells([])}
+                    className="ml-auto px-2 py-1 text-xs bg-gray-600 hover:bg-gray-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Clear all well selections"
+                    disabled={selectedWells.length === 0}
+                  >
+                    <i className="fas fa-refresh mr-1"></i>Refresh
+                  </button>
+                </div>
+                <div className="scan-well-plate-grid">
+                  <div className="scan-grid-col-labels">
+                    <div></div>
+                    {getWellPlateGridLabels().cols.map((label, colIdx) => (
+                      <div key={`col-${label}`} className="scan-grid-label">{label}</div>
+                    ))}
+                  </div>
+                  {getWellPlateGridLabels().rows.map((rowLabel, rowIdx) => (
+                    <div key={`row-${rowIdx}`} className="scan-grid-row">
+                      <div className="scan-grid-label">{rowLabel}</div>
+                      {getWellPlateGridLabels().cols.map((colLabel, colIdx) => {
+                        const wellId = getWellIdFromIndex(rowIdx, colIdx);
+                        const isSelected = selectedWells.includes(wellId);
+                        const isDragSelected = gridSelectedCells[`${rowIdx}-${colIdx}`];
+                        return (
+                          <div
+                            key={`cell-${rowIdx}-${colIdx}`}
+                            className={`scan-grid-cell${isSelected || isDragSelected ? ' selected' : ''}`}
+                            onMouseDown={() => handleGridCellMouseDown(rowIdx, colIdx)}
+                            onMouseEnter={() => handleGridCellMouseEnter(rowIdx, colIdx)}
+                            style={{ userSelect: 'none' }}
+                          >
+                            {/* Optionally show wellId or leave blank for cleaner look */}
+                          </div>
+                        );
+                      })}
+                    </div>
                   ))}
                 </div>
-                {getWellPlateGridLabels().rows.map((rowLabel, rowIdx) => (
-                  <div key={`row-${rowIdx}`} className="scan-grid-row">
-                    <div className="scan-grid-label">{rowLabel}</div>
-                    {getWellPlateGridLabels().cols.map((colLabel, colIdx) => {
-                      const wellId = getWellIdFromIndex(rowIdx, colIdx);
-                      const isSelected = selectedWells.includes(wellId);
-                      const isDragSelected = gridSelectedCells[`${rowIdx}-${colIdx}`];
-                      return (
-                        <div
-                          key={`cell-${rowIdx}-${colIdx}`}
-                          className={`scan-grid-cell${isSelected || isDragSelected ? ' selected' : ''}`}
-                          onMouseDown={() => handleGridCellMouseDown(rowIdx, colIdx)}
-                          onMouseEnter={() => handleGridCellMouseEnter(rowIdx, colIdx)}
-                          style={{ userSelect: 'none' }}
-                        >
-                          {/* Optionally show wellId or leave blank for cleaner look */}
-                        </div>
-                      );
-                    })}
+              </div>
+            </div>
+
+            <div className="space-y-2 text-xs">
+              <div>
+                <label className="block text-gray-300 font-medium mb-1">Start Position (mm)</label>
+                <div className="flex space-x-2">
+                  <div className="w-1/2 input-validation-container">
+                    <input
+                      type="number"
+                      value={startXInput.inputValue}
+                      onChange={startXInput.handleInputChange}
+                      onKeyDown={startXInput.handleKeyDown}
+                      onBlur={startXInput.handleBlur}
+                      className={getInputValidationClasses(
+                        startXInput.isValid,
+                        startXInput.hasUnsavedChanges,
+                        "w-full px-2 py-1 bg-gray-700 border rounded text-white"
+                      )}
+                      step="0.1"
+                      disabled={isScanInProgress}
+                      placeholder="X position"
+                    />
                   </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-3 text-xs">
-            <div>
-              <label className="block text-gray-300 font-medium mb-1">Start Position (mm)</label>
-              <div className="flex space-x-2">
-                <div className="w-1/2 input-validation-container">
-                  <input
-                    type="number"
-                    value={startXInput.inputValue}
-                    onChange={startXInput.handleInputChange}
-                    onKeyDown={startXInput.handleKeyDown}
-                    onBlur={startXInput.handleBlur}
-                    className={getInputValidationClasses(
-                      startXInput.isValid,
-                      startXInput.hasUnsavedChanges,
-                      "w-full px-2 py-1 bg-gray-700 border rounded text-white"
-                    )}
-                    step="0.1"
-                    disabled={isScanInProgress}
-                    placeholder="X position"
-                  />
-                </div>
-                <div className="w-1/2 input-validation-container">
-                  <input
-                    type="number"
-                    value={startYInput.inputValue}
-                    onChange={startYInput.handleInputChange}
-                    onKeyDown={startYInput.handleKeyDown}
-                    onBlur={startYInput.handleBlur}
-                    className={getInputValidationClasses(
-                      startYInput.isValid,
-                      startYInput.hasUnsavedChanges,
-                      "w-full px-2 py-1 bg-gray-700 border rounded text-white"
-                    )}
-                    step="0.1"
-                    disabled={isScanInProgress}
-                    placeholder="Y position"
-                  />
-                </div>
-              </div>
-            </div>
-            
-            <div>
-              <label className="block text-gray-300 font-medium mb-1">Grid Size (positions)</label>
-              <div className="flex space-x-2">
-                <div className="w-1/2 input-validation-container">
-                  <input
-                    type="number"
-                    value={nxInput.inputValue}
-                    onChange={nxInput.handleInputChange}
-                    onKeyDown={nxInput.handleKeyDown}
-                    onBlur={nxInput.handleBlur}
-                    className={getInputValidationClasses(
-                      nxInput.isValid,
-                      nxInput.hasUnsavedChanges,
-                      "w-full px-2 py-1 bg-gray-700 border rounded text-white"
-                    )}
-                    min="1"
-                    disabled={isScanInProgress}
-                    placeholder="Nx"
-                  />
-                </div>
-                <div className="w-1/2 input-validation-container">
-                  <input
-                    type="number"
-                    value={nyInput.inputValue}
-                    onChange={nyInput.handleInputChange}
-                    onKeyDown={nyInput.handleKeyDown}
-                    onBlur={nyInput.handleBlur}
-                    className={getInputValidationClasses(
-                      nyInput.isValid,
-                      nyInput.hasUnsavedChanges,
-                      "w-full px-2 py-1 bg-gray-700 border rounded text-white"
-                    )}
-                    min="1"
-                    disabled={isScanInProgress}
-                    placeholder="Ny"
-                  />
-                </div>
-              </div>
-            </div>
-            
-            <div>
-              <label className="block text-gray-300 font-medium mb-1">Step Size (mm)</label>
-              <div className="flex space-x-2">
-                <div className="w-1/2 input-validation-container">
-                  <input
-                    type="number"
-                    value={dxInput.inputValue}
-                    onChange={dxInput.handleInputChange}
-                    onKeyDown={dxInput.handleKeyDown}
-                    onBlur={dxInput.handleBlur}
-                    className={getInputValidationClasses(
-                      dxInput.isValid,
-                      dxInput.hasUnsavedChanges,
-                      "w-full px-2 py-1 bg-gray-700 border rounded text-white"
-                    )}
-                    step="0.1"
-                    min="0.1"
-                    disabled={isScanInProgress}
-                    placeholder="dX step"
-                  />
-                </div>
-                <div className="w-1/2 input-validation-container">
-                  <input
-                    type="number"
-                    value={dyInput.inputValue}
-                    onChange={dyInput.handleInputChange}
-                    onKeyDown={dyInput.handleKeyDown}
-                    onBlur={dyInput.handleBlur}
-                    className={getInputValidationClasses(
-                      dyInput.isValid,
-                      dyInput.hasUnsavedChanges,
-                      "w-full px-2 py-1 bg-gray-700 border rounded text-white"
-                    )}
-                    step="0.1"
-                    min="0.1"
-                    disabled={isScanInProgress}
-                    placeholder="dY step"
-                  />
-                </div>
-              </div>
-            </div>
-            
-
-            
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="block text-gray-300 font-medium">Illumination Channels</label>
-                <div className="flex space-x-1">
-                  <button
-                    onClick={() => {
-                      if (isScanInProgress) return;
-                      loadCurrentMicroscopeSettings();
-                    }}
-                    className="px-2 py-1 text-xs bg-green-600 hover:bg-green-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                    disabled={isScanInProgress || !microscopeControlService}
-                    title="Load current microscope settings"
-                  >
-                    <i className="fas fa-download mr-1"></i>
-                    Load Current
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (isScanInProgress) return;
-                      // Find a channel that's not already in use
-                      const availableChannels = [
-                        'BF LED matrix full',
-                        'Fluorescence 405 nm Ex',
-                        'Fluorescence 488 nm Ex',
-                        'Fluorescence 561 nm Ex',
-                        'Fluorescence 638 nm Ex',
-                        'Fluorescence 730 nm Ex'
-                      ];
-                      const usedChannels = scanParameters.illumination_settings.map(s => s.channel);
-                      const nextChannel = availableChannels.find(c => !usedChannels.includes(c)) || 'BF LED matrix full';
-                      
-                      setScanParameters(prev => ({
-                        ...prev,
-                        illumination_settings: [
-                          ...prev.illumination_settings,
-                          {
-                            channel: nextChannel,
-                            intensity: 50,
-                            exposure_time: 100
-                          }
-                        ]
-                      }));
-                    }}
-                    className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                    disabled={isScanInProgress || scanParameters.illumination_settings.length >= 6}
-                    title="Add channel"
-                  >
-                    <i className="fas fa-plus mr-1"></i>
-                    Add Channel
-                  </button>
+                  <div className="w-1/2 input-validation-container">
+                    <input
+                      type="number"
+                      value={startYInput.inputValue}
+                      onChange={startYInput.handleInputChange}
+                      onKeyDown={startYInput.handleKeyDown}
+                      onBlur={startYInput.handleBlur}
+                      className={getInputValidationClasses(
+                        startYInput.isValid,
+                        startYInput.hasUnsavedChanges,
+                        "w-full px-2 py-1 bg-gray-700 border rounded text-white"
+                      )}
+                      step="0.1"
+                      disabled={isScanInProgress}
+                      placeholder="Y position"
+                    />
+                  </div>
                 </div>
               </div>
               
-              <div className="space-y-2 max-h-48 overflow-y-auto">
-                {scanParameters.illumination_settings.map((setting, index) => (
-                  <div key={index} className="bg-gray-700 p-2 rounded border border-gray-600">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs text-gray-300 font-medium">Channel {index + 1}</span>
-                      <button
-                        onClick={() => {
-                          if (isScanInProgress || scanParameters.illumination_settings.length <= 1) return;
-                          setScanParameters(prev => ({
-                            ...prev,
-                            illumination_settings: prev.illumination_settings.filter((_, i) => i !== index)
-                          }));
-                        }}
-                        className="px-1 py-0.5 text-xs bg-red-600 hover:bg-red-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                        disabled={isScanInProgress || scanParameters.illumination_settings.length <= 1}
-                        title="Remove channel"
-                      >
-                        <i className="fas fa-times"></i>
-                      </button>
-                    </div>
-                    
-                    <div className="space-y-2">
-                      <div className="relative">
-                        <select
-                          value={setting.channel}
-                          onChange={(e) => {
-                            if (isScanInProgress) return;
+              <div>
+                <label className="block text-gray-300 font-medium mb-1">Grid Size (positions)</label>
+                <div className="flex space-x-2">
+                  <div className="w-1/2 input-validation-container">
+                    <input
+                      type="number"
+                      value={nxInput.inputValue}
+                      onChange={nxInput.handleInputChange}
+                      onKeyDown={nxInput.handleKeyDown}
+                      onBlur={nxInput.handleBlur}
+                      className={getInputValidationClasses(
+                        nxInput.isValid,
+                        nxInput.hasUnsavedChanges,
+                        "w-full px-2 py-1 bg-gray-700 border rounded text-white"
+                      )}
+                      min="1"
+                      disabled={isScanInProgress}
+                      placeholder="Nx"
+                    />
+                  </div>
+                  <div className="w-1/2 input-validation-container">
+                    <input
+                      type="number"
+                      value={nyInput.inputValue}
+                      onChange={nyInput.handleInputChange}
+                      onKeyDown={nyInput.handleKeyDown}
+                      onBlur={nyInput.handleBlur}
+                      className={getInputValidationClasses(
+                        nyInput.isValid,
+                        nyInput.hasUnsavedChanges,
+                        "w-full px-2 py-1 bg-gray-700 border rounded text-white"
+                      )}
+                      min="1"
+                      disabled={isScanInProgress}
+                      placeholder="Ny"
+                    />
+                  </div>
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-gray-300 font-medium mb-1">Step Size (mm)</label>
+                <div className="flex space-x-2">
+                  <div className="w-1/2 input-validation-container">
+                    <input
+                      type="number"
+                      value={dxInput.inputValue}
+                      onChange={dxInput.handleInputChange}
+                      onKeyDown={dxInput.handleKeyDown}
+                      onBlur={dxInput.handleBlur}
+                      className={getInputValidationClasses(
+                        dxInput.isValid,
+                        dxInput.hasUnsavedChanges,
+                        "w-full px-2 py-1 bg-gray-700 border rounded text-white"
+                      )}
+                      step="0.1"
+                      min="0.1"
+                      disabled={isScanInProgress}
+                      placeholder="dX step"
+                    />
+                  </div>
+                  <div className="w-1/2 input-validation-container">
+                    <input
+                      type="number"
+                      value={dyInput.inputValue}
+                      onChange={dyInput.handleInputChange}
+                      onKeyDown={dyInput.handleKeyDown}
+                      onBlur={dyInput.handleBlur}
+                      className={getInputValidationClasses(
+                        dyInput.isValid,
+                        dyInput.hasUnsavedChanges,
+                        "w-full px-2 py-1 bg-gray-700 border rounded text-white"
+                      )}
+                      step="0.1"
+                      min="0.1"
+                      disabled={isScanInProgress}
+                      placeholder="dY step"
+                    />
+                  </div>
+                </div>
+              </div>
+              
+
+              
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-gray-300 font-medium">Illumination Channels</label>
+                  <div className="flex space-x-1">
+                    <button
+                      onClick={() => {
+                        if (isScanInProgress) return;
+                        loadCurrentMicroscopeSettings();
+                      }}
+                      className="px-2 py-1 text-xs bg-green-600 hover:bg-green-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                      disabled={isScanInProgress || !microscopeControlService}
+                      title="Load current microscope settings"
+                    >
+                      <i className="fas fa-download mr-1"></i>
+                      Load Current
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (isScanInProgress) return;
+                        // Find a channel that's not already in use
+                        const availableChannels = [
+                          'BF LED matrix full',
+                          'Fluorescence 405 nm Ex',
+                          'Fluorescence 488 nm Ex',
+                          'Fluorescence 561 nm Ex',
+                          'Fluorescence 638 nm Ex',
+                          'Fluorescence 730 nm Ex'
+                        ];
+                        const usedChannels = scanParameters.illumination_settings.map(s => s.channel);
+                        const nextChannel = availableChannels.find(c => !usedChannels.includes(c)) || 'BF LED matrix full';
+                        
+                        setScanParameters(prev => ({
+                          ...prev,
+                          illumination_settings: [
+                            ...prev.illumination_settings,
+                            {
+                              channel: nextChannel,
+                              intensity: 50,
+                              exposure_time: 100
+                            }
+                          ]
+                        }));
+                      }}
+                      className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                      disabled={isScanInProgress || scanParameters.illumination_settings.length >= 6}
+                      title="Add channel"
+                    >
+                      <i className="fas fa-plus mr-1"></i>
+                      Add Channel
+                    </button>
+                  </div>
+                </div>
+                
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {scanParameters.illumination_settings.map((setting, index) => (
+                    <div key={index} className="bg-gray-700 p-2 rounded border border-gray-600">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs text-gray-300 font-medium">Channel {index + 1}</span>
+                        <button
+                          onClick={() => {
+                            if (isScanInProgress || scanParameters.illumination_settings.length <= 1) return;
                             setScanParameters(prev => ({
                               ...prev,
-                              illumination_settings: prev.illumination_settings.map((s, i) => 
-                                i === index ? { ...s, channel: e.target.value } : s
-                              )
+                              illumination_settings: prev.illumination_settings.filter((_, i) => i !== index)
                             }));
                           }}
-                          className={`w-full px-2 py-1 text-xs bg-gray-600 border rounded text-white ${
-                            scanParameters.illumination_settings.filter(s => s.channel === setting.channel).length > 1 
-                              ? 'border-yellow-500' 
-                              : 'border-gray-500'
-                          }`}
-                          disabled={isScanInProgress}
+                          className="px-1 py-0.5 text-xs bg-red-600 hover:bg-red-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                          disabled={isScanInProgress || scanParameters.illumination_settings.length <= 1}
+                          title="Remove channel"
                         >
-                          <option value="BF LED matrix full">BF LED matrix full</option>
-                          <option value="Fluorescence 405 nm Ex">Fluorescence 405 nm Ex</option>
-                          <option value="Fluorescence 488 nm Ex">Fluorescence 488 nm Ex</option>
-                          <option value="Fluorescence 561 nm Ex">Fluorescence 561 nm Ex</option>
-                          <option value="Fluorescence 638 nm Ex">Fluorescence 638 nm Ex</option>
-                          <option value="Fluorescence 730 nm Ex">Fluorescence 730 nm Ex</option>
-                        </select>
-                        {scanParameters.illumination_settings.filter(s => s.channel === setting.channel).length > 1 && (
-                          <div className="absolute -top-1 -right-1">
-                            <i className="fas fa-exclamation-triangle text-yellow-500 text-xs" title="Duplicate channel detected"></i>
-                          </div>
-                        )}
+                          <i className="fas fa-times"></i>
+                        </button>
                       </div>
                       
-                      <div className="flex space-x-2">
-                        <div className="flex-1">
-                          <input
-                            type="number"
-                            value={setting.intensity}
+                      <div className="space-y-2">
+                        <div className="relative">
+                          <select
+                            value={setting.channel}
                             onChange={(e) => {
                               if (isScanInProgress) return;
-                              const value = parseInt(e.target.value) || 0;
-                              if (value >= 1 && value <= 100) {
-                                setScanParameters(prev => ({
-                                  ...prev,
-                                  illumination_settings: prev.illumination_settings.map((s, i) => 
-                                    i === index ? { ...s, intensity: value } : s
-                                  )
-                                }));
-                              }
+                              setScanParameters(prev => ({
+                                ...prev,
+                                illumination_settings: prev.illumination_settings.map((s, i) => 
+                                  i === index ? { ...s, channel: e.target.value } : s
+                                )
+                              }));
                             }}
-                            className="w-full px-2 py-1 text-xs bg-gray-600 border border-gray-500 rounded text-white"
-                            min="1"
-                            max="100"
+                            className={`w-full px-2 py-1 text-xs bg-gray-600 border rounded text-white ${
+                              scanParameters.illumination_settings.filter(s => s.channel === setting.channel).length > 1 
+                                ? 'border-yellow-500' 
+                                : 'border-gray-500'
+                            }`}
                             disabled={isScanInProgress}
-                            placeholder="Intensity %"
-                          />
+                          >
+                            <option value="BF LED matrix full">BF LED matrix full</option>
+                            <option value="Fluorescence 405 nm Ex">Fluorescence 405 nm Ex</option>
+                            <option value="Fluorescence 488 nm Ex">Fluorescence 488 nm Ex</option>
+                            <option value="Fluorescence 561 nm Ex">Fluorescence 561 nm Ex</option>
+                            <option value="Fluorescence 638 nm Ex">Fluorescence 638 nm Ex</option>
+                            <option value="Fluorescence 730 nm Ex">Fluorescence 730 nm Ex</option>
+                          </select>
+                          {scanParameters.illumination_settings.filter(s => s.channel === setting.channel).length > 1 && (
+                            <div className="absolute -top-1 -right-1">
+                              <i className="fas fa-exclamation-triangle text-yellow-500 text-xs" title="Duplicate channel detected"></i>
+                            </div>
+                          )}
                         </div>
-                        <div className="flex-1">
-                          <input
-                            type="number"
-                            value={setting.exposure_time}
-                            onChange={(e) => {
-                              if (isScanInProgress) return;
-                              const value = parseInt(e.target.value) || 0;
-                              if (value >= 1 && value <= 1000) {
-                                setScanParameters(prev => ({
-                                  ...prev,
-                                  illumination_settings: prev.illumination_settings.map((s, i) => 
-                                    i === index ? { ...s, exposure_time: value } : s
-                                  )
-                                }));
-                              }
-                            }}
-                            className="w-full px-2 py-1 text-xs bg-gray-600 border border-gray-500 rounded text-white"
-                            min="1"
-                            max="1000"
-                            disabled={isScanInProgress}
-                            placeholder="Exposure ms"
-                          />
+                        
+                        <div className="flex space-x-2">
+                          <div className="flex-1">
+                            <input
+                              type="number"
+                              value={setting.intensity}
+                              onChange={(e) => {
+                                if (isScanInProgress) return;
+                                const value = parseInt(e.target.value) || 0;
+                                if (value >= 1 && value <= 100) {
+                                  setScanParameters(prev => ({
+                                    ...prev,
+                                    illumination_settings: prev.illumination_settings.map((s, i) => 
+                                      i === index ? { ...s, intensity: value } : s
+                                    )
+                                  }));
+                                }
+                              }}
+                              className="w-full px-2 py-1 text-xs bg-gray-600 border border-gray-500 rounded text-white"
+                              min="1"
+                              max="100"
+                              disabled={isScanInProgress}
+                              placeholder="Intensity %"
+                            />
+                          </div>
+                          <div className="flex-1">
+                            <input
+                              type="number"
+                              value={setting.exposure_time}
+                              onChange={(e) => {
+                                if (isScanInProgress) return;
+                                const value = parseInt(e.target.value) || 0;
+                                if (value >= 1 && value <= 1000) {
+                                  setScanParameters(prev => ({
+                                    ...prev,
+                                    illumination_settings: prev.illumination_settings.map((s, i) => 
+                                      i === index ? { ...s, exposure_time: value } : s
+                                    )
+                                  }));
+                                }
+                              }}
+                              className="w-full px-2 py-1 text-xs bg-gray-600 border border-gray-500 rounded text-white"
+                              min="1"
+                              max="1000"
+                              disabled={isScanInProgress}
+                              placeholder="Exposure ms"
+                            />
+                          </div>
                         </div>
                       </div>
                     </div>
+                  ))}
+                </div>
+                
+                {scanParameters.illumination_settings.length > 1 && (
+                  <div className="mt-2 p-2 bg-blue-900 bg-opacity-30 rounded border border-blue-500 text-xs">
+                    <div className="flex items-center text-blue-300 mb-1">
+                      <i className="fas fa-info-circle mr-1"></i>
+                      Multi-channel Acquisition
+                    </div>
+                    <div className="text-gray-300">
+                      Channels: {scanParameters.illumination_settings.map(s => 
+                        s.channel.replace('Fluorescence ', '').replace(' Ex', '').replace('BF LED matrix full', 'BF')
+                      ).join(', ')}
+                    </div>
+                    {scanParameters.illumination_settings.some((setting, index) => 
+                      scanParameters.illumination_settings.filter(s => s.channel === setting.channel).length > 1
+                    ) && (
+                      <div className="text-yellow-300 mt-1">
+                        <i className="fas fa-exclamation-triangle mr-1"></i>
+                        Warning: Duplicate channels detected
+                      </div>
+                    )}
                   </div>
-                ))}
+                )}
               </div>
               
-              {scanParameters.illumination_settings.length > 1 && (
-                <div className="mt-2 p-2 bg-blue-900 bg-opacity-30 rounded border border-blue-500 text-xs">
-                  <div className="flex items-center text-blue-300 mb-1">
-                    <i className="fas fa-info-circle mr-1"></i>
-                    Multi-channel Acquisition
-                  </div>
-                  <div className="text-gray-300">
-                    Channels: {scanParameters.illumination_settings.map(s => 
-                      s.channel.replace('Fluorescence ', '').replace(' Ex', '').replace('BF LED matrix full', 'BF')
-                    ).join(', ')}
-                  </div>
-                  {scanParameters.illumination_settings.some((setting, index) => 
-                    scanParameters.illumination_settings.filter(s => s.channel === setting.channel).length > 1
-                  ) && (
-                    <div className="text-yellow-300 mt-1">
-                      <i className="fas fa-exclamation-triangle mr-1"></i>
-                      Warning: Duplicate channels detected
-                    </div>
-                  )}
+              <div className="flex items-center space-x-4">
+                <label className="flex items-center text-xs">
+                  <input
+                    type="checkbox"
+                    checked={scanParameters.do_contrast_autofocus}
+                    onChange={(e) => setScanParameters(prev => ({ ...prev, do_contrast_autofocus: e.target.checked }))}
+                    className="mr-2"
+                    disabled={isScanInProgress}
+                  />
+                  Contrast AF
+                </label>
+                <label className="flex items-center text-xs">
+                  <input
+                    type="checkbox"
+                    checked={scanParameters.do_reflection_af}
+                    onChange={(e) => setScanParameters(prev => ({ ...prev, do_reflection_af: e.target.checked }))}
+                    className="mr-2"
+                    disabled={isScanInProgress}
+                  />
+                  Reflection AF
+                </label>
+              </div>
+              
+              <div className="bg-gray-700 p-2 rounded text-xs">
+                <div>Total scan area: {(scanParameters.Nx * scanParameters.dx_mm).toFixed(1)} × {(scanParameters.Ny * scanParameters.dy_mm).toFixed(1)} mm</div>
+                <div>Total positions: {scanParameters.Nx * scanParameters.Ny}</div>
+                <div>Channels: {scanParameters.illumination_settings.length}</div>
+                <div>Total images: {scanParameters.Nx * scanParameters.Ny * scanParameters.illumination_settings.length}</div>
+                <div>End position: ({(scanParameters.start_x_mm + (scanParameters.Nx-1) * scanParameters.dx_mm).toFixed(1)}, {(scanParameters.start_y_mm + (scanParameters.Ny-1) * scanParameters.dy_mm).toFixed(1)}) mm</div>
+              </div>
+              
+              
+              {isRectangleSelection && (
+                <div className="bg-blue-900 bg-opacity-50 p-2 rounded text-xs border border-blue-500">
+                  <i className="fas fa-vector-square mr-1"></i>
+                  Drag on the map to select scan area. Current settings will be used as defaults.
                 </div>
               )}
             </div>
             
-            <div className="flex items-center space-x-4">
-              <label className="flex items-center text-xs">
-                <input
-                  type="checkbox"
-                  checked={scanParameters.do_contrast_autofocus}
-                  onChange={(e) => setScanParameters(prev => ({ ...prev, do_contrast_autofocus: e.target.checked }))}
-                  className="mr-2"
-                  disabled={isScanInProgress}
-                />
-                Contrast AF
-              </label>
-              <label className="flex items-center text-xs">
-                <input
-                  type="checkbox"
-                  checked={scanParameters.do_reflection_af}
-                  onChange={(e) => setScanParameters(prev => ({ ...prev, do_reflection_af: e.target.checked }))}
-                  className="mr-2"
-                  disabled={isScanInProgress}
-                />
-                Reflection AF
-              </label>
-            </div>
-            
-            <div className="bg-gray-700 p-2 rounded text-xs">
-              <div>Total scan area: {(scanParameters.Nx * scanParameters.dx_mm).toFixed(1)} × {(scanParameters.Ny * scanParameters.dy_mm).toFixed(1)} mm</div>
-              <div>Total positions: {scanParameters.Nx * scanParameters.Ny}</div>
-              <div>Channels: {scanParameters.illumination_settings.length}</div>
-              <div>Total images: {scanParameters.Nx * scanParameters.Ny * scanParameters.illumination_settings.length}</div>
-              <div>End position: ({(scanParameters.start_x_mm + (scanParameters.Nx-1) * scanParameters.dx_mm).toFixed(1)}, {(scanParameters.start_y_mm + (scanParameters.Ny-1) * scanParameters.dy_mm).toFixed(1)}) mm</div>
-            </div>
-            
-            
-            {isRectangleSelection && (
-              <div className="bg-blue-900 bg-opacity-50 p-2 rounded text-xs border border-blue-500">
-                <i className="fas fa-vector-square mr-1"></i>
-                Drag on the map to select scan area. Current settings will be used as defaults.
-              </div>
-            )}
-          </div>
-          
-                      <div className="flex justify-end space-x-2 mt-4">
-              <button
-                onClick={() => {
-                  if (isScanInProgress) return;
-                  if (isRectangleSelection) {
-                    // Stop rectangle selection
-                    setIsRectangleSelection(false);
-                    setRectangleStart(null);
-                    setRectangleEnd(null);
-                    setDragSelectedWell(null);
-                  } else {
-                    // Start rectangle selection - clear any existing selection first
-                    setRectangleStart(null);
-                    setRectangleEnd(null);
-                    setDragSelectedWell(null);
-                    setIsRectangleSelection(true);
-                  }
-                }}
-                className={`px-3 py-1 text-xs rounded disabled:opacity-50 disabled:cursor-not-allowed ${
-                  isRectangleSelection ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-gray-600 hover:bg-gray-500 text-white'
-                }`}
-                disabled={isScanInProgress}
-              >
-                <i className="fas fa-vector-square mr-1"></i>
-                {isRectangleSelection ? 'Stop Selection' : 'Select Area'}
-              </button>
-              <button
-                onClick={async () => {
-                  if (!microscopeControlService) return;
-                  
-                  if (isScanInProgress) {
-                    // Stop scan logic
-                    try {
-                      if (appendLog) appendLog('Stopping scan...');
-                      
-                      const result = await microscopeControlService.stop_scan_and_stitching();
-                      
-                      if (result.success) {
-                        if (showNotification) showNotification('Scan stop requested', 'success');
-                        if (appendLog) appendLog('Scan stop requested - scan will be interrupted');
-                        setIsScanInProgress(false);
-                        if (setMicroscopeBusy) setMicroscopeBusy(false);
-                        if (setCurrentOperation) setCurrentOperation(null); // Re-enable sidebar
-                      } else {
-                        if (showNotification) showNotification(`Failed to stop scan: ${result.message}`, 'error');
-                        if (appendLog) appendLog(`Failed to stop scan: ${result.message}`);
-                      }
-                    } catch (error) {
-                      if (showNotification) showNotification(`Error stopping scan: ${error.message}`, 'error');
-                      if (appendLog) appendLog(`Error stopping scan: ${error.message}`);
-                    }
-                    return;
-                  }
-                  
-
-                  
-                  // Check if WebRTC is active and stop it to prevent camera resource conflict
-                  const wasWebRtcActive = isWebRtcActive;
-                  if (wasWebRtcActive) {
-                    if (appendLog) appendLog('Stopping WebRTC stream to prevent camera resource conflict during scanning...');
-                    try {
-                      if (toggleWebRtcStream) {
-                        toggleWebRtcStream(); // This will stop the WebRTC stream
-                        // Wait a moment for the stream to fully stop
-                        await new Promise(resolve => setTimeout(resolve, 500));
-                      } else {
-                        if (appendLog) appendLog('Warning: toggleWebRtcStream function not available, proceeding with scan...');
-                      }
-                    } catch (webRtcError) {
-                      if (appendLog) appendLog(`Warning: Failed to stop WebRTC stream: ${webRtcError.message}. Proceeding with scan...`);
-                    }
-                  }
-                  
-                  setIsScanInProgress(true);
-                  if (setMicroscopeBusy) setMicroscopeBusy(true); // Also set global busy state
-                  if (setCurrentOperation) setCurrentOperation('scanning'); // Disable sidebar during scanning
-                  
-                  // Disable rectangle selection during scanning to allow map browsing
-                  setIsRectangleSelection(false);
-                  setRectangleStart(null);
-                  setRectangleEnd(null);
-                  
-                  try {
-                    
-                    
-                    if (appendLog) {
-                      const channelNames = scanParameters.illumination_settings.map(s => s.channel).join(', ');
-                      appendLog(`Starting scan: ${scanParameters.Nx}×${scanParameters.Ny} positions from (${scanParameters.start_x_mm.toFixed(1)}, ${scanParameters.start_y_mm.toFixed(1)}) mm`);
-                      appendLog(`Channels: ${channelNames}`);
-                    }
-                    
-                    const result = await microscopeControlService.normal_scan_with_stitching(
-                      scanParameters.start_x_mm,
-                      scanParameters.start_y_mm,
-                      scanParameters.Nx,
-                      scanParameters.Ny,
-                      scanParameters.dx_mm,
-                      scanParameters.dy_mm,
-                      scanParameters.illumination_settings,
-                      scanParameters.do_contrast_autofocus,
-                      scanParameters.do_reflection_af,
-                      'scan_' + Date.now(),
-                      0, // timepoint index
-                      activeExperiment, // experiment_name parameter
-                      selectedWells, // <-- now supports multi-well
-                      wellPlateType, // wellplate_type parameter
-                      wellPaddingMm // well_padding_mm parameter
-                    );
-                    
-                    if (result.success) {
-                      if (showNotification) showNotification('Scan completed successfully', 'success');
-                      if (appendLog) {
-                        appendLog('Scan completed successfully');
-                        if (wasWebRtcActive) {
-                          appendLog('Note: WebRTC stream was stopped for scanning. Click "Start Live" to resume video stream if needed.');
-                        }
-                      }
-                      setShowScanConfig(false);
+                        <div className="flex justify-end space-x-2 mt-4">
+                <button
+                  onClick={() => {
+                    if (isScanInProgress) return;
+                    if (isRectangleSelection) {
+                      // Stop rectangle selection
                       setIsRectangleSelection(false);
                       setRectangleStart(null);
                       setRectangleEnd(null);
-                      // Enable scan results layer if not already
-                      setVisibleLayers(prev => ({ ...prev, scanResults: true }));
-                      
-                      // Refresh scan results display once after completion
-                      setTimeout(() => {
-                        refreshScanResults();
-                      }, 1000); // Wait 1 second then refresh
+                      setDragSelectedWell(null);
                     } else {
-                      if (showNotification) showNotification(`Scan failed: ${result.message}`, 'error');
-                      if (appendLog) appendLog(`Scan failed: ${result.message}`);
+                      // Start rectangle selection - clear any existing selection first
+                      setRectangleStart(null);
+                      setRectangleEnd(null);
+                      setDragSelectedWell(null);
+                      setIsRectangleSelection(true);
                     }
-                  } catch (error) {
-                    if (showNotification) showNotification(`Scan error: ${error.message}`, 'error');
-                    if (appendLog) appendLog(`Scan error: ${error.message}`);
-                  } finally {
-                    setIsScanInProgress(false);
-                    if (setMicroscopeBusy) setMicroscopeBusy(false); // Clear global busy state
-                    if (setCurrentOperation) setCurrentOperation(null); // Re-enable sidebar
-                  }
-                }}
-              className={`px-3 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed flex items-center ${
-                isScanInProgress ? 'bg-red-600 hover:bg-red-500' : 'bg-green-600 hover:bg-green-500'
-              }`}
-              disabled={!microscopeControlService}
-            >
-              {isScanInProgress ? (
-                <>
-                  <i className="fas fa-stop mr-1"></i>
-                  Stop Scan
-                </>
-              ) : (
-                <>
-                  <i className="fas fa-play mr-1"></i>
-                  Start Scan
-                </>
-              )}
-            </button>
-            
+                  }}
+                  className={`px-3 py-1 text-xs rounded disabled:opacity-50 disabled:cursor-not-allowed ${
+                    isRectangleSelection ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-gray-600 hover:bg-gray-500 text-white'
+                  }`}
+                  disabled={isScanInProgress}
+                >
+                  <i className="fas fa-vector-square mr-1"></i>
+                  {isRectangleSelection ? 'Stop Selection' : 'Select Area'}
+                </button>
+                <button
+                  onClick={async () => {
+                    if (!microscopeControlService) return;
+                    
+                    if (isScanInProgress) {
+                      // Stop scan logic
+                      try {
+                        if (appendLog) appendLog('Stopping scan...');
+                        
+                        const result = await microscopeControlService.stop_scan_and_stitching();
+                        
+                        if (result.success) {
+                          if (showNotification) showNotification('Scan stop requested', 'success');
+                          if (appendLog) appendLog('Scan stop requested - scan will be interrupted');
+                          setIsScanInProgress(false);
+                          if (setMicroscopeBusy) setMicroscopeBusy(false);
+                          if (setCurrentOperation) setCurrentOperation(null); // Re-enable sidebar
+                        } else {
+                          if (showNotification) showNotification(`Failed to stop scan: ${result.message}`, 'error');
+                          if (appendLog) appendLog(`Failed to stop scan: ${result.message}`);
+                        }
+                      } catch (error) {
+                        if (showNotification) showNotification(`Error stopping scan: ${error.message}`, 'error');
+                        if (appendLog) appendLog(`Error stopping scan: ${error.message}`);
+                      }
+                      return;
+                    }
+                    
 
+                    
+                    // Check if WebRTC is active and stop it to prevent camera resource conflict
+                    const wasWebRtcActive = isWebRtcActive;
+                    if (wasWebRtcActive) {
+                      if (appendLog) appendLog('Stopping WebRTC stream to prevent camera resource conflict during scanning...');
+                      try {
+                        if (toggleWebRtcStream) {
+                          toggleWebRtcStream(); // This will stop the WebRTC stream
+                          // Wait a moment for the stream to fully stop
+                          await new Promise(resolve => setTimeout(resolve, 500));
+                        } else {
+                          if (appendLog) appendLog('Warning: toggleWebRtcStream function not available, proceeding with scan...');
+                        }
+                      } catch (webRtcError) {
+                        if (appendLog) appendLog(`Warning: Failed to stop WebRTC stream: ${webRtcError.message}. Proceeding with scan...`);
+                      }
+                    }
+                    
+                    setIsScanInProgress(true);
+                    if (setMicroscopeBusy) setMicroscopeBusy(true); // Also set global busy state
+                    if (setCurrentOperation) setCurrentOperation('scanning'); // Disable sidebar during scanning
+                    
+                    // Disable rectangle selection during scanning to allow map browsing
+                    setIsRectangleSelection(false);
+                    setRectangleStart(null);
+                    setRectangleEnd(null);
+                    
+                    try {
+                      
+                      
+                      if (appendLog) {
+                        const channelNames = scanParameters.illumination_settings.map(s => s.channel).join(', ');
+                        appendLog(`Starting scan: ${scanParameters.Nx}×${scanParameters.Ny} positions from (${scanParameters.start_x_mm.toFixed(1)}, ${scanParameters.start_y_mm.toFixed(1)}) mm`);
+                        appendLog(`Channels: ${channelNames}`);
+                      }
+                      
+                      const result = await microscopeControlService.normal_scan_with_stitching(
+                        scanParameters.start_x_mm,
+                        scanParameters.start_y_mm,
+                        scanParameters.Nx,
+                        scanParameters.Ny,
+                        scanParameters.dx_mm,
+                        scanParameters.dy_mm,
+                        scanParameters.illumination_settings,
+                        scanParameters.do_contrast_autofocus,
+                        scanParameters.do_reflection_af,
+                        'scan_' + Date.now(),
+                        0, // timepoint index
+                        activeExperiment, // experiment_name parameter
+                        selectedWells, // <-- now supports multi-well
+                        wellPlateType, // wellplate_type parameter
+                        wellPaddingMm // well_padding_mm parameter
+                      );
+                      
+                      if (result.success) {
+                        if (showNotification) showNotification('Scan completed successfully', 'success');
+                        if (appendLog) {
+                          appendLog('Scan completed successfully');
+                          if (wasWebRtcActive) {
+                            appendLog('Note: WebRTC stream was stopped for scanning. Click "Start Live" to resume video stream if needed.');
+                          }
+                        }
+                        setShowScanConfig(false);
+                        setIsRectangleSelection(false);
+                        setRectangleStart(null);
+                        setRectangleEnd(null);
+                        // Enable scan results layer if not already
+                        setVisibleLayers(prev => ({ ...prev, scanResults: true }));
+                        
+                        // Refresh scan results display once after completion
+                        setTimeout(() => {
+                          refreshScanResults();
+                        }, 1000); // Wait 1 second then refresh
+                      } else {
+                        if (showNotification) showNotification(`Scan failed: ${result.message}`, 'error');
+                        if (appendLog) appendLog(`Scan failed: ${result.message}`);
+                      }
+                    } catch (error) {
+                      if (showNotification) showNotification(`Scan error: ${error.message}`, 'error');
+                      if (appendLog) appendLog(`Scan error: ${error.message}`);
+                    } finally {
+                      setIsScanInProgress(false);
+                      if (setMicroscopeBusy) setMicroscopeBusy(false); // Clear global busy state
+                      if (setCurrentOperation) setCurrentOperation(null); // Re-enable sidebar
+                    }
+                  }}
+                className={`px-3 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed flex items-center ${
+                  isScanInProgress ? 'bg-red-600 hover:bg-red-500' : 'bg-green-600 hover:bg-green-500'
+                }`}
+                disabled={!microscopeControlService}
+              >
+                {isScanInProgress ? (
+                  <>
+                    <i className="fas fa-stop mr-1"></i>
+                    Stop Scan
+                  </>
+                ) : (
+                  <>
+                    <i className="fas fa-play mr-1"></i>
+                    Start Scan
+                  </>
+                )}
+              </button>
+              
+
+            </div>
           </div>
         </div>
       )}

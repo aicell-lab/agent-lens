@@ -306,8 +306,8 @@ input[type="checkbox"]:disabled + span {
 
 /* Multi-well selection grid for Scan Configuration panel */
 .scan-well-plate-grid-container {
-  margin-top: 0.5rem;
-  margin-bottom: 1rem;
+  margin-top: 0.25rem;
+  margin-bottom: 0.5rem;
   user-select: none;
   width: 100%;
   display: flex;
@@ -317,9 +317,9 @@ input[type="checkbox"]:disabled + span {
 .scan-well-plate-grid {
   display: grid;
   grid-template-columns: auto repeat(12, 1fr);
-  gap: 1px;
+  gap: 0.5px;
   border: 1px solid #374151;
-  padding: 2px;
+  padding: 1px;
   background-color: #23272f;
   width: 100%;
   max-width: 260px; /* was 340px */
@@ -338,187 +338,367 @@ input[type="checkbox"]:disabled + span {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 2px;
-  font-size: 0.65rem;
+  padding: 1px;
+  font-size: 0.6rem;
   font-weight: bold;
   background-color: #374151;
   color: #cbd5e1;
-  min-width: 14px;
+  min-width: 12px;
   text-align: center;
   border-radius: 0.25rem;
 }
 
 .scan-grid-cell {
-  padding: 3px;
-  border: 1px solid #374151;
-  background-color: #23272f;
-  text-align: center;
+  width: 12px;
+  height: 12px;
+  background-color: #4b5563;
+  border: 1px solid #6b7280;
   cursor: pointer;
-  font-size: 0.6rem;
-  transition: background-color 0.2s, color 0.2s, border-color 0.2s;
-  min-width: 14px;
-  min-height: 14px;
+  transition: all 0.2s ease;
   border-radius: 0.25rem;
-  color: #cbd5e1;
 }
 
 .scan-grid-cell:hover {
-  background-color: #334155;
+  background-color: #6b7280;
+  border-color: #9ca3af;
 }
 
 .scan-grid-cell.selected {
-  background-color: #2563eb;
-  color: #fff;
-  border-color: #1d4ed8;
+  background-color: #3b82f6;
+  border-color: #60a5fa;
+  box-shadow: 0 0 4px rgba(59, 130, 246, 0.5);
 }
 
 .scan-grid-cell:disabled {
-  background-color: #1e293b;
-  cursor: not-allowed;
-  color: #64748b;
-}
-
-/* Ensure the first cell in the column labels row (top-left empty cell) is styled like other labels */
-.scan-well-plate-grid > .scan-grid-col-labels > div:first-child {
   background-color: #374151;
-  border: none;
+  border-color: #4b5563;
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
-/* Browse Data Modal styles */
-.browse-data-modal {
-  max-width: 900px;
-  width: 100%;
-  background: #23272f;
-  border-radius: 0.75rem;
-  box-shadow: 0 4px 32px rgba(0,0,0,0.5);
-  border: 1px solid #374151;
-  overflow: hidden;
+/* Ensure the first cell (row label) is properly aligned */
+.scan-well-plate-grid > .scan-grid-col-labels > div:first-child {
+  width: 12px;
+  height: 12px;
 }
+
+/* Scrollable scan configuration panels */
+.scan-config-panel {
+  max-height: calc(100vh - 120px); /* Leave space for top controls */
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.scan-config-panel::-webkit-scrollbar {
+  width: 6px; /* Reduced from 8px */
+}
+
+.scan-config-panel::-webkit-scrollbar-track {
+  background: #374151;
+  border-radius: 3px; /* Reduced from 4px */
+}
+
+.scan-config-panel::-webkit-scrollbar-thumb {
+  background: #6b7280;
+  border-radius: 3px; /* Reduced from 4px */
+}
+
+.scan-config-panel::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+/* Ensure proper spacing in scrollable panels */
+.scan-config-content {
+  padding-right: 3px; /* Reduced from 4px to account for smaller scrollbar */
+}
+
+/* Compact spacing for scan configuration panels */
+.scan-config-content .space-y-3 {
+  gap: 0.5rem; /* Reduced from 0.75rem */
+}
+
+.scan-config-content .space-y-2 {
+  gap: 0.375rem; /* Reduced from 0.5rem */
+}
+
+.scan-config-content .mb-3 {
+  margin-bottom: 0.5rem; /* Reduced from 0.75rem */
+}
+
+.scan-config-content .mb-2 {
+  margin-bottom: 0.375rem; /* Reduced from 0.5rem */
+}
+
+.scan-config-content .mb-1 {
+  margin-bottom: 0.25rem; /* Reduced from 0.25rem - keep same */
+}
+
+.scan-config-content .mt-2 {
+  margin-top: 0.375rem; /* Reduced from 0.5rem */
+}
+
+.scan-config-content .mt-1 {
+  margin-top: 0.25rem; /* Reduced from 0.25rem - keep same */
+}
+
+.scan-config-content .mt-4 {
+  margin-top: 0.75rem; /* Reduced from 1rem */
+}
+
+/* Compact input styling */
+.scan-config-content input,
+.scan-config-content select {
+  padding: 0.25rem 0.5rem; /* Reduced from 0.5rem 1rem */
+  font-size: 0.75rem; /* Reduced from 0.875rem */
+}
+
+.scan-config-content label {
+  font-size: 0.75rem; /* Reduced from 0.875rem */
+  margin-bottom: 0.125rem; /* Reduced from 0.25rem */
+}
+
+/* Compact section styling */
+.scan-config-content .bg-gray-700 {
+  padding: 0.5rem; /* Reduced from 1rem */
+  border-radius: 0.25rem; /* Reduced from 0.375rem */
+}
+
+.scan-config-content .bg-gray-700 .mb-2 {
+  margin-bottom: 0.25rem; /* Reduced from 0.5rem */
+}
+
+/* Compact button styling */
+.scan-config-content button {
+  padding: 0.25rem 0.5rem; /* Reduced from 0.5rem 1rem */
+  font-size: 0.75rem; /* Reduced from 0.875rem */
+}
+
+/* Compact grid styling */
+.scan-well-plate-grid-container {
+  margin-top: 0.25rem; /* Reduced from 0.5rem */
+  margin-bottom: 0.5rem; /* Reduced from 1rem */
+}
+
+.scan-well-plate-grid {
+  gap: 0.5px; /* Reduced from 1px */
+  padding: 1px; /* Reduced from 2px */
+}
+
+.scan-grid-cell {
+  width: 12px; /* Reduced from 14px */
+  height: 12px; /* Reduced from 14px */
+}
+
+.scan-grid-label {
+  padding: 1px; /* Reduced from 2px */
+  font-size: 0.6rem; /* Reduced from 0.65rem */
+  min-width: 12px; /* Reduced from 14px */
+}
+
+/* Ensure the first cell (row label) is properly aligned */
+.scan-well-plate-grid > .scan-grid-col-labels > div:first-child {
+  width: 12px; /* Reduced from 14px */
+  height: 12px; /* Reduced from 14px */
+}
+
+/* Compact radio button spacing */
+.scan-config-content .flex-col.space-y-1 {
+  gap: 0.125rem; /* Reduced from 0.25rem */
+}
+
+.scan-config-content .flex-col.space-y-1 label {
+  font-size: 0.7rem; /* Reduced from 0.75rem */
+}
+
+/* Compact info text */
+.scan-config-content .text-xs {
+  font-size: 0.65rem; /* Reduced from 0.75rem */
+  line-height: 1.2; /* Reduced from 1.4 */
+}
+
+/* Compact spacing for flex containers */
+.scan-config-content .flex.space-x-2 {
+  gap: 0.25rem; /* Reduced from 0.5rem */
+}
+
+.scan-config-content .flex.space-x-1 {
+  gap: 0.125rem; /* Reduced from 0.25rem */
+}
+
+/* Compact header styling */
+.scan-config-panel .flex.items-center.justify-between {
+  padding: 0.75rem 1rem; /* Reduced from 1rem 1.5rem */
+}
+
+.scan-config-panel .text-sm {
+  font-size: 0.8rem; /* Reduced from 0.875rem */
+}
+
+/* Compact content padding */
+.scan-config-panel .p-4 {
+  padding: 0.75rem; /* Reduced from 1rem */
+}
+
+/* Compact border styling */
+.scan-config-panel .border-b {
+  border-bottom-width: 1px; /* Keep thin border */
+}
+
+/* Compact info box styling */
+.scan-config-content .bg-gray-700.p-2 {
+  padding: 0.375rem; /* Reduced from 0.5rem */
+}
+
+.scan-config-content .bg-gray-700.p-2 .mb-1 {
+  margin-bottom: 0.125rem; /* Reduced from 0.25rem */
+}
+
+/* Compact text styling */
+.scan-config-content .text-gray-400.text-xs {
+  font-size: 0.6rem; /* Reduced from 0.75rem */
+  margin-top: 0.125rem; /* Reduced from 0.25rem */
+}
+
+/* Historical data browsing modal */
+.browse-data-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: #1f2937;
+  border: 1px solid #374151;
+  border-radius: 0.5rem;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  max-width: 90vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
 .browse-data-modal-header {
   padding: 1rem;
   border-bottom: 1px solid #374151;
-  background: #1a1a1a;
   display: flex;
-  align-items: center;
   justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
 }
+
 .browse-data-modal-body {
-  display: flex;
-  flex-direction: row;
-  min-height: 350px;
+  padding: 1rem;
+  overflow-y: auto;
+  flex: 1;
 }
+
 .browse-data-modal-col {
   flex: 1;
-  padding: 1.5rem;
+  min-width: 0;
 }
+
 .browse-data-modal-col:not(:last-child) {
   border-right: 1px solid #374151;
+  padding-right: 1rem;
 }
 
+/* Historical timeline container */
 .historical-timeline-container {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 60px;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  z-index: 60;
-  pointer-events: auto;
-  background: rgba(30, 41, 59, 0.95); /* dark bg */
-  border-top: 1px solid #374151;
-  padding-bottom: 8px;
-}
-.historical-timeline-line {
-  position: relative;
-  width: 90%;
-  height: 32px;
-  margin: 0 auto;
-  background: none;
-  border-bottom: 2px solid #64748b;
-  display: flex;
-  align-items: flex-end;
-  justify-content: flex-start;
-}
-.historical-timeline-point {
-  position: absolute;
-  bottom: 0;
-  transform: translateX(-50%);
-  cursor: pointer;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  pointer-events: auto;
-}
-.historical-timeline-dot {
-  width: 14px;
-  height: 14px;
-  background: #60a5fa;
-  border-radius: 50%;
-  border: 2px solid #2563eb;
-  margin-bottom: 2px;
-  transition: background 0.2s, border 0.2s;
-}
-.historical-timeline-point.selected .historical-timeline-dot {
-  background: #fbbf24;
-  border-color: #f59e42;
-}
-.historical-timeline-label {
-  font-size: 10px;
-  color: #cbd5e1;
-  margin-top: 2px;
-  white-space: nowrap;
-  text-align: center;
-  max-width: 60px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.historical-timeline-point.selected .historical-timeline-label {
-  color: #fbbf24;
-  font-weight: bold;
+  gap: 0.5rem;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 0.5rem;
+  background: #374151;
+  border-radius: 0.25rem;
+  border: 1px solid #4b5563;
 }
 
-/* Historical Timepoint Controls */
-.historical-timepoint-container {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 60px; /* Position above the timeline */
-  height: 50px;
+.historical-timeline-line {
   display: flex;
   align-items: center;
-  justify-content: center;
-  z-index: 59;
-  pointer-events: auto;
-  background: rgba(30, 41, 59, 0.95);
-  border-top: 1px solid #374151;
-  padding: 8px 16px;
+  gap: 0.5rem;
+  padding: 0.25rem;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.historical-timeline-line:hover {
+  background: #4b5563;
+}
+
+.historical-timeline-point {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 0.75rem;
+}
+
+.historical-timeline-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #6b7280;
+  transition: all 0.2s ease;
+}
+
+.historical-timeline-point.selected .historical-timeline-dot {
+  background: #3b82f6;
+  box-shadow: 0 0 4px rgba(59, 130, 246, 0.5);
+}
+
+.historical-timeline-label {
+  font-size: 0.75rem;
+  color: #d1d5db;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}
+
+.historical-timeline-point.selected .historical-timeline-label {
+  color: #3b82f6;
+  font-weight: 500;
+}
+
+/* Historical timepoint controls */
+.historical-timepoint-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  background: #374151;
+  border-radius: 0.25rem;
+  border: 1px solid #4b5563;
+  margin-top: 0.5rem;
 }
 
 .historical-timepoint-controls {
   display: flex;
   align-items: center;
-  gap: 12px;
-  width: 100%;
-  max-width: 400px;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .historical-timepoint-label {
-  font-size: 12px;
-  color: #cbd5e1;
+  font-size: 0.75rem;
+  color: #d1d5db;
   font-weight: 500;
-  min-width: 80px;
-  text-align: center;
+  min-width: 60px;
 }
 
 .historical-timepoint-slider {
   flex: 1;
-  height: 6px;
-  background: #374151;
-  border-radius: 3px;
+  min-width: 100px;
+  height: 4px;
+  background: #4b5563;
+  border-radius: 2px;
   outline: none;
-  cursor: pointer;
   -webkit-appearance: none;
   appearance: none;
 }
@@ -528,63 +708,56 @@ input[type="checkbox"]:disabled + span {
   appearance: none;
   width: 16px;
   height: 16px;
-  background: #60a5fa;
+  background: #3b82f6;
   border-radius: 50%;
-  border: 2px solid #2563eb;
   cursor: pointer;
-  transition: background 0.2s, border 0.2s;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .historical-timepoint-slider::-webkit-slider-thumb:hover {
-  background: #93c5fd;
-  border-color: #3b82f6;
+  background: #60a5fa;
+  transform: scale(1.1);
 }
 
 .historical-timepoint-slider::-moz-range-thumb {
   width: 16px;
   height: 16px;
-  background: #60a5fa;
+  background: #3b82f6;
   border-radius: 50%;
-  border: 2px solid #2563eb;
   cursor: pointer;
-  transition: background 0.2s, border 0.2s;
+  border: none;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .historical-timepoint-slider::-moz-range-thumb:hover {
-  background: #93c5fd;
-  border-color: #3b82f6;
+  background: #60a5fa;
 }
 
 .historical-timepoint-buttons {
   display: flex;
-  gap: 4px;
+  gap: 0.25rem;
 }
 
 .historical-timepoint-btn {
-  width: 28px;
-  height: 28px;
-  background: #374151;
-  border: 1px solid #4b5563;
-  border-radius: 4px;
-  color: #cbd5e1;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  background: #4b5563;
+  color: #d1d5db;
+  border: none;
+  border-radius: 0.25rem;
   cursor: pointer;
+  transition: all 0.2s ease;
   display: flex;
   align-items: center;
-  justify-content: center;
-  font-size: 10px;
-  transition: background 0.2s, border 0.2s, color 0.2s;
+  gap: 0.25rem;
 }
 
 .historical-timepoint-btn:hover:not(:disabled) {
-  background: #4b5563;
-  border-color: #60a5fa;
-  color: #fbbf24;
+  background: #6b7280;
+  color: white;
 }
 
 .historical-timepoint-btn:disabled {
-  background: #1f2937;
-  border-color: #374151;
-  color: #6b7280;
-  cursor: not-allowed;
   opacity: 0.5;
+  cursor: not-allowed;
 }
