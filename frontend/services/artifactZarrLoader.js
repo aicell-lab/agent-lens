@@ -699,8 +699,8 @@ class ArtifactZarrLoader {
       let loadedChunks = 0;
       const totalChunks = chunks.length;
       
-      // Fetch and place each chunk
-      for (const chunk of chunks) {
+      // Create array of chunk loading promises for parallel execution
+      const chunkPromises = chunks.map(async (chunk) => {
         const [t, c, z, y, x] = chunk.coordinates;
         const chunkUrl = `${baseUrl}${scaleLevel}/${t}.${c}.${z}.${y}.${x}`;
         
@@ -724,7 +724,7 @@ class ArtifactZarrLoader {
             const posX = chunkAbsX - regionStartX;
             const posY = chunkAbsY - regionStartY;
             
-            // Only draw if the chunk intersects with our region
+            // Only process if the chunk intersects with our region
             if (posX < totalWidth && posY < totalHeight && 
                 posX + chunkCanvas.width > 0 && posY + chunkCanvas.height > 0) {
               
@@ -737,14 +737,33 @@ class ArtifactZarrLoader {
               const destX = Math.max(0, posX);
               const destY = Math.max(0, posY);
             
-            // Debug logging for chunk positioning
+              // Debug logging for chunk positioning
               console.log(`Placing chunk ${chunk.filename} at dest (${destX}, ${destY}) from src (${srcX}, ${srcY}) size ${srcWidth}x${srcHeight}`);
             
-              // Draw chunk onto main canvas with proper clipping
-              ctx.drawImage(chunkCanvas, srcX, srcY, srcWidth, srcHeight, destX, destY, srcWidth, srcHeight);
+              return {
+                chunkCanvas,
+                destX,
+                destY,
+                srcX,
+                srcY,
+                srcWidth,
+                srcHeight
+              };
             }
-            loadedChunks++;
           }
+        }
+        return null;
+      });
+      
+      // Wait for all chunks to load in parallel
+      const chunkResults = await Promise.all(chunkPromises);
+      
+      // Draw all loaded chunks onto the main canvas
+      for (const result of chunkResults) {
+        if (result) {
+          const { chunkCanvas, destX, destY, srcX, srcY, srcWidth, srcHeight } = result;
+          ctx.drawImage(chunkCanvas, srcX, srcY, srcWidth, srcHeight, destX, destY, srcWidth, srcHeight);
+          loadedChunks++;
         }
       }
       
