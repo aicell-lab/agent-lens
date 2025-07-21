@@ -543,3 +543,4 @@ async def hypha_server():
 
 ---
 *Remember: This is a research platform for autonomous microscopy. Prioritize reliability, performance, and scientific accuracy in all implementations.* 
+- When starting the frontend webapp (npm start), a circular dependency check (madge) is run automatically before the app launches. This ensures no import cycles are present in the codebase. 
