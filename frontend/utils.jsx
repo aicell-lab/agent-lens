@@ -40,7 +40,7 @@ export class HyphaServerManager {
     this.token = token;
     this.servers = {}; // Cache for server connections { workspace: serverPromise }
     this.serverConnections = {}; // Cache for actual server objects { workspace: serverObject }
-    this.defaultServerUrl = "https://hypha.aicell.io/"; // Make configurable if needed
+    this.defaultServerUrl = "http://reef.dyn.scilifelab.se:9527/"; // Make configurable if needed
     this.defaultClientNamePrefix = "hypha-client";
   }
 
@@ -182,7 +182,7 @@ export const initializeServices = async (
   );
   setSimilarityService(similarityService);
   
-  const incubatorServiceIdFull = "reef-imaging/mirror-incubator-control";
+  const incubatorServiceIdFull = "reef-imaging-local/incubator-control";
   const incubatorControlService = await tryGetService(
     hyphaManager,
     "Incubator Control",
@@ -193,7 +193,7 @@ export const initializeServices = async (
   );
   setIncubatorControlService(incubatorControlService);
 
-  const roboticArmServiceIdFull = "reef-imaging/mirror-robotic-arm-control";
+  const roboticArmServiceIdFull = "reef-imaging-local/robotic-arm-control";
   const roboticArmService = await tryGetService(
     hyphaManager,
     "Robotic Arm Control",
@@ -204,7 +204,7 @@ export const initializeServices = async (
   );
   setRoboticArmService(roboticArmService);
 
-  const orchestratorManagerServiceIdFull = "reef-imaging/orchestrator-manager";
+  const orchestratorManagerServiceIdFull = "reef-imaging-local/orchestrator-manager";
   const orchestratorManagerService = await tryGetService(
     hyphaManager,
     "Orchestrator Manager",

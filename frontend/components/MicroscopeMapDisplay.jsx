@@ -3880,7 +3880,7 @@ const MicroscopeMapDisplay = ({
                     try {
                       if (appendLog) appendLog('Starting quick scan...');
                       
-                      const result = await microscopeControlService.start_quick_scan(quickScanParameters);
+                      const result = await microscopeControlService.quick_scan_with_stitching(quickScanParameters);
                       
                       if (result.success) {
                         if (showNotification) showNotification('Quick scan started', 'success');
@@ -4545,7 +4545,7 @@ const MicroscopeMapDisplay = ({
             </div>
             {/* Notice */}
             <div className="bg-blue-900 bg-opacity-40 text-blue-200 text-xs p-2 px-4 border-b border-blue-700">
-              This is for data browsing, for management, please go to <a href="https://hypha.aicell.io/agent-lens#artifacts" target="_blank" rel="noopener noreferrer" className="underline text-blue-300">https://hypha.aicell.io/agent-lens#artifacts</a> if you have access.
+              This is for data browsing, for management, please go to <a href="http://reef.dyn.scilifelab.se:9527/agent-lens#artifacts" target="_blank" rel="noopener noreferrer" className="underline text-blue-300">http://reef.dyn.scilifelab.se:9527/agent-lens#artifacts</a> if you have access.
             </div>
             {/* Modal Body: Two columns */}
             <div className="flex flex-row divide-x divide-gray-700" style={{ minHeight: '350px' }}>

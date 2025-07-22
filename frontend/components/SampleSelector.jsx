@@ -32,11 +32,11 @@ const SampleSelector = ({
     'simulated-sample-3': 'agent-lens/hpa-sample-2025-01-14_15-00-51'
   };
   
-  const isRealMicroscopeSelected = selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ||
-                                selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2';
+  const isRealMicroscopeSelected = selectedMicroscopeId === 'reef-imaging-local/microscope-control-squid-1' ||
+                                selectedMicroscopeId === 'reef-imaging-local/microscope-control-squid-2';
   const isSimulatedMicroscopeSelected = selectedMicroscopeId === 'agent-lens/squid-control-reef';
-  const currentMicroscopeNumber = selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 1 : 
-                                 selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2' ? 2 : 0;
+  const currentMicroscopeNumber = selectedMicroscopeId === 'reef-imaging-local/microscope-control-squid-1' ? 1 : 
+                                 selectedMicroscopeId === 'reef-imaging-local/microscope-control-squid-2' ? 2 : 0;
 
   // Notify parent when sample load status changes
   useEffect(() => {
@@ -91,7 +91,7 @@ const SampleSelector = ({
     const connectToRoboticArm = async () => {
       if (isRealMicroscopeSelected && !roboticArmService) {
         try {
-          const robotic_arm_id = "reef-imaging/mirror-robotic-arm-control";
+          const robotic_arm_id = "reef-imaging-local/robotic-arm-control";
           
           // This is a placeholder for the actual connection method
           // In a real application, you would need to properly connect to the service

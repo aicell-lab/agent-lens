@@ -49,8 +49,8 @@ const numpyArrayToDataURL = (numpyArray) => {
 
 const WEBRTC_SERVICE_IDS = {
   "agent-lens/squid-control-reef": "agent-lens/video-track-squid-control-reef",
-  "reef-imaging/mirror-microscope-control-squid-1": "reef-imaging/video-track-microscope-control-squid-1",
-  "reef-imaging/mirror-microscope-control-squid-2": "reef-imaging/video-track-microscope-control-squid-2", // Assuming typo correction
+  "reef-imaging-local/microscope-control-squid-1": "reef-imaging-local/video-track-microscope-control-squid-1",
+  "reef-imaging-local/microscope-control-squid-2": "reef-imaging-local/video-track-microscope-control-squid-2", // Assuming typo correction
 };
 
 // Define well plate configurations
@@ -1451,8 +1451,8 @@ const MicroscopeControlPanel = ({
             <div className="flex items-center justify-start flex-grow">
               <h3 className="text-lg font-medium mr-3">
                 {selectedMicroscopeId === 'agent-lens/squid-control-reef' ? 'Simulated Microscope' :
-                 selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 'Real Microscope 1' :
-                 selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2' ? 'Real Microscope 2' :
+                 selectedMicroscopeId === 'reef-imaging-local/microscope-control-squid-1' ? 'Real Microscope 1' :
+                 selectedMicroscopeId === 'reef-imaging-local/microscope-control-squid-2' ? 'Real Microscope 2' :
                  'Microscope Control'}
               </h3>
               {selectedMicroscopeId && (
@@ -1844,8 +1844,8 @@ const MicroscopeControlPanel = ({
                 {selectedMicroscopeId && (
                   <span className="text-sm text-gray-600 ml-2">
                     ({selectedMicroscopeId === 'agent-lens/squid-control-reef' ? 'Simulated' :
-                      selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 'Real Microscope 1' :
-                      selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2' ? 'Real Microscope 2' :
+                      selectedMicroscopeId === 'reef-imaging-local/microscope-control-squid-1' ? 'Real Microscope 1' :
+                      selectedMicroscopeId === 'reef-imaging-local/microscope-control-squid-2' ? 'Real Microscope 2' :
                       selectedMicroscopeId})
                   </span>
                 )}

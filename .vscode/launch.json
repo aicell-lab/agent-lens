@@ -11,7 +11,7 @@
             "args": [
                 "connect-server",
                 "--workspace_name=agent-lens",
-                "--server_url=https://hypha.aicell.io"
+                "--server_url=http://reef.dyn.scilifelab.se:9527"
             ],
         }
     ]
