@@ -2076,6 +2076,14 @@ const MicroscopeMapDisplay = ({
 
   // Add state for selected dataset in historical mode
   const [selectedHistoricalDataset, setSelectedHistoricalDataset] = useState(null);
+  
+  // Auto-select first dataset when datasets are loaded in historical mode
+  useEffect(() => {
+    if (isHistoricalDataMode && datasets.length > 0 && !selectedHistoricalDataset) {
+      console.log('[Historical Mode] Auto-selecting first dataset:', datasets[0]);
+      setSelectedHistoricalDataset(datasets[0]);
+    }
+  }, [isHistoricalDataMode, datasets, selectedHistoricalDataset]);
 
   
   // Initialize ArtifactZarrLoader for historical data
@@ -4676,27 +4684,50 @@ const MicroscopeMapDisplay = ({
         </div>
       )}
 
+      {/* Historical Timeline - positioned at bottom of main container */}
       {isHistoricalDataMode && selectedGallery && datasets.length > 0 && (
-        <div className="historical-timeline-container">
-          <div className="historical-timeline-line">
-            {datasets.map((ds, idx) => {
-              const isSelected = selectedHistoricalDataset && selectedHistoricalDataset.id === ds.id;
-              return (
-                <div
-                  key={ds.id}
-                  className={`historical-timeline-point${isSelected ? ' selected' : ''}`}
-                  style={{ left: `${(idx / (datasets.length - 1)) * 100}%` }}
-                  onClick={() => setSelectedHistoricalDataset(ds)}
-                  title={ds.manifest?.name || ds.alias || ds.id}
-                >
-                  <div className="historical-timeline-dot" />
-                  <div className="historical-timeline-label">{ds.id}</div>
-                </div>
-              );
-            })}
+        <div className="absolute bottom-0 left-0 right-0 z-50">
+          <div className="historical-timeline-container">
+            <div className="historical-timeline-line">
+              {datasets.map((ds, idx) => {
+                const isSelected = selectedHistoricalDataset && selectedHistoricalDataset.id === ds.id;
+                // Adjust position to account for sidebar and window edges
+                let position;
+                if (datasets.length === 1) {
+                  position = 50; // Center if only one dataset
+                } else {
+                  // Use a smaller range to avoid edges: 10% to 90% instead of 0% to 100%
+                  position = 10 + (idx / (datasets.length - 1)) * 80;
+                }
+                return (
+                  <div
+                    key={ds.id}
+                    className={`historical-timeline-point${isSelected ? ' selected' : ''}`}
+                    style={{ left: `${position}%` }}
+                    onClick={() => setSelectedHistoricalDataset(ds)}
+                    title={ds.manifest?.name || ds.alias || ds.id}
+                  >
+                    <div className="historical-timeline-dot" />
+                    <div className="historical-timeline-tooltip">
+                      <div className="tooltip-content">
+                        <div className="tooltip-title">{ds.manifest?.name || ds.alias || ds.id}</div>
+                        <div className="tooltip-details">
+                          <div>ID: {ds.id}</div>
+                          {ds.manifest?.description && <div>Description: {ds.manifest.description}</div>}
+                          {ds.manifest?.created_at && <div>Created: {new Date(ds.manifest.created_at).toLocaleString()}</div>}
+                          {ds.manifest?.size && <div>Size: {ds.manifest.size}</div>}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
+      
+
       
     </div>
   );
