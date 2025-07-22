@@ -342,6 +342,11 @@ const MicroscopeMapDisplay = ({
             refreshScanResults();
           }, 100);
         }
+        
+        // Refresh canvas view to show new experiment data
+        setTimeout(() => {
+          refreshCanvasView();
+        }, 200);
       } else {
         if (showNotification) showNotification(`Failed to activate experiment: ${result.message}`, 'error');
         if (appendLog) appendLog(`Failed to activate experiment: ${result.message}`);
@@ -2397,6 +2402,12 @@ const MicroscopeMapDisplay = ({
       return;
     }
 
+    // Don't trigger tile loading if tiles are currently loading
+    if (isLoadingCanvas || activeTileRequestsRef.current.size > 0) {
+      console.log('[Tile Loading] Skipping - tiles are currently loading (isLoadingCanvas:', isLoadingCanvas, 'activeRequests:', activeTileRequestsRef.current.size, ')');
+      return;
+    }
+
     const container = mapContainerRef.current;
     if (!container) {
       console.log('[Tile Loading] Skipping - no container reference');
@@ -2469,6 +2480,13 @@ const MicroscopeMapDisplay = ({
   // Effect to trigger tile loading when needsTileReload is set
   useEffect(() => {
     if (needsTileReload && mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
+      // Check if tiles are currently loading
+      if (isLoadingCanvas || activeTileRequestsRef.current.size > 0) {
+        console.log('[needsTileReload] Skipping - tiles are currently loading (isLoadingCanvas:', isLoadingCanvas, 'activeRequests:', activeTileRequestsRef.current.size, ')');
+        setNeedsTileReload(false); // Reset flag but don't trigger new loading
+        return;
+      }
+      
       console.log('[needsTileReload] Triggering tile reload');
       // Reset the flag
       setNeedsTileReload(false);
@@ -2493,10 +2511,15 @@ const MicroscopeMapDisplay = ({
       // Only trigger immediate tile load if user is NOT actively zooming
       // If user is zooming, let the interaction completion effect handle it
       if (!isZooming) {
-        console.log('[scaleLevel cleanup] User not zooming - scheduling tile load');
-        setTimeout(() => {
-          scheduleTileUpdate(); // Use scheduleTileUpdate instead of direct call
-        }, 200); // Small delay to ensure cleanup is complete
+        // Check if tiles are currently loading
+        if (isLoadingCanvas || activeTileRequestsRef.current.size > 0) {
+          console.log('[scaleLevel cleanup] Skipping - tiles are currently loading');
+        } else {
+          console.log('[scaleLevel cleanup] User not zooming - scheduling tile load');
+          setTimeout(() => {
+            scheduleTileUpdate(); // Use scheduleTileUpdate instead of direct call
+          }, 200); // Small delay to ensure cleanup is complete
+        }
       } else {
         console.log('[scaleLevel cleanup] User is zooming - skipping tile load');
       }
