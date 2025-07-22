@@ -3880,29 +3880,52 @@ const MicroscopeMapDisplay = ({
                     try {
                       if (appendLog) appendLog('Starting quick scan...');
                       
-                      const result = await microscopeControlService.start_quick_scan(quickScanParameters);
+                      // Set scanning state immediately to update UI
+                      setIsQuickScanInProgress(true);
                       
-                      if (result.success) {
+                      const result = await microscopeControlService.quick_scan_with_stitching(
+                        quickScanParameters.wellplate_type,
+                        quickScanParameters.exposure_time,
+                        quickScanParameters.intensity,
+                        quickScanParameters.fps_target,
+                        'quick_scan_' + Date.now(),
+                        quickScanParameters.n_stripes,
+                        quickScanParameters.stripe_width_mm,
+                        quickScanParameters.dy_mm,
+                        quickScanParameters.velocity_scan_mm_per_s,
+                        quickScanParameters.do_contrast_autofocus,
+                        quickScanParameters.do_reflection_af,
+                        activeExperiment, // experiment_name parameter
+                        wellPaddingMm // well_padding_mm parameter
+                      );
+                      
+                      if (appendLog) appendLog(`Quick scan result: ${JSON.stringify(result)}`);
+                      
+                      if (result && result.success) {
                         if (showNotification) showNotification('Quick scan started', 'success');
-                        setIsQuickScanInProgress(true);
                         if (appendLog) appendLog('Quick scan started successfully');
                       } else {
+                        // If scan failed, reset the state
+                        setIsQuickScanInProgress(false);
                         if (showNotification) showNotification('Failed to start quick scan', 'error');
-                        if (appendLog) appendLog(`Quick scan start failed: ${result.message}`);
+                        if (appendLog) appendLog(`Quick scan start failed: ${result ? result.message : 'No result returned'}`);
                       }
                     } catch (error) {
+                      // If error occurred, reset the state
+                      setIsQuickScanInProgress(false);
                       if (showNotification) showNotification('Error starting quick scan', 'error');
                       if (appendLog) appendLog(`Quick scan start error: ${error.message}`);
+                      console.error('Quick scan error:', error);
                     }
                   }
                 }}
-                className="px-3 py-1 text-xs bg-green-600 hover:bg-green-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
-                disabled={!microscopeControlService || isQuickScanInProgress}
+                className={`px-3 py-1 text-xs ${isQuickScanInProgress ? 'bg-red-600 hover:bg-red-500' : 'bg-green-600 hover:bg-green-500'} text-white rounded disabled:opacity-50 disabled:cursor-not-allowed flex items-center`}
+                disabled={!microscopeControlService}
               >
                 {isQuickScanInProgress ? (
                   <>
-                    <i className="fas fa-spinner fa-spin mr-1"></i>
-                    Quick Scanning...
+                    <i className="fas fa-stop mr-1"></i>
+                    Stop Quick Scan
                   </>
                 ) : (
                   <>
@@ -3911,36 +3934,7 @@ const MicroscopeMapDisplay = ({
                   </>
                 )}
               </button>
-              
-              {/* Stop button - only visible during scanning */}
-              {isQuickScanInProgress && (
-                <button
-                  onClick={async () => {
-                    try {
-                      if (appendLog) appendLog('Stopping quick scan...');
-                      
-                      const result = await microscopeControlService.stop_scan_and_stitching();
-                      
-                      if (result.success) {
-                        if (showNotification) showNotification('Quick scan stopped', 'success');
-                        setIsQuickScanInProgress(false);
-                        if (appendLog) appendLog('Quick scan stopped successfully');
-                      } else {
-                        if (showNotification) showNotification('Failed to stop quick scan', 'error');
-                        if (appendLog) appendLog(`Quick scan stop failed: ${result.message}`);
-                      }
-                    } catch (error) {
-                      if (showNotification) showNotification('Error stopping quick scan', 'error');
-                      if (appendLog) appendLog(`Quick scan stop error: ${error.message}`);
-                    }
-                  }}
-                  className="px-3 py-1 text-xs bg-red-600 hover:bg-red-500 text-white rounded flex items-center"
-                  title="Stop quick scan"
-                >
-                  <i className="fas fa-stop mr-1"></i>
-                  Stop Scan
-                </button>
-              )}
+
             </div>
           </div>
         </div>
