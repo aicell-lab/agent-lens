@@ -2104,6 +2104,88 @@ const MicroscopeMapDisplay = ({
     };
   }, []);
 
+  // Helper function to get wells that intersect with a region
+  const getIntersectingWells = useCallback((regionMinX, regionMaxX, regionMinY, regionMaxY) => {
+    const wellConfig = getWellPlateConfig();
+    if (!wellConfig) return [];
+    
+    const { well_size_mm, well_spacing_mm, a1_x_mm, a1_y_mm } = wellConfig;
+    const layout = getWellPlateLayout();
+    const { rows, cols } = layout;
+    
+    const intersectingWells = [];
+    
+    rows.forEach((row, rowIndex) => {
+      cols.forEach((col, colIndex) => {
+        const wellId = `${row}${col}`;
+        const wellCenterX = a1_x_mm + colIndex * well_spacing_mm;
+        const wellCenterY = a1_y_mm + rowIndex * well_spacing_mm;
+        
+        // Calculate well boundaries
+        const wellRadius = (well_size_mm / 2) + wellPaddingMm;
+        const wellMinX = wellCenterX - wellRadius;
+        const wellMaxX = wellCenterX + wellRadius;
+        const wellMinY = wellCenterY - wellRadius;
+        const wellMaxY = wellCenterY + wellRadius;
+        
+        // Check if well intersects with the region
+        const intersects = wellMaxX >= regionMinX && wellMinX <= regionMaxX &&
+                         wellMaxY >= regionMinY && wellMinY <= regionMaxY;
+        
+        if (intersects) {
+          intersectingWells.push({
+            id: wellId,
+            centerX: wellCenterX,
+            centerY: wellCenterY,
+            rowIndex,
+            colIndex,
+            radius: wellRadius,
+            wellMinX,
+            wellMaxX,
+            wellMinY,
+            wellMaxY
+          });
+        }
+      });
+    });
+    
+    return intersectingWells;
+  }, [getWellPlateConfig, getWellPlateLayout, wellPaddingMm]);
+
+  // Helper function to calculate well-relative region for a specific well
+  const calculateWellRegion = useCallback((wellInfo, regionMinX, regionMaxX, regionMinY, regionMaxY) => {
+    // Calculate intersection of region with well boundaries
+    const intersectionMinX = Math.max(regionMinX, wellInfo.wellMinX);
+    const intersectionMaxX = Math.min(regionMaxX, wellInfo.wellMaxX);
+    const intersectionMinY = Math.max(regionMinY, wellInfo.wellMinY);
+    const intersectionMaxY = Math.min(regionMaxY, wellInfo.wellMaxY);
+    
+    // Convert to well-relative coordinates (well center is at 0,0)
+    const wellRelativeMinX = intersectionMinX - wellInfo.centerX;
+    const wellRelativeMaxX = intersectionMaxX - wellInfo.centerX;
+    const wellRelativeMinY = intersectionMinY - wellInfo.centerY;
+    const wellRelativeMaxY = intersectionMaxY - wellInfo.centerY;
+    
+    // Calculate center and dimensions
+    const centerX = (wellRelativeMinX + wellRelativeMaxX) / 2;
+    const centerY = (wellRelativeMinY + wellRelativeMaxY) / 2;
+    const width_mm = intersectionMaxX - intersectionMinX;
+    const height_mm = intersectionMaxY - intersectionMinY;
+    
+    return {
+      centerX,
+      centerY,
+      width_mm,
+      height_mm,
+      intersectionBounds: {
+        minX: intersectionMinX,
+        maxX: intersectionMaxX,
+        minY: intersectionMinY,
+        maxY: intersectionMaxY
+      }
+    };
+  }, []);
+
   // Intelligent tile-based loading function (moved here after all dependencies are defined)
   const loadStitchedTiles = useCallback(async () => {
     console.log('[loadStitchedTiles] Called - checking conditions');
@@ -2175,66 +2257,97 @@ const MicroscopeMapDisplay = ({
       setIsLoadingCanvas(true);
       
       try {
-        // Calculate center coordinates for the historical data API
-        const centerX = clampedTopLeft.x + (width_mm / 2);
-        const centerY = clampedTopLeft.y + (height_mm / 2);
+        // Get intersecting wells using well plate configuration
+        const intersectingWells = getIntersectingWells(
+          clampedTopLeft.x, clampedBottomRight.x, 
+          clampedTopLeft.y, clampedBottomRight.y
+        );
         
-        // Determine which well this region belongs to
-        const detectedWell = detectWellFromStageCoords(centerX, centerY);
-        if (!detectedWell) {
-          if (appendLog) appendLog('Historical data: No well detected for this region');
+        if (intersectingWells.length === 0) {
+          if (appendLog) appendLog('Historical data: No wells intersect with this region');
           return;
         }
         
-        // Call the historical data loader with absolute stage coordinates (following Python get_stitched_region pattern)
-        const result = await artifactZarrLoaderRef.current.getHistoricalStitchedRegion(
-          centerX, // Use absolute stage coordinates (like live microscope mode)
-          centerY, // Use absolute stage coordinates (like live microscope mode)
-          width_mm,
-          height_mm,
-          wellPlateType,
-          scaleLevel,
-          activeChannel,
-          0, // Use fixed timepoint 0
-          'base64',
-          selectedHistoricalDataset.id,
-          detectedWell.id,
-          getWellPlateConfig() // Pass the actual well plate configuration
-        );
+        console.log(`[loadStitchedTiles] Found ${intersectingWells.length} intersecting wells:`, 
+                   intersectingWells.map(w => w.id));
         
-        if (result.success) {
-          // Use the bounds returned from the historical data loader for proper positioning
-          const historicalBounds = result.metadata.bounds || bounds;
-          const historicalWidth_mm = result.metadata.region_mm?.width || width_mm;
-          const historicalHeight_mm = result.metadata.region_mm?.height || height_mm;
+        // Prepare well requests for parallel loading
+        const wellRequests = intersectingWells.map(wellInfo => {
+          const wellRegion = calculateWellRegion(
+            wellInfo, 
+            clampedTopLeft.x, clampedBottomRight.x, 
+            clampedTopLeft.y, clampedBottomRight.y
+          );
           
-          const newTile = {
-            data: `data:image/png;base64,${result.data}`,
-            bounds: historicalBounds,
-            width_mm: historicalWidth_mm,
-            height_mm: historicalHeight_mm,
-            scale: scaleLevel,
+          return {
+            wellId: wellInfo.id,
+            centerX: wellRegion.centerX,
+            centerY: wellRegion.centerY,
+            width_mm: wellRegion.width_mm,
+            height_mm: wellRegion.height_mm,
             channel: activeChannel,
-            timestamp: Date.now(),
-            isHistorical: true,
+            scaleLevel,
+            timepoint: 0,
             datasetId: selectedHistoricalDataset.id,
-            wellId: detectedWell.id
+            outputFormat: 'base64',
+            intersectionBounds: wellRegion.intersectionBounds
           };
+        });
+        
+        // Load all wells in parallel
+        const wellResults = await artifactZarrLoaderRef.current.getMultipleWellRegions(wellRequests);
+        
+        // Process successful results
+        const successfulResults = wellResults.filter(result => result.success);
+        
+        if (successfulResults.length > 0) {
+          console.log(`[loadStitchedTiles] Successfully loaded ${successfulResults.length}/${wellRequests.length} well regions`);
           
-          addOrUpdateTile(newTile);
+          // Create tiles for each successful well
+          for (const result of successfulResults) {
+            const wellRequest = wellRequests.find(req => req.wellId === result.wellId);
+            if (!wellRequest) continue;
+            
+            // Create bounds for this well's intersection
+            const wellBounds = {
+              topLeft: { 
+                x: wellRequest.intersectionBounds.minX, 
+                y: wellRequest.intersectionBounds.minY 
+              },
+              bottomRight: { 
+                x: wellRequest.intersectionBounds.maxX, 
+                y: wellRequest.intersectionBounds.maxY 
+              }
+            };
+            
+            const newTile = {
+              data: `data:image/png;base64,${result.data}`,
+              bounds: wellBounds,
+              width_mm: result.metadata.width_mm,
+              height_mm: result.metadata.height_mm,
+              scale: scaleLevel,
+              channel: activeChannel,
+              timestamp: Date.now(),
+              isHistorical: true,
+              datasetId: selectedHistoricalDataset.id,
+              wellId: result.wellId
+            };
+            
+            addOrUpdateTile(newTile);
+          }
           
           // Clean up old tiles for this scale/channel combination to prevent memory bloat
           cleanupOldTiles(scaleLevel, activeChannel);
           
           if (appendLog) {
-            appendLog(`Loaded historical tile for scale ${scaleLevel}, well ${detectedWell.id}, region (${clampedTopLeft.x.toFixed(1)}, ${clampedTopLeft.y.toFixed(1)}) to (${clampedBottomRight.x.toFixed(1)}, ${clampedBottomRight.y.toFixed(1)})`);
+            appendLog(`Loaded ${successfulResults.length} historical well tiles for scale ${scaleLevel}, region (${clampedTopLeft.x.toFixed(1)}, ${clampedTopLeft.y.toFixed(1)}) to (${clampedBottomRight.x.toFixed(1)}, ${clampedBottomRight.y.toFixed(1)})`);
           }
         } else {
-          if (appendLog) appendLog(`Failed to load historical tile: ${result.message}`);
+          if (appendLog) appendLog(`Failed to load any historical well tiles: ${wellResults.map(r => r.message).join(', ')}`);
         }
       } catch (error) {
-        console.error('Failed to load historical tile:', error);
-        if (appendLog) appendLog(`Failed to load historical tile: ${error.message}`);
+        console.error('Failed to load historical tiles:', error);
+        if (appendLog) appendLog(`Failed to load historical tiles: ${error.message}`);
       } finally {
         // Remove from active requests
         activeTileRequestsRef.current.delete(requestKey);
@@ -2359,7 +2472,7 @@ const MicroscopeMapDisplay = ({
         setIsLoadingCanvas(false);
       }
     }
-  }, [isHistoricalDataMode, microscopeControlService, visibleLayers.scanResults, visibleLayers.channels, mapViewMode, scaleLevel, displayToStageCoords, stageDimensions, pixelsPerMm, isRegionCovered, getTileKey, addOrUpdateTile, appendLog, isSimulatedMicroscope, selectedHistoricalDataset, selectedGallery, detectWellFromStageCoords, wellPlateType]);
+  }, [isHistoricalDataMode, microscopeControlService, visibleLayers.scanResults, visibleLayers.channels, mapViewMode, scaleLevel, displayToStageCoords, stageDimensions, pixelsPerMm, isRegionCovered, getTileKey, addOrUpdateTile, appendLog, isSimulatedMicroscope, selectedHistoricalDataset, selectedGallery, getIntersectingWells, calculateWellRegion, wellPlateType]);
 
   // Debounce tile loading - only load after user stops interacting for 1 second
   const scheduleTileUpdate = useCallback(() => {
@@ -3709,11 +3822,7 @@ const MicroscopeMapDisplay = ({
                   className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white"
                   disabled={isQuickScanInProgress}
                 >
-                  <option value="6">6-well plate</option>
-                  <option value="12">12-well plate</option>
-                  <option value="24">24-well plate</option>
                   <option value="96">96-well plate</option>
-                  <option value="384">384-well plate</option>
                 </select>
               </div>
 
@@ -3922,7 +4031,7 @@ const MicroscopeMapDisplay = ({
                 <div>• Maximum exposure: 30ms</div>
                 <div>• Scans entire {quickScanParameters.wellplate_type}-well plate</div>
                 <div>• Estimated scan time: {(() => {
-                  const wellplateSizes = { '6': 6, '12': 12, '24': 24, '96': 96, '384': 384 };
+                  const wellplateSizes = {'96': 96};
                   const wells = wellplateSizes[quickScanParameters.wellplate_type] || 96;
                   const stripesPerWell = quickScanParameters.n_stripes;
                   const timePerStripe = quickScanParameters.stripe_width_mm / quickScanParameters.velocity_scan_mm_per_s;

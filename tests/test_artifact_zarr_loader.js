@@ -12,7 +12,6 @@ import ArtifactZarrLoader from '../frontend/services/artifactZarrLoader.js';
 // Test configuration
 const TEST_CONFIG = {
   datasetId: 'test-20250718-115143',
-  wellId: 'A2',
   channel: 'BF LED matrix full',
   scaleLevel: 3,
   timepoint: 0,
@@ -37,7 +36,7 @@ class ArtifactZarrLoaderTest {
     console.log('🔬 ArtifactZarrLoader JavaScript Test Suite');
     console.log('=' .repeat(60));
     console.log(`📊 Testing with dataset: ${TEST_CONFIG.datasetId}`);
-    console.log(`🔍 Testing well: ${TEST_CONFIG.wellId}`);
+    console.log(`🔍 Testing well: A2`);
     console.log(`🎨 Testing channel: ${TEST_CONFIG.channel}`);
     console.log(`📏 Testing scale level: ${TEST_CONFIG.scaleLevel}`);
     console.log();
@@ -89,7 +88,7 @@ class ArtifactZarrLoaderTest {
     console.log('🧪 Test 2: Canvas Existence Check');
     
     try {
-      const exists = await this.loader.checkCanvasExists(TEST_CONFIG.datasetId, TEST_CONFIG.wellId);
+      const exists = await this.loader.checkCanvasExists(TEST_CONFIG.datasetId, 'A2');
       
       if (exists) {
         this.recordTestResult('Canvas Exists', true, 'Canvas data found for well');
@@ -111,7 +110,7 @@ class ArtifactZarrLoaderTest {
     console.log('🧪 Test 3: Zarr Metadata Fetching');
     
     try {
-      const baseUrl = `${this.loader.baseUrl}/${TEST_CONFIG.datasetId}/zip-files/well_${TEST_CONFIG.wellId}_96.zip/~/data.zarr/`;
+      const baseUrl = `${this.loader.baseUrl}/${TEST_CONFIG.datasetId}/zip-files/well_A2_96.zip/~/data.zarr/`;
       const metadata = await this.loader.fetchZarrMetadata(baseUrl, TEST_CONFIG.scaleLevel);
       
       if (metadata) {
@@ -141,7 +140,7 @@ class ArtifactZarrLoaderTest {
     console.log('🧪 Test 4: Channel Index Mapping');
     
     try {
-      const baseUrl = `${this.loader.baseUrl}/${TEST_CONFIG.datasetId}/zip-files/well_${TEST_CONFIG.wellId}_96.zip/~/data.zarr/`;
+      const baseUrl = `${this.loader.baseUrl}/${TEST_CONFIG.datasetId}/zip-files/well_A2_96.zip/~/data.zarr/`;
       const channelIndex = await this.loader.getChannelIndex(baseUrl, TEST_CONFIG.channel);
       
       if (channelIndex !== null) {
@@ -218,8 +217,7 @@ class ArtifactZarrLoaderTest {
         TEST_CONFIG.channel,
         TEST_CONFIG.timepoint,
         TEST_CONFIG.outputFormat,
-        TEST_CONFIG.datasetId,
-        TEST_CONFIG.wellId
+        TEST_CONFIG.datasetId
       );
       
       if (result.success) {
@@ -251,7 +249,7 @@ class ArtifactZarrLoaderTest {
     console.log('🧪 Test 7: Error Handling');
     
     try {
-      // Test missing well ID
+      // Test missing dataset ID
       const result1 = await this.loader.getHistoricalStitchedRegion(
         TEST_CONFIG.centerX,
         TEST_CONFIG.centerY,
@@ -262,14 +260,12 @@ class ArtifactZarrLoaderTest {
         TEST_CONFIG.channel,
         TEST_CONFIG.timepoint,
         TEST_CONFIG.outputFormat,
-        TEST_CONFIG.datasetId,
-        null // Missing well ID
+        null // Missing dataset ID
       );
       
-      assert(result1.success === false, 'Should fail with missing well ID');
-      assert(result1.message.includes('Well ID is required'), 'Should have appropriate error message');
+      assert(result1.success === false, 'Should fail with missing dataset ID');
       
-      // Test missing dataset ID
+      // Test invalid dataset ID
       const result2 = await this.loader.getHistoricalStitchedRegion(
         TEST_CONFIG.centerX,
         TEST_CONFIG.centerY,
@@ -280,8 +276,7 @@ class ArtifactZarrLoaderTest {
         TEST_CONFIG.channel,
         TEST_CONFIG.timepoint,
         TEST_CONFIG.outputFormat,
-        null, // Missing dataset ID
-        TEST_CONFIG.wellId
+        'invalid-dataset-id'
       );
       
       assert(result2.success === false, 'Should fail with missing dataset ID');

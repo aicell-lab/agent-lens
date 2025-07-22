@@ -18,195 +18,174 @@ class ArtifactZarrLoader {
   }
 
   /**
-   * Main function to get historical stitched region - JavaScript version of get_stitched_region
-   * Follows the same logic as the Python implementation
+   * Get individual well region data
+   * This is the primary method for historical data - handles single well requests
+   * @param {string} wellId - Well ID (e.g., 'A2')
+   * @param {number} centerX - Center X coordinate in mm (well-relative)
+   * @param {number} centerY - Center Y coordinate in mm (well-relative)
+   * @param {number} width_mm - Width in mm
+   * @param {number} height_mm - Height in mm
+   * @param {string} channel - Channel name
+   * @param {number} scaleLevel - Scale level
+   * @param {number} timepoint - Timepoint index
+   * @param {string} datasetId - Dataset ID
+   * @param {string} outputFormat - Output format ('base64', 'blob', 'array')
+   * @returns {Promise<Object>} Well region data
+   */
+  async getWellRegion(
+    wellId, centerX, centerY, width_mm, height_mm, channel, scaleLevel, 
+    timepoint = 0, datasetId, outputFormat = 'base64'
+  ) {
+    try {
+      console.log(`Well region request: well=${wellId}, center=(${centerX.toFixed(2)}, ${centerY.toFixed(2)}), ` +
+                  `size=(${width_mm.toFixed(2)}x${height_mm.toFixed(2)}), ` +
+                  `scale=${scaleLevel}, channel=${channel}`);
+
+      // Check if well canvas exists
+      const canvasExists = await this.checkCanvasExists(datasetId, wellId);
+      if (!canvasExists) {
+        console.warn(`Well canvas for ${wellId} does not exist`);
+        return { success: false, message: `Well canvas for ${wellId} does not exist` };
+      }
+
+      // Get well canvas region using well-relative coordinates
+      const region = await this.getWellCanvasRegion(
+        centerX, centerY, width_mm, height_mm,
+        channel, scaleLevel, timepoint, datasetId, wellId
+      );
+      
+      if (!region) {
+        console.warn(`Failed to get region from well ${wellId}`);
+        return { success: false, message: `Failed to get region from well ${wellId}` };
+      }
+      
+      console.log(`Retrieved well region from ${wellId}, size: ${region.width}x${region.height}`);
+      
+      // Convert to requested output format
+      const outputData = await this.normalizeAndEncodeImage(region, null, outputFormat);
+      
+      return {
+        success: true,
+        data: outputData,
+        metadata: {
+          width: region.width,
+          height: region.height,
+          channel,
+          scale: scaleLevel,
+          timepoint,
+          wellId,
+          centerX,
+          centerY,
+          width_mm,
+          height_mm
+        }
+      };
+
+    } catch (error) {
+      console.error(`Failed to get well region for ${wellId}:`, error);
+      return { 
+        success: false, 
+        message: `Failed to load well ${wellId}: ${error.message}` 
+      };
+    }
+  }
+
+  /**
+   * Get multiple well regions in parallel
+   * @param {Array} wellRequests - Array of well request objects
+   * @returns {Promise<Array>} Array of well region results
+   */
+  async getMultipleWellRegions(wellRequests) {
+    try {
+      console.log(`Loading ${wellRequests.length} well regions in parallel`);
+      
+      // Process all wells in parallel
+      const wellPromises = wellRequests.map(async (request) => {
+        const { wellId, centerX, centerY, width_mm, height_mm, channel, scaleLevel, timepoint, datasetId, outputFormat } = request;
+        
+        try {
+          const result = await this.getWellRegion(
+            wellId, centerX, centerY, width_mm, height_mm, channel, scaleLevel, 
+            timepoint, datasetId, outputFormat
+          );
+          
+          return {
+            ...result,
+            wellId,
+            centerX,
+            centerY,
+            width_mm,
+            height_mm
+          };
+        } catch (error) {
+          console.error(`Error loading well ${wellId}:`, error);
+          return {
+            success: false,
+            wellId,
+            message: error.message
+          };
+        }
+      });
+      
+      const results = await Promise.all(wellPromises);
+      
+      // Count successful results
+      const successfulResults = results.filter(r => r.success);
+      console.log(`Successfully loaded ${successfulResults.length}/${wellRequests.length} well regions`);
+      
+      return results;
+      
+    } catch (error) {
+      console.error('Failed to load multiple well regions:', error);
+      return wellRequests.map(request => ({
+        success: false,
+        wellId: request.wellId,
+        message: error.message
+      }));
+    }
+  }
+
+  /**
+   * Legacy function - kept for backward compatibility
+   * This should be replaced by the new multi-well workflow in the frontend
    */
   async getHistoricalStitchedRegion(
     centerX, centerY, width_mm, height_mm, wellPlateType, scaleLevel, 
     channel, timepoint = 0, outputFormat = 'base64',
-    datasetId, wellId, wellPlateConfig = null
+    datasetId
   ) {
+    console.warn('getHistoricalStitchedRegion is deprecated. Use getWellRegion or getMultipleWellRegions instead.');
+    
+    // Simple fallback - just try to get a single well region
     try {
-      console.log(`Historical stitched region request: center=(${centerX.toFixed(2)}, ${centerY.toFixed(2)}), ` +
-                  `size=(${width_mm.toFixed(2)}x${height_mm.toFixed(2)}), ` +
-                  `scale=${scaleLevel}, channel=${channel}, well=${wellId}`);
-
-      // Calculate the bounding box of the requested region (following Python logic)
-      const half_width = width_mm / 2.0;
-      const half_height = height_mm / 2.0;
+      const result = await this.getWellRegion(
+        'A2', // Default well
+        0, 0, // Well-relative coordinates
+        width_mm, height_mm,
+        channel, scaleLevel, timepoint, datasetId, outputFormat
+      );
       
-      const region_min_x = centerX - half_width;
-      const region_max_x = centerX + half_width;
-      const region_min_y = centerY - half_height;
-      const region_max_y = centerY + half_height;
-
-      console.log(`Region bounds: (${region_min_x.toFixed(2)}-${region_max_x.toFixed(2)}, ` +
-                  `${region_min_y.toFixed(2)}-${region_max_y.toFixed(2)})`);
-
-      // Get well plate format configuration - use passed config or fallback to hardcoded
-      const config = wellPlateConfig || this.getWellPlateConfig(wellPlateType);
-      
-      // Add missing properties to the config if they don't exist
-      if (!config.max_rows || !config.max_cols) {
-        const layout = this.getWellPlateLayout(wellPlateType);
-        config.max_rows = layout.rows.length;
-        config.max_cols = layout.cols.length;
-      }
-      
-      console.log('Well plate config:', config);
-      console.log('Requested region center:', centerX, centerY);
-      console.log('Requested region size:', width_mm, height_mm);
-      
-      // For now, simulate the well offset - in practice this should come from configuration
-      const x_offset = 0; // CONFIG.WELLPLATE_OFFSET_X_MM equivalent
-      const y_offset = 0; // CONFIG.WELLPLATE_OFFSET_Y_MM equivalent
-
-      // Find all wells that intersect with the requested region
-      const wells_to_query = [];
-      const well_regions = [];
-
-      for (let row_idx = 0; row_idx < config.max_rows; row_idx++) {
-        for (let col_idx = 0; col_idx < config.max_cols; col_idx++) {
-          // Calculate well center position - handle both uppercase and lowercase property names
-          const a1_x = config.A1_X_MM || config.a1_x_mm;
-          const a1_y = config.A1_Y_MM || config.a1_y_mm;
-          const well_spacing = config.WELL_SPACING_MM || config.well_spacing_mm;
-          const well_size = config.WELL_SIZE_MM || config.well_size_mm;
-          
-          const well_center_x = a1_x + x_offset + col_idx * well_spacing;
-          const well_center_y = a1_y + y_offset + row_idx * well_spacing;
-          
-          // Calculate well boundaries with padding (using default 1.0mm like Python)
-          const well_radius = well_size / 2.0;
-          const well_padding_mm = 1.0; // Default padding
-          const padded_radius = well_radius + well_padding_mm;
-          
-          const well_min_x = well_center_x - padded_radius;
-          const well_max_x = well_center_x + padded_radius;
-          const well_min_y = well_center_y - padded_radius;
-          const well_max_y = well_center_y + padded_radius;
-          
-          // Debug: Log well A1 and A2 positions to see if they're correct
-          if (row_idx === 0 && (col_idx === 0 || col_idx === 1)) {
-            const well_row = String.fromCharCode(65 + row_idx);
-            const well_column = col_idx + 1;
-            const wellId = `${well_row}${well_column}`;
-            console.log(`Well ${wellId}: center=(${well_center_x.toFixed(2)}, ${well_center_y.toFixed(2)}), bounds=(${well_min_x.toFixed(2)}-${well_max_x.toFixed(2)}, ${well_min_y.toFixed(2)}-${well_max_y.toFixed(2)})`);
-          }
-          
-          // Check if this well intersects with the requested region
-          if (well_max_x >= region_min_x && well_min_x <= region_max_x &&
-              well_max_y >= region_min_y && well_min_y <= region_max_y) {
-            
-            const well_row = String.fromCharCode(65 + row_idx); // A, B, C...
-            const well_column = col_idx + 1;
-            const wellIdCalculated = `${well_row}${well_column}`;
-            
-            // Calculate the intersection region in well-relative coordinates
-            const intersection_min_x = Math.max(region_min_x, well_min_x);
-            const intersection_max_x = Math.min(region_max_x, well_max_x);
-            const intersection_min_y = Math.max(region_min_y, well_min_y);
-            const intersection_max_y = Math.min(region_max_y, well_max_y);
-            
-            // Convert to well-relative coordinates
-            const well_rel_center_x = ((intersection_min_x + intersection_max_x) / 2.0) - well_center_x;
-            const well_rel_center_y = ((intersection_min_y + intersection_max_y) / 2.0) - well_center_y;
-            const well_rel_width = intersection_max_x - intersection_min_x;
-            const well_rel_height = intersection_max_y - intersection_min_y;
-            
-            wells_to_query.push([well_row, well_column]);
-            well_regions.push({
-              well_row,
-              well_column,
-              wellId: wellIdCalculated,
-              well_center_x,
-              well_center_y,
-              well_rel_center_x,
-              well_rel_center_y,
-              well_rel_width,
-              well_rel_height,
-              abs_min_x: intersection_min_x,
-              abs_max_x: intersection_max_x,
-              abs_min_y: intersection_min_y,
-              abs_max_y: intersection_max_y
-            });
-          }
-        }
-      }
-
-      if (wells_to_query.length === 0) {
-        console.warn('No wells found that intersect with requested region');
-        return { success: false, message: 'No wells found that intersect with requested region' };
-      }
-
-      console.log(`Found ${wells_to_query.length} wells that intersect with requested region:`, wells_to_query);
-
-      // If only one well, get the region directly (following Python logic)
-      if (wells_to_query.length === 1) {
-        const well_info = well_regions[0];
-        
-        // Check if the well canvas exists
-        const canvasExists = await this.checkCanvasExists(datasetId, well_info.wellId);
-      if (!canvasExists) {
-          console.warn(`Well canvas for ${well_info.wellId} does not exist`);
-          return { success: false, message: `Well canvas for ${well_info.wellId} does not exist` };
-      }
-
-        // Get well canvas region using absolute stage coordinates (like Python get_canvas_region)
-        const region = await this.getWellCanvasRegion(
-          well_info.abs_min_x + (well_info.abs_max_x - well_info.abs_min_x) / 2, // Center X in absolute coordinates
-          well_info.abs_min_y + (well_info.abs_max_y - well_info.abs_min_y) / 2, // Center Y in absolute coordinates
-          well_info.abs_max_x - well_info.abs_min_x, // Width in absolute coordinates
-          well_info.abs_max_y - well_info.abs_min_y, // Height in absolute coordinates
-          channel, scaleLevel, timepoint, datasetId, well_info.wellId
-        );
-        
-        if (!region) {
-          console.warn(`Failed to get region from well ${well_info.wellId}`);
-          return { success: false, message: `Failed to get region from well ${well_info.wellId}` };
-        }
-        
-        console.log(`Retrieved single-well region from ${well_info.wellId}, size: ${region.width}x${region.height}`);
-        
-        // Convert to requested output format
-        const outputData = await this.normalizeAndEncodeImage(region, null, outputFormat);
-        
+      if (result.success) {
+        // Convert to legacy format
         return {
           success: true,
-          data: outputData,
+          data: result.data,
           metadata: {
-            width: region.width,
-            height: region.height,
-            channel,
-            scale: scaleLevel,
-            timepoint,
-            wellId: well_info.wellId,
-            // Return absolute stage coordinates for proper tile positioning
+            ...result.metadata,
             bounds: {
-              topLeft: { x: well_info.abs_min_x, y: well_info.abs_min_y },
-              bottomRight: { x: well_info.abs_max_x, y: well_info.abs_max_y }
+              topLeft: { x: centerX - width_mm/2, y: centerY - height_mm/2 },
+              bottomRight: { x: centerX + width_mm/2, y: centerY + height_mm/2 }
             },
-            region_mm: { width: well_info.abs_max_x - well_info.abs_min_x, height: well_info.abs_max_y - well_info.abs_min_y }
+            region_mm: { width: width_mm, height: height_mm }
           }
         };
       }
-
-      // Multiple wells - need to stitch them together (following Python logic)
-      console.log(`Stitching regions from ${wells_to_query.length} wells`);
       
-      // For multi-well stitching, we need to implement the full stitching logic
-      // This is more complex and would require additional implementation
-      // For now, return an error indicating multi-well stitching is not yet implemented
-      return { 
-        success: false, 
-        message: `Multi-well stitching not yet implemented (${wells_to_query.length} wells required)` 
-      };
-
+      return result;
     } catch (error) {
-      console.error('Failed to get historical stitched region:', error);
       return { 
         success: false, 
-        message: `Failed to load historical data: ${error.message}` 
+        message: `Legacy method failed: ${error.message}` 
       };
     }
   }
@@ -271,55 +250,7 @@ class ArtifactZarrLoader {
     }
   }
 
-  /**
-   * Get well plate layout (rows and columns)
-   */
-  getWellPlateLayout(wellPlateType) {
-    const layouts = {
-      '6': { rows: ['A', 'B'], cols: [1, 2, 3] },
-      '12': { rows: ['A', 'B', 'C'], cols: [1, 2, 3, 4] },
-      '24': { rows: ['A', 'B', 'C', 'D'], cols: [1, 2, 3, 4, 5, 6] },
-      '48': { rows: ['A', 'B', 'C', 'D', 'E', 'F'], cols: [1, 2, 3, 4, 5, 6, 7, 8] },
-      '96': { rows: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'], cols: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] },
-      '384': { rows: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P'], cols: Array.from({length: 24}, (_, i) => i + 1) }
-    };
-    return layouts[wellPlateType] || layouts['96'];
-  }
 
-  /**
-   * Get well plate configuration based on type
-   */
-  getWellPlateConfig(wellPlateType) {
-    const configs = {
-      '6': {
-        max_rows: 2, max_cols: 3,
-        A1_X_MM: -18.0, A1_Y_MM: -12.0, // Example values - should come from actual config
-        WELL_SPACING_MM: 18.0, WELL_SIZE_MM: 16.0
-      },
-      '12': {
-        max_rows: 3, max_cols: 4,
-        A1_X_MM: -27.0, A1_Y_MM: -18.0,
-        WELL_SPACING_MM: 18.0, WELL_SIZE_MM: 16.0
-      },
-      '24': {
-        max_rows: 4, max_cols: 6,
-        A1_X_MM: -45.0, A1_Y_MM: -27.0,
-        WELL_SPACING_MM: 18.0, WELL_SIZE_MM: 16.0
-      },
-      '96': {
-        max_rows: 8, max_cols: 12,
-        A1_X_MM: -99.0, A1_Y_MM: -63.0,
-        WELL_SPACING_MM: 18.0, WELL_SIZE_MM: 16.0
-      },
-      '384': {
-        max_rows: 16, max_cols: 24,
-        A1_X_MM: -207.0, A1_Y_MM: -135.0,
-        WELL_SPACING_MM: 18.0, WELL_SIZE_MM: 16.0
-      }
-    };
-    
-    return configs[wellPlateType] || configs['96']; // Default to 96-well
-  }
 
   /**
    * Get canvas region by channel name - JavaScript version of get_canvas_region_by_channel_name
@@ -352,25 +283,50 @@ class ArtifactZarrLoader {
       }
 
       console.log(`Using pixel size: ${pixelSizeUm} µm per pixel at scale ${scale}`);
+      console.log(`Requested region: center=(${x_mm.toFixed(3)}, ${y_mm.toFixed(3)}) mm, size=${width_mm.toFixed(3)}x${height_mm.toFixed(3)} mm`);
 
-      // Convert ABSOLUTE stage coordinates to pixel coordinates (following Python logic)
+      // Convert stage coordinates to pixel coordinates (using zarr coordinate system)
       const centerPixelCoords = this.stageToPixelCoords(x_mm, y_mm, scale, pixelSizeUm, metadata);
+      console.log(`Converted to pixel coords: (${centerPixelCoords.x}, ${centerPixelCoords.y}) at scale ${scale}`);
       
-      // Calculate pixel dimensions
+      // Calculate pixel dimensions at the current scale level
       const scale_factor = Math.pow(4, scale);
       const width_px = Math.round(width_mm * 1000 / (pixelSizeUm * scale_factor));
       const height_px = Math.round(height_mm * 1000 / (pixelSizeUm * scale_factor));
       
       console.log(`Region: center=(${centerPixelCoords.x}, ${centerPixelCoords.y}) px, size=${width_px}x${height_px} px`);
 
-      // Calculate bounds
+      // Calculate bounds (following Python logic more closely)
       const { zarray } = metadata;
       const [, , , imageHeight, imageWidth] = zarray.shape;
       
-      const x_start = Math.max(0, centerPixelCoords.x - Math.floor(width_px / 2));
-      const x_end = Math.min(imageWidth, x_start + width_px);
-      const y_start = Math.max(0, centerPixelCoords.y - Math.floor(height_px / 2));
-      const y_end = Math.min(imageHeight, y_start + height_px);
+      // Calculate start and end coordinates, ensuring they're within image bounds
+      // If the center is outside the image, clamp it to the image bounds
+      const clampedCenterX = Math.max(Math.floor(width_px / 2), Math.min(imageWidth - Math.floor(width_px / 2), centerPixelCoords.x));
+      const clampedCenterY = Math.max(Math.floor(height_px / 2), Math.min(imageHeight - Math.floor(height_px / 2), centerPixelCoords.y));
+      
+      let x_start = Math.max(0, clampedCenterX - Math.floor(width_px / 2));
+      let y_start = Math.max(0, clampedCenterY - Math.floor(height_px / 2));
+      let x_end = Math.min(imageWidth, x_start + width_px);
+      let y_end = Math.min(imageHeight, y_start + height_px);
+      
+      console.log(`Clamped center: (${clampedCenterX}, ${clampedCenterY}) from original (${centerPixelCoords.x}, ${centerPixelCoords.y})`);
+      
+      // Ensure we have a valid region
+      if (x_start >= x_end || y_start >= y_end) {
+        console.warn(`Invalid pixel region: x(${x_start}-${x_end}), y(${y_start}-${y_end}) for image size ${imageWidth}x${imageHeight} - returning empty region`);
+        // Return a small empty canvas instead of throwing an error
+        const emptyCanvas = document.createElement('canvas');
+        emptyCanvas.width = 1;
+        emptyCanvas.height = 1;
+        return {
+          width: 1,
+          height: 1,
+          canvas: emptyCanvas,
+          loadedChunks: 0,
+          totalChunks: 0
+        };
+      }
 
       console.log(`Pixel bounds: x(${x_start}-${x_end}), y(${y_start}-${y_end}), image size: ${imageWidth}x${imageHeight}`);
 
@@ -418,9 +374,8 @@ class ArtifactZarrLoader {
       // Check for squid_canvas metadata first (custom format)
       if (zattrs.squid_canvas && zattrs.squid_canvas.pixel_size_xy_um) {
         const basePixelSize = zattrs.squid_canvas.pixel_size_xy_um;
-        // Apply scale factor
-        const scaleFactor = Math.pow(4, scaleLevel);
-        return basePixelSize * scaleFactor;
+        // Return base pixel size - scale factor will be applied elsewhere
+        return basePixelSize;
       }
 
       // Fallback to OME-Zarr standard multiscales
@@ -434,7 +389,15 @@ class ArtifactZarrLoader {
               // OME-Zarr scale array: [t, c, z, y, x] - we want the y/x scale
               const yScale = transform.scale[3]; // micrometers per pixel
               const xScale = transform.scale[4]; // micrometers per pixel
-              return (yScale + xScale) / 2; // Average of x and y scales
+              // For scale level 0, this should be the base pixel size
+              // For higher scales, the scale is already baked into the transform
+              if (scaleLevel === 0) {
+                return (yScale + xScale) / 2; // Average of x and y scales at base level
+              } else {
+                // For higher scale levels, divide by the scale factor to get base pixel size
+                const scaleFactor = Math.pow(4, scaleLevel);
+                return ((yScale + xScale) / 2) / scaleFactor;
+              }
             }
           }
         }
@@ -442,7 +405,7 @@ class ArtifactZarrLoader {
       
       // Fallback to default if no metadata found
       console.warn('Could not find pixel size in metadata, using default');
-      return 0.311688 * Math.pow(4, scaleLevel); // Default from example metadata
+      return 0.311688; // Default base pixel size - scale factor will be applied elsewhere
       
     } catch (error) {
       console.error('Error extracting pixel size from metadata:', error);
@@ -451,34 +414,34 @@ class ArtifactZarrLoader {
   }
 
   /**
-   * Convert stage coordinates to pixel coordinates - JavaScript version of stage_to_pixel_coords
+   * Convert stage coordinates to pixel coordinates for zarr data
+   * Uses the zarr coordinate system directly (centered at 0,0)
    */
   stageToPixelCoords(x_mm, y_mm, scale, pixelSizeUm, metadata) {
     try {
-      // Get stage limits from metadata
-      const { zattrs } = metadata;
-      let stageLimits = {
-        x_negative: -4.105, // Default values
-        y_negative: -4.105
-      };
+      const { zarray } = metadata;
       
-      if (zattrs.squid_canvas && zattrs.squid_canvas.stage_limits) {
-        stageLimits = zattrs.squid_canvas.stage_limits;
-      }
+      // Get image dimensions
+      const [, , , imageHeight, imageWidth] = zarray.shape;
+      const centerX_px = imageWidth / 2;
+      const centerY_px = imageHeight / 2;
       
-      // Offset to make all coordinates positive (following Python logic)
-      const x_offset_mm = -stageLimits.x_negative;
-      const y_offset_mm = -stageLimits.y_negative;
+      // Convert mm to pixels at the requested scale
+      // Zarr coordinate system is centered at (0, 0) so we use coordinates directly
+      const scale_factor = Math.pow(4, scale);
+      const x_px = Math.floor(centerX_px + (x_mm * 1000) / (pixelSizeUm * scale_factor));
+      const y_px = Math.floor(centerY_px + (y_mm * 1000) / (pixelSizeUm * scale_factor));
       
-      // Convert to pixels at scale 0
-      const x_px = Math.floor((x_mm + x_offset_mm) * 1000 / pixelSizeUm);
-      const y_px = Math.floor((y_mm + y_offset_mm) * 1000 / pixelSizeUm);
+      console.log(`Converting zarr coords (${x_mm.toFixed(3)}, ${y_mm.toFixed(3)}) mm to pixels (${x_px}, ${y_px})`);
       
       return { x: x_px, y: y_px };
 
     } catch (error) {
       console.error('Error converting stage to pixel coordinates:', error);
-      return { x: 0, y: 0 };
+      // Fallback to image center if conversion fails
+      const { zarray } = metadata;
+      const [, , , imageHeight, imageWidth] = zarray.shape;
+      return { x: Math.floor(imageWidth / 2), y: Math.floor(imageHeight / 2) };
     }
   }
 
@@ -1085,6 +1048,202 @@ class ArtifactZarrLoader {
       chunkCount: chunks.length,
       layout: `Grid ${maxX - minX + 1}x${maxY - minY + 1} with ${chunks.length} chunks`
     };
+  }
+
+    /**
+   * Discover available wells that intersect with the requested region
+   * @param {string} datasetId - Dataset ID
+   * @param {number} region_min_x - Minimum X coordinate of region
+   * @param {number} region_max_x - Maximum X coordinate of region  
+   * @param {number} region_min_y - Minimum Y coordinate of region
+   * @param {number} region_max_y - Maximum Y coordinate of region
+   * @returns {Promise<Array>} Array of available well information
+   */
+  async discoverAvailableWells(datasetId, region_min_x, region_max_x, region_min_y, region_max_y) {
+    const availableWells = [];
+    
+    // First, try to get a list of available wells from the dataset
+    // This is more efficient than checking every possible well
+    const correctDatasetId = this.extractDatasetId(datasetId);
+    const datasetUrl = `${this.baseUrl}/${correctDatasetId}/zip-files/`;
+    
+    try {
+      // Try to get directory listing to see what wells are available
+      const response = await fetch(datasetUrl);
+      console.log(`Directory listing response status: ${response.status}`);
+      
+      if (response.ok) {
+        const directoryData = await response.json();
+        console.log('Directory listing data:', directoryData);
+        
+        const wellFiles = directoryData
+          .filter(item => item.type === 'file' && item.name.startsWith('well_') && item.name.endsWith('_96.zip'))
+          .map(item => {
+            // Extract well ID from filename (e.g., "well_A2_96.zip" -> "A2")
+            const match = item.name.match(/well_([A-Z]\d+)_96\.zip/);
+            return match ? match[1] : null;
+          })
+          .filter(wellId => wellId !== null);
+        
+        console.log(`Found ${wellFiles.length} available wells in dataset:`, wellFiles);
+        
+        // Check only the available wells
+        for (const wellId of wellFiles) {
+          try {
+            const canvasExists = await this.checkCanvasExists(datasetId, wellId);
+            if (canvasExists) {
+              // Get zarr metadata to determine well boundaries
+              const baseUrl = `${this.baseUrl}/${correctDatasetId}/zip-files/well_${wellId}_96.zip/~/data.zarr/`;
+              const metadata = await this.fetchZarrMetadata(baseUrl, 0); // Use scale 0 for metadata
+              
+              if (metadata && metadata.zattrs.squid_canvas && metadata.zattrs.squid_canvas.stage_limits) {
+                const stageLimits = metadata.zattrs.squid_canvas.stage_limits;
+                
+                // Well boundaries are defined by its stage limits
+                const well_min_x = stageLimits.x_negative;
+                const well_max_x = stageLimits.x_positive;
+                const well_min_y = stageLimits.y_negative;
+                const well_max_y = stageLimits.y_positive;
+                
+                console.log(`Well ${wellId} stage limits: (${well_min_x.toFixed(3)}, ${well_min_y.toFixed(3)}) to (${well_max_x.toFixed(3)}, ${well_max_y.toFixed(3)})`);
+                console.log(`Requested region: (${region_min_x.toFixed(3)}, ${region_min_y.toFixed(3)}) to (${region_max_x.toFixed(3)}, ${region_max_y.toFixed(3)})`);
+                
+                // Check if this well intersects with the requested region
+                const intersects = well_max_x >= region_min_x && well_min_x <= region_max_x &&
+                                 well_max_y >= region_min_y && well_min_y <= region_max_y;
+                
+                console.log(`Well ${wellId} intersection check: ${intersects}`);
+                
+                if (intersects) {
+                  availableWells.push({
+                    wellId,
+                    stageLimits,
+                    metadata
+                  });
+                  
+                  console.log(`Found intersecting well ${wellId} with bounds (${well_min_x.toFixed(3)}, ${well_min_y.toFixed(3)}) to (${well_max_x.toFixed(3)}, ${well_max_y.toFixed(3)})`);
+                } else {
+                  console.log(`Well ${wellId} does not intersect with requested region`);
+                }
+              } else {
+                console.log(`Well ${wellId} missing stage limits in metadata`);
+              }
+            }
+          } catch {
+            // Well doesn't exist or can't be accessed, skip silently
+            continue;
+          }
+        }
+      } else {
+        console.warn('Could not get directory listing, falling back to checking common wells');
+        // Fallback: check only common wells that are likely to exist
+        const commonWells = ['A1', 'A2', 'A3', 'B1', 'B2', 'B3', 'C1', 'C2', 'C3'];
+        
+        for (const wellId of commonWells) {
+          try {
+            const canvasExists = await this.checkCanvasExists(datasetId, wellId);
+            if (canvasExists) {
+              // Get zarr metadata to determine well boundaries
+              const baseUrl = `${this.baseUrl}/${correctDatasetId}/zip-files/well_${wellId}_96.zip/~/data.zarr/`;
+              const metadata = await this.fetchZarrMetadata(baseUrl, 0);
+              
+              if (metadata && metadata.zattrs.squid_canvas && metadata.zattrs.squid_canvas.stage_limits) {
+                const stageLimits = metadata.zattrs.squid_canvas.stage_limits;
+                
+                const well_min_x = stageLimits.x_negative;
+                const well_max_x = stageLimits.x_positive;
+                const well_min_y = stageLimits.y_negative;
+                const well_max_y = stageLimits.y_positive;
+                
+                console.log(`Fallback - Well ${wellId} stage limits: (${well_min_x.toFixed(3)}, ${well_min_y.toFixed(3)}) to (${well_max_x.toFixed(3)}, ${well_max_y.toFixed(3)})`);
+                console.log(`Fallback - Requested region: (${region_min_x.toFixed(3)}, ${region_min_y.toFixed(3)}) to (${region_max_x.toFixed(3)}, ${region_max_y.toFixed(3)})`);
+                
+                const intersects = well_max_x >= region_min_x && well_min_x <= region_max_x &&
+                                 well_max_y >= region_min_y && well_min_y <= region_max_y;
+                
+                console.log(`Fallback - Well ${wellId} intersection check: ${intersects}`);
+                
+                if (intersects) {
+                  availableWells.push({
+                    wellId,
+                    stageLimits,
+                    metadata
+                  });
+                  
+                  console.log(`Found intersecting well ${wellId} with bounds (${well_min_x.toFixed(3)}, ${well_min_y.toFixed(3)}) to (${well_max_x.toFixed(3)}, ${well_max_y.toFixed(3)})`);
+                } else {
+                  console.log(`Fallback - Well ${wellId} does not intersect with requested region`);
+                }
+              } else {
+                console.log(`Fallback - Well ${wellId} missing stage limits in metadata`);
+              }
+            }
+          } catch {
+            continue;
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error discovering available wells:', error);
+    }
+    
+    // If no wells found, add a debug fallback to include at least one well for testing
+    if (availableWells.length === 0) {
+      console.warn('No intersecting wells found - adding A2 as debug fallback');
+      try {
+        const canvasExists = await this.checkCanvasExists(datasetId, 'A2');
+        if (canvasExists) {
+          const correctDatasetId = this.extractDatasetId(datasetId);
+          const baseUrl = `${this.baseUrl}/${correctDatasetId}/zip-files/well_A2_96.zip/~/data.zarr/`;
+          const metadata = await this.fetchZarrMetadata(baseUrl, 0);
+          
+          if (metadata && metadata.zattrs.squid_canvas && metadata.zattrs.squid_canvas.stage_limits) {
+            availableWells.push({
+              wellId: 'A2',
+              stageLimits: metadata.zattrs.squid_canvas.stage_limits,
+              metadata
+            });
+            console.log('Added A2 as debug fallback well');
+          }
+        }
+      } catch (fallbackError) {
+        console.error('Debug fallback also failed:', fallbackError);
+      }
+    }
+    
+    return availableWells;
+  }
+
+
+
+  /**
+   * Test method to verify the new workflow
+   * @param {string} datasetId - Dataset ID to test
+   * @returns {Promise<Object>} Test results
+   */
+  async testNewWorkflow(datasetId) {
+    try {
+      console.log(`Testing new workflow for dataset: ${datasetId}`);
+      
+      // Test single well request
+      const testWellId = 'A2';
+      const testResult = await this.getWellRegion(
+        testWellId, 0, 0, 2.0, 2.0, 'BF LED matrix full', 0, 0, datasetId, 'base64'
+      );
+      
+      return {
+        success: true,
+        singleWellTest: testResult,
+        message: `Test completed for dataset ${datasetId}`
+      };
+      
+    } catch (error) {
+      console.error('Test workflow failed:', error);
+      return {
+        success: false,
+        message: error.message
+      };
+    }
   }
 }
 

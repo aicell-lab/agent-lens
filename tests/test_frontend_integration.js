@@ -71,8 +71,7 @@ async function testFrontendIntegration() {
           'BF LED matrix full', // channel
           0, // timepoint_index
           'base64', // output_format
-          'test-dataset', // dataset_id
-          'A1' // well_id
+          'test-dataset' // dataset_id
         );
         return result;
       } catch (error) {
