@@ -145,7 +145,6 @@ const MicroscopeMapDisplay = ({
   const [isLoadingCanvas, setIsLoadingCanvas] = useState(false);
   const [needsTileReload, setNeedsTileReload] = useState(false); // Flag to trigger tile loading after refresh
   const canvasUpdateTimerRef = useRef(null);
-  const lastCanvasRequestRef = useRef({ x: 0, y: 0, width: 0, height: 0, scale: 0 });
   const activeTileRequestsRef = useRef(new Set()); // Track active requests to prevent duplicates
 
   // Function to refresh scan results (moved early to avoid dependency issues)
@@ -2094,13 +2093,17 @@ const MicroscopeMapDisplay = ({
 
   // Intelligent tile-based loading function (moved here after all dependencies are defined)
   const loadStitchedTiles = useCallback(async () => {
+    console.log('[loadStitchedTiles] Called - checking conditions');
     if (!visibleLayers.scanResults || mapViewMode !== 'FREE_PAN') {
+      console.log('[loadStitchedTiles] Skipping - scan results not visible or not in FREE_PAN mode');
       return;
     }
     
     // Handle historical data mode
     if (isHistoricalDataMode) {
+      console.log('[loadStitchedTiles] Historical data mode - checking requirements');
       if (!artifactZarrLoaderRef.current || !selectedHistoricalDataset || !selectedGallery) {
+        console.log('[loadStitchedTiles] Skipping historical mode - missing requirements');
         return;
       }
       
@@ -2233,6 +2236,7 @@ const MicroscopeMapDisplay = ({
     
     // Handle live microscope mode
     if (!microscopeControlService || isSimulatedMicroscope) {
+      console.log('[loadStitchedTiles] Skipping - no microscope service or simulated mode');
       return;
     }
     
@@ -2271,7 +2275,7 @@ const MicroscopeMapDisplay = ({
     
     // Check if this region is already covered by existing tiles
     if (isRegionCovered(bounds, scaleLevel, activeChannel, stitchedTiles)) {
-      // Region is already loaded, no need to fetch
+      console.log('[loadStitchedTiles] Region already covered by existing tiles - skipping');
       return;
     }
     
@@ -2283,12 +2287,14 @@ const MicroscopeMapDisplay = ({
     
     // Check if we're already loading this tile
     if (activeTileRequestsRef.current.has(requestKey)) {
+      console.log('[loadStitchedTiles] Tile request already in progress - skipping');
       return;
     }
     
     // Mark this request as active
     activeTileRequestsRef.current.add(requestKey);
     setIsLoadingCanvas(true);
+    console.log('[loadStitchedTiles] Starting tile fetch for request key:', requestKey);
     
     try {
       // Calculate center coordinates for the new get_stitched_region API
@@ -2344,10 +2350,16 @@ const MicroscopeMapDisplay = ({
 
   // Debounce tile loading - only load after user stops interacting for 1 second
   const scheduleTileUpdate = useCallback(() => {
+    console.log('[scheduleTileUpdate] Called - clearing existing timer and scheduling new one');
     if (canvasUpdateTimerRef.current) {
+      console.log('[scheduleTileUpdate] Clearing existing timer');
       clearTimeout(canvasUpdateTimerRef.current);
     }
-    canvasUpdateTimerRef.current = setTimeout(loadStitchedTiles, 1000); // Wait 1 second after user stops
+    canvasUpdateTimerRef.current = setTimeout(() => {
+      console.log('[scheduleTileUpdate] Timer fired - calling loadStitchedTiles');
+      loadStitchedTiles();
+    }, 1000); // Wait 1 second after user stops
+    console.log('[scheduleTileUpdate] New timer scheduled for 1000ms');
   }, [loadStitchedTiles]);
 
   // Function to refresh canvas view (can be used by timepoint operations)
@@ -2370,52 +2382,85 @@ const MicroscopeMapDisplay = ({
     }
   }, [loadStitchedTiles, appendLog, isSimulatedMicroscope]);
 
-  // Effect to trigger tile loading when view changes (throttled for performance)
+  // Consolidated tile loading effect - replaces multiple overlapping effects
+  const lastTileRequestRef = useRef({ panX: 0, panY: 0, scale: 0, timestamp: 0 });
+  
   useEffect(() => {
-    if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
-      // Don't trigger tile loading if user is actively interacting with the map
-      if (isPanning || isZooming) {
-        return;
-      }
-      
-      const container = mapContainerRef.current;
-      if (container) {
-        const panThreshold = 80; // Increased threshold to reduce triggering
-        const lastPan = lastCanvasRequestRef.current.panX || 0;
-        const lastMapScale = lastCanvasRequestRef.current.mapScale || 0;
-        
-        const significantPanChange = Math.abs(mapPan.x - lastPan) > panThreshold || 
-                                    Math.abs(mapPan.y - (lastCanvasRequestRef.current.panY || 0)) > panThreshold;
-        const scaleChange = Math.abs(mapScale - lastMapScale) > lastMapScale * 0.15; // Less sensitive to scale changes
-        
-        if (significantPanChange || scaleChange) {
-          lastCanvasRequestRef.current.panX = mapPan.x;
-          lastCanvasRequestRef.current.panY = mapPan.y;
-          lastCanvasRequestRef.current.mapScale = mapScale;
-          scheduleTileUpdate();
-        }
-      }
+    if (mapViewMode !== 'FREE_PAN' || !visibleLayers.scanResults) {
+      console.log('[Tile Loading] Skipping - not in FREE_PAN mode or scan results not visible');
+      return;
     }
-  }, [mapPan.x, mapPan.y, mapScale, mapViewMode, visibleLayers.scanResults, isPanning, isZooming, scheduleTileUpdate]);
 
-  // Effect to trigger tile loading when user interactions finish
-  useEffect(() => {
-    if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
-      // Only trigger when user has stopped interacting (neither panning nor zooming)
-      if (!isPanning && !isZooming) {
-        // Add a small delay to ensure the interaction state has stabilized
-        const interactionEndTimer = setTimeout(() => {
-          scheduleTileUpdate();
-        }, 200); // 200ms delay after interactions end
-        
-        return () => clearTimeout(interactionEndTimer);
-      }
+    // Don't trigger tile loading if user is actively interacting
+    if (isPanning || isZooming) {
+      console.log('[Tile Loading] Skipping - user is actively interacting (panning:', isPanning, 'zooming:', isZooming, ')');
+      return;
     }
-  }, [isPanning, isZooming, mapViewMode, visibleLayers.scanResults, scheduleTileUpdate]);
+
+    const container = mapContainerRef.current;
+    if (!container) {
+      console.log('[Tile Loading] Skipping - no container reference');
+      return;
+    }
+
+    // Check if this is a significant change that warrants tile loading
+    const panThreshold = 80;
+    const scaleThreshold = 0.15;
+    
+    const lastRequest = lastTileRequestRef.current;
+    const panChangeX = Math.abs(mapPan.x - lastRequest.panX);
+    const panChangeY = Math.abs(mapPan.y - lastRequest.panY);
+    const scaleChange = Math.abs(mapScale - lastRequest.scale);
+    
+    const significantPanChange = panChangeX > panThreshold || panChangeY > panThreshold;
+    const significantScaleChange = scaleChange > lastRequest.scale * scaleThreshold;
+    
+    // Only trigger if there's a significant change and enough time has passed since last request
+    const timeSinceLastRequest = Date.now() - lastRequest.timestamp;
+    const minTimeBetweenRequests = 500; // 500ms minimum between requests
+    
+    console.log('[Tile Loading] Checking conditions:', {
+      panChangeX: panChangeX.toFixed(1),
+      panChangeY: panChangeY.toFixed(1),
+      scaleChange: scaleChange.toFixed(3),
+      significantPanChange,
+      significantScaleChange,
+      timeSinceLastRequest: timeSinceLastRequest + 'ms',
+      minTimeBetweenRequests: minTimeBetweenRequests + 'ms',
+      willTrigger: (significantPanChange || significantScaleChange) && timeSinceLastRequest > minTimeBetweenRequests
+    });
+    
+    if ((significantPanChange || significantScaleChange) && timeSinceLastRequest > minTimeBetweenRequests) {
+      console.log('[Tile Loading] TRIGGERING tile update - significant change detected');
+      
+      // Update last request info
+      lastTileRequestRef.current = {
+        panX: mapPan.x,
+        panY: mapPan.y,
+        scale: mapScale,
+        timestamp: Date.now()
+      };
+      
+      // Schedule tile update
+      scheduleTileUpdate();
+    } else {
+      console.log('[Tile Loading] Skipping - no significant change or too soon since last request');
+    }
+  }, [
+    mapViewMode, 
+    visibleLayers.scanResults, 
+    isPanning, 
+    isZooming, 
+    mapPan.x, 
+    mapPan.y, 
+    mapScale, 
+    scheduleTileUpdate
+  ]);
 
   // Initial tile loading when the map becomes visible
   useEffect(() => {
     if (isOpen && mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
+      console.log('[Initial Tile Loading] Triggering initial tile loading');
       // Trigger initial tile loading through debounced function
       scheduleTileUpdate();
     }
@@ -2424,6 +2469,7 @@ const MicroscopeMapDisplay = ({
   // Effect to trigger tile loading when needsTileReload is set
   useEffect(() => {
     if (needsTileReload && mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
+      console.log('[needsTileReload] Triggering tile reload');
       // Reset the flag
       setNeedsTileReload(false);
       
@@ -2437,6 +2483,7 @@ const MicroscopeMapDisplay = ({
   // Effect to cleanup high-resolution tiles when zooming out (but don't immediately load during active zoom)
   useEffect(() => {
     if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
+      console.log('[scaleLevel cleanup] Triggering cleanup and potential tile load');
       const activeChannel = Object.entries(visibleLayers.channels)
         .find(([_, isVisible]) => isVisible)?.[0] || 'BF LED matrix full';
       
@@ -2446,12 +2493,15 @@ const MicroscopeMapDisplay = ({
       // Only trigger immediate tile load if user is NOT actively zooming
       // If user is zooming, let the interaction completion effect handle it
       if (!isZooming) {
+        console.log('[scaleLevel cleanup] User not zooming - scheduling tile load');
         setTimeout(() => {
-          loadStitchedTiles();
+          scheduleTileUpdate(); // Use scheduleTileUpdate instead of direct call
         }, 200); // Small delay to ensure cleanup is complete
+      } else {
+        console.log('[scaleLevel cleanup] User is zooming - skipping tile load');
       }
     }
-  }, [scaleLevel, mapViewMode, visibleLayers.scanResults, visibleLayers.channels, isZooming, loadStitchedTiles, cleanupOldTiles]);
+  }, [scaleLevel, mapViewMode, visibleLayers.scanResults, visibleLayers.channels, isZooming, scheduleTileUpdate, cleanupOldTiles]);
 
   if (!isOpen) return null;
 
