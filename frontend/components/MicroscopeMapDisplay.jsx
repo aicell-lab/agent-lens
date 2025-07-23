@@ -74,6 +74,14 @@ const MicroscopeMapDisplay = ({
     }
   }, [isSimulatedMicroscope]);
   
+  // 🚀 PERFORMANCE OPTIMIZATION: Clean up progress tracking on unmount or mode change
+  useEffect(() => {
+    return () => {
+      // Clean up progress tracking when component unmounts
+      chunkProgressUpdateTimes.current.clear();
+    };
+  }, []);
+  
   // Map view mode: 'FOV_FITTED' for fitted video view, 'FREE_PAN' for stage map view
   const [mapViewMode, setMapViewMode] = useState('FOV_FITTED');
   const [scaleLevel, setScaleLevel] = useState(0); // Start at highest resolution for FOV_FITTED mode
@@ -152,6 +160,8 @@ const MicroscopeMapDisplay = ({
   const [needsTileReload, setNeedsTileReload] = useState(false); // Flag to trigger tile loading after refresh
   const canvasUpdateTimerRef = useRef(null);
   const activeTileRequestsRef = useRef(new Set()); // Track active requests to prevent duplicates
+  const chunkProgressUpdateTimes = useRef(new Map()); // Track last update time for each well to throttle progress updates
+  const lastTileLoadAttemptRef = useRef(0); // Track last tile load attempt to prevent excessive retries
 
   // Function to refresh scan results (moved early to avoid dependency issues)
   const refreshScanResults = useCallback(() => {
@@ -2270,6 +2280,16 @@ const MicroscopeMapDisplay = ({
   // Intelligent tile-based loading function (moved here after all dependencies are defined)
   const loadStitchedTiles = useCallback(async () => {
     console.log('[loadStitchedTiles] Called - checking conditions');
+    
+    // 🚀 PERFORMANCE OPTIMIZATION: Throttle tile loading attempts to prevent CPU overload
+    const now = Date.now();
+    const MIN_LOAD_INTERVAL = 3000; // Minimum 3 seconds between tile load attempts
+    if (now - lastTileLoadAttemptRef.current < MIN_LOAD_INTERVAL) {
+      console.log('[loadStitchedTiles] Throttling tile load attempt - too soon since last attempt');
+      return;
+    }
+    lastTileLoadAttemptRef.current = now;
+    
     if (!visibleLayers.scanResults || mapViewMode !== 'FREE_PAN') {
       console.log('[loadStitchedTiles] Skipping - scan results not visible or not in FREE_PAN mode');
       return;
@@ -2487,20 +2507,36 @@ const MicroscopeMapDisplay = ({
         const onChunkProgress = (wellId, loadedChunks, totalChunks, partialCanvas) => {
           console.log(`🔄 REAL-TIME: Well ${wellId} progress: ${loadedChunks}/${totalChunks} chunks loaded`);
           
-          // Update chunk progress
+          // 🚀 PERFORMANCE OPTIMIZATION: Throttle state updates to reduce CPU usage
+          const now = Date.now();
+          const lastUpdate = chunkProgressUpdateTimes.current.get(wellId) || 0;
+          const UPDATE_INTERVAL = 200; // Only update state every 200ms per well
+          
+          if (now - lastUpdate < UPDATE_INTERVAL && loadedChunks < totalChunks) {
+            return; // Skip update if too frequent
+          }
+          
+          // Update chunk progress with throttling
           setRealTimeChunkProgress(prev => {
             const newProgress = new Map(prev);
             newProgress.set(wellId, { loadedChunks, totalChunks, partialCanvas });
             return newProgress;
           });
           
-          // If we have a partial canvas, create a temporary tile for real-time display
-          if (partialCanvas && loadedChunks > 0) {
+          // Update last update time
+          chunkProgressUpdateTimes.current.set(wellId, now);
+          
+          // 🚀 PERFORMANCE OPTIMIZATION: Only create tiles for significant progress or completion
+          const progressPercentage = (loadedChunks / totalChunks) * 100;
+          const shouldCreateTile = progressPercentage >= 25 && progressPercentage % 25 === 0 || loadedChunks === totalChunks;
+          
+          if (partialCanvas && loadedChunks > 0 && shouldCreateTile) {
             const wellRequest = wellRequests.find(req => req.wellId === wellId);
             if (!wellRequest) return;
             
-            // Convert canvas to base64 for tile display
-            const partialDataUrl = partialCanvas.toDataURL('image/png');
+            // 🚀 PERFORMANCE OPTIMIZATION: Use lower quality for partial tiles to reduce CPU
+            const quality = loadedChunks === totalChunks ? 0.9 : 0.7; // Lower quality for partial tiles
+            const partialDataUrl = partialCanvas.toDataURL('image/jpeg', quality);
             
             // Calculate bounds (use intersection bounds for now, will be updated with actual bounds later)
             const wellBounds = {
@@ -2526,7 +2562,7 @@ const MicroscopeMapDisplay = ({
               isHistorical: true,
               datasetId: selectedHistoricalDataset.id,
               wellId: wellId,
-              isPartial: true, // Mark as partial for potential cleanup
+              isPartial: loadedChunks < totalChunks, // Mark as partial for potential cleanup
               progress: `${loadedChunks}/${totalChunks}`
             };
             
@@ -2657,6 +2693,9 @@ const MicroscopeMapDisplay = ({
         setRealTimeChunkProgress(new Map());
         setRealTimeWellProgress(new Map());
         
+        // 🚀 PERFORMANCE OPTIMIZATION: Clean up progress tracking
+        chunkProgressUpdateTimes.current.clear();
+        
         // Clear cancellation state for completed request
         if (currentCancellableRequest && currentCancellableRequest.requestKey === currentRequestKey) {
           setCurrentCancellableRequest(null);
@@ -2679,6 +2718,22 @@ const MicroscopeMapDisplay = ({
     // Handle live microscope mode
     if (!microscopeControlService || isSimulatedMicroscope) {
       console.log('[loadStitchedTiles] Skipping - no microscope service or simulated mode');
+      // 🚀 PERFORMANCE OPTIMIZATION: Clear loading state when no service available
+      if (activeTileRequestsRef.current.size === 0) {
+        setIsLoadingCanvas(false);
+      }
+      return;
+    }
+    
+    // 🚀 PERFORMANCE OPTIMIZATION: Additional check for microscope service availability
+    try {
+      // Test if microscope service is responsive
+      await microscopeControlService.get_status();
+    } catch (error) {
+      console.log('[loadStitchedTiles] Microscope service not responsive - skipping tile loading');
+      if (activeTileRequestsRef.current.size === 0) {
+        setIsLoadingCanvas(false);
+      }
       return;
     }
     
@@ -2973,9 +3028,8 @@ const MicroscopeMapDisplay = ({
       // Always cleanup immediately when scale changes to save memory
       cleanupOldTiles(scaleLevel, activeChannel);
       
-      // Only trigger immediate tile load if user is NOT actively zooming
-      // If user is zooming, let the interaction completion effect handle it
-      if (!isZooming) {
+      // 🚀 PERFORMANCE OPTIMIZATION: Only trigger tile load if microscope service is available
+      if (!isZooming && microscopeControlService && !isSimulatedMicroscope) {
         // Check if tiles are currently loading
         if (isLoadingCanvas || activeTileRequestsRef.current.size > 0) {
           console.log('[scaleLevel cleanup] Skipping - tiles are currently loading');
@@ -2986,10 +3040,10 @@ const MicroscopeMapDisplay = ({
           }, 200); // Small delay to ensure cleanup is complete
         }
       } else {
-        console.log('[scaleLevel cleanup] User is zooming - skipping tile load');
+        console.log('[scaleLevel cleanup] User is zooming or no microscope service - skipping tile load');
       }
     }
-  }, [scaleLevel, mapViewMode, visibleLayers.scanResults, visibleLayers.channels, isZooming, scheduleTileUpdate, cleanupOldTiles]);
+  }, [scaleLevel, mapViewMode, visibleLayers.scanResults, visibleLayers.channels, isZooming, scheduleTileUpdate, cleanupOldTiles, microscopeControlService, isSimulatedMicroscope]);
 
   // Effect to ensure tiles are loaded for current scale level
   // EXCLUDES historical mode - no automatic tile loading needed for historical data
@@ -2997,6 +3051,12 @@ const MicroscopeMapDisplay = ({
     if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && !isZooming && !isHistoricalDataMode) {
       const activeChannel = Object.entries(visibleLayers.channels)
         .find(([_, isVisible]) => isVisible)?.[0] || 'BF LED matrix full';
+      
+      // 🚀 PERFORMANCE OPTIMIZATION: Check if microscope service is available before attempting tile loading
+      if (!microscopeControlService || isSimulatedMicroscope) {
+        console.log('[Scale Level Check] Skipping - no microscope service or simulated mode');
+        return;
+      }
       
       // Check if we have tiles for the current scale level
       const currentScaleTiles = stitchedTiles.filter(tile => 
@@ -3015,13 +3075,13 @@ const MicroscopeMapDisplay = ({
           console.log('[Scale Level Check] Triggering tile load for missing scale level');
           setTimeout(() => {
             scheduleTileUpdate();
-          }, 100); // Small delay to ensure other operations are complete
+          }, 300); // Small delay to ensure other operations are complete
         }
       } else {
         console.log(`[Scale Level Check] Found ${currentScaleTiles.length} tiles for scale ${scaleLevel}, channel ${activeChannel}`);
       }
     }
-  }, [scaleLevel, mapViewMode, visibleLayers.scanResults, visibleLayers.channels, stitchedTiles, isZooming, isLoadingCanvas, isHistoricalDataMode, scheduleTileUpdate]);
+  }, [scaleLevel, mapViewMode, visibleLayers.scanResults, visibleLayers.channels, stitchedTiles, isZooming, isLoadingCanvas, isHistoricalDataMode, scheduleTileUpdate, microscopeControlService, isSimulatedMicroscope]);
 
   if (!isOpen) return null;
 

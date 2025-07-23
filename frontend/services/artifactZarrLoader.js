@@ -27,6 +27,11 @@ class ArtifactZarrLoader {
     this.requestIds = new Map(); // Map of URL to request ID for tracking
     this.nextRequestId = 1; // Counter for unique request IDs
     this.activeBatchRequests = new Set(); // Track active batch request IDs
+    
+    // 🚀 PERFORMANCE OPTIMIZATION: Add memory management
+    this.maxCacheSize = 100; // Limit cache size to prevent memory bloat
+    this.lastCleanup = Date.now();
+    this.cleanupInterval = 30000; // Clean up every 30 seconds
   }
 
   /**
@@ -355,6 +360,9 @@ class ArtifactZarrLoader {
   async getMultipleWellRegionsRealTime(wellRequests, onChunkProgress, onWellComplete, batchId = null) {
     const requestBatchId = batchId || `well_batch_${Date.now()}_${Math.random()}`;
     this.activeBatchRequests.add(requestBatchId);
+    
+    // 🚀 PERFORMANCE OPTIMIZATION: Run memory cleanup before starting new batch
+    this.cleanupMemory();
     
     try {
       console.log(`🚀 REAL-TIME: Starting progressive loading for ${wellRequests.length} wells (Batch: ${requestBatchId})`);
@@ -691,6 +699,9 @@ class ArtifactZarrLoader {
    */
   async getWellCanvasRegionRealTime(x_mm, y_mm, width_mm, height_mm, channelName, scale, timepoint, datasetId, wellId, onChunkProgress, batchId = null) {
     const wellRequestId = batchId || `well_${wellId}_${Date.now()}`;
+    
+    // 🚀 PERFORMANCE OPTIMIZATION: Run memory cleanup periodically
+    this.cleanupMemory();
     
     try {
       // Extract the correct dataset ID
@@ -1277,6 +1288,14 @@ class ArtifactZarrLoader {
       let loadedChunks = 0;
       const totalChunks = chunks.length;
       
+      // 🚀 PERFORMANCE OPTIMIZATION: Throttle progress updates to reduce CPU usage
+      let lastProgressUpdate = 0;
+      const PROGRESS_UPDATE_INTERVAL = 100; // Only update progress every 100ms
+      
+      // 🚀 PERFORMANCE OPTIMIZATION: Track if we need to provide a progress update
+      let needsProgressUpdate = false;
+      let lastPartialCanvas = null;
+      
       // Create a map to track processed chunks for efficient updates
       const processedChunks = new Map();
       
@@ -1337,20 +1356,31 @@ class ArtifactZarrLoader {
               
               loadedChunks++;
               
-              // REAL-TIME: Provide progressive update callback
-              if (onChunkProgress) {
-                // Create a copy of the current canvas for the callback
-                const partialCanvas = document.createElement('canvas');
-                partialCanvas.width = totalWidth;
-                partialCanvas.height = totalHeight;
-                const partialCtx = partialCanvas.getContext('2d');
+              // 🚀 PERFORMANCE OPTIMIZATION: Throttled progress updates
+              const now = Date.now();
+              if (onChunkProgress && (now - lastProgressUpdate > PROGRESS_UPDATE_INTERVAL || i === chunks.length - 1)) {
+                // Only create partial canvas when we actually need to provide an update
+                if (!lastPartialCanvas) {
+                  lastPartialCanvas = document.createElement('canvas');
+                  lastPartialCanvas.width = totalWidth;
+                  lastPartialCanvas.height = totalHeight;
+                }
+                
+                // Copy current canvas state to partial canvas
+                const partialCtx = lastPartialCanvas.getContext('2d');
+                partialCtx.clearRect(0, 0, totalWidth, totalHeight);
                 partialCtx.drawImage(canvas, 0, 0);
                 
-                onChunkProgress(loadedChunks, totalChunks, partialCanvas);
+                onChunkProgress(loadedChunks, totalChunks, lastPartialCanvas);
+                lastProgressUpdate = now;
               }
               
               console.log(`✅ REAL-TIME: Loaded chunk ${i + 1}/${totalChunks} (${chunk.filename}) - ${loadedChunks}/${totalChunks} total`);
             }
+            
+            // 🚀 MEMORY OPTIMIZATION: Clean up chunk canvas immediately
+            chunkCanvas.width = 0;
+            chunkCanvas.height = 0;
           }
         } catch (error) {
           if (error.name === 'AbortError') {
@@ -1359,6 +1389,13 @@ class ArtifactZarrLoader {
           }
           console.warn(`Error processing chunk ${chunk.filename}:`, error);
         }
+      }
+      
+      // 🚀 MEMORY OPTIMIZATION: Clean up partial canvas
+      if (lastPartialCanvas) {
+        lastPartialCanvas.width = 0;
+        lastPartialCanvas.height = 0;
+        lastPartialCanvas = null;
       }
       
       console.log(`✅ REAL-TIME: Successfully loaded ${loadedChunks}/${totalChunks} chunks for scale ${scaleLevel}`);
@@ -1537,6 +1574,66 @@ class ArtifactZarrLoader {
     this.chunkCache.clear();
     this.directoryCache.clear();
     this.requestPromises.clear();
+  }
+  
+  /**
+   * 🚀 PERFORMANCE OPTIMIZATION: Memory cleanup to prevent bloat
+   */
+  cleanupMemory() {
+    const now = Date.now();
+    if (now - this.lastCleanup < this.cleanupInterval) {
+      return; // Not time for cleanup yet
+    }
+    
+    // Clean up old cache entries
+    const maxAge = 5 * 60 * 1000; // 5 minutes
+    let cleanedCount = 0;
+    
+    // Clean metadata cache
+    for (const [key, value] of this.metadataCache) {
+      if (now - value.timestamp > maxAge) {
+        this.metadataCache.delete(key);
+        cleanedCount++;
+      }
+    }
+    
+    // Clean chunk cache (most memory intensive)
+    for (const [key, value] of this.chunkCache) {
+      if (now - value.timestamp > maxAge) {
+        this.chunkCache.delete(key);
+        cleanedCount++;
+      }
+    }
+    
+    // Clean directory cache
+    for (const [key, value] of this.directoryCache) {
+      if (now - value.timestamp > maxAge) {
+        this.directoryCache.delete(key);
+        cleanedCount++;
+      }
+    }
+    
+    // Limit cache sizes
+    if (this.metadataCache.size > this.maxCacheSize) {
+      const entries = Array.from(this.metadataCache.entries());
+      entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
+      const toRemove = entries.slice(0, entries.length - this.maxCacheSize);
+      toRemove.forEach(([key]) => this.metadataCache.delete(key));
+      cleanedCount += toRemove.length;
+    }
+    
+    if (this.chunkCache.size > this.maxCacheSize) {
+      const entries = Array.from(this.chunkCache.entries());
+      entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
+      const toRemove = entries.slice(0, entries.length - this.maxCacheSize);
+      toRemove.forEach(([key]) => this.chunkCache.delete(key));
+      cleanedCount += toRemove.length;
+    }
+    
+    this.lastCleanup = now;
+    if (cleanedCount > 0) {
+      console.log(`🧹 Memory cleanup: removed ${cleanedCount} old cache entries`);
+    }
   }
 
   /**
