@@ -15,6 +15,63 @@ class ArtifactZarrLoader {
     this.directoryCache = new Map(); // Cache for directory listings
     this.activeRequests = new Set(); // Track active requests to prevent duplicates
     this.baseUrl = 'https://hypha.aicell.io/agent-lens/artifacts';
+    
+    // MAXIMUM SPEED - No limits, just go as fast as possible!
+    this.maxConcurrentRequests = 200; // High concurrency for maximum speed
+    this.requestQueue = []; // Queue for requests when limit is reached
+    this.activeRequestCount = 0;
+    this.requestPromises = new Map(); // Cache for pending requests to avoid duplicates
+  }
+
+  /**
+   * MAXIMUM SPEED fetch - no waiting, just fire all requests!
+   * @param {string} url - URL to fetch
+   * @param {Object} options - Fetch options
+   * @returns {Promise<Response>} Fetch response
+   */
+  async managedFetch(url, options = {}) {
+    // Check if this exact request is already in progress
+    if (this.requestPromises.has(url)) {
+      return this.requestPromises.get(url);
+    }
+
+    // Create the fetch promise - NO WAITING, just fire!
+    const fetchPromise = (async () => {
+      this.activeRequestCount++;
+      
+      try {
+        const response = await fetch(url, options);
+        return response;
+      } catch (error) {
+        // Gracefully handle 404s and other errors
+        console.warn(`Request failed for ${url}: ${error.message}`);
+        return new Response(null, { status: 404, statusText: 'Not Found' });
+      } finally {
+        this.activeRequestCount--;
+        this.requestPromises.delete(url);
+      }
+    })();
+
+    // Cache the promise to avoid duplicate requests
+    this.requestPromises.set(url, fetchPromise);
+    
+    return fetchPromise;
+  }
+
+  /**
+   * MAXIMUM SPEED batch fetch - fire ALL requests at once!
+   * @param {Array<string>} urls - URLs to fetch
+   * @param {Object} options - Fetch options
+   * @returns {Promise<Array<Response>>} Array of responses
+   */
+  async batchFetch(urls, options = {}) {
+    console.log(`🚀 MAXIMUM SPEED: Firing ${urls.length} requests simultaneously!`);
+    
+    // Fire ALL requests at once - no batching, no limits!
+    const allPromises = urls.map(url => this.managedFetch(url, options));
+    const results = await Promise.all(allPromises);
+    
+    return results;
   }
 
   /**
@@ -37,29 +94,22 @@ class ArtifactZarrLoader {
     timepoint = 0, datasetId, outputFormat = 'base64'
   ) {
     try {
-      console.log(`Well region request: well=${wellId}, center=(${centerX.toFixed(2)}, ${centerY.toFixed(2)}), ` +
+      console.log(`🚀 MAXIMUM SPEED: Well region request: well=${wellId}, center=(${centerX.toFixed(2)}, ${centerY.toFixed(2)}), ` +
                   `size=(${width_mm.toFixed(2)}x${height_mm.toFixed(2)}), ` +
                   `scale=${scaleLevel}, channel=${channel}`);
 
-      // Check if well canvas exists
-      const canvasExists = await this.checkCanvasExists(datasetId, wellId);
-      if (!canvasExists) {
-        console.warn(`Well canvas for ${wellId} does not exist`);
-        return { success: false, message: `Well canvas for ${wellId} does not exist` };
-      }
-
-      // Get well canvas region using well-relative coordinates
+      // NO WAITING - just try to get the region directly!
       const region = await this.getWellCanvasRegion(
         centerX, centerY, width_mm, height_mm,
         channel, scaleLevel, timepoint, datasetId, wellId
       );
       
       if (!region) {
-        console.warn(`Failed to get region from well ${wellId}`);
-        return { success: false, message: `Failed to get region from well ${wellId}` };
+        console.warn(`Well ${wellId} not available (404 or no data)`);
+        return { success: false, message: `Well ${wellId} not available` };
       }
       
-      console.log(`Retrieved well region from ${wellId}, size: ${region.width}x${region.height}`);
+      console.log(`✅ Retrieved well region from ${wellId}, size: ${region.width}x${region.height}`);
       
       // Convert to requested output format
       const outputData = await this.normalizeAndEncodeImage(region, null, outputFormat);
@@ -82,24 +132,24 @@ class ArtifactZarrLoader {
       };
 
     } catch (error) {
-      console.error(`Failed to get well region for ${wellId}:`, error);
+      console.warn(`Well ${wellId} failed: ${error.message}`);
       return { 
         success: false, 
-        message: `Failed to load well ${wellId}: ${error.message}` 
+        message: `Well ${wellId} not available` 
       };
     }
   }
 
   /**
-   * Get multiple well regions in parallel
+   * 🚀 MAXIMUM SPEED: Get multiple well regions - fire ALL requests simultaneously!
    * @param {Array} wellRequests - Array of well request objects
    * @returns {Promise<Array>} Array of well region results
    */
   async getMultipleWellRegions(wellRequests) {
     try {
-      console.log(`Loading ${wellRequests.length} well regions in parallel`);
+      console.log(`🚀 MAXIMUM SPEED: Firing ${wellRequests.length} well requests simultaneously!`);
       
-      // Process all wells in parallel
+      // Fire ALL well requests simultaneously - NO WAITING!
       const wellPromises = wellRequests.map(async (request) => {
         const { wellId, centerX, centerY, width_mm, height_mm, channel, scaleLevel, timepoint, datasetId, outputFormat } = request;
         
@@ -118,11 +168,11 @@ class ArtifactZarrLoader {
             height_mm
           };
         } catch (error) {
-          console.error(`Error loading well ${wellId}:`, error);
+          console.warn(`Well ${wellId} failed: ${error.message}`);
           return {
             success: false,
             wellId,
-            message: error.message
+            message: `Well ${wellId} not available`
           };
         }
       });
@@ -131,16 +181,16 @@ class ArtifactZarrLoader {
       
       // Count successful results
       const successfulResults = results.filter(r => r.success);
-      console.log(`Successfully loaded ${successfulResults.length}/${wellRequests.length} well regions`);
+      console.log(`✅ Successfully loaded ${successfulResults.length}/${wellRequests.length} well regions`);
       
       return results;
       
     } catch (error) {
-      console.error('Failed to load multiple well regions:', error);
+      console.warn(`Multiple well regions failed: ${error.message}`);
       return wellRequests.map(request => ({
         success: false,
         wellId: request.wellId,
-        message: error.message
+        message: `Well ${request.wellId} not available`
       }));
     }
   }
@@ -222,7 +272,7 @@ class ArtifactZarrLoader {
       const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
       
       try {
-        const response = await fetch(zattrsUrl, {
+        const response = await this.managedFetch(zattrsUrl, {
           method: 'GET',
           signal: controller.signal
         });
@@ -359,7 +409,7 @@ class ArtifactZarrLoader {
       return imageData;
 
     } catch (error) {
-      console.error('Error in getWellCanvasRegion:', error);
+      console.warn(`Well canvas region failed: ${error.message}`);
       return null;
     }
   }
@@ -482,7 +532,7 @@ class ArtifactZarrLoader {
   }
 
   /**
-   * Fetch Zarr metadata (zattrs and zarray)
+   * Fetch Zarr metadata (zattrs and zarray) in parallel
    * @param {string} baseUrl - Base URL for zarr data
    * @param {number} scaleLevel - Scale level
    * @returns {Promise<Object|null>} Metadata object
@@ -496,21 +546,24 @@ class ArtifactZarrLoader {
     }
 
     try {
-      // Fetch zattrs (contains channel mapping and other metadata)
-      const zattrsUrl = `${baseUrl}.zattrs`;
-      const zattrsResponse = await fetch(zattrsUrl);
+      // Fetch zattrs and zarray in parallel with managed fetch
+      const [zattrsResponse, zarrayResponse] = await Promise.all([
+        this.managedFetch(`${baseUrl}.zattrs`),
+        this.managedFetch(`${baseUrl}${scaleLevel}/.zarray`)
+      ]);
+
       if (!zattrsResponse.ok) {
         throw new Error(`Failed to fetch zattrs: ${zattrsResponse.status}`);
       }
-      const zattrs = await zattrsResponse.json();
-
-      // Fetch zarray for the specific scale level
-      const zarrayUrl = `${baseUrl}${scaleLevel}/.zarray`;
-      const zarrayResponse = await fetch(zarrayUrl);
       if (!zarrayResponse.ok) {
         throw new Error(`Failed to fetch zarray for scale ${scaleLevel}: ${zarrayResponse.status}`);
       }
-      const zarray = await zarrayResponse.json();
+
+      // Parse JSON responses in parallel
+      const [zattrs, zarray] = await Promise.all([
+        zattrsResponse.json(),
+        zarrayResponse.json()
+      ]);
 
       const metadata = { zattrs, zarray, scaleLevel };
       
@@ -520,7 +573,7 @@ class ArtifactZarrLoader {
       return metadata;
 
     } catch (error) {
-      console.error(`Error fetching Zarr metadata for scale ${scaleLevel}:`, error);
+      console.warn(`Zarr metadata not available for scale ${scaleLevel}: ${error.message}`);
       return null;
     }
   }
@@ -535,7 +588,7 @@ class ArtifactZarrLoader {
     try {
       // Get zattrs to find channel mapping
       const zattrsUrl = `${baseUrl}.zattrs`;
-      const response = await fetch(zattrsUrl);
+      const response = await this.managedFetch(zattrsUrl);
       if (!response.ok) {
         return null;
       }
@@ -584,7 +637,7 @@ class ArtifactZarrLoader {
 
     try {
       const directoryUrl = `${baseUrl}${scaleLevel}/`;
-      const response = await fetch(directoryUrl);
+      const response = await this.managedFetch(directoryUrl);
       
       if (!response.ok) {
         console.error(`Failed to fetch directory listing for scale ${scaleLevel}: ${response.status}`);
@@ -605,13 +658,13 @@ class ArtifactZarrLoader {
       return chunkFiles;
 
     } catch (error) {
-      console.error(`Error fetching directory listing for scale ${scaleLevel}:`, error);
+      console.warn(`Directory listing not available for scale ${scaleLevel}: ${error.message}`);
       return null;
     }
   }
 
   /**
-   * Compose image from multiple chunks
+   * Compose image from multiple chunks with optimized parallel loading
    * @param {string} baseUrl - Base URL for zarr data
    * @param {Array} chunks - Array of chunk coordinates (filtered to available chunks)
    * @param {Object} metadata - Zarr metadata
@@ -632,25 +685,7 @@ class ArtifactZarrLoader {
       const totalWidth = regionWidth;
       const totalHeight = regionHeight;
       
-      // Calculate chunk bounds for reference
-      const minY = Math.min(...chunks.map(c => c.coordinates[3]));
-      const maxY = Math.max(...chunks.map(c => c.coordinates[3]));
-      const minX = Math.min(...chunks.map(c => c.coordinates[4]));
-      const maxX = Math.max(...chunks.map(c => c.coordinates[4]));
-      
-      // Debug logging for stitching dimensions
-      console.log(`Stitching ${chunks.length} chunks into ${totalWidth}x${totalHeight} image`);
-      console.log(`Chunk range: X(${minX}-${maxX}), Y(${minY}-${maxY})`);
-      console.log(`Chunk size: ${xChunk}x${yChunk}`);
-      console.log(`Region start: (${regionStartX}, ${regionStartY})`);
-      
-      // Debug: Visualize chunk layout
-      const layout = this.visualizeChunkLayout(chunks);
-      console.log('Chunk layout:', layout.layout);
-      console.log('Chunk grid:');
-      layout.grid.forEach((row) => {
-        console.log(`  ${row}`);
-      });
+      console.log(`🚀 Optimized stitching: ${chunks.length} chunks into ${totalWidth}x${totalHeight} image`);
       
       // Create canvas for composition
       const canvas = document.createElement('canvas');
@@ -658,27 +693,38 @@ class ArtifactZarrLoader {
       canvas.height = totalHeight;
       const ctx = canvas.getContext('2d');
       
-      // Track successful chunk loads
-      let loadedChunks = 0;
-      const totalChunks = chunks.length;
-      
-      // Create array of chunk loading promises for parallel execution
-      const chunkPromises = chunks.map(async (chunk) => {
+      // Batch fetch all chunk URLs for optimized parallel loading
+      const chunkUrls = chunks.map(chunk => {
         const [t, c, z, y, x] = chunk.coordinates;
-        const chunkUrl = `${baseUrl}${scaleLevel}/${t}.${c}.${z}.${y}.${x}`;
+        return `${baseUrl}${scaleLevel}/${t}.${c}.${z}.${y}.${x}`;
+      });
+      
+      console.time('Batch chunk fetch');
+      const chunkResponses = await this.batchFetch(chunkUrls);
+      console.timeEnd('Batch chunk fetch');
+      
+             // Process chunks in parallel: decode and prepare canvas data
+       console.time('Parallel chunk processing');
+       const chunkPromises = chunks.map(async (chunk, index) => {
+         const response = chunkResponses[index];
+         const [, , , y, x] = chunk.coordinates;
         
-        const chunkData = await this.fetchZarrChunk(chunkUrl, dataType);
-        if (chunkData) {
-          // Convert chunk data to ImageData
+        if (!response || !response.ok) {
+          console.warn(`Chunk not available: ${chunk.filename}`);
+          return null;
+        }
+        
+        try {
+          // Fetch and decode chunk data
+          const chunkData = await response.arrayBuffer();
           const imageData = this.decodeChunk(chunkData, [yChunk, xChunk], dataType);
+          
           if (imageData) {
             // Create temporary canvas for this chunk
             const chunkCanvas = document.createElement('canvas');
             chunkCanvas.width = imageData.width;
             chunkCanvas.height = imageData.height;
             const chunkCtx = chunkCanvas.getContext('2d');
-            
-            // Put image data on chunk canvas
             chunkCtx.putImageData(imageData, 0, 0);
             
             // Calculate position in composed image relative to region start
@@ -700,9 +746,6 @@ class ArtifactZarrLoader {
               const destX = Math.max(0, posX);
               const destY = Math.max(0, posY);
             
-              // Debug logging for chunk positioning
-              console.log(`Placing chunk ${chunk.filename} at dest (${destX}, ${destY}) from src (${srcX}, ${srcY}) size ${srcWidth}x${srcHeight}`);
-            
               return {
                 chunkCanvas,
                 destX,
@@ -710,18 +753,27 @@ class ArtifactZarrLoader {
                 srcX,
                 srcY,
                 srcWidth,
-                srcHeight
+                srcHeight,
+                chunkId: chunk.filename
               };
             }
           }
+        } catch (error) {
+          console.warn(`Error processing chunk ${chunk.filename}:`, error);
         }
+        
         return null;
       });
       
       // Wait for all chunks to load in parallel
       const chunkResults = await Promise.all(chunkPromises);
+      console.timeEnd('Parallel chunk processing');
       
       // Draw all loaded chunks onto the main canvas
+      console.time('Canvas composition');
+      let loadedChunks = 0;
+      const totalChunks = chunks.length;
+      
       for (const result of chunkResults) {
         if (result) {
           const { chunkCanvas, destX, destY, srcX, srcY, srcWidth, srcHeight } = result;
@@ -729,8 +781,9 @@ class ArtifactZarrLoader {
           loadedChunks++;
         }
       }
+      console.timeEnd('Canvas composition');
       
-      console.log(`Successfully loaded ${loadedChunks}/${totalChunks} chunks for scale ${scaleLevel}`);
+      console.log(`✅ Successfully loaded ${loadedChunks}/${totalChunks} chunks for scale ${scaleLevel}`);
       
       return {
         width: totalWidth,
@@ -776,7 +829,7 @@ class ArtifactZarrLoader {
     this.activeRequests.add(chunkUrl);
 
     try {
-      const response = await fetch(chunkUrl);
+      const response = await this.managedFetch(chunkUrl);
       if (!response.ok) {
         console.warn(`Chunk not found: ${chunkUrl} (${response.status})`);
         return null;
@@ -892,6 +945,7 @@ class ArtifactZarrLoader {
     this.metadataCache.clear();
     this.chunkCache.clear();
     this.directoryCache.clear();
+    this.requestPromises.clear();
   }
 
   /**
@@ -899,6 +953,8 @@ class ArtifactZarrLoader {
    */
   cancelActiveRequests() {
     this.activeRequests.clear();
+    this.requestPromises.clear();
+    this.activeRequestCount = 0;
   }
 
   /**
@@ -910,7 +966,10 @@ class ArtifactZarrLoader {
       metadataCacheSize: this.metadataCache.size,
       chunkCacheSize: this.chunkCache.size,
       directoryCacheSize: this.directoryCache.size,
-      activeRequests: this.activeRequests.size
+      activeRequests: this.activeRequests.size,
+      activeRequestCount: this.activeRequestCount,
+      maxConcurrentRequests: this.maxConcurrentRequests,
+      pendingRequestPromises: this.requestPromises.size
     };
   }
 
@@ -1065,7 +1124,7 @@ class ArtifactZarrLoader {
     // First, try to get a list of available wells from the dataset
     // This is more efficient than checking every possible well
     const correctDatasetId = this.extractDatasetId(datasetId);
-    const datasetUrl = `${this.baseUrl}/${correctDatasetId}/zip-files/`;
+    const datasetUrl = `${this.baseUrl}/${correctDatasetId}`;
     
     try {
       // Try to get directory listing to see what wells are available
@@ -1214,36 +1273,139 @@ class ArtifactZarrLoader {
     return availableWells;
   }
 
-
-
   /**
-   * Test method to verify the new workflow
-   * @param {string} datasetId - Dataset ID to test
-   * @returns {Promise<Object>} Test results
+   * Get list of available wells from dataset metadata
+   * @param {string} datasetId - Dataset ID
+   * @returns {Promise<Array<string>>} Array of available well IDs
    */
-  async testNewWorkflow(datasetId) {
+  async getAvailableWells(datasetId) {
+    const correctDatasetId = this.extractDatasetId(datasetId);
+    const datasetUrl = `${this.baseUrl}/${correctDatasetId}`;
+    
     try {
-      console.log(`Testing new workflow for dataset: ${datasetId}`);
+      console.log(`🔍 Getting available wells from: ${datasetUrl}`);
+      const response = await this.managedFetch(datasetUrl);
       
-      // Test single well request
-      const testWellId = 'A2';
-      const testResult = await this.getWellRegion(
-        testWellId, 0, 0, 2.0, 2.0, 'BF LED matrix full', 0, 0, datasetId, 'base64'
-      );
+      if (!response.ok) {
+        console.warn(`Failed to get dataset metadata: ${response.status}`);
+        return [];
+      }
       
-      return {
-        success: true,
-        singleWellTest: testResult,
-        message: `Test completed for dataset ${datasetId}`
-      };
+      const datasetData = await response.json();
+      
+      // Extract well IDs from download_weights
+      if (datasetData.config && datasetData.config.download_weights) {
+        const availableWells = Object.keys(datasetData.config.download_weights)
+          .filter(filename => filename.startsWith('well_') && filename.endsWith('_96.zip'))
+          .map(filename => {
+            // Extract well ID from filename (e.g., "well_A2_96.zip" -> "A2")
+            const match = filename.match(/well_([A-Z]\d+)_96\.zip/);
+            return match ? match[1] : null;
+          })
+          .filter(wellId => wellId !== null);
+        
+        console.log(`✅ Found ${availableWells.length} available wells:`, availableWells);
+        return availableWells;
+      }
+      
+      console.warn('No download_weights found in dataset metadata');
+      return [];
       
     } catch (error) {
-      console.error('Test workflow failed:', error);
-      return {
-        success: false,
-        message: error.message
-      };
+      console.warn(`Failed to get available wells: ${error.message}`);
+      return [];
     }
+  }
+
+  /**
+   * Get visible wells for a given region using well plate config (frontend provides config)
+   * @param {Array} allWells - Array of well info objects (id, centerX, centerY, radius, wellMinX, wellMaxX, wellMinY, wellMaxY)
+   * @param {number} regionMinX
+   * @param {number} regionMaxX
+   * @param {number} regionMinY
+   * @param {number} regionMaxY
+   * @returns {Array} Array of visible well info
+   */
+  getVisibleWellsInRegion(allWells, regionMinX, regionMaxX, regionMinY, regionMaxY) {
+    return allWells.filter(well => {
+      // Well is visible if its center is inside the region, or region overlaps well bounds
+      const centerInside = (
+        well.centerX >= regionMinX && well.centerX <= regionMaxX &&
+        well.centerY >= regionMinY && well.centerY <= regionMaxY
+      );
+      const overlaps = (
+        well.wellMaxX >= regionMinX && well.wellMinX <= regionMaxX &&
+        well.wellMaxY >= regionMinY && well.wellMinY <= regionMaxY
+      );
+      return centerInside || overlaps;
+    });
+  }
+
+  /**
+   * For a given well, check which chunks are available for a region
+   * @param {string} datasetId
+   * @param {string} wellId
+   * @param {number} scaleLevel
+   * @param {number} x_start
+   * @param {number} y_start
+   * @param {number} x_end
+   * @param {number} y_end
+   * @param {number} timepoint
+   * @param {number} channelIndex
+   * @returns {Promise<Array>} Array of available chunk objects
+   */
+  async getAvailableChunksForRegion(datasetId, wellId, scaleLevel, x_start, y_start, x_end, y_end, timepoint, channelIndex) {
+    const correctDatasetId = this.extractDatasetId(datasetId);
+    const baseUrl = `${this.baseUrl}/${correctDatasetId}/zip-files/well_${wellId}_96.zip/~/data.zarr/`;
+    
+    console.log(`🔍 Checking chunks for well ${wellId} scale ${scaleLevel}:`);
+    console.log(`   Region: (${x_start}, ${y_start}) to (${x_end}, ${y_end})`);
+    console.log(`   Base URL: ${baseUrl}`);
+    
+    const metadata = await this.fetchZarrMetadata(baseUrl, scaleLevel);
+    if (!metadata) {
+      console.log(`❌ No metadata available for well ${wellId} scale ${scaleLevel}`);
+      return [];
+    }
+    
+    const { zarray } = metadata;
+    console.log(`   Image shape: ${zarray.shape}`);
+    console.log(`   Chunk size: ${zarray.chunks}`);
+    
+    // Calculate chunk coordinates for the region
+    const chunks = this.calculateChunkCoordinatesFromPixels(
+      x_start, y_start, x_end, y_end, timepoint, channelIndex, zarray
+    );
+    
+    console.log(`   Calculated ${chunks.length} chunk coordinates:`);
+    chunks.forEach(chunk => {
+      console.log(`     ${chunk.filename}: (${chunk.coordinates.join(', ')})`);
+    });
+    
+    // Get available chunks
+    const availableChunks = await this.getAvailableChunks(baseUrl, scaleLevel);
+    if (!availableChunks) {
+      console.log(`❌ No available chunks found for well ${wellId} scale ${scaleLevel}`);
+      return [];
+    }
+    
+    console.log(`   Found ${availableChunks.length} available chunks`);
+    if (availableChunks.length <= 10) {
+      availableChunks.forEach(chunk => console.log(`     ${chunk}`));
+    } else {
+      console.log(`     First 5: ${availableChunks.slice(0, 5).join(', ')}`);
+      console.log(`     Last 5: ${availableChunks.slice(-5).join(', ')}`);
+    }
+    
+    const availableChunkSet = new Set(availableChunks);
+    const matchingChunks = chunks.filter(chunk => availableChunkSet.has(chunk.filename));
+    
+    console.log(`   Matching chunks: ${matchingChunks.length}/${chunks.length}`);
+    matchingChunks.forEach(chunk => {
+      console.log(`     ✅ ${chunk.filename}`);
+    });
+    
+    return matchingChunks;
   }
 }
 

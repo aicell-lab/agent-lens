@@ -2257,69 +2257,153 @@ const MicroscopeMapDisplay = ({
       setIsLoadingCanvas(true);
       
       try {
-        // Get intersecting wells using well plate configuration
-        const intersectingWells = getIntersectingWells(
+        // Get all possible intersecting wells using well plate configuration
+        const allIntersectingWells = getIntersectingWells(
           clampedTopLeft.x, clampedBottomRight.x, 
           clampedTopLeft.y, clampedBottomRight.y
         );
-        
-        if (intersectingWells.length === 0) {
+        if (allIntersectingWells.length === 0) {
           if (appendLog) appendLog('Historical data: No wells intersect with this region');
           return;
         }
+        // Use artifactZarrLoader to filter only visible wells (center or overlap)
+        const visibleWells = artifactZarrLoaderRef.current.getVisibleWellsInRegion(
+          allIntersectingWells,
+          clampedTopLeft.x, clampedBottomRight.x,
+          clampedTopLeft.y, clampedBottomRight.y
+        );
+        if (visibleWells.length === 0) {
+          if (appendLog) appendLog('Historical data: No visible wells in this region');
+          return;
+        }
         
-        console.log(`[loadStitchedTiles] Found ${intersectingWells.length} intersecting wells:`, 
-                   intersectingWells.map(w => w.id));
+        // 🚀 OPTIMIZATION: Get available wells from dataset metadata first!
+        console.log(`🔍 Getting available wells from dataset metadata...`);
+        const availableWellIds = await artifactZarrLoaderRef.current.getAvailableWells(selectedHistoricalDataset.id);
         
-        // Prepare well requests for parallel loading
-        const wellRequests = intersectingWells.map(wellInfo => {
+        // Filter visible wells to only include those that actually exist
+        const existingVisibleWells = visibleWells.filter(well => availableWellIds.includes(well.id));
+        
+        console.log(`📊 Well filtering: ${visibleWells.length} visible wells, ${availableWellIds.length} available wells, ${existingVisibleWells.length} existing visible wells`);
+        
+        if (existingVisibleWells.length === 0) {
+          if (appendLog) appendLog('Historical data: No existing wells in visible region');
+          return;
+        }
+        
+        // 🚀 MAXIMUM SPEED: Process all existing wells in parallel!
+        console.log(`🚀 Processing ${existingVisibleWells.length} existing wells in parallel for scale ${scaleLevel}`);
+        const startTime = Date.now();
+        
+        const wellProcessingPromises = existingVisibleWells.map(async (wellInfo) => {
+          const wellStartTime = Date.now();
           const wellRegion = calculateWellRegion(
-            wellInfo, 
-            clampedTopLeft.x, clampedBottomRight.x, 
+            wellInfo,
+            clampedTopLeft.x, clampedBottomRight.x,
             clampedTopLeft.y, clampedBottomRight.y
           );
           
-          return {
-            wellId: wellInfo.id,
-            centerX: wellRegion.centerX,
-            centerY: wellRegion.centerY,
-            width_mm: wellRegion.width_mm,
-            height_mm: wellRegion.height_mm,
-            channel: activeChannel,
+          // Convert channel name to index (needed for chunk check)
+          const channelIndex = 0; // Single channel for now
+          
+          // Use artifactZarrLoader's proper coordinate conversion instead of simple conversion
+          // First, get the metadata to understand the image dimensions and pixel size
+          const correctDatasetId = artifactZarrLoaderRef.current.extractDatasetId(selectedHistoricalDataset.id);
+          const baseUrl = `${artifactZarrLoaderRef.current.baseUrl}/${correctDatasetId}/zip-files/well_${wellInfo.id}_96.zip/~/data.zarr/`;
+          const metadata = await artifactZarrLoaderRef.current.fetchZarrMetadata(baseUrl, scaleLevel);
+          
+          if (!metadata) {
+            console.log(`❌ No metadata available for well ${wellInfo.id} scale ${scaleLevel}`);
+            return null;
+          }
+          
+          // Get pixel size for proper coordinate conversion
+          const pixelSizeUm = artifactZarrLoaderRef.current.getPixelSizeFromMetadata(metadata, scaleLevel);
+          
+          // Convert well region coordinates to pixel coordinates using proper method
+          const centerPixelCoords = artifactZarrLoaderRef.current.stageToPixelCoords(
+            wellRegion.centerX, wellRegion.centerY, scaleLevel, pixelSizeUm, metadata
+          );
+          
+          // Calculate region bounds in pixels
+          const halfWidthPx = Math.floor((wellRegion.width_mm * 1000) / (pixelSizeUm * Math.pow(4, scaleLevel)) / 2);
+          const halfHeightPx = Math.floor((wellRegion.height_mm * 1000) / (pixelSizeUm * Math.pow(4, scaleLevel)) / 2);
+          
+          const regionStartX = centerPixelCoords.x - halfWidthPx;
+          const regionStartY = centerPixelCoords.y - halfHeightPx;
+          const regionEndX = centerPixelCoords.x + halfWidthPx;
+          const regionEndY = centerPixelCoords.y + halfHeightPx;
+          
+          console.log(`🔍 Well ${wellInfo.id} region: center=(${wellRegion.centerX.toFixed(2)}, ${wellRegion.centerY.toFixed(2)}) mm, ` +
+                     `pixel center=(${centerPixelCoords.x}, ${centerPixelCoords.y}), ` +
+                     `bounds=(${regionStartX}, ${regionStartY}) to (${regionEndX}, ${regionEndY})`);
+          
+          // Check available chunks for this well and region
+          const availableChunks = await artifactZarrLoaderRef.current.getAvailableChunksForRegion(
+            selectedHistoricalDataset.id,
+            wellInfo.id,
             scaleLevel,
-            timepoint: 0,
-            datasetId: selectedHistoricalDataset.id,
-            outputFormat: 'base64',
-            intersectionBounds: wellRegion.intersectionBounds
-          };
+            regionStartX, regionStartY, regionEndX, regionEndY,
+            0, channelIndex
+          );
+          
+          const wellEndTime = Date.now();
+          const wellDuration = wellEndTime - wellStartTime;
+          
+          if (availableChunks.length > 0) {
+            console.log(`✅ Well ${wellInfo.id} has ${availableChunks.length} available chunks for scale ${scaleLevel} (${wellDuration}ms)`);
+            return {
+              wellId: wellInfo.id,
+              centerX: wellRegion.centerX,
+              centerY: wellRegion.centerY,
+              width_mm: wellRegion.width_mm,
+              height_mm: wellRegion.height_mm,
+              channel: activeChannel,
+              scaleLevel,
+              timepoint: 0,
+              datasetId: selectedHistoricalDataset.id,
+              outputFormat: 'base64',
+              intersectionBounds: wellRegion.intersectionBounds
+            };
+          } else {
+            console.log(`❌ Well ${wellInfo.id} has no available chunks for scale ${scaleLevel} (${wellDuration}ms)`);
+            return null;
+          }
         });
         
-        // Load all wells in parallel
-        const wellResults = await artifactZarrLoaderRef.current.getMultipleWellRegions(wellRequests);
+        // Wait for all wells to be processed in parallel
+        const wellProcessingResults = await Promise.all(wellProcessingPromises);
+        const wellRequests = wellProcessingResults.filter(result => result !== null);
         
+        const totalDuration = Date.now() - startTime;
+        console.log(`⚡ Parallel well processing completed: ${wellRequests.length}/${visibleWells.length} wells in ${totalDuration}ms`);
+        
+        if (wellRequests.length === 0) {
+          if (appendLog) appendLog('Historical data: No available chunks in visible wells');
+          return;
+        }
+        // 🚀 MAXIMUM SPEED: Load all wells in parallel without waiting!
+        console.log(`🚀 Firing ${wellRequests.length} well requests (with available chunks) simultaneously!`);
+        const wellResults = await artifactZarrLoaderRef.current.getMultipleWellRegions(wellRequests);
         // Process successful results
         const successfulResults = wellResults.filter(result => result.success);
-        
         if (successfulResults.length > 0) {
-          console.log(`[loadStitchedTiles] Successfully loaded ${successfulResults.length}/${wellRequests.length} well regions`);
-          
-          // Create tiles for each successful well
-          for (const result of successfulResults) {
+          console.log(`✅ Successfully loaded ${successfulResults.length}/${wellRequests.length} well regions`);
+          // Create tiles for each successful well - NO WAITING!
+          successfulResults.forEach(result => {
             const wellRequest = wellRequests.find(req => req.wellId === result.wellId);
-            if (!wellRequest) continue;
-            
+            if (!wellRequest) return;
             // Create bounds for this well's intersection
             const wellBounds = {
-              topLeft: { 
-                x: wellRequest.intersectionBounds.minX, 
-                y: wellRequest.intersectionBounds.minY 
+              topLeft: {
+                x: wellRequest.intersectionBounds.minX,
+                y: wellRequest.intersectionBounds.minY
               },
-              bottomRight: { 
-                x: wellRequest.intersectionBounds.maxX, 
-                y: wellRequest.intersectionBounds.maxY 
+              bottomRight: {
+                x: wellRequest.intersectionBounds.maxX,
+                y: wellRequest.intersectionBounds.maxY
               }
             };
-            
             const newTile = {
               data: `data:image/png;base64,${result.data}`,
               bounds: wellBounds,
@@ -2332,18 +2416,16 @@ const MicroscopeMapDisplay = ({
               datasetId: selectedHistoricalDataset.id,
               wellId: result.wellId
             };
-            
             addOrUpdateTile(newTile);
-          }
-          
+          });
           // Clean up old tiles for this scale/channel combination to prevent memory bloat
           cleanupOldTiles(scaleLevel, activeChannel);
-          
           if (appendLog) {
-            appendLog(`Loaded ${successfulResults.length} historical well tiles for scale ${scaleLevel}, region (${clampedTopLeft.x.toFixed(1)}, ${clampedTopLeft.y.toFixed(1)}) to (${clampedBottomRight.x.toFixed(1)}, ${clampedBottomRight.y.toFixed(1)})`);
+            appendLog(`✅ Loaded ${successfulResults.length} historical well tiles for scale ${scaleLevel}`);
           }
         } else {
-          if (appendLog) appendLog(`Failed to load any historical well tiles: ${wellResults.map(r => r.message).join(', ')}`);
+          console.warn(`No wells available in this region`);
+          if (appendLog) appendLog(`No wells available in this region`);
         }
       } catch (error) {
         console.error('Failed to load historical tiles:', error);
@@ -2646,6 +2728,37 @@ const MicroscopeMapDisplay = ({
       }
     }
   }, [scaleLevel, mapViewMode, visibleLayers.scanResults, visibleLayers.channels, isZooming, scheduleTileUpdate, cleanupOldTiles]);
+
+  // Effect to ensure tiles are loaded for current scale level
+  useEffect(() => {
+    if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && !isZooming) {
+      const activeChannel = Object.entries(visibleLayers.channels)
+        .find(([_, isVisible]) => isVisible)?.[0] || 'BF LED matrix full';
+      
+      // Check if we have tiles for the current scale level
+      const currentScaleTiles = stitchedTiles.filter(tile => 
+        tile.scale === scaleLevel && 
+        tile.channel === activeChannel
+      );
+      
+      // If no tiles exist for current scale level, trigger loading
+      if (currentScaleTiles.length === 0) {
+        console.log(`[Scale Level Check] No tiles found for scale ${scaleLevel}, channel ${activeChannel} - triggering tile load`);
+        
+        // Check if tiles are currently loading
+        if (isLoadingCanvas || activeTileRequestsRef.current.size > 0) {
+          console.log('[Scale Level Check] Skipping - tiles are currently loading');
+        } else {
+          console.log('[Scale Level Check] Triggering tile load for missing scale level');
+          setTimeout(() => {
+            scheduleTileUpdate();
+          }, 100); // Small delay to ensure other operations are complete
+        }
+      } else {
+        console.log(`[Scale Level Check] Found ${currentScaleTiles.length} tiles for scale ${scaleLevel}, channel ${activeChannel}`);
+      }
+    }
+  }, [scaleLevel, mapViewMode, visibleLayers.scanResults, visibleLayers.channels, stitchedTiles, isZooming, isLoadingCanvas, scheduleTileUpdate]);
 
   if (!isOpen) return null;
 
