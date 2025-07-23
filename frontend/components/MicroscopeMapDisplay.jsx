@@ -82,6 +82,56 @@ const MicroscopeMapDisplay = ({
     };
   }, []);
   
+  // 🚀 PERFORMANCE OPTIMIZATION: User activity tracking for idle detection
+  useEffect(() => {
+    const updateUserActivity = (event) => {
+      // 🚀 PERFORMANCE OPTIMIZATION: Only track activity within the map component
+      const mapContainer = mapContainerRef.current;
+      if (!mapContainer) return;
+      
+      // Check if the event target is within the map container
+      const isMapInteraction = mapContainer.contains(event.target) || 
+                              event.target === mapContainer ||
+                              event.target.closest('.map-controls') !== null;
+      
+      if (!isMapInteraction) return;
+      
+      const wasIdle = isUserIdleRef.current;
+      lastUserActivityRef.current = Date.now();
+      isUserIdleRef.current = false;
+      
+      // 🚀 PERFORMANCE OPTIMIZATION: Only log when user becomes active in map
+      if (wasIdle) {
+        console.log('🔄 User became active in map');
+      }
+    };
+    
+    const checkUserIdle = () => {
+      const now = Date.now();
+      const IDLE_THRESHOLD = 3000; // 3 seconds of inactivity
+      isUserIdleRef.current = (now - lastUserActivityRef.current) > IDLE_THRESHOLD;
+    };
+    
+    // Track user activity events - only meaningful map interactions
+    // Only track user activity for map-specific interactions: drag, zoom in/out
+    // - 'mousedown', 'mousemove' for drag
+    // - 'wheel', 'touchstart' for zoom/pan on map
+    const events = ['mousedown', 'mousemove', 'wheel', 'touchstart'];
+    events.forEach(event => {
+      document.addEventListener(event, updateUserActivity, { passive: true });
+    });
+    
+    // Check for idle state every second
+    const idleCheckInterval = setInterval(checkUserIdle, 1000);
+    
+    return () => {
+      events.forEach(event => {
+        document.removeEventListener(event, updateUserActivity);
+      });
+      clearInterval(idleCheckInterval);
+    };
+  }, []);
+  
   // Map view mode: 'FOV_FITTED' for fitted video view, 'FREE_PAN' for stage map view
   const [mapViewMode, setMapViewMode] = useState('FOV_FITTED');
   const [scaleLevel, setScaleLevel] = useState(0); // Start at highest resolution for FOV_FITTED mode
@@ -162,6 +212,8 @@ const MicroscopeMapDisplay = ({
   const activeTileRequestsRef = useRef(new Set()); // Track active requests to prevent duplicates
   const chunkProgressUpdateTimes = useRef(new Map()); // Track last update time for each well to throttle progress updates
   const lastTileLoadAttemptRef = useRef(0); // Track last tile load attempt to prevent excessive retries
+  const lastUserActivityRef = useRef(Date.now()); // Track last user activity to detect idle state
+  const isUserIdleRef = useRef(false); // Track if user is currently idle
 
   // Function to refresh scan results (moved early to avoid dependency issues)
   const refreshScanResults = useCallback(() => {
@@ -2492,6 +2544,12 @@ const MicroscopeMapDisplay = ({
           if (appendLog) appendLog('Historical data: No available chunks in visible wells');
           return;
         }
+        // 🚀 PERFORMANCE OPTIMIZATION: Don't start processing if user is idle
+        if (isUserIdleRef.current) {
+          console.log('⏸️ Skipping historical data processing - user is idle');
+          return;
+        }
+        
         // 🚀 REAL-TIME CHUNK LOADING: Load wells progressively with live updates!
         console.log(`🚀 REAL-TIME: Starting progressive loading for ${wellRequests.length} wells`);
         setIsRealTimeLoading(true);
@@ -2506,6 +2564,12 @@ const MicroscopeMapDisplay = ({
         // Real-time chunk progress callback
         const onChunkProgress = (wellId, loadedChunks, totalChunks, partialCanvas) => {
           console.log(`🔄 REAL-TIME: Well ${wellId} progress: ${loadedChunks}/${totalChunks} chunks loaded`);
+          
+          // 🚀 PERFORMANCE OPTIMIZATION: Stop processing if user is idle
+          if (isUserIdleRef.current && loadedChunks < totalChunks) {
+            console.log(`⏸️ Skipping chunk processing for well ${wellId} - user is idle`);
+            return;
+          }
           
           // 🚀 PERFORMANCE OPTIMIZATION: Throttle state updates to reduce CPU usage
           const now = Date.now();
@@ -2695,6 +2759,12 @@ const MicroscopeMapDisplay = ({
         
         // 🚀 PERFORMANCE OPTIMIZATION: Clean up progress tracking
         chunkProgressUpdateTimes.current.clear();
+        
+        // 🚀 PERFORMANCE OPTIMIZATION: Stop processing if user has been idle for too long
+        if (isUserIdleRef.current) {
+          console.log('⏸️ Stopping historical data processing - user is idle');
+          return;
+        }
         
         // Clear cancellation state for completed request
         if (currentCancellableRequest && currentCancellableRequest.requestKey === currentRequestKey) {
