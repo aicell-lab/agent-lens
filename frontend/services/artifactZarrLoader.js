@@ -1305,18 +1305,15 @@ class ArtifactZarrLoader {
         const [, , , y, x] = chunk.coordinates;
         
         try {
-          // Fetch individual chunk with cancellation support
+          // Fetch individual chunk with caching support
           const chunkUrl = `${baseUrl}${scaleLevel}/${chunk.coordinates.join('.')}`;
           const chunkRequestId = `${chunkBatchId}_chunk_${i}`;
-          const response = await this.managedFetch(chunkUrl, {}, chunkRequestId);
+          const chunkData = await this.fetchZarrChunk(chunkUrl, dataType, chunkRequestId);
           
-          if (!response || !response.ok) {
+          if (!chunkData) {
             console.warn(`Chunk not available: ${chunk.filename}`);
             continue;
           }
-          
-          // Fetch and decode chunk data
-          const chunkData = await response.arrayBuffer();
           const imageData = this.decodeChunk(chunkData, [yChunk, xChunk], dataType);
           
           if (imageData) {
@@ -1433,13 +1430,14 @@ class ArtifactZarrLoader {
    * @param {string} dataType - Data type (uint8, uint16, etc.)
    * @returns {Promise<ArrayBuffer|null>} Chunk data
    */
-  async fetchZarrChunk(chunkUrl, dataType) {
+  async fetchZarrChunk(chunkUrl, dataType, requestId = null) {
     const cacheKey = `${chunkUrl}_${dataType}`;
     
-    // Check cache first
-    if (this.chunkCache.has(cacheKey)) {
-      return this.chunkCache.get(cacheKey);
-    }
+          // Check cache first
+      if (this.chunkCache.has(cacheKey)) {
+        console.log(`✅ CACHE HIT: ${chunkUrl} (${this.chunkCache.size} cached chunks)`);
+        return this.chunkCache.get(cacheKey);
+      }
 
     // Check if this request is already in progress
     if (this.activeRequests.has(chunkUrl)) {
@@ -1457,7 +1455,7 @@ class ArtifactZarrLoader {
     this.activeRequests.add(chunkUrl);
 
     try {
-      const response = await this.managedFetch(chunkUrl);
+      const response = await this.managedFetch(chunkUrl, {}, requestId);
       if (!response.ok) {
         console.warn(`Chunk not found: ${chunkUrl} (${response.status})`);
         return null;
@@ -1467,10 +1465,15 @@ class ArtifactZarrLoader {
       
       // Cache the chunk data
       this.chunkCache.set(cacheKey, chunkData);
+      console.log(`💾 CACHE MISS → CACHED: ${chunkUrl} (${this.chunkCache.size} cached chunks)`);
       
       return chunkData;
 
     } catch (error) {
+      if (error.name === 'AbortError') {
+        console.log(`🚫 Chunk fetch aborted: ${chunkUrl}`);
+        throw error;
+      }
       console.error(`Error fetching chunk ${chunkUrl}:`, error);
       return null;
     } finally {

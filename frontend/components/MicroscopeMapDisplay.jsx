@@ -248,7 +248,7 @@ const MicroscopeMapDisplay = ({
   // Well selection state for scanning
   const [selectedWells, setSelectedWells] = useState([]); // Start with no wells selected
   const [wellPlateType, setWellPlateType] = useState('96'); // Default to 96-well
-  const [wellPaddingMm, setWellPaddingMm] = useState(1.0); // Default padding
+  const [wellPaddingMm] = useState(1.0); // Default padding
 
   // Helper function to get well plate configuration
   const getWellPlateConfig = useCallback(() => {
@@ -1312,7 +1312,7 @@ const MicroscopeMapDisplay = ({
     if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
       // Clean up but don't immediately clear everything - let new tiles load first
       const activeChannel = Object.entries(visibleLayers.channels)
-        .find(([_, isVisible]) => isVisible)?.[0] || 'BF LED matrix full';
+        .find(([, isVisible]) => isVisible)?.[0] || 'BF LED matrix full';
       
       // Trigger cleanup of old tiles after a delay to allow new ones to load
       const cleanupTimer = setTimeout(() => {
