@@ -103,7 +103,8 @@ const MicroscopeMapDisplay = ({
       }
     ],
     do_contrast_autofocus: false,
-    do_reflection_af: false
+    do_reflection_af: false,
+    uploading: false
   });
 
   // Quick scan functionality states
@@ -119,7 +120,8 @@ const MicroscopeMapDisplay = ({
     dy_mm: 0.85,
     velocity_scan_mm_per_s: 3.0,
     do_contrast_autofocus: false,
-    do_reflection_af: false
+    do_reflection_af: false,
+    uploading: false
   });
 
   // Layer dropdown state
@@ -4340,6 +4342,22 @@ const MicroscopeMapDisplay = ({
                 </div>
               </div>
               
+              {/* Upload During Scanning Toggle */}
+              <div className="bg-gray-700 p-2 rounded">
+                <div className="text-purple-300 font-medium mb-1"><i className="fas fa-cloud-upload-alt mr-1"></i>Upload Settings</div>
+                <label className="flex items-center text-xs">
+                  <input
+                    type="checkbox"
+                    checked={quickScanParameters.uploading}
+                    onChange={(e) => setQuickScanParameters(prev => ({ ...prev, uploading: e.target.checked }))}
+                    className="mr-2"
+                    disabled={isQuickScanInProgress}
+                  />
+                  Upload during scanning
+                  <i className="fas fa-question-circle ml-1 text-gray-400" title="Enable background upload of scan data to artifact manager during scanning"></i>
+                </label>
+              </div>
+              
               <div className="bg-gray-700 p-2 rounded text-xs">
                 <div className="text-yellow-300 font-medium mb-1"><i className="fas fa-info-circle mr-1"></i>Quick Scan Info</div>
                 <div>• Brightfield channel only</div>
@@ -4402,7 +4420,8 @@ const MicroscopeMapDisplay = ({
                         quickScanParameters.do_contrast_autofocus,
                         quickScanParameters.do_reflection_af,
                         activeExperiment, // experiment_name parameter
-                        wellPaddingMm // well_padding_mm parameter
+                        wellPaddingMm, // well_padding_mm parameter
+                        quickScanParameters.uploading // uploading parameter
                       );
                       
                       if (appendLog) appendLog(`Quick scan result: ${JSON.stringify(result)}`);
@@ -4844,6 +4863,22 @@ const MicroscopeMapDisplay = ({
                 </label>
               </div>
               
+              {/* Upload During Scanning Toggle */}
+              <div className="bg-gray-700 p-2 rounded">
+                <div className="text-purple-300 font-medium mb-1"><i className="fas fa-cloud-upload-alt mr-1"></i>Upload Settings</div>
+                <label className="flex items-center text-xs">
+                  <input
+                    type="checkbox"
+                    checked={scanParameters.uploading}
+                    onChange={(e) => setScanParameters(prev => ({ ...prev, uploading: e.target.checked }))}
+                    className="mr-2"
+                    disabled={isScanInProgress}
+                  />
+                  Upload during scanning
+                  <i className="fas fa-question-circle ml-1 text-gray-400" title="Enable background upload of scan data to artifact manager during scanning"></i>
+                </label>
+              </div>
+              
               <div className="bg-gray-700 p-2 rounded text-xs">
                 <div>Total scan area: {(scanParameters.Nx * scanParameters.dx_mm).toFixed(1)} × {(scanParameters.Ny * scanParameters.dy_mm).toFixed(1)} mm</div>
                 <div>Total positions: {scanParameters.Nx * scanParameters.Ny}</div>
@@ -4967,7 +5002,8 @@ const MicroscopeMapDisplay = ({
                         activeExperiment, // experiment_name parameter
                         selectedWells, // <-- now supports multi-well
                         wellPlateType, // wellplate_type parameter
-                        wellPaddingMm // well_padding_mm parameter
+                        wellPaddingMm, // well_padding_mm parameter
+                        scanParameters.uploading // uploading parameter
                       );
                       
                       if (result.success) {
