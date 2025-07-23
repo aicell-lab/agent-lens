@@ -99,6 +99,7 @@ const MicroscopeMapDisplay = ({
       const wasIdle = isUserIdleRef.current;
       lastUserActivityRef.current = Date.now();
       isUserIdleRef.current = false;
+      hasUserInteractedRef.current = true; // Mark that user has interacted
       
       // 🚀 PERFORMANCE OPTIMIZATION: Only log when user becomes active in map
       if (wasIdle) {
@@ -109,6 +110,13 @@ const MicroscopeMapDisplay = ({
     const checkUserIdle = () => {
       const now = Date.now();
       const IDLE_THRESHOLD = 3000; // 3 seconds of inactivity
+      
+      // Don't consider user idle if they haven't interacted yet
+      if (!hasUserInteractedRef.current) {
+        isUserIdleRef.current = false;
+        return;
+      }
+      
       isUserIdleRef.current = (now - lastUserActivityRef.current) > IDLE_THRESHOLD;
     };
     
@@ -214,6 +222,7 @@ const MicroscopeMapDisplay = ({
   const lastTileLoadAttemptRef = useRef(0); // Track last tile load attempt to prevent excessive retries
   const lastUserActivityRef = useRef(Date.now()); // Track last user activity to detect idle state
   const isUserIdleRef = useRef(false); // Track if user is currently idle
+  const hasUserInteractedRef = useRef(false); // Track if user has ever interacted with the map
 
   // Function to refresh scan results (moved early to avoid dependency issues)
   const refreshScanResults = useCallback(() => {
@@ -2550,6 +2559,13 @@ const MicroscopeMapDisplay = ({
           return;
         }
         
+        // Mark user as having interacted when they enter historical mode
+        if (!hasUserInteractedRef.current) {
+          console.log('🔄 User entered historical mode - marking as active');
+          hasUserInteractedRef.current = true;
+          isUserIdleRef.current = false;
+        }
+        
         // 🚀 REAL-TIME CHUNK LOADING: Load wells progressively with live updates!
         console.log(`🚀 REAL-TIME: Starting progressive loading for ${wellRequests.length} wells`);
         setIsRealTimeLoading(true);
@@ -2566,7 +2582,7 @@ const MicroscopeMapDisplay = ({
           console.log(`🔄 REAL-TIME: Well ${wellId} progress: ${loadedChunks}/${totalChunks} chunks loaded`);
           
           // 🚀 PERFORMANCE OPTIMIZATION: Stop processing if user is idle
-          if (isUserIdleRef.current && loadedChunks < totalChunks) {
+          if (isUserIdleRef.current && loadedChunks < totalChunks && hasUserInteractedRef.current) {
             console.log(`⏸️ Skipping chunk processing for well ${wellId} - user is idle`);
             return;
           }
@@ -2761,7 +2777,7 @@ const MicroscopeMapDisplay = ({
         chunkProgressUpdateTimes.current.clear();
         
         // 🚀 PERFORMANCE OPTIMIZATION: Stop processing if user has been idle for too long
-        if (isUserIdleRef.current) {
+        if (isUserIdleRef.current && hasUserInteractedRef.current) {
           console.log('⏸️ Stopping historical data processing - user is idle');
           return;
         }
