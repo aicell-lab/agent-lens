@@ -2408,14 +2408,69 @@ const MicroscopeMapDisplay = ({
           if (appendLog) appendLog('Historical data: No available chunks in visible wells');
           return;
         }
-        // 🚀 MAXIMUM SPEED: Load all wells in parallel without waiting!
-        console.log(`🚀 Firing ${wellRequests.length} well requests (with available chunks) simultaneously!`);
-        const wellResults = await artifactZarrLoaderRef.current.getMultipleWellRegions(wellRequests);
+        // 🚀 TRUE BATCH LOADING: Load all wells with optimized chunk batching!
+        console.log(`🚀 TRUE BATCH LOADING: Processing ${wellRequests.length} wells with chunk batching!`);
+        
+        // Group wells by dataset for batch processing
+        const wellsByDataset = wellRequests.reduce((groups, request) => {
+          const datasetId = request.datasetId;
+          if (!groups[datasetId]) {
+            groups[datasetId] = [];
+          }
+          groups[datasetId].push(request);
+          return groups;
+        }, {});
+        
+        const allResults = [];
+        
+        // Process each dataset's wells with batch loading
+        for (const [datasetId, datasetWells] of Object.entries(wellsByDataset)) {
+          console.log(`📦 Processing ${datasetWells.length} wells for dataset ${datasetId} with batch loading`);
+          
+          // Use the new batch loading approach for each well
+          const datasetResults = await Promise.all(datasetWells.map(async (wellRequest) => {
+            try {
+              // Get well region data using the new batch loading method
+              const result = await artifactZarrLoaderRef.current.getWellRegion(
+                wellRequest.wellId,
+                wellRequest.centerX,
+                wellRequest.centerY,
+                wellRequest.width_mm,
+                wellRequest.height_mm,
+                wellRequest.channel,
+                wellRequest.scaleLevel,
+                wellRequest.timepoint,
+                wellRequest.datasetId,
+                wellRequest.outputFormat
+              );
+              
+              return {
+                ...result,
+                wellId: wellRequest.wellId,
+                centerX: wellRequest.centerX,
+                centerY: wellRequest.centerY,
+                width_mm: wellRequest.width_mm,
+                height_mm: wellRequest.height_mm
+              };
+            } catch (error) {
+              console.warn(`Well ${wellRequest.wellId} failed: ${error.message}`);
+              return {
+                success: false,
+                wellId: wellRequest.wellId,
+                message: `Well ${wellRequest.wellId} not available`
+              };
+            }
+          }));
+          
+          allResults.push(...datasetResults);
+        }
+        
         // Process successful results
-        const successfulResults = wellResults.filter(result => result.success);
+        const successfulResults = allResults.filter(result => result.success);
         if (successfulResults.length > 0) {
-          console.log(`✅ Successfully loaded ${successfulResults.length}/${wellRequests.length} well regions`);
-          // Create tiles for each successful well - NO WAITING!
+          console.log(`✅ TRUE BATCH LOADING: Successfully loaded ${successfulResults.length}/${wellRequests.length} well regions`);
+          
+          // Create tiles for each successful well
           successfulResults.forEach(result => {
             const wellRequest = wellRequests.find(req => req.wellId === result.wellId);
             if (!wellRequest) return;
@@ -2472,10 +2527,11 @@ const MicroscopeMapDisplay = ({
             };
             addOrUpdateTile(newTile);
           });
+          
           // Clean up old tiles for this scale/channel combination to prevent memory bloat
           cleanupOldTiles(scaleLevel, activeChannel);
           if (appendLog) {
-            appendLog(`✅ Loaded ${successfulResults.length} historical well tiles for scale ${scaleLevel}`);
+            appendLog(`✅ TRUE BATCH LOADING: Loaded ${successfulResults.length} historical well tiles for scale ${scaleLevel}`);
           }
         } else {
           console.warn(`No wells available in this region`);

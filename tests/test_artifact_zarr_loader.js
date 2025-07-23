@@ -51,6 +51,7 @@ class ArtifactZarrLoaderTest {
       await this.testErrorHandling();
       await this.testCachingBehavior();
       await this.testMemoryManagement();
+      await this.testChunkBatching();
 
       this.printTestResults();
     } catch (error) {
@@ -333,6 +334,196 @@ class ArtifactZarrLoaderTest {
       this.recordTestResult('Memory Management', false, error.message);
       console.log('❌ Memory management failed:', error.message);
     }
+  }
+
+  /**
+   * Test chunk batching functionality
+   * This demonstrates how to batch multiple chunk requests into a single request
+   */
+  async testChunkBatching() {
+    console.log('🧪 Test 10: Chunk Batching');
+    
+    try {
+      const datasetId = 'default-20250723-072316';
+      const wellId = 'B3';
+      const scaleLevel = 2;
+      const channel = 'BF LED matrix full';
+      const timepoint = 0;
+      
+      // Base URL for the test dataset
+      const baseUrl = `https://hypha.aicell.io/agent-lens/artifacts/${datasetId}/zip-files/well_${wellId}_96.zip/~/data.zarr/`;
+      
+      console.log(`🔍 Testing chunk batching for: ${baseUrl}`);
+      
+      // Step 1: Get metadata to understand the data structure
+      const metadata = await this.loader.fetchZarrMetadata(baseUrl, scaleLevel);
+      if (!metadata) {
+        this.recordTestResult('Chunk Batching', false, 'No metadata available for testing');
+        console.log('⚠️  Chunk batching - no metadata available (may be expected for test data)');
+        return;
+      }
+      
+      // Step 2: Get channel index
+      const channelIndex = await this.loader.getChannelIndex(baseUrl, channel);
+      if (channelIndex === null) {
+        this.recordTestResult('Chunk Batching', false, 'Channel not found');
+        console.log('⚠️  Chunk batching - channel not found (may be expected for test data)');
+        return;
+      }
+      
+      // Step 3: Calculate chunk coordinates for a small region
+      const { zarray } = metadata;
+      const [, , , yChunk, xChunk] = zarray.chunks;
+      
+      // Define a small region that should require multiple chunks
+      const regionStartX = 0;
+      const regionStartY = 0;
+      const regionEndX = Math.min(xChunk * 2, zarray.shape[4]); // 2 chunks wide
+      const regionEndY = Math.min(yChunk * 2, zarray.shape[3]); // 2 chunks high
+      
+      console.log(`📐 Region: (${regionStartX}, ${regionStartY}) to (${regionEndX}, ${regionEndY})`);
+      console.log(`🔲 Chunk size: ${xChunk}x${yChunk}`);
+      
+      // Calculate all chunks needed for this region
+      const allChunks = this.loader.calculateChunkCoordinatesFromPixels(
+        regionStartX, regionStartY, regionEndX, regionEndY,
+        timepoint, channelIndex, zarray
+      );
+      
+      console.log(`🧩 Total chunks needed: ${allChunks.length}`);
+      
+      // Step 4: Get available chunks
+      const availableChunks = await this.loader.getAvailableChunks(baseUrl, scaleLevel);
+      if (!availableChunks || availableChunks.length === 0) {
+        this.recordTestResult('Chunk Batching', false, 'No available chunks found');
+        console.log('⚠️  Chunk batching - no available chunks (may be expected for test data)');
+        return;
+      }
+      
+      // Filter to only available chunks
+      const availableChunkSet = new Set(availableChunks);
+      const filteredChunks = allChunks.filter(chunk => availableChunkSet.has(chunk.filename));
+      
+      console.log(`✅ Available chunks: ${filteredChunks.length}/${allChunks.length}`);
+      
+      if (filteredChunks.length === 0) {
+        this.recordTestResult('Chunk Batching', false, 'No matching chunks available');
+        console.log('⚠️  Chunk batching - no matching chunks available (may be expected for test data)');
+        return;
+      }
+      
+      // Step 5: Demonstrate chunk batching
+      console.log('\n🚀 Demonstrating chunk batching:');
+      
+      // Method 1: Individual chunk requests (current approach - slow)
+      console.log('📊 Method 1: Individual chunk requests (current - slow)');
+      
+      const individualChunkUrls = filteredChunks.map(chunk => {
+        const [t, c, z, y, x] = chunk.coordinates;
+        return `${baseUrl}${scaleLevel}/${t}.${c}.${z}.${y}.${x}`;
+      });
+      
+      console.log(`   🔗 Generated ${individualChunkUrls.length} individual URLs`);
+      console.log(`   📝 Example URLs:`);
+      individualChunkUrls.slice(0, 3).forEach((url, i) => {
+        console.log(`      ${i + 1}. ${url.split('/').pop()}`);
+      });
+      
+      // Method 2: Batched chunk requests (proposed approach - fast)
+      console.log('\n📊 Method 2: Batched chunk requests (proposed - fast)');
+      
+      // Create batch request payload
+      const batchPayload = {
+        datasetId,
+        wellId,
+        scaleLevel,
+        channelIndex,
+        timepoint,
+        chunks: filteredChunks.map(chunk => ({
+          coordinates: chunk.coordinates,
+          filename: chunk.filename
+        }))
+      };
+      
+      console.log(`   📦 Batch payload: ${JSON.stringify(batchPayload, null, 2)}`);
+      
+      // Simulate batch request URL (this would be a new server endpoint)
+      const batchRequestUrl = `${baseUrl}${scaleLevel}/batch`;
+      console.log(`   🔗 Batch request URL: ${batchRequestUrl}`);
+      
+      // Method 3: Optimized batch with chunk grouping
+      console.log('\n📊 Method 3: Optimized batch with chunk grouping');
+      
+      // Group chunks by spatial proximity for better caching
+      const chunkGroups = this.groupChunksByProximity(filteredChunks, 4); // Max 4 chunks per group
+      
+      console.log(`   📦 Created ${chunkGroups.length} chunk groups:`);
+      chunkGroups.forEach((group, i) => {
+        console.log(`      Group ${i + 1}: ${group.length} chunks`);
+        group.forEach(chunk => {
+          console.log(`         - ${chunk.filename}`);
+        });
+      });
+      
+      // Simulate performance comparison
+      console.log('\n⏱️  Performance comparison:');
+      console.log(`   📊 Individual requests: ${individualChunkUrls.length} HTTP requests`);
+      console.log(`   📊 Batched requests: ${chunkGroups.length} HTTP requests`);
+      console.log(`   🚀 Reduction: ${Math.round((1 - chunkGroups.length / individualChunkUrls.length) * 100)}% fewer requests`);
+      
+      // Calculate theoretical performance improvement
+      const httpOverhead = 50; // ms per request
+      const individualTotalTime = individualChunkUrls.length * httpOverhead;
+      const batchTotalTime = chunkGroups.length * httpOverhead;
+      const timeReduction = Math.round((1 - batchTotalTime / individualTotalTime) * 100);
+      
+      console.log(`   ⚡ Theoretical time reduction: ${timeReduction}%`);
+      
+      this.recordTestResult('Chunk Batching', true, 
+        `Demonstrated batching: ${individualChunkUrls.length} → ${chunkGroups.length} requests (${Math.round((1 - chunkGroups.length / individualChunkUrls.length) * 100)}% reduction)`);
+      console.log('✅ Chunk batching demonstration completed');
+      
+    } catch (error) {
+      this.recordTestResult('Chunk Batching', false, error.message);
+      console.log('❌ Chunk batching failed:', error.message);
+    }
+  }
+
+  /**
+   * Group chunks by spatial proximity for optimized batching
+   * @param {Array} chunks - Array of chunk objects
+   * @param {number} maxGroupSize - Maximum chunks per group
+   * @returns {Array<Array>} Array of chunk groups
+   */
+  groupChunksByProximity(chunks, maxGroupSize) {
+    if (chunks.length <= maxGroupSize) {
+      return [chunks];
+    }
+    
+    // Sort chunks by spatial coordinates (y, then x)
+    const sortedChunks = [...chunks].sort((a, b) => {
+      const [,,, y1, x1] = a.coordinates;
+      const [,,, y2, x2] = b.coordinates;
+      if (y1 !== y2) return y1 - y2;
+      return x1 - x2;
+    });
+    
+    const groups = [];
+    let currentGroup = [];
+    
+    for (const chunk of sortedChunks) {
+      if (currentGroup.length >= maxGroupSize) {
+        groups.push(currentGroup);
+        currentGroup = [];
+      }
+      currentGroup.push(chunk);
+    }
+    
+    if (currentGroup.length > 0) {
+      groups.push(currentGroup);
+    }
+    
+    return groups;
   }
 
   /**

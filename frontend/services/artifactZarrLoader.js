@@ -75,6 +75,142 @@ class ArtifactZarrLoader {
   }
 
   /**
+   * TRUE BATCH LOADING: Send one request with multiple chunk coordinates
+   * This replaces individual chunk requests with a single batch request
+   * @param {string} baseUrl - Base URL for zarr data
+   * @param {number} scaleLevel - Scale level
+   * @param {Array} chunkCoordinates - Array of chunk coordinate objects
+   * @param {Object} options - Fetch options
+   * @returns {Promise<Array<Object>>} Array of chunk data objects
+   */
+  async batchLoadChunks(baseUrl, scaleLevel, chunkCoordinates, options = {}) {
+    if (chunkCoordinates.length === 0) {
+      console.log('No chunks to batch load');
+      return [];
+    }
+
+    console.log(`🚀 TRUE BATCH LOADING: Sending ${chunkCoordinates.length} chunks in ONE request!`);
+    
+    try {
+      // Create batch request payload
+      const batchPayload = {
+        scaleLevel,
+        chunks: chunkCoordinates.map(chunk => ({
+          coordinates: chunk.coordinates,
+          filename: chunk.filename,
+          pixelBounds: chunk.pixelBounds
+        }))
+      };
+
+      // Create batch request URL
+      const batchUrl = `${baseUrl}${scaleLevel}/batch`;
+      
+      console.log(`📦 Batch payload:`, batchPayload);
+      console.log(`🔗 Batch URL: ${batchUrl}`);
+
+      // Send single batch request
+      const response = await this.managedFetch(batchUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...options.headers
+        },
+        body: JSON.stringify(batchPayload),
+        ...options
+      });
+
+      if (!response.ok) {
+        throw new Error(`Batch request failed: ${response.status} ${response.statusText}`);
+      }
+
+      // Parse batch response
+      const batchData = await response.json();
+      
+      if (!batchData.chunks || !Array.isArray(batchData.chunks)) {
+        throw new Error('Invalid batch response format');
+      }
+
+      console.log(`✅ Batch loading successful: received ${batchData.chunks.length} chunks`);
+
+      // Convert batch response to individual chunk data
+      const chunkResults = batchData.chunks.map((chunkData, index) => {
+        const originalChunk = chunkCoordinates[index];
+        
+        if (!chunkData.data) {
+          console.warn(`Chunk ${originalChunk.filename} not available in batch response`);
+          return null;
+        }
+
+        // Convert base64 data to ArrayBuffer
+        const binaryString = atob(chunkData.data);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+
+        return {
+          chunk: originalChunk,
+          data: bytes.buffer,
+          filename: originalChunk.filename
+        };
+      }).filter(result => result !== null);
+
+      console.log(`✅ Successfully processed ${chunkResults.length}/${chunkCoordinates.length} chunks from batch`);
+      return chunkResults;
+
+    } catch (error) {
+      console.error('Batch loading failed:', error);
+      
+      // Fallback to individual requests if batch loading fails
+      console.log('🔄 Falling back to individual chunk requests...');
+      return this.fallbackToIndividualRequests(baseUrl, scaleLevel, chunkCoordinates, options);
+    }
+  }
+
+  /**
+   * Fallback method for individual chunk requests when batch loading fails
+   * @param {string} baseUrl - Base URL for zarr data
+   * @param {number} scaleLevel - Scale level
+   * @param {Array} chunkCoordinates - Array of chunk coordinate objects
+   * @param {Object} options - Fetch options
+   * @returns {Promise<Array<Object>>} Array of chunk data objects
+   */
+  async fallbackToIndividualRequests(baseUrl, scaleLevel, chunkCoordinates, options = {}) {
+    console.log(`🔄 Fallback: Loading ${chunkCoordinates.length} chunks individually`);
+    
+    const chunkUrls = chunkCoordinates.map(chunk => {
+      const [t, c, z, y, x] = chunk.coordinates;
+      return `${baseUrl}${scaleLevel}/${t}.${c}.${z}.${y}.${x}`;
+    });
+
+    const responses = await this.batchFetch(chunkUrls, options);
+    
+    const chunkResults = [];
+    for (let i = 0; i < responses.length; i++) {
+      const response = responses[i];
+      const chunk = chunkCoordinates[i];
+      
+      if (response && response.ok) {
+        try {
+          const chunkData = await response.arrayBuffer();
+          chunkResults.push({
+            chunk,
+            data: chunkData,
+            filename: chunk.filename
+          });
+        } catch (error) {
+          console.warn(`Failed to process chunk ${chunk.filename}:`, error);
+        }
+      } else {
+        console.warn(`Chunk ${chunk.filename} not available (${response?.status || 'unknown'})`);
+      }
+    }
+
+    console.log(`✅ Fallback completed: ${chunkResults.length}/${chunkCoordinates.length} chunks loaded`);
+    return chunkResults;
+  }
+
+  /**
    * Get individual well region data
    * This is the primary method for historical data - handles single well requests
    * @param {string} wellId - Well ID (e.g., 'A2')
@@ -694,7 +830,7 @@ class ArtifactZarrLoader {
   }
 
   /**
-   * Compose image from multiple chunks with optimized parallel loading
+   * Compose image from multiple chunks with TRUE BATCH LOADING
    * @param {string} baseUrl - Base URL for zarr data
    * @param {Array} chunks - Array of chunk coordinates (filtered to available chunks)
    * @param {Object} metadata - Zarr metadata
@@ -715,7 +851,7 @@ class ArtifactZarrLoader {
       const totalWidth = regionWidth;
       const totalHeight = regionHeight;
       
-      console.log(`🧩 Stitching: ${chunks.length} chunks → ${totalWidth}×${totalHeight}px`);
+      console.log(`🧩 TRUE BATCH STITCHING: ${chunks.length} chunks → ${totalWidth}×${totalHeight}px`);
       
       // Create canvas for composition
       const canvas = document.createElement('canvas');
@@ -723,32 +859,24 @@ class ArtifactZarrLoader {
       canvas.height = totalHeight;
       const ctx = canvas.getContext('2d');
       
-      // Batch fetch all chunk URLs for optimized parallel loading
-      const chunkUrls = chunks.map(chunk => {
-        const [t, c, z, y, x] = chunk.coordinates;
-        return `${baseUrl}${scaleLevel}/${t}.${c}.${z}.${y}.${x}`;
-      });
-      
-      const batchTimerName = `Batch chunk fetch ${Date.now()}_${Math.random()}`;
+      // 🚀 TRUE BATCH LOADING: Load all chunks in ONE request!
+      const batchTimerName = `True batch chunk loading ${Date.now()}_${Math.random()}`;
       console.time(batchTimerName);
-      const chunkResponses = await this.batchFetch(chunkUrls);
+      
+      const chunkResults = await this.batchLoadChunks(baseUrl, scaleLevel, chunks);
       console.timeEnd(batchTimerName);
       
-             // Process chunks in parallel: decode and prepare canvas data
-       const processingTimerName = `Parallel chunk processing ${Date.now()}_${Math.random()}`;
-       console.time(processingTimerName);
-       const chunkPromises = chunks.map(async (chunk, index) => {
-         const response = chunkResponses[index];
-         const [, , , y, x] = chunk.coordinates;
-        
-        if (!response || !response.ok) {
-          console.warn(`Chunk not available: ${chunk.filename}`);
-          return null;
-        }
+      // Process chunks in parallel: decode and prepare canvas data
+      const processingTimerName = `Parallel chunk processing ${Date.now()}_${Math.random()}`;
+      console.time(processingTimerName);
+      
+      const chunkPromises = chunkResults.map(async (chunkResult) => {
+        const chunk = chunkResult.chunk;
+        const chunkData = chunkResult.data;
+        const [, , , y, x] = chunk.coordinates;
         
         try {
-          // Fetch and decode chunk data
-          const chunkData = await response.arrayBuffer();
+          // Decode chunk data
           const imageData = this.decodeChunk(chunkData, [yChunk, xChunk], dataType);
           
           if (imageData) {
@@ -798,7 +926,7 @@ class ArtifactZarrLoader {
       });
       
       // Wait for all chunks to load in parallel
-      const chunkResults = await Promise.all(chunkPromises);
+      const processedChunks = await Promise.all(chunkPromises);
       console.timeEnd(processingTimerName);
       
       // Draw all loaded chunks onto the main canvas
@@ -807,7 +935,7 @@ class ArtifactZarrLoader {
       let loadedChunks = 0;
       const totalChunks = chunks.length;
       
-      for (const result of chunkResults) {
+      for (const result of processedChunks) {
         if (result) {
           const { chunkCanvas, destX, destY, srcX, srcY, srcWidth, srcHeight } = result;
           ctx.drawImage(chunkCanvas, srcX, srcY, srcWidth, srcHeight, destX, destY, srcWidth, srcHeight);
@@ -816,7 +944,7 @@ class ArtifactZarrLoader {
       }
       console.timeEnd(compositionTimerName);
       
-      console.log(`✅ Successfully loaded ${loadedChunks}/${totalChunks} chunks for scale ${scaleLevel}`);
+      console.log(`✅ TRUE BATCH LOADING: Successfully loaded ${loadedChunks}/${totalChunks} chunks for scale ${scaleLevel}`);
       
       return {
         width: totalWidth,
