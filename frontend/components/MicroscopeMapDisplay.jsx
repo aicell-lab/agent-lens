@@ -67,6 +67,10 @@ const MicroscopeMapDisplay = ({
       setRectangleStart(null);
       setRectangleEnd(null);
       setDragSelectedWell(null);
+      // Clean up grid drawing states
+      setGridDragStart(null);
+      setGridDragEnd(null);
+      setIsGridDragging(false);
     }
   }, [isSimulatedMicroscope]);
   
@@ -3351,6 +3355,10 @@ const MicroscopeMapDisplay = ({
                       setRectangleStart(null);
                       setRectangleEnd(null);
                       setDragSelectedWell(null);
+                      // Clean up grid drawing states
+                      setGridDragStart(null);
+                      setGridDragEnd(null);
+                      setIsGridDragging(false);
                       // Open quick scan panel (always allow opening, even during scanning)
                       setShowQuickScanConfig(true);
                     }
@@ -3408,6 +3416,10 @@ const MicroscopeMapDisplay = ({
                     setIsRectangleSelection(false);
                     setRectangleStart(null);
                     setRectangleEnd(null);
+                    // Clean up grid drawing states
+                    setGridDragStart(null);
+                    setGridDragEnd(null);
+                    setIsGridDragging(false);
                   } else if (isScanInProgress) {
                     // Switch to FREE_PAN mode and open scan panel to view progress
                     transitionToFreePan();
@@ -4473,9 +4485,14 @@ const MicroscopeMapDisplay = ({
             <button
               onClick={() => {
                 setShowScanConfig(false);
+                setIsRectangleSelection(false);
                 setRectangleStart(null);
                 setRectangleEnd(null);
                 setDragSelectedWell(null);
+                // Clean up grid drawing states
+                setGridDragStart(null);
+                setGridDragEnd(null);
+                setIsGridDragging(false);
               }}
               className="text-gray-400 hover:text-white p-1"
               title="Close"
