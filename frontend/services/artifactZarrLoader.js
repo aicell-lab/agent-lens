@@ -29,7 +29,7 @@ class ArtifactZarrLoader {
     this.activeBatchRequests = new Set(); // Track active batch request IDs
     
     // 🚀 PERFORMANCE OPTIMIZATION: Add memory management
-    this.maxCacheSize = 100; // Limit cache size to prevent memory bloat
+    this.maxCacheSize = 2000; // Limit cache size to prevent memory bloat
     this.lastCleanup = Date.now();
     this.cleanupInterval = 30000; // Clean up every 30 seconds
   }
@@ -1589,7 +1589,7 @@ class ArtifactZarrLoader {
     }
     
     // Clean up old cache entries
-    const maxAge = 5 * 60 * 1000; // 5 minutes
+    const maxAge = 10 * 60 * 1000; // 10 minutes
     let cleanedCount = 0;
     
     // Clean metadata cache
