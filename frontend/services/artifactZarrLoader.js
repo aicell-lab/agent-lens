@@ -21,34 +21,123 @@ class ArtifactZarrLoader {
     this.requestQueue = []; // Queue for requests when limit is reached
     this.activeRequestCount = 0;
     this.requestPromises = new Map(); // Cache for pending requests to avoid duplicates
+    
+    // 🚀 REQUEST CANCELLATION: Track and manage cancellable requests
+    this.requestControllers = new Map(); // Map of request ID to AbortController
+    this.requestIds = new Map(); // Map of URL to request ID for tracking
+    this.nextRequestId = 1; // Counter for unique request IDs
+    this.activeBatchRequests = new Set(); // Track active batch request IDs
+  }
+
+  /**
+   * Generate a unique request ID for tracking and cancellation
+   * @returns {string} Unique request ID
+   */
+  generateRequestId() {
+    return `req_${Date.now()}_${this.nextRequestId++}`;
+  }
+
+  /**
+   * Cancel a specific request by ID
+   * @param {string} requestId - Request ID to cancel
+   * @returns {boolean} True if request was cancelled
+   */
+  cancelRequest(requestId) {
+    const controller = this.requestControllers.get(requestId);
+    if (controller) {
+      controller.abort();
+      this.requestControllers.delete(requestId);
+      console.log(`🚫 Cancelled request: ${requestId}`);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Cancel all active requests
+   * @returns {number} Number of requests cancelled
+   */
+  cancelAllRequests() {
+    let cancelledCount = 0;
+    for (const [requestId, controller] of this.requestControllers) {
+      controller.abort();
+      cancelledCount++;
+    }
+    this.requestControllers.clear();
+    this.requestIds.clear();
+    this.activeBatchRequests.clear();
+    console.log(`🚫 Cancelled all ${cancelledCount} active requests`);
+    return cancelledCount;
+  }
+
+  /**
+   * Cancel all requests for a specific batch
+   * @param {string} batchId - Batch request ID to cancel
+   * @returns {number} Number of requests cancelled
+   */
+  cancelBatchRequests(batchId) {
+    let cancelledCount = 0;
+    const batchRequests = Array.from(this.requestControllers.keys())
+      .filter(requestId => requestId.startsWith(batchId));
+    
+    for (const requestId of batchRequests) {
+      const controller = this.requestControllers.get(requestId);
+      if (controller) {
+        controller.abort();
+        this.requestControllers.delete(requestId);
+        cancelledCount++;
+      }
+    }
+    
+    this.activeBatchRequests.delete(batchId);
+    console.log(`🚫 Cancelled ${cancelledCount} requests for batch: ${batchId}`);
+    return cancelledCount;
   }
 
   /**
    * MAXIMUM SPEED fetch - no waiting, just fire all requests!
    * @param {string} url - URL to fetch
    * @param {Object} options - Fetch options
+   * @param {string} requestId - Optional request ID for cancellation
    * @returns {Promise<Response>} Fetch response
    */
-  async managedFetch(url, options = {}) {
+  async managedFetch(url, options = {}, requestId = null) {
+    // Generate request ID if not provided
+    const reqId = requestId || this.generateRequestId();
+    
     // Check if this exact request is already in progress
     if (this.requestPromises.has(url)) {
       return this.requestPromises.get(url);
     }
+
+    // Create AbortController for this request
+    const controller = new AbortController();
+    this.requestControllers.set(reqId, controller);
+    this.requestIds.set(url, reqId);
 
     // Create the fetch promise - NO WAITING, just fire!
     const fetchPromise = (async () => {
       this.activeRequestCount++;
       
       try {
-        const response = await fetch(url, options);
+        const response = await fetch(url, {
+          ...options,
+          signal: controller.signal
+        });
         return response;
       } catch (error) {
+        if (error.name === 'AbortError') {
+          console.log(`🚫 Request aborted: ${url}`);
+          throw error;
+        }
         // Gracefully handle 404s and other errors
         console.warn(`Request failed for ${url}: ${error.message}`);
         return new Response(null, { status: 404, statusText: 'Not Found' });
       } finally {
         this.activeRequestCount--;
         this.requestPromises.delete(url);
+        this.requestControllers.delete(reqId);
+        this.requestIds.delete(url);
       }
     })();
 
@@ -62,16 +151,27 @@ class ArtifactZarrLoader {
    * MAXIMUM SPEED batch fetch - fire ALL requests at once!
    * @param {Array<string>} urls - URLs to fetch
    * @param {Object} options - Fetch options
+   * @param {string} batchId - Optional batch ID for cancellation
    * @returns {Promise<Array<Response>>} Array of responses
    */
-  async batchFetch(urls, options = {}) {
-    console.log(`🚀 MAXIMUM SPEED: Firing ${urls.length} requests simultaneously!`);
+  async batchFetch(urls, options = {}, batchId = null) {
+    const batchRequestId = batchId || `batch_${Date.now()}_${Math.random()}`;
+    this.activeBatchRequests.add(batchRequestId);
     
-    // Fire ALL requests at once - no batching, no limits!
-    const allPromises = urls.map(url => this.managedFetch(url, options));
-    const results = await Promise.all(allPromises);
+    console.log(`🚀 MAXIMUM SPEED: Firing ${urls.length} requests simultaneously! (Batch: ${batchRequestId})`);
     
-    return results;
+    try {
+      // Fire ALL requests at once - no batching, no limits!
+      const allPromises = urls.map((url, index) => {
+        const requestId = `${batchRequestId}_${index}`;
+        return this.managedFetch(url, options, requestId);
+      });
+      
+      const results = await Promise.all(allPromises);
+      return results;
+    } finally {
+      this.activeBatchRequests.delete(batchRequestId);
+    }
   }
 
   /**
@@ -249,15 +349,20 @@ class ArtifactZarrLoader {
    * @param {Array} wellRequests - Array of well request objects
    * @param {Function} onChunkProgress - Callback for chunk loading progress (wellId, loadedChunks, totalChunks, partialCanvas)
    * @param {Function} onWellComplete - Callback when a well is fully loaded (wellId, finalResult)
+   * @param {string} batchId - Optional batch ID for cancellation
    * @returns {Promise<Array>} Array of final well region results
    */
-  async getMultipleWellRegionsRealTime(wellRequests, onChunkProgress, onWellComplete) {
+  async getMultipleWellRegionsRealTime(wellRequests, onChunkProgress, onWellComplete, batchId = null) {
+    const requestBatchId = batchId || `well_batch_${Date.now()}_${Math.random()}`;
+    this.activeBatchRequests.add(requestBatchId);
+    
     try {
-      console.log(`🚀 REAL-TIME: Starting progressive loading for ${wellRequests.length} wells`);
+      console.log(`🚀 REAL-TIME: Starting progressive loading for ${wellRequests.length} wells (Batch: ${requestBatchId})`);
       
       // Fire ALL well requests simultaneously with real-time updates
-      const wellPromises = wellRequests.map(async (request) => {
+      const wellPromises = wellRequests.map(async (request, index) => {
         const { wellId, centerX, centerY, width_mm, height_mm, channel, scaleLevel, timepoint, datasetId, outputFormat } = request;
+        const wellRequestId = `${requestBatchId}_well_${index}`;
         
         try {
           const result = await this.getWellCanvasRegionRealTime(
@@ -268,15 +373,16 @@ class ArtifactZarrLoader {
               if (onChunkProgress) {
                 onChunkProgress(wellId, loadedChunks, totalChunks, partialCanvas);
               }
-            }
+            },
+            wellRequestId
           );
           
           if (!result) {
-            console.warn(`Well ${wellId} not available (404 or no data)`);
+            console.warn(`Well ${wellId} not available (404, no data, or channel not found)`);
             return {
               success: false,
               wellId,
-              message: `Well ${wellId} not available`
+              message: `Well ${wellId} not available or channel not found`
             };
           }
           
@@ -315,6 +421,14 @@ class ArtifactZarrLoader {
           return finalResult;
           
         } catch (error) {
+          if (error.name === 'AbortError') {
+            console.log(`🚫 Well ${wellId} loading aborted`);
+            return {
+              success: false,
+              wellId,
+              message: `Well ${wellId} loading cancelled`
+            };
+          }
           console.warn(`Well ${wellId} failed: ${error.message}`);
           return {
             success: false,
@@ -333,13 +447,44 @@ class ArtifactZarrLoader {
       return results;
       
     } catch (error) {
+      if (error.name === 'AbortError') {
+        console.log(`🚫 Batch well loading aborted: ${requestBatchId}`);
+        return wellRequests.map(request => ({
+          success: false,
+          wellId: request.wellId,
+          message: `Well ${request.wellId} loading cancelled`
+        }));
+      }
       console.warn(`Real-time multiple well regions failed: ${error.message}`);
       return wellRequests.map(request => ({
         success: false,
         wellId: request.wellId,
         message: `Well ${request.wellId} not available`
       }));
+    } finally {
+      this.activeBatchRequests.delete(requestBatchId);
     }
+  }
+
+  /**
+   * 🚀 REAL-TIME CHUNK LOADING with cancellation support
+   * Returns both the promise and a cancellation function
+   * @param {Array} wellRequests - Array of well request objects
+   * @param {Function} onChunkProgress - Callback for chunk loading progress
+   * @param {Function} onWellComplete - Callback when a well is fully loaded
+   * @returns {Object} { promise, cancel } - Promise and cancellation function
+   */
+  getMultipleWellRegionsRealTimeCancellable(wellRequests, onChunkProgress, onWellComplete) {
+    const batchId = `cancellable_batch_${Date.now()}_${Math.random()}`;
+    
+    const promise = this.getMultipleWellRegionsRealTime(wellRequests, onChunkProgress, onWellComplete, batchId);
+    
+    const cancel = () => {
+      console.log(`🚫 Cancelling batch: ${batchId}`);
+      return this.cancelBatchRequests(batchId);
+    };
+    
+    return { promise, cancel };
   }
 
   /**
@@ -544,7 +689,9 @@ class ArtifactZarrLoader {
    * 🚀 REAL-TIME: Get well canvas region with progressive chunk loading
    * Provides live updates as chunks become available
    */
-  async getWellCanvasRegionRealTime(x_mm, y_mm, width_mm, height_mm, channelName, scale, timepoint, datasetId, wellId, onChunkProgress) {
+  async getWellCanvasRegionRealTime(x_mm, y_mm, width_mm, height_mm, channelName, scale, timepoint, datasetId, wellId, onChunkProgress, batchId = null) {
+    const wellRequestId = batchId || `well_${wellId}_${Date.now()}`;
+    
     try {
       // Extract the correct dataset ID
       const correctDatasetId = this.extractDatasetId(datasetId);
@@ -561,7 +708,8 @@ class ArtifactZarrLoader {
       // Map channel name to index
       const channelIndex = await this.getChannelIndex(baseUrl, channelName);
       if (channelIndex === null) {
-        throw new Error(`Channel '${channelName}' not found`);
+        console.warn(`Channel '${channelName}' not found - returning null for graceful handling`);
+        return null; // Return null instead of throwing to allow graceful handling
       }
 
       // Get pixel size from metadata (following the scale transformations)
@@ -639,7 +787,7 @@ class ArtifactZarrLoader {
       // REAL-TIME: Compose chunks progressively with live updates
       const imageData = await this.composeImageFromChunksRealTime(
         baseUrl, filteredChunks, metadata, scale, x_start, y_start, x_end - x_start, y_end - y_start,
-        onChunkProgress
+        onChunkProgress, wellRequestId
       );
 
       // CRITICAL: Calculate actual stage bounds from extracted pixel bounds
@@ -672,6 +820,10 @@ class ArtifactZarrLoader {
       return imageData;
 
     } catch (error) {
+      if (error.name === 'AbortError') {
+        console.log(`🚫 Well ${wellId} canvas region loading aborted`);
+        throw error;
+      }
       console.warn(`Real-time well canvas region failed: ${error.message}`);
       return null;
     }
@@ -879,9 +1031,29 @@ class ArtifactZarrLoader {
         }
       }
       
+      // 🚫 IMPROVED: Handle common channel name variations
+      // Map common microscope channel names to standard indices
+      // Based on actual channel mapping from MapDisplay.jsx
+      const channelNameMap = {
+        'BF_LED_matrix_full': 0,
+        'Fluorescence_405_nm_Ex': 11,
+        'Fluorescence_488_nm_Ex': 12,
+        'Fluorescence_561_nm_Ex': 14,
+        'Fluorescence_638_nm_Ex': 13
+      };
+      
+      if (channelNameMap[channelName] !== undefined) {
+        console.log(`📋 Using fallback channel mapping: ${channelName} → ${channelNameMap[channelName]}`);
+        return channelNameMap[channelName];
+      }
+      
       return null;
 
     } catch (error) {
+      if (error.name === 'AbortError') {
+        console.log(`🚫 Channel index request aborted for ${channelName}`);
+        throw error; // Re-throw AbortError to be handled by caller
+      }
       console.error('Error getting channel index:', error);
       return null;
     }
@@ -1081,7 +1253,9 @@ class ArtifactZarrLoader {
    * 🚀 REAL-TIME: Compose image from chunks with progressive updates
    * Provides live feedback as chunks become available
    */
-  async composeImageFromChunksRealTime(baseUrl, chunks, metadata, scaleLevel, regionStartX, regionStartY, regionWidth, regionHeight, onChunkProgress) {
+  async composeImageFromChunksRealTime(baseUrl, chunks, metadata, scaleLevel, regionStartX, regionStartY, regionWidth, regionHeight, onChunkProgress, batchId = null) {
+    const chunkBatchId = batchId || `chunk_batch_${Date.now()}`;
+    
     try {
       const { zarray } = metadata;
       const [, , , yChunk, xChunk] = zarray.chunks;
@@ -1091,7 +1265,7 @@ class ArtifactZarrLoader {
       const totalWidth = regionWidth;
       const totalHeight = regionHeight;
       
-      console.log(`🧩 REAL-TIME: Stitching: ${chunks.length} chunks → ${totalWidth}×${totalHeight}px`);
+      console.log(`🧩 REAL-TIME: Stitching: ${chunks.length} chunks → ${totalWidth}×${totalHeight}px (Batch: ${chunkBatchId})`);
       
       // Create canvas for composition
       const canvas = document.createElement('canvas');
@@ -1112,9 +1286,10 @@ class ArtifactZarrLoader {
         const [, , , y, x] = chunk.coordinates;
         
         try {
-          // Fetch individual chunk
+          // Fetch individual chunk with cancellation support
           const chunkUrl = `${baseUrl}${scaleLevel}/${chunk.coordinates.join('.')}`;
-          const response = await this.managedFetch(chunkUrl);
+          const chunkRequestId = `${chunkBatchId}_chunk_${i}`;
+          const response = await this.managedFetch(chunkUrl, {}, chunkRequestId);
           
           if (!response || !response.ok) {
             console.warn(`Chunk not available: ${chunk.filename}`);
@@ -1178,6 +1353,10 @@ class ArtifactZarrLoader {
             }
           }
         } catch (error) {
+          if (error.name === 'AbortError') {
+            console.log(`🚫 Chunk ${chunk.filename} loading aborted`);
+            throw error;
+          }
           console.warn(`Error processing chunk ${chunk.filename}:`, error);
         }
       }
@@ -1202,6 +1381,10 @@ class ArtifactZarrLoader {
       };
 
     } catch (error) {
+      if (error.name === 'AbortError') {
+        console.log(`🚫 Chunk composition aborted: ${chunkBatchId}`);
+        throw error;
+      }
       console.error('Error composing image from chunks (real-time):', error);
       return null;
     }
@@ -1814,6 +1997,38 @@ class ArtifactZarrLoader {
     });
     
     return matchingChunks;
+  }
+
+  /**
+   * Test method to verify cancellation functionality
+   * @returns {Object} Test results
+   */
+  testCancellation() {
+    console.log('🧪 Testing cancellation functionality...');
+    
+    // Test request ID generation
+    const requestId1 = this.generateRequestId();
+    const requestId2 = this.generateRequestId();
+    console.log(`Generated request IDs: ${requestId1}, ${requestId2}`);
+    
+    // Test cancellation of non-existent request
+    const cancelled1 = this.cancelRequest('non_existent');
+    console.log(`Cancelled non-existent request: ${cancelled1}`);
+    
+    // Test batch cancellation
+    const cancelled2 = this.cancelBatchRequests('non_existent_batch');
+    console.log(`Cancelled non-existent batch: ${cancelled2}`);
+    
+    // Test all requests cancellation
+    const cancelled3 = this.cancelAllRequests();
+    console.log(`Cancelled all requests: ${cancelled3}`);
+    
+    return {
+      requestIdGeneration: requestId1 !== requestId2,
+      nonExistentCancellation: !cancelled1,
+      batchCancellation: cancelled2 === 0,
+      allRequestsCancellation: cancelled3 >= 0
+    };
   }
 }
 

@@ -219,6 +219,10 @@ const MicroscopeMapDisplay = ({
   const [realTimeChunkProgress, setRealTimeChunkProgress] = useState(new Map());
   const [realTimeWellProgress, setRealTimeWellProgress] = useState(new Map());
   const [isRealTimeLoading, setIsRealTimeLoading] = useState(false);
+  
+  // 🚀 REQUEST CANCELLATION: Track cancellable requests
+  const [currentCancellableRequest, setCurrentCancellableRequest] = useState(null);
+  const [lastRequestKey, setLastRequestKey] = useState(null);
 
   // Helper function to render real-time loading progress
   const renderRealTimeProgress = useCallback(() => {
@@ -2606,12 +2610,31 @@ const MicroscopeMapDisplay = ({
           addOrUpdateTile(finalTile);
         };
         
-        // Start real-time loading
-        const wellResults = await artifactZarrLoaderRef.current.getMultipleWellRegionsRealTime(
-          wellRequests, 
-          onChunkProgress, 
-          onWellComplete
-        );
+        // 🚀 REQUEST CANCELLATION: Check if we need to cancel previous request
+        const currentRequestKey = getTileKey(bounds, scaleLevel, activeChannel);
+        if (lastRequestKey && lastRequestKey !== currentRequestKey) {
+          console.log(`🔄 User moved to new position, cancelling previous request: ${lastRequestKey} → ${currentRequestKey}`);
+          if (currentCancellableRequest) {
+            const cancelledCount = currentCancellableRequest.cancel();
+            console.log(`🚫 Cancelled ${cancelledCount} pending requests for previous position`);
+          }
+        }
+        
+        // Update request tracking
+        setLastRequestKey(currentRequestKey);
+        
+        // Start real-time loading with cancellation support
+        const { promise: wellResultsPromise, cancel: cancelWellRequests } = 
+          artifactZarrLoaderRef.current.getMultipleWellRegionsRealTimeCancellable(
+            wellRequests, 
+            onChunkProgress, 
+            onWellComplete
+          );
+        
+        // Store cancellation function for potential future cancellation
+        setCurrentCancellableRequest({ cancel: cancelWellRequests, requestKey: currentRequestKey });
+        
+        const wellResults = await wellResultsPromise;
         
         // Process final results
         const successfulResults = wellResults.filter(result => result.success);
@@ -2633,6 +2656,11 @@ const MicroscopeMapDisplay = ({
         setIsRealTimeLoading(false);
         setRealTimeChunkProgress(new Map());
         setRealTimeWellProgress(new Map());
+        
+        // Clear cancellation state for completed request
+        if (currentCancellableRequest && currentCancellableRequest.requestKey === currentRequestKey) {
+          setCurrentCancellableRequest(null);
+        }
       } catch (error) {
         console.error('Failed to load historical tiles:', error);
         if (appendLog) appendLog(`Failed to load historical tiles: ${error.message}`);
@@ -2782,6 +2810,13 @@ const MicroscopeMapDisplay = ({
   // Function to refresh canvas view (can be used by timepoint operations)
   const refreshCanvasView = useCallback(() => {
     if (!isSimulatedMicroscope) {
+      // 🚀 REQUEST CANCELLATION: Cancel any pending requests before refreshing
+      if (currentCancellableRequest) {
+        const cancelledCount = currentCancellableRequest.cancel();
+        console.log(`🚫 Refresh: Cancelled ${cancelledCount} pending requests`);
+        setCurrentCancellableRequest(null);
+      }
+      
       // Clear active requests
       activeTileRequestsRef.current.clear();
       
@@ -2797,7 +2832,7 @@ const MicroscopeMapDisplay = ({
         appendLog('Refreshing canvas view');
       }
     }
-  }, [loadStitchedTiles, appendLog, isSimulatedMicroscope]);
+  }, [loadStitchedTiles, appendLog, isSimulatedMicroscope, currentCancellableRequest]);
 
   // Consolidated tile loading effect - replaces multiple overlapping effects
   const lastTileRequestRef = useRef({ panX: 0, panY: 0, scale: 0, timestamp: 0 });
@@ -2880,6 +2915,24 @@ const MicroscopeMapDisplay = ({
     scheduleTileUpdate
   ]);
 
+  // 🚀 REQUEST CANCELLATION: Cleanup effect for cancellable requests
+  useEffect(() => {
+    return () => {
+      // Cancel any pending cancellable requests when component unmounts
+      if (currentCancellableRequest) {
+        const cancelledCount = currentCancellableRequest.cancel();
+        console.log(`🚫 Component unmount: Cancelled ${cancelledCount} pending requests`);
+      }
+      
+      // 🚫 IMPROVED: Only cancel artifact loader requests if we're not in historical mode
+      // This prevents aggressive cancellation during normal navigation
+      if (artifactZarrLoaderRef.current && !isHistoricalDataMode) {
+        const cancelledCount = artifactZarrLoaderRef.current.cancelAllRequests();
+        console.log(`🚫 Component unmount: Cancelled ${cancelledCount} artifact loader requests`);
+      }
+    };
+  }, [currentCancellableRequest, isHistoricalDataMode]);
+
   // Initial tile loading when the map becomes visible
   useEffect(() => {
     if (isOpen && mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
@@ -2939,8 +2992,9 @@ const MicroscopeMapDisplay = ({
   }, [scaleLevel, mapViewMode, visibleLayers.scanResults, visibleLayers.channels, isZooming, scheduleTileUpdate, cleanupOldTiles]);
 
   // Effect to ensure tiles are loaded for current scale level
+  // EXCLUDES historical mode - no automatic tile loading needed for historical data
   useEffect(() => {
-    if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && !isZooming) {
+    if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && !isZooming && !isHistoricalDataMode) {
       const activeChannel = Object.entries(visibleLayers.channels)
         .find(([_, isVisible]) => isVisible)?.[0] || 'BF LED matrix full';
       
@@ -2967,7 +3021,7 @@ const MicroscopeMapDisplay = ({
         console.log(`[Scale Level Check] Found ${currentScaleTiles.length} tiles for scale ${scaleLevel}, channel ${activeChannel}`);
       }
     }
-  }, [scaleLevel, mapViewMode, visibleLayers.scanResults, visibleLayers.channels, stitchedTiles, isZooming, isLoadingCanvas, scheduleTileUpdate]);
+  }, [scaleLevel, mapViewMode, visibleLayers.scanResults, visibleLayers.channels, stitchedTiles, isZooming, isLoadingCanvas, isHistoricalDataMode, scheduleTileUpdate]);
 
   if (!isOpen) return null;
 
