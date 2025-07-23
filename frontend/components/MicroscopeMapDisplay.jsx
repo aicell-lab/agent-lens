@@ -209,6 +209,60 @@ const MicroscopeMapDisplay = ({
   // Add state for historical data mode
   const [isHistoricalDataMode, setIsHistoricalDataMode] = useState(false);
 
+  // Add state for real-time chunk loading progress
+  const [realTimeChunkProgress, setRealTimeChunkProgress] = useState(new Map());
+  const [realTimeWellProgress, setRealTimeWellProgress] = useState(new Map());
+  const [isRealTimeLoading, setIsRealTimeLoading] = useState(false);
+
+  // Helper function to render real-time loading progress
+  const renderRealTimeProgress = useCallback(() => {
+    if (!isRealTimeLoading || realTimeChunkProgress.size === 0) return null;
+    
+    const totalWells = realTimeChunkProgress.size;
+    const completedWells = Array.from(realTimeChunkProgress.values()).filter(p => p.loadedChunks === p.totalChunks).length;
+    const totalChunks = Array.from(realTimeChunkProgress.values()).reduce((sum, p) => sum + p.totalChunks, 0);
+    const loadedChunks = Array.from(realTimeChunkProgress.values()).reduce((sum, p) => sum + p.loadedChunks, 0);
+    
+    return (
+      <div className="real-time-progress-overlay" style={{
+        position: 'absolute',
+        top: '10px',
+        right: '10px',
+        background: 'rgba(0, 0, 0, 0.8)',
+        color: 'white',
+        padding: '10px',
+        borderRadius: '5px',
+        fontSize: '12px',
+        zIndex: 1000,
+        minWidth: '200px'
+      }}>
+        <div style={{ fontWeight: 'bold', marginBottom: '5px' }}>
+          🔄 Real-time Loading
+        </div>
+        <div style={{ marginBottom: '3px' }}>
+          Wells: {completedWells}/{totalWells} completed
+        </div>
+        <div style={{ marginBottom: '3px' }}>
+          Chunks: {loadedChunks}/{totalChunks} loaded
+        </div>
+        <div style={{ 
+          width: '100%', 
+          height: '4px', 
+          background: '#333', 
+          borderRadius: '2px',
+          overflow: 'hidden'
+        }}>
+          <div style={{
+            width: `${(loadedChunks / totalChunks) * 100}%`,
+            height: '100%',
+            background: '#4CAF50',
+            transition: 'width 0.3s ease'
+          }} />
+        </div>
+      </div>
+    );
+  }, [isRealTimeLoading, realTimeChunkProgress]);
+
   // Helper function to detect which well a stage coordinate belongs to
   const detectWellFromStageCoords = useCallback((stageX, stageY) => {
     const wellConfig = getWellPlateConfig();
@@ -2408,79 +2462,171 @@ const MicroscopeMapDisplay = ({
           if (appendLog) appendLog('Historical data: No available chunks in visible wells');
           return;
         }
-        // 🚀 MAXIMUM SPEED: Load all wells in parallel without waiting!
-        console.log(`🚀 Firing ${wellRequests.length} well requests (with available chunks) simultaneously!`);
-        const wellResults = await artifactZarrLoaderRef.current.getMultipleWellRegions(wellRequests);
-        // Process successful results
-        const successfulResults = wellResults.filter(result => result.success);
-        if (successfulResults.length > 0) {
-          console.log(`✅ Successfully loaded ${successfulResults.length}/${wellRequests.length} well regions`);
-          // Create tiles for each successful well - NO WAITING!
-          successfulResults.forEach(result => {
-            const wellRequest = wellRequests.find(req => req.wellId === result.wellId);
+        // 🚀 REAL-TIME CHUNK LOADING: Load wells progressively with live updates!
+        console.log(`🚀 REAL-TIME: Starting progressive loading for ${wellRequests.length} wells`);
+        setIsRealTimeLoading(true);
+        
+        // Clear previous progress
+        setRealTimeChunkProgress(new Map());
+        setRealTimeWellProgress(new Map());
+        
+        // Track completed wells for final processing
+        const completedWells = new Map();
+        
+        // Real-time chunk progress callback
+        const onChunkProgress = (wellId, loadedChunks, totalChunks, partialCanvas) => {
+          console.log(`🔄 REAL-TIME: Well ${wellId} progress: ${loadedChunks}/${totalChunks} chunks loaded`);
+          
+          // Update chunk progress
+          setRealTimeChunkProgress(prev => {
+            const newProgress = new Map(prev);
+            newProgress.set(wellId, { loadedChunks, totalChunks, partialCanvas });
+            return newProgress;
+          });
+          
+          // If we have a partial canvas, create a temporary tile for real-time display
+          if (partialCanvas && loadedChunks > 0) {
+            const wellRequest = wellRequests.find(req => req.wellId === wellId);
             if (!wellRequest) return;
             
-            // CRITICAL FIX: Use actual stage bounds if available for accurate positioning
-            let wellBounds;
-            if (result.metadata.actualStageBounds) {
-              // Use the actual extracted bounds from zarr loader
-              const actualBounds = result.metadata.actualStageBounds;
-              // Convert well-relative bounds to absolute bounds
-              const wellInfo = existingVisibleWells.find(w => w.id === result.wellId);
-              wellBounds = {
-                topLeft: {
-                  x: wellInfo.centerX + actualBounds.startX,
-                  y: wellInfo.centerY + actualBounds.startY
-                },
-                bottomRight: {
-                  x: wellInfo.centerX + actualBounds.endX,
-                  y: wellInfo.centerY + actualBounds.endY
-                }
-              };
-              console.log(`🎯 Using actual zarr bounds for ${result.wellId}: rel(${actualBounds.startX.toFixed(2)}, ${actualBounds.startY.toFixed(2)}) to (${actualBounds.endX.toFixed(2)}, ${actualBounds.endY.toFixed(2)})`);
-            } else {
-              // Fallback to calculated intersection bounds
-              wellBounds = {
-                topLeft: {
-                  x: wellRequest.intersectionBounds.minX,
-                  y: wellRequest.intersectionBounds.minY
-                },
-                bottomRight: {
-                  x: wellRequest.intersectionBounds.maxX,
-                  y: wellRequest.intersectionBounds.maxY
-                }
-              };
-              console.log(`⚠️ Using fallback intersection bounds for ${result.wellId}`);
-            }
+            // Convert canvas to base64 for tile display
+            const partialDataUrl = partialCanvas.toDataURL('image/png');
             
-            // DIAGNOSTIC: Log coordinate transformation for debugging (condensed)
-            const centerX = (wellBounds.topLeft.x + wellBounds.bottomRight.x) / 2;
-            const centerY = (wellBounds.topLeft.y + wellBounds.bottomRight.y) / 2;
-            console.log(`📍 ${result.wellId}: rel(${wellRequest.centerX.toFixed(2)}, ${wellRequest.centerY.toFixed(2)}) → center(${centerX.toFixed(1)}, ${centerY.toFixed(1)}) ${result.metadata.width_mm.toFixed(1)}×${result.metadata.height_mm.toFixed(1)}mm`);
+            // Calculate bounds (use intersection bounds for now, will be updated with actual bounds later)
+            const wellBounds = {
+              topLeft: {
+                x: wellRequest.intersectionBounds.minX,
+                y: wellRequest.intersectionBounds.minY
+              },
+              bottomRight: {
+                x: wellRequest.intersectionBounds.maxX,
+                y: wellRequest.intersectionBounds.maxY
+              }
+            };
             
-            const newTile = {
-              data: `data:image/png;base64,${result.data}`,
+            // Create temporary tile with partial data
+            const tempTile = {
+              data: partialDataUrl,
               bounds: wellBounds,
-              width_mm: result.metadata.width_mm,
-              height_mm: result.metadata.height_mm,
+              width_mm: wellRequest.width_mm,
+              height_mm: wellRequest.height_mm,
               scale: scaleLevel,
               channel: activeChannel,
               timestamp: Date.now(),
               isHistorical: true,
               datasetId: selectedHistoricalDataset.id,
-              wellId: result.wellId
+              wellId: wellId,
+              isPartial: true, // Mark as partial for potential cleanup
+              progress: `${loadedChunks}/${totalChunks}`
             };
-            addOrUpdateTile(newTile);
+            
+            // Add or update tile with partial data
+            addOrUpdateTile(tempTile);
+          }
+        };
+        
+        // Well completion callback
+        const onWellComplete = (wellId, finalResult) => {
+          console.log(`✅ REAL-TIME: Well ${wellId} completed loading`);
+          
+          // Store completed well result
+          completedWells.set(wellId, finalResult);
+          
+          // Update well progress
+          setRealTimeWellProgress(prev => {
+            const newProgress = new Map(prev);
+            newProgress.set(wellId, { status: 'completed', result: finalResult });
+            return newProgress;
           });
+          
+          // Create final tile with complete data
+          const wellRequest = wellRequests.find(req => req.wellId === wellId);
+          if (!wellRequest) return;
+          
+          // CRITICAL FIX: Use actual stage bounds if available for accurate positioning
+          let wellBounds;
+          if (finalResult.metadata.actualStageBounds) {
+            // Use the actual extracted bounds from zarr loader
+            const actualBounds = finalResult.metadata.actualStageBounds;
+            // Convert well-relative bounds to absolute bounds
+            const wellInfo = existingVisibleWells.find(w => w.id === wellId);
+            wellBounds = {
+              topLeft: {
+                x: wellInfo.centerX + actualBounds.startX,
+                y: wellInfo.centerY + actualBounds.startY
+              },
+              bottomRight: {
+                x: wellInfo.centerX + actualBounds.endX,
+                y: wellInfo.centerY + actualBounds.endY
+              }
+            };
+            console.log(`🎯 Using actual zarr bounds for ${wellId}: rel(${actualBounds.startX.toFixed(2)}, ${actualBounds.startY.toFixed(2)}) to (${actualBounds.endX.toFixed(2)}, ${actualBounds.endY.toFixed(2)})`);
+          } else {
+            // Fallback to calculated intersection bounds
+            wellBounds = {
+              topLeft: {
+                x: wellRequest.intersectionBounds.minX,
+                y: wellRequest.intersectionBounds.minY
+              },
+              bottomRight: {
+                x: wellRequest.intersectionBounds.maxX,
+                y: wellRequest.intersectionBounds.maxY
+              }
+            };
+            console.log(`⚠️ Using fallback intersection bounds for ${wellId}`);
+          }
+          
+          // DIAGNOSTIC: Log coordinate transformation for debugging (condensed)
+          const centerX = (wellBounds.topLeft.x + wellBounds.bottomRight.x) / 2;
+          const centerY = (wellBounds.topLeft.y + wellBounds.bottomRight.y) / 2;
+          console.log(`📍 ${wellId}: rel(${wellRequest.centerX.toFixed(2)}, ${wellRequest.centerY.toFixed(2)}) → center(${centerX.toFixed(1)}, ${centerY.toFixed(1)}) ${finalResult.metadata.width_mm.toFixed(1)}×${finalResult.metadata.height_mm.toFixed(1)}mm`);
+          
+          // Create final tile with complete data
+          const finalTile = {
+            data: `data:image/png;base64,${finalResult.data}`,
+            bounds: wellBounds,
+            width_mm: finalResult.metadata.width_mm,
+            height_mm: finalResult.metadata.height_mm,
+            scale: scaleLevel,
+            channel: activeChannel,
+            timestamp: Date.now(),
+            isHistorical: true,
+            datasetId: selectedHistoricalDataset.id,
+            wellId: wellId,
+            isPartial: false // Mark as complete
+          };
+          
+          // Replace partial tile with complete tile
+          addOrUpdateTile(finalTile);
+        };
+        
+        // Start real-time loading
+        const wellResults = await artifactZarrLoaderRef.current.getMultipleWellRegionsRealTime(
+          wellRequests, 
+          onChunkProgress, 
+          onWellComplete
+        );
+        
+        // Process final results
+        const successfulResults = wellResults.filter(result => result.success);
+        if (successfulResults.length > 0) {
+          console.log(`✅ REAL-TIME: Completed loading ${successfulResults.length}/${wellRequests.length} well regions`);
+          
           // Clean up old tiles for this scale/channel combination to prevent memory bloat
           cleanupOldTiles(scaleLevel, activeChannel);
+          
           if (appendLog) {
-            appendLog(`✅ Loaded ${successfulResults.length} historical well tiles for scale ${scaleLevel}`);
+            appendLog(`✅ REAL-TIME: Loaded ${successfulResults.length} historical well tiles for scale ${scaleLevel}`);
           }
         } else {
           console.warn(`No wells available in this region`);
           if (appendLog) appendLog(`No wells available in this region`);
         }
+        
+        // Clear real-time loading state
+        setIsRealTimeLoading(false);
+        setRealTimeChunkProgress(new Map());
+        setRealTimeWellProgress(new Map());
       } catch (error) {
         console.error('Failed to load historical tiles:', error);
         if (appendLog) appendLog(`Failed to load historical tiles: ${error.message}`);
@@ -5005,8 +5151,9 @@ const MicroscopeMapDisplay = ({
           </div>
         </div>
       )}
-      
 
+      {/* Real-time chunk loading progress overlay */}
+      {renderRealTimeProgress()}
       
     </div>
   );

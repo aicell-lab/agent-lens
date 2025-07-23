@@ -244,6 +244,105 @@ class ArtifactZarrLoader {
   }
 
   /**
+   * 🚀 REAL-TIME CHUNK LOADING: Load chunks progressively with live updates
+   * This method provides real-time feedback as chunks become available
+   * @param {Array} wellRequests - Array of well request objects
+   * @param {Function} onChunkProgress - Callback for chunk loading progress (wellId, loadedChunks, totalChunks, partialCanvas)
+   * @param {Function} onWellComplete - Callback when a well is fully loaded (wellId, finalResult)
+   * @returns {Promise<Array>} Array of final well region results
+   */
+  async getMultipleWellRegionsRealTime(wellRequests, onChunkProgress, onWellComplete) {
+    try {
+      console.log(`🚀 REAL-TIME: Starting progressive loading for ${wellRequests.length} wells`);
+      
+      // Fire ALL well requests simultaneously with real-time updates
+      const wellPromises = wellRequests.map(async (request) => {
+        const { wellId, centerX, centerY, width_mm, height_mm, channel, scaleLevel, timepoint, datasetId, outputFormat } = request;
+        
+        try {
+          const result = await this.getWellCanvasRegionRealTime(
+            centerX, centerY, width_mm, height_mm,
+            channel, scaleLevel, timepoint, datasetId, wellId,
+            (loadedChunks, totalChunks, partialCanvas) => {
+              // Call progress callback for real-time updates
+              if (onChunkProgress) {
+                onChunkProgress(wellId, loadedChunks, totalChunks, partialCanvas);
+              }
+            }
+          );
+          
+          if (!result) {
+            console.warn(`Well ${wellId} not available (404 or no data)`);
+            return {
+              success: false,
+              wellId,
+              message: `Well ${wellId} not available`
+            };
+          }
+          
+          // Convert to requested output format
+          const outputData = await this.normalizeAndEncodeImage(result, null, outputFormat);
+          
+          const finalResult = {
+            success: true,
+            data: outputData,
+            metadata: {
+              width: result.width,
+              height: result.height,
+              channel,
+              scale: scaleLevel,
+              timepoint,
+              wellId,
+              centerX,
+              centerY,
+              width_mm,
+              height_mm,
+              actualBounds: result.actualBounds || null,
+              actualStageBounds: result.actualStageBounds || null
+            },
+            wellId,
+            centerX,
+            centerY,
+            width_mm,
+            height_mm
+          };
+          
+          // Call completion callback
+          if (onWellComplete) {
+            onWellComplete(wellId, finalResult);
+          }
+          
+          return finalResult;
+          
+        } catch (error) {
+          console.warn(`Well ${wellId} failed: ${error.message}`);
+          return {
+            success: false,
+            wellId,
+            message: `Well ${wellId} not available`
+          };
+        }
+      });
+      
+      const results = await Promise.all(wellPromises);
+      
+      // Count successful results
+      const successfulResults = results.filter(r => r.success);
+      console.log(`✅ REAL-TIME: Completed loading ${successfulResults.length}/${wellRequests.length} well regions`);
+      
+      return results;
+      
+    } catch (error) {
+      console.warn(`Real-time multiple well regions failed: ${error.message}`);
+      return wellRequests.map(request => ({
+        success: false,
+        wellId: request.wellId,
+        message: `Well ${request.wellId} not available`
+      }));
+    }
+  }
+
+  /**
    * Extract the correct dataset ID from a potentially slash-containing ID
    * @param {string} datasetId - Dataset ID that might contain slashes
    * @returns {string} The correct dataset ID (right side of last slash, or original if no slash)
@@ -437,6 +536,143 @@ class ArtifactZarrLoader {
 
     } catch (error) {
       console.warn(`Well canvas region failed: ${error.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * 🚀 REAL-TIME: Get well canvas region with progressive chunk loading
+   * Provides live updates as chunks become available
+   */
+  async getWellCanvasRegionRealTime(x_mm, y_mm, width_mm, height_mm, channelName, scale, timepoint, datasetId, wellId, onChunkProgress) {
+    try {
+      // Extract the correct dataset ID
+      const correctDatasetId = this.extractDatasetId(datasetId);
+      
+      // Construct base URL for this well's zarr data
+      const baseUrl = `${this.baseUrl}/${correctDatasetId}/zip-files/well_${wellId}_96.zip/~/data.zarr/`;
+      
+      // Get metadata for this scale level
+      const metadata = await this.fetchZarrMetadata(baseUrl, scale);
+      if (!metadata) {
+        throw new Error('Failed to fetch Zarr metadata');
+      }
+
+      // Map channel name to index
+      const channelIndex = await this.getChannelIndex(baseUrl, channelName);
+      if (channelIndex === null) {
+        throw new Error(`Channel '${channelName}' not found`);
+      }
+
+      // Get pixel size from metadata (following the scale transformations)
+      const pixelSizeUm = this.getPixelSizeFromMetadata(metadata, scale);
+      if (!pixelSizeUm) {
+        throw new Error('Could not determine pixel size from metadata');
+      }
+
+      console.log(`🔬 REAL-TIME: Well canvas region: center=(${x_mm.toFixed(2)}, ${y_mm.toFixed(2)})mm, size=${width_mm.toFixed(1)}×${height_mm.toFixed(1)}mm, pixelSize=${pixelSizeUm}µm/px @ scale${scale}`);
+
+      // Convert stage coordinates to pixel coordinates (using zarr coordinate system)
+      const centerPixelCoords = this.stageToPixelCoords(x_mm, y_mm, scale, pixelSizeUm, metadata);
+      // Calculate pixel dimensions at the current scale level
+      const scale_factor = Math.pow(4, scale);
+      const width_px = Math.round(width_mm * 1000 / (pixelSizeUm * scale_factor));
+      const height_px = Math.round(height_mm * 1000 / (pixelSizeUm * scale_factor));
+      
+      console.log(`📏 REAL-TIME: Region: center=(${centerPixelCoords.x}, ${centerPixelCoords.y})px, size=${width_px}×${height_px}px`);
+
+      // Calculate bounds (following Python logic more closely)
+      const { zarray } = metadata;
+      const [, , , imageHeight, imageWidth] = zarray.shape;
+      
+      // Calculate start and end coordinates, ensuring they're within image bounds
+      // If the center is outside the image, clamp it to the image bounds
+      const clampedCenterX = Math.max(Math.floor(width_px / 2), Math.min(imageWidth - Math.floor(width_px / 2), centerPixelCoords.x));
+      const clampedCenterY = Math.max(Math.floor(height_px / 2), Math.min(imageHeight - Math.floor(height_px / 2), centerPixelCoords.y));
+      
+      let x_start = Math.max(0, clampedCenterX - Math.floor(width_px / 2));
+      let y_start = Math.max(0, clampedCenterY - Math.floor(height_px / 2));
+      let x_end = Math.min(imageWidth, x_start + width_px);
+      let y_end = Math.min(imageHeight, y_start + height_px);
+      
+      console.log(`Clamped center: (${clampedCenterX}, ${clampedCenterY}) from original (${centerPixelCoords.x}, ${centerPixelCoords.y})`);
+      
+      // Ensure we have a valid region
+      if (x_start >= x_end || y_start >= y_end) {
+        console.warn(`Invalid pixel region: x(${x_start}-${x_end}), y(${y_start}-${y_end}) for image size ${imageWidth}x${imageHeight} - returning empty region`);
+        // Return a small empty canvas instead of throwing an error
+        const emptyCanvas = document.createElement('canvas');
+        emptyCanvas.width = 1;
+        emptyCanvas.height = 1;
+        return {
+          width: 1,
+          height: 1,
+          canvas: emptyCanvas,
+          loadedChunks: 0,
+          totalChunks: 0
+        };
+      }
+
+      console.log(`Pixel bounds: x(${x_start}-${x_end}), y(${y_start}-${y_end}), image size: ${imageWidth}x${imageHeight}`);
+
+      // Calculate chunk coordinates for the region
+      const chunks = this.calculateChunkCoordinatesFromPixels(
+        x_start, y_start, x_end, y_end, timepoint, channelIndex, zarray
+      );
+
+      // Get available chunks and fetch the region
+      const availableChunks = await this.getAvailableChunks(baseUrl, scale);
+      if (!availableChunks) {
+        throw new Error('Failed to get available chunks');
+      }
+
+      // Filter chunks to only available ones
+      const availableChunkSet = new Set(availableChunks);
+      const filteredChunks = chunks.filter(chunk => {
+        return availableChunkSet.has(chunk.filename);
+      });
+
+      if (filteredChunks.length === 0) {
+        throw new Error('No available chunks found for the requested region');
+      }
+
+      // REAL-TIME: Compose chunks progressively with live updates
+      const imageData = await this.composeImageFromChunksRealTime(
+        baseUrl, filteredChunks, metadata, scale, x_start, y_start, x_end - x_start, y_end - y_start,
+        onChunkProgress
+      );
+
+      // CRITICAL: Calculate actual stage bounds from extracted pixel bounds
+      if (imageData && imageData.actualBounds) {
+        const { actualBounds } = imageData;
+        const scale_factor = Math.pow(4, scale);
+        
+        // Convert pixel bounds back to stage coordinates
+        const centerX_px = imageWidth / 2;
+        const centerY_px = imageHeight / 2;
+        
+        const actualStartX_mm = ((actualBounds.startX - centerX_px) * pixelSizeUm * scale_factor) / 1000;
+        const actualStartY_mm = ((actualBounds.startY - centerY_px) * pixelSizeUm * scale_factor) / 1000;
+        const actualEndX_mm = ((actualBounds.endX - centerX_px) * pixelSizeUm * scale_factor) / 1000;
+        const actualEndY_mm = ((actualBounds.endY - centerY_px) * pixelSizeUm * scale_factor) / 1000;
+        
+        console.log(`🎯 Actual extracted region: stage(${actualStartX_mm.toFixed(2)}, ${actualStartY_mm.toFixed(2)}) to (${actualEndX_mm.toFixed(2)}, ${actualEndY_mm.toFixed(2)}) mm`);
+        
+        // Add actual stage bounds to return data
+        imageData.actualStageBounds = {
+          startX: actualStartX_mm,
+          startY: actualStartY_mm,
+          endX: actualEndX_mm,
+          endY: actualEndY_mm,
+          width: actualEndX_mm - actualStartX_mm,
+          height: actualEndY_mm - actualStartY_mm
+        };
+      }
+
+      return imageData;
+
+    } catch (error) {
+      console.warn(`Real-time well canvas region failed: ${error.message}`);
       return null;
     }
   }
@@ -837,6 +1073,136 @@ class ArtifactZarrLoader {
 
     } catch (error) {
       console.error('Error composing image from chunks:', error);
+      return null;
+    }
+  }
+
+  /**
+   * 🚀 REAL-TIME: Compose image from chunks with progressive updates
+   * Provides live feedback as chunks become available
+   */
+  async composeImageFromChunksRealTime(baseUrl, chunks, metadata, scaleLevel, regionStartX, regionStartY, regionWidth, regionHeight, onChunkProgress) {
+    try {
+      const { zarray } = metadata;
+      const [, , , yChunk, xChunk] = zarray.chunks;
+      const dataType = zarray.dtype;
+      
+      // Use the specified region dimensions instead of calculating from chunks
+      const totalWidth = regionWidth;
+      const totalHeight = regionHeight;
+      
+      console.log(`🧩 REAL-TIME: Stitching: ${chunks.length} chunks → ${totalWidth}×${totalHeight}px`);
+      
+      // Create canvas for composition
+      const canvas = document.createElement('canvas');
+      canvas.width = totalWidth;
+      canvas.height = totalHeight;
+      const ctx = canvas.getContext('2d');
+      
+      // REAL-TIME: Process chunks individually and provide progressive updates
+      let loadedChunks = 0;
+      const totalChunks = chunks.length;
+      
+      // Create a map to track processed chunks for efficient updates
+      const processedChunks = new Map();
+      
+      // Process chunks one by one for real-time feedback
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        const [, , , y, x] = chunk.coordinates;
+        
+        try {
+          // Fetch individual chunk
+          const chunkUrl = `${baseUrl}${scaleLevel}/${chunk.coordinates.join('.')}`;
+          const response = await this.managedFetch(chunkUrl);
+          
+          if (!response || !response.ok) {
+            console.warn(`Chunk not available: ${chunk.filename}`);
+            continue;
+          }
+          
+          // Fetch and decode chunk data
+          const chunkData = await response.arrayBuffer();
+          const imageData = this.decodeChunk(chunkData, [yChunk, xChunk], dataType);
+          
+          if (imageData) {
+            // Create temporary canvas for this chunk
+            const chunkCanvas = document.createElement('canvas');
+            chunkCanvas.width = imageData.width;
+            chunkCanvas.height = imageData.height;
+            const chunkCtx = chunkCanvas.getContext('2d');
+            chunkCtx.putImageData(imageData, 0, 0);
+            
+            // Calculate position in composed image relative to region start
+            const chunkAbsX = x * xChunk;
+            const chunkAbsY = y * yChunk;
+            const posX = chunkAbsX - regionStartX;
+            const posY = chunkAbsY - regionStartY;
+            
+            // Only process if the chunk intersects with our region
+            if (posX < totalWidth && posY < totalHeight && 
+                posX + chunkCanvas.width > 0 && posY + chunkCanvas.height > 0) {
+              
+              // Calculate source and destination rectangles for partial chunks
+              const srcX = Math.max(0, regionStartX - chunkAbsX);
+              const srcY = Math.max(0, regionStartY - chunkAbsY);
+              const srcWidth = Math.min(chunkCanvas.width - srcX, totalWidth - Math.max(0, posX));
+              const srcHeight = Math.min(chunkCanvas.height - srcY, totalHeight - Math.max(0, posY));
+              
+              const destX = Math.max(0, posX);
+              const destY = Math.max(0, posY);
+              
+              // Draw this chunk onto the main canvas
+              ctx.drawImage(chunkCanvas, srcX, srcY, srcWidth, srcHeight, destX, destY, srcWidth, srcHeight);
+              
+              // Store processed chunk info
+              processedChunks.set(chunk.filename, {
+                destX, destY, srcWidth, srcHeight
+              });
+              
+              loadedChunks++;
+              
+              // REAL-TIME: Provide progressive update callback
+              if (onChunkProgress) {
+                // Create a copy of the current canvas for the callback
+                const partialCanvas = document.createElement('canvas');
+                partialCanvas.width = totalWidth;
+                partialCanvas.height = totalHeight;
+                const partialCtx = partialCanvas.getContext('2d');
+                partialCtx.drawImage(canvas, 0, 0);
+                
+                onChunkProgress(loadedChunks, totalChunks, partialCanvas);
+              }
+              
+              console.log(`✅ REAL-TIME: Loaded chunk ${i + 1}/${totalChunks} (${chunk.filename}) - ${loadedChunks}/${totalChunks} total`);
+            }
+          }
+        } catch (error) {
+          console.warn(`Error processing chunk ${chunk.filename}:`, error);
+        }
+      }
+      
+      console.log(`✅ REAL-TIME: Successfully loaded ${loadedChunks}/${totalChunks} chunks for scale ${scaleLevel}`);
+      
+      return {
+        width: totalWidth,
+        height: totalHeight,
+        canvas: canvas,
+        loadedChunks,
+        totalChunks,
+        // CRITICAL: Return actual extracted bounds for accurate positioning
+        actualBounds: {
+          startX: regionStartX,
+          startY: regionStartY,
+          endX: regionStartX + regionWidth,
+          endY: regionStartY + regionHeight,
+          width: regionWidth,
+          height: regionHeight
+        }
+      };
+
+    } catch (error) {
+      console.error('Error composing image from chunks (real-time):', error);
       return null;
     }
   }
