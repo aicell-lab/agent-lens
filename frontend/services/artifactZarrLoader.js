@@ -127,7 +127,10 @@ class ArtifactZarrLoader {
           centerX,
           centerY,
           width_mm,
-          height_mm
+          height_mm,
+          // CRITICAL: Return the actual extracted bounds for accurate positioning
+          actualBounds: region.actualBounds || null,
+          actualStageBounds: region.actualStageBounds || null
         }
       };
 
@@ -332,19 +335,16 @@ class ArtifactZarrLoader {
         throw new Error('Could not determine pixel size from metadata');
       }
 
-      console.log(`Using pixel size: ${pixelSizeUm} µm per pixel at scale ${scale}`);
-      console.log(`Requested region: center=(${x_mm.toFixed(3)}, ${y_mm.toFixed(3)}) mm, size=${width_mm.toFixed(3)}x${height_mm.toFixed(3)} mm`);
+      console.log(`🔬 Well canvas region: center=(${x_mm.toFixed(2)}, ${y_mm.toFixed(2)})mm, size=${width_mm.toFixed(1)}×${height_mm.toFixed(1)}mm, pixelSize=${pixelSizeUm}µm/px @ scale${scale}`);
 
       // Convert stage coordinates to pixel coordinates (using zarr coordinate system)
       const centerPixelCoords = this.stageToPixelCoords(x_mm, y_mm, scale, pixelSizeUm, metadata);
-      console.log(`Converted to pixel coords: (${centerPixelCoords.x}, ${centerPixelCoords.y}) at scale ${scale}`);
-      
       // Calculate pixel dimensions at the current scale level
       const scale_factor = Math.pow(4, scale);
       const width_px = Math.round(width_mm * 1000 / (pixelSizeUm * scale_factor));
       const height_px = Math.round(height_mm * 1000 / (pixelSizeUm * scale_factor));
       
-      console.log(`Region: center=(${centerPixelCoords.x}, ${centerPixelCoords.y}) px, size=${width_px}x${height_px} px`);
+      console.log(`📏 Region: center=(${centerPixelCoords.x}, ${centerPixelCoords.y})px, size=${width_px}×${height_px}px`);
 
       // Calculate bounds (following Python logic more closely)
       const { zarray } = metadata;
@@ -405,6 +405,33 @@ class ArtifactZarrLoader {
       const imageData = await this.composeImageFromChunks(
         baseUrl, filteredChunks, metadata, scale, x_start, y_start, x_end - x_start, y_end - y_start
       );
+
+      // CRITICAL: Calculate actual stage bounds from extracted pixel bounds
+      if (imageData && imageData.actualBounds) {
+        const { actualBounds } = imageData;
+        const scale_factor = Math.pow(4, scale);
+        
+        // Convert pixel bounds back to stage coordinates
+        const centerX_px = imageWidth / 2;
+        const centerY_px = imageHeight / 2;
+        
+        const actualStartX_mm = ((actualBounds.startX - centerX_px) * pixelSizeUm * scale_factor) / 1000;
+        const actualStartY_mm = ((actualBounds.startY - centerY_px) * pixelSizeUm * scale_factor) / 1000;
+        const actualEndX_mm = ((actualBounds.endX - centerX_px) * pixelSizeUm * scale_factor) / 1000;
+        const actualEndY_mm = ((actualBounds.endY - centerY_px) * pixelSizeUm * scale_factor) / 1000;
+        
+        console.log(`🎯 Actual extracted region: stage(${actualStartX_mm.toFixed(2)}, ${actualStartY_mm.toFixed(2)}) to (${actualEndX_mm.toFixed(2)}, ${actualEndY_mm.toFixed(2)}) mm`);
+        
+        // Add actual stage bounds to return data
+        imageData.actualStageBounds = {
+          startX: actualStartX_mm,
+          startY: actualStartY_mm,
+          endX: actualEndX_mm,
+          endY: actualEndY_mm,
+          width: actualEndX_mm - actualStartX_mm,
+          height: actualEndY_mm - actualStartY_mm
+        };
+      }
 
       return imageData;
 
@@ -479,10 +506,13 @@ class ArtifactZarrLoader {
       // Convert mm to pixels at the requested scale
       // Zarr coordinate system is centered at (0, 0) so we use coordinates directly
       const scale_factor = Math.pow(4, scale);
-      const x_px = Math.floor(centerX_px + (x_mm * 1000) / (pixelSizeUm * scale_factor));
-      const y_px = Math.floor(centerY_px + (y_mm * 1000) / (pixelSizeUm * scale_factor));
       
-      console.log(`Converting zarr coords (${x_mm.toFixed(3)}, ${y_mm.toFixed(3)}) mm to pixels (${x_px}, ${y_px})`);
+      // IMPROVED: Use more precise rounding to avoid positioning errors
+      // Round to nearest integer instead of always flooring, which can cause systematic offset
+      const x_px = Math.round(centerX_px + (x_mm * 1000) / (pixelSizeUm * scale_factor));
+      const y_px = Math.round(centerY_px + (y_mm * 1000) / (pixelSizeUm * scale_factor));
+      
+      console.log(`📐 Coords: (${x_mm.toFixed(2)}, ${y_mm.toFixed(2)})mm → (${x_px}, ${y_px})px`);
       
       return { x: x_px, y: y_px };
 
@@ -491,7 +521,7 @@ class ArtifactZarrLoader {
       // Fallback to image center if conversion fails
       const { zarray } = metadata;
       const [, , , imageHeight, imageWidth] = zarray.shape;
-      return { x: Math.floor(imageWidth / 2), y: Math.floor(imageHeight / 2) };
+      return { x: Math.round(imageWidth / 2), y: Math.round(imageHeight / 2) };
     }
   }
 
@@ -685,7 +715,7 @@ class ArtifactZarrLoader {
       const totalWidth = regionWidth;
       const totalHeight = regionHeight;
       
-      console.log(`🚀 Optimized stitching: ${chunks.length} chunks into ${totalWidth}x${totalHeight} image`);
+      console.log(`🧩 Stitching: ${chunks.length} chunks → ${totalWidth}×${totalHeight}px`);
       
       // Create canvas for composition
       const canvas = document.createElement('canvas');
@@ -699,12 +729,14 @@ class ArtifactZarrLoader {
         return `${baseUrl}${scaleLevel}/${t}.${c}.${z}.${y}.${x}`;
       });
       
-      console.time('Batch chunk fetch');
+      const batchTimerName = `Batch chunk fetch ${Date.now()}_${Math.random()}`;
+      console.time(batchTimerName);
       const chunkResponses = await this.batchFetch(chunkUrls);
-      console.timeEnd('Batch chunk fetch');
+      console.timeEnd(batchTimerName);
       
              // Process chunks in parallel: decode and prepare canvas data
-       console.time('Parallel chunk processing');
+       const processingTimerName = `Parallel chunk processing ${Date.now()}_${Math.random()}`;
+       console.time(processingTimerName);
        const chunkPromises = chunks.map(async (chunk, index) => {
          const response = chunkResponses[index];
          const [, , , y, x] = chunk.coordinates;
@@ -767,10 +799,11 @@ class ArtifactZarrLoader {
       
       // Wait for all chunks to load in parallel
       const chunkResults = await Promise.all(chunkPromises);
-      console.timeEnd('Parallel chunk processing');
+      console.timeEnd(processingTimerName);
       
       // Draw all loaded chunks onto the main canvas
-      console.time('Canvas composition');
+      const compositionTimerName = `Canvas composition ${Date.now()}_${Math.random()}`;
+      console.time(compositionTimerName);
       let loadedChunks = 0;
       const totalChunks = chunks.length;
       
@@ -781,7 +814,7 @@ class ArtifactZarrLoader {
           loadedChunks++;
         }
       }
-      console.timeEnd('Canvas composition');
+      console.timeEnd(compositionTimerName);
       
       console.log(`✅ Successfully loaded ${loadedChunks}/${totalChunks} chunks for scale ${scaleLevel}`);
       
@@ -790,7 +823,16 @@ class ArtifactZarrLoader {
         height: totalHeight,
         canvas: canvas,
         loadedChunks,
-        totalChunks
+        totalChunks,
+        // CRITICAL: Return actual extracted bounds for accurate positioning
+        actualBounds: {
+          startX: regionStartX,
+          startY: regionStartY,
+          endX: regionStartX + regionWidth,
+          endY: regionStartY + regionHeight,
+          width: regionWidth,
+          height: regionHeight
+        }
       };
 
     } catch (error) {

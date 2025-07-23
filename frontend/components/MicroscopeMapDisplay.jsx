@@ -2160,17 +2160,34 @@ const MicroscopeMapDisplay = ({
     const intersectionMinY = Math.max(regionMinY, wellInfo.wellMinY);
     const intersectionMaxY = Math.min(regionMaxY, wellInfo.wellMaxY);
     
+    // CRITICAL FIX: Ensure we have a valid intersection for this specific well
+    if (intersectionMinX >= intersectionMaxX || intersectionMinY >= intersectionMaxY) {
+      console.warn(`⚠️ No valid intersection for well ${wellInfo.id}: intersection bounds (${intersectionMinX.toFixed(3)}, ${intersectionMinY.toFixed(3)}) to (${intersectionMaxX.toFixed(3)}, ${intersectionMaxY.toFixed(3)})`);
+      return null;
+    }
+    
     // Convert to well-relative coordinates (well center is at 0,0)
     const wellRelativeMinX = intersectionMinX - wellInfo.centerX;
     const wellRelativeMaxX = intersectionMaxX - wellInfo.centerX;
     const wellRelativeMinY = intersectionMinY - wellInfo.centerY;
     const wellRelativeMaxY = intersectionMaxY - wellInfo.centerY;
     
-    // Calculate center and dimensions
+    // Calculate center and dimensions for zarr request
     const centerX = (wellRelativeMinX + wellRelativeMaxX) / 2;
     const centerY = (wellRelativeMinY + wellRelativeMaxY) / 2;
     const width_mm = intersectionMaxX - intersectionMinX;
     const height_mm = intersectionMaxY - intersectionMinY;
+    
+    // DEBUG: Log well-specific calculation details
+    console.log(`🔍 Well ${wellInfo.id} region calculation:`);
+    console.log(`   Well bounds: (${wellInfo.wellMinX.toFixed(3)}, ${wellInfo.wellMinY.toFixed(3)}) to (${wellInfo.wellMaxX.toFixed(3)}, ${wellInfo.wellMaxY.toFixed(3)})`);
+    console.log(`   Region bounds: (${regionMinX.toFixed(3)}, ${regionMinY.toFixed(3)}) to (${regionMaxX.toFixed(3)}, ${regionMaxY.toFixed(3)})`);
+    console.log(`   Intersection: (${intersectionMinX.toFixed(3)}, ${intersectionMinY.toFixed(3)}) to (${intersectionMaxX.toFixed(3)}, ${intersectionMaxY.toFixed(3)})`);
+    console.log(`   Well-relative center: (${centerX.toFixed(3)}, ${centerY.toFixed(3)}) mm`);
+    
+    // CRITICAL FIX: Use the intersection bounds directly instead of coordinate transformation
+    // The intersection bounds represent the exact region that should be loaded, so they
+    // should be used directly as the tile bounds to avoid coordinate transformation errors
     
     return {
       centerX,
@@ -2272,6 +2289,9 @@ const MicroscopeMapDisplay = ({
           clampedTopLeft.x, clampedBottomRight.x,
           clampedTopLeft.y, clampedBottomRight.y
         );
+        console.log(`📊 Region analysis: (${clampedTopLeft.x.toFixed(3)}, ${clampedTopLeft.y.toFixed(3)}) to (${clampedBottomRight.x.toFixed(3)}, ${clampedBottomRight.y.toFixed(3)})`);
+        console.log(`📊 Found ${allIntersectingWells.length} intersecting wells: ${allIntersectingWells.map(w => w.id).join(', ')}`);
+        console.log(`📊 Found ${visibleWells.length} visible wells: ${visibleWells.map(w => w.id).join(', ')}`);
         if (visibleWells.length === 0) {
           if (appendLog) appendLog('Historical data: No visible wells in this region');
           return;
@@ -2302,6 +2322,12 @@ const MicroscopeMapDisplay = ({
             clampedTopLeft.x, clampedBottomRight.x,
             clampedTopLeft.y, clampedBottomRight.y
           );
+          
+          // Skip wells with no valid intersection
+          if (!wellRegion) {
+            console.log(`⚠️ Skipping well ${wellInfo.id} - no valid intersection with region`);
+            return null;
+          }
           
           // Convert channel name to index (needed for chunk check)
           const channelIndex = 0; // Single channel for now
@@ -2393,17 +2419,45 @@ const MicroscopeMapDisplay = ({
           successfulResults.forEach(result => {
             const wellRequest = wellRequests.find(req => req.wellId === result.wellId);
             if (!wellRequest) return;
-            // Create bounds for this well's intersection
-            const wellBounds = {
-              topLeft: {
-                x: wellRequest.intersectionBounds.minX,
-                y: wellRequest.intersectionBounds.minY
-              },
-              bottomRight: {
-                x: wellRequest.intersectionBounds.maxX,
-                y: wellRequest.intersectionBounds.maxY
-              }
-            };
+            
+            // CRITICAL FIX: Use actual stage bounds if available for accurate positioning
+            let wellBounds;
+            if (result.metadata.actualStageBounds) {
+              // Use the actual extracted bounds from zarr loader
+              const actualBounds = result.metadata.actualStageBounds;
+              // Convert well-relative bounds to absolute bounds
+              const wellInfo = existingVisibleWells.find(w => w.id === result.wellId);
+              wellBounds = {
+                topLeft: {
+                  x: wellInfo.centerX + actualBounds.startX,
+                  y: wellInfo.centerY + actualBounds.startY
+                },
+                bottomRight: {
+                  x: wellInfo.centerX + actualBounds.endX,
+                  y: wellInfo.centerY + actualBounds.endY
+                }
+              };
+              console.log(`🎯 Using actual zarr bounds for ${result.wellId}: rel(${actualBounds.startX.toFixed(2)}, ${actualBounds.startY.toFixed(2)}) to (${actualBounds.endX.toFixed(2)}, ${actualBounds.endY.toFixed(2)})`);
+            } else {
+              // Fallback to calculated intersection bounds
+              wellBounds = {
+                topLeft: {
+                  x: wellRequest.intersectionBounds.minX,
+                  y: wellRequest.intersectionBounds.minY
+                },
+                bottomRight: {
+                  x: wellRequest.intersectionBounds.maxX,
+                  y: wellRequest.intersectionBounds.maxY
+                }
+              };
+              console.log(`⚠️ Using fallback intersection bounds for ${result.wellId}`);
+            }
+            
+            // DIAGNOSTIC: Log coordinate transformation for debugging (condensed)
+            const centerX = (wellBounds.topLeft.x + wellBounds.bottomRight.x) / 2;
+            const centerY = (wellBounds.topLeft.y + wellBounds.bottomRight.y) / 2;
+            console.log(`📍 ${result.wellId}: rel(${wellRequest.centerX.toFixed(2)}, ${wellRequest.centerY.toFixed(2)}) → center(${centerX.toFixed(1)}, ${centerY.toFixed(1)}) ${result.metadata.width_mm.toFixed(1)}×${result.metadata.height_mm.toFixed(1)}mm`);
+            
             const newTile = {
               data: `data:image/png;base64,${result.data}`,
               bounds: wellBounds,
@@ -2523,6 +2577,9 @@ const MicroscopeMapDisplay = ({
       );
       
       if (result.success) {
+        // DIAGNOSTIC: Log coordinate transformation for comparison with historical mode
+        console.log(`📍 FREE_PAN: center(${centerX.toFixed(2)}, ${centerY.toFixed(2)}) → bounds(${bounds.topLeft.x.toFixed(1)}, ${bounds.topLeft.y.toFixed(1)}) ${width_mm.toFixed(1)}×${height_mm.toFixed(1)}mm`);
+        
         const newTile = {
           data: `data:image/png;base64,${result.data}`,
           bounds,
