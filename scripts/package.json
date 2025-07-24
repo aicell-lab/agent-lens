@@ -1,0 +1,14 @@
+{
+  "name": "agent-lens-scripts",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Scripts for Agent-Lens microscopy platform",
+  "main": "test_zarr_loading.js",
+  "dependencies": {
+    "node-fetch": "^3.3.0",
+    "pngjs": "^7.0.0"
+  },
+  "scripts": {
+    "test-zarr": "node test_zarr_loading.js"
+  }
+} 

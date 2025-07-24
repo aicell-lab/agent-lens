@@ -211,18 +211,6 @@ class AgentLensArtifactManager:
         files = await self._svc.list_files(dataset_id)
         return files
 
-    async def navigate_collections(self, parent_id=None):
-        """
-        Navigate through collections and datasets.
-
-        Args:
-            parent_id (str, optional): The ID of the parent collection. Defaults to None for top-level collections.
-
-        Returns:
-            list: A list of collections and datasets under the specified parent.
-        """
-        collections = await self._svc.list(artifact_id=parent_id)
-        return collections
 
     async def get_file_details(self, dataset_id, file_path):
         """
@@ -294,6 +282,103 @@ class AgentLensArtifactManager:
             import traceback
             logger.info(traceback.format_exc())
             return []
+
+    async def list_microscope_galleries(self, microscope_service_id: str):
+        """
+        List all galleries (collections) available for a given microscope's service ID.
+        This includes both standard microscope galleries and experiment-based galleries.
+        Returns a list of gallery info dicts.
+        """
+        try:
+            # List all collections in the agent-lens workspace (top-level)
+            all_collections = await self._svc.list()
+            logger.info(f"Microscope service ID: {microscope_service_id}")
+            #logger.info(f"All collections: {all_collections}")
+            galleries = []
+
+            for coll in all_collections:
+                manifest = coll.get('manifest', {})
+                manifest_microscope_id = manifest.get('microscope_service_id')
+                if manifest_microscope_id:
+                    # Match if manifest id is a substring or suffix of the provided id
+                    if manifest_microscope_id in microscope_service_id or microscope_service_id.endswith(manifest_microscope_id):
+                        galleries.append(coll)
+                        continue
+
+            return {
+                "success": True,
+                "microscope_service_id": microscope_service_id,
+                "galleries": galleries,
+                "total": len(galleries)
+            }
+        except Exception as e:
+            logger.error(f"Error listing galleries: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            raise e
+
+    async def list_gallery_datasets(self, gallery_id: str = None, microscope_service_id: str = None, experiment_id: str = None):
+        """
+        List all datasets in a gallery (collection).
+        You can specify the gallery by its artifact ID, or provide microscope_service_id and/or experiment_id to find the gallery.
+        Returns a list of datasets in the gallery.
+        """
+        try:
+            # Find the gallery if not given
+            gallery = None
+            if gallery_id:
+                # Try to read the gallery directly
+                gallery = await self._svc.read(artifact_id=gallery_id)
+            else:
+                # Use microscope_service_id and/or experiment_id to find the gallery
+                if microscope_service_id is None and experiment_id is None:
+                    raise Exception("You must provide either gallery_id, microscope_service_id, or experiment_id.")
+                # Use the same logic as before to find the gallery
+                galleries_result = await self.list_microscope_galleries(microscope_service_id)
+                galleries = galleries_result.get('galleries', [])
+                if not galleries:
+                    raise Exception(f"No gallery found for microscope_service_id={microscope_service_id}")
+                gallery = galleries[0]  # Use the first matching gallery
+            if not gallery:
+                raise Exception("Gallery not found.")
+            # List datasets in the gallery
+            datasets = await self._svc.list(gallery["id"])
+            return {
+                "success": True,
+                "gallery_id": gallery["id"],
+                "gallery_alias": gallery.get("alias"),
+                "gallery_name": gallery.get("manifest", {}).get("name"),
+                "datasets": datasets,
+                "total": len(datasets)
+            }
+        except Exception as e:
+            logger.error(f"Error listing gallery datasets: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            raise e
+
+    async def delete_artifact(self, artifact_id: str, delete_files: bool = True, recursive: bool = True):
+        """
+        Delete a gallery or dataset (artifact) by its ID.
+        Args:
+            artifact_id (str): The ID of the artifact (gallery or dataset) to delete.
+            delete_files (bool): Whether to delete the associated files. Default is True.
+            recursive (bool): Whether to delete recursively (all children). Default is True.
+        Returns:
+            dict: Success status and message.
+        """
+        try:
+            await self._svc.delete(
+                artifact_id=artifact_id,
+                delete_files=delete_files,
+                recursive=recursive
+            )
+            return {"success": True, "artifact_id": artifact_id}
+        except Exception as e:
+            logger.error(f"Error deleting artifact {artifact_id}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            raise e
 
 # Constants
 SERVER_URL = "https://hypha.aicell.io"

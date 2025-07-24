@@ -2,7 +2,8 @@
   "name": "agent-lens",
   "version": "1.0.0",
   "scripts": {
-    "start": "vite",
+    "check:circles": "madge --circular ./components ./utils.jsx ./main.jsx",
+    "start": "npm run check:circles && vite",
     "build": "vite build",
     "build:test": "vite build --mode test",
     "serve": "vite preview",
