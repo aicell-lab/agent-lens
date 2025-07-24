@@ -15,4 +15,5 @@ zarr==2.15.0
 #torch==2.5.1
 # segment-anything==1.0
 # kaibu_utils==0.1.14
-# requests==2.32.3
+# artifact manager
+requests==2.32.3
