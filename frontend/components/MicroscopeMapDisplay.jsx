@@ -81,7 +81,18 @@ const MicroscopeMapDisplay = ({
       chunkProgressUpdateTimes.current.clear();
     };
   }, []);
-  
+
+  // Set default quick scan parameters for specific microscope types
+  useEffect(() => {
+    if (selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1') {
+      // Set default values for Real Microscope 1
+      setQuickScanParameters(prev => ({
+        ...prev,
+        intensity: 70,
+        exposure_time: 2
+      }));
+    }
+  }, [selectedMicroscopeId]);
 
   
   // Map view mode: 'FOV_FITTED' for fitted video view, 'FREE_PAN' for stage map view
