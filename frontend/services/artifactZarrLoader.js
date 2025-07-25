@@ -16,6 +16,10 @@ class ArtifactZarrLoader {
     this.activeRequests = new Set(); // Track active requests to prevent duplicates
     this.baseUrl = 'https://hypha.aicell.io/agent-lens/artifacts';
     
+    // 🚀 DATASET-LEVEL CACHE: Simple cache for zattrs per dataset
+    this.datasetZattrsCache = new Map(); // Cache for dataset-level zattrs
+    this.currentDatasetId = null; // Track current dataset for cache invalidation
+    
     // MAXIMUM SPEED - No limits, just go as fast as possible!
     this.maxConcurrentRequests = 200; // High concurrency for maximum speed
     this.requestQueue = []; // Queue for requests when limit is reached
@@ -64,7 +68,7 @@ class ArtifactZarrLoader {
    */
   cancelAllRequests() {
     let cancelledCount = 0;
-    for (const [requestId, controller] of this.requestControllers) {
+    for (const [, controller] of this.requestControllers) {
       controller.abort();
       cancelledCount++;
     }
@@ -496,9 +500,9 @@ class ArtifactZarrLoader {
   }
 
   /**
-   * Extract the correct dataset ID from a potentially slash-containing ID
+   * Extract the correct dataset ID from a potentially nested path
    * @param {string} datasetId - Dataset ID that might contain slashes
-   * @returns {string} The correct dataset ID (right side of last slash, or original if no slash)
+   * @returns {string} Clean dataset ID
    */
   extractDatasetId(datasetId) {
     if (datasetId.includes('/')) {
@@ -506,6 +510,8 @@ class ArtifactZarrLoader {
     }
     return datasetId;
   }
+
+
 
   /**
    * Check if canvas (zip file) exists for the given well
@@ -565,6 +571,13 @@ class ArtifactZarrLoader {
     try {
       // Extract the correct dataset ID
       const correctDatasetId = this.extractDatasetId(datasetId);
+      
+      // 🚀 SIMPLE CACHE: Clear dataset cache if dataset changed
+      if (this.currentDatasetId !== correctDatasetId) {
+        console.log(`🔄 Dataset changed from ${this.currentDatasetId} to ${correctDatasetId}, clearing zattrs cache`);
+        this.datasetZattrsCache.clear();
+        this.currentDatasetId = correctDatasetId;
+      }
       
       // Construct base URL for this well's zarr data
       const baseUrl = `${this.baseUrl}/${correctDatasetId}/zip-files/well_${wellId}_96.zip/~/data.zarr/`;
@@ -975,24 +988,34 @@ class ArtifactZarrLoader {
     }
 
     try {
-      // Fetch zattrs and zarray in parallel with managed fetch
-      const [zattrsResponse, zarrayResponse] = await Promise.all([
-        this.managedFetch(`${baseUrl}.zattrs`),
-        this.managedFetch(`${baseUrl}${scaleLevel}/.zarray`)
-      ]);
-
-      if (!zattrsResponse.ok) {
-        throw new Error(`Failed to fetch zattrs: ${zattrsResponse.status}`);
+      // 🚀 SIMPLE CACHE: Check if we already have zattrs for this dataset
+      const zattrsUrl = `${baseUrl}.zattrs`;
+      const zattrsCacheKey = zattrsUrl;
+      
+      let zattrs;
+      if (this.datasetZattrsCache.has(zattrsCacheKey)) {
+        console.log(`📋 Using cached zattrs for ${zattrsUrl}`);
+        zattrs = this.datasetZattrsCache.get(zattrsCacheKey);
+      } else {
+        console.log(`📥 Fetching zattrs for ${zattrsUrl}`);
+        const zattrsResponse = await this.managedFetch(zattrsUrl);
+        if (!zattrsResponse.ok) {
+          throw new Error(`Failed to fetch zattrs: ${zattrsResponse.status}`);
+        }
+        zattrs = await zattrsResponse.json();
+        this.datasetZattrsCache.set(zattrsCacheKey, zattrs);
+        console.log(`✅ Cached zattrs for ${zattrsUrl}`);
       }
+      
+      // Fetch zarray
+      const zarrayResponse = await this.managedFetch(`${baseUrl}${scaleLevel}/.zarray`);
+
       if (!zarrayResponse.ok) {
         throw new Error(`Failed to fetch zarray for scale ${scaleLevel}: ${zarrayResponse.status}`);
       }
 
-      // Parse JSON responses in parallel
-      const [zattrs, zarray] = await Promise.all([
-        zattrsResponse.json(),
-        zarrayResponse.json()
-      ]);
+      // Parse zarray JSON response
+      const zarray = await zarrayResponse.json();
 
       const metadata = { zattrs, zarray, scaleLevel };
       
@@ -1015,14 +1038,24 @@ class ArtifactZarrLoader {
    */
   async getChannelIndex(baseUrl, channelName) {
     try {
-      // Get zattrs to find channel mapping
+      // 🚀 SIMPLE CACHE: Check if we already have zattrs for this dataset
       const zattrsUrl = `${baseUrl}.zattrs`;
-      const response = await this.managedFetch(zattrsUrl);
-      if (!response.ok) {
-        return null;
-      }
+      const zattrsCacheKey = zattrsUrl;
       
-      const zattrs = await response.json();
+      let zattrs;
+      if (this.datasetZattrsCache.has(zattrsCacheKey)) {
+        console.log(`📋 Using cached zattrs for ${zattrsUrl}`);
+        zattrs = this.datasetZattrsCache.get(zattrsCacheKey);
+      } else {
+        console.log(`📥 Fetching zattrs for ${zattrsUrl}`);
+        const response = await this.managedFetch(zattrsUrl);
+        if (!response.ok) {
+          return null;
+        }
+        zattrs = await response.json();
+        this.datasetZattrsCache.set(zattrsCacheKey, zattrs);
+        console.log(`✅ Cached zattrs for ${zattrsUrl}`);
+      }
       
       // Check squid_canvas channel mapping first
       if (zattrs.squid_canvas && zattrs.squid_canvas.channel_mapping) {
@@ -1292,8 +1325,7 @@ class ArtifactZarrLoader {
       let lastProgressUpdate = 0;
       const PROGRESS_UPDATE_INTERVAL = 100; // Only update progress every 100ms
       
-      // 🚀 PERFORMANCE OPTIMIZATION: Track if we need to provide a progress update
-      let needsProgressUpdate = false;
+      // 🚀 PERFORMANCE OPTIMIZATION: Track partial canvas for progress updates
       let lastPartialCanvas = null;
       
       // Create a map to track processed chunks for efficient updates
@@ -1577,6 +1609,9 @@ class ArtifactZarrLoader {
     this.chunkCache.clear();
     this.directoryCache.clear();
     this.requestPromises.clear();
+    // 🚀 DATASET CACHE: Also clear dataset-level caches
+    this.datasetZattrsCache.clear();
+    this.currentDatasetId = null;
   }
   
   /**
@@ -1657,6 +1692,9 @@ class ArtifactZarrLoader {
       metadataCacheSize: this.metadataCache.size,
       chunkCacheSize: this.chunkCache.size,
       directoryCacheSize: this.directoryCache.size,
+      // 🚀 DATASET CACHE: Include dataset-level cache stats
+      datasetZattrsCacheSize: this.datasetZattrsCache.size,
+      currentDatasetId: this.currentDatasetId,
       activeRequests: this.activeRequests.size,
       activeRequestCount: this.activeRequestCount,
       maxConcurrentRequests: this.maxConcurrentRequests,
