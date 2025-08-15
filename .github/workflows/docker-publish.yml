@@ -47,11 +47,3 @@ jobs:
           push: ${{ github.event_name == 'push' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # Add build arguments for better debugging
-          build-args: |
-            BUILDKIT_INLINE_CACHE=1
-          # Enable BuildKit for better error messages
-          platforms: linux/amd64
-          # Add cache for faster builds
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
