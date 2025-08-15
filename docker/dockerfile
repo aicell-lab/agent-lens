@@ -16,11 +16,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Install packages with proper dependency handling
 RUN apt-get update && \
-    # Install perl and perl-base together first to ensure compatibility
-    apt-get install -y --no-install-recommends \
-        perl \
-        perl-base && \
-    # Now install other packages including git
+    # Install packages including git (perl is already available from base image)
     apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
