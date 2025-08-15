@@ -231,7 +231,7 @@ docs/                    # Documentation and diagrams
 
 ### 4.1. Microscopy Domain Knowledge
 - Understand multi-dimensional acquisition (X, Y, Z, time, channels)
-- Handle different illumination channels (BF_LED_matrix_full, Fluorescence_405_nm_Ex, Fluorescence_488_nm_Ex, Fluorescence_561_nm_Ex, Fluorescence_638_nm_Ex, Fluorescence_730 nm_Ex)
+- Handle different illumination channels (BF_LED_matrix_full, Fluorescence_405_nm_Ex, Fluorescence_488_nm_Ex, Fluorescence_561_nm_Ex, Fluorescence_638_nm_Ex, Fluorescence_730_nm_Ex)
 - Implement proper camera exposure and intensity control
 - Support autofocus algorithms (contrast-based and laser-based)
 - Handle well plate navigation (96, 48, 24-well formats)
@@ -543,3 +543,4 @@ async def hypha_server():
 
 ---
 *Remember: This is a research platform for autonomous microscopy. Prioritize reliability, performance, and scientific accuracy in all implementations.* 
+- When starting the frontend webapp (npm start), a circular dependency check (madge) is run automatically before the app launches. This ensures no import cycles are present in the codebase. 
