@@ -11,15 +11,22 @@ RUN --mount=type=cache,target=/var/cache/apt \
     echo "deb http://deb.debian.org/debian-security bookworm-security main" >> /etc/apt/sources.list && \
     apt-get update
 
+# Set environment to avoid interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
 # Install packages with proper dependency handling
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends --fix-missing \
+    # Install perl and perl-base together first to ensure compatibility
+    apt-get install -y --no-install-recommends \
+        perl \
+        perl-base && \
+    # Now install other packages including git
+    apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
         jq \
-        libgl1-mesa-glx && \
-    # Install git separately to avoid Perl conflicts
-    apt-get install -y --no-install-recommends --fix-missing git && \
+        libgl1-mesa-glx \
+        git && \
     # Install Node.js
     curl -sL https://deb.nodesource.com/setup_20.x | bash - && \
     apt-get install -y nodejs && \
