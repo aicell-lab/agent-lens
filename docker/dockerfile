@@ -17,7 +17,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Install packages with proper dependency handling
 RUN apt-get update && \
     # Install packages including git (perl is already available from base image)
-    apt-get install -y --no-install-recommends \
+    apt-get install -y --no-install-recommends --allow-downgrades \
         ca-certificates \
         curl \
         jq \
