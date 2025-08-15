@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.3.1
-FROM python:3.11-slim
+FROM python:3.11.9-slim
 
 # Install git and other system dependencies
 RUN --mount=type=cache,target=/var/cache/apt \
@@ -11,10 +11,25 @@ RUN --mount=type=cache,target=/var/cache/apt \
     echo "deb http://deb.debian.org/debian-security bookworm-security main" >> /etc/apt/sources.list && \
     apt-get update
 
-# Install packages
-RUN apt-get update && apt-get install -y --no-install-recommends git curl jq libgl1-mesa-glx && \
-    curl -sL https://deb.nodesource.com/setup_20.x | bash - && \
-    apt-get install -y nodejs && \
+# Install packages with proper dependency handling
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        curl \
+        jq \
+        libgl1-mesa-glx \
+        ca-certificates \
+        gnupg && \
+    # Install Node.js repository key and setup
+    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /usr/share/keyrings/nodesource.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x bookworm main" > /etc/apt/sources.list.d/nodesource.list && \
+    # Install git separately to avoid Perl conflicts - use force-yes if needed
+    apt-get update && \
+    apt-get install -y --no-install-recommends git || \
+    (apt-get update && apt-get install -y --no-install-recommends --allow-downgrades git) && \
+    # Install Node.js
+    apt-get install -y --no-install-recommends nodejs && \
+    # Clean up
+    apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
 # Create a non-root user with explicit UID/GID
