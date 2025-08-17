@@ -1460,7 +1460,7 @@
 
 .collapsible-chat-panel.collapsed {
   width: 350px;
-  transform: translateX(calc(100% - 40px));
+  transform: translateX(calc(100% - 20px));
 }
 
 .chat-panel-header {
@@ -1868,7 +1868,7 @@
   
   .collapsible-chat-panel.collapsed {
     width: 300px;
-    transform: translateX(calc(100% - 40px));
+    transform: translateX(calc(100% - 18px));
   }
   
   .collapsible-chat-panel.expanded + .mcp-image-display-area,
@@ -1904,7 +1904,7 @@
   
   .collapsible-chat-panel.collapsed {
     width: 100vw;
-    transform: translateX(calc(100% - 40px));
+    transform: translateX(calc(100% - 16px));
   }
   
   .collapsible-chat-panel.expanded + .mcp-image-display-area,
