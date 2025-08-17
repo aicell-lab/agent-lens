@@ -3199,6 +3199,108 @@ const MicroscopeMapDisplay = ({
                   <i className="fas fa-crosshairs mr-1"></i>
                   Fit to View
                 </button>
+                
+                {/* Scan Area Button */}
+                <button
+                  onClick={() => {
+                    if (isSimulatedMicroscope) return;
+                    if (showScanConfig) {
+                      // Close scan panel and cancel selection
+                      setShowScanConfig(false);
+                      setIsRectangleSelection(false);
+                      setRectangleStart(null);
+                      setRectangleEnd(null);
+                      setDragSelectedWell(null);
+                    } else {
+                      // Automatically switch to FREE_PAN mode if in FOV_FITTED mode
+                      if (mapViewMode === 'FOV_FITTED') {
+                        transitionToFreePan();
+                        if (appendLog) {
+                          appendLog('Switched to stage map view for scan area selection');
+                        }
+                      }
+                      // Open scan panel and load current microscope settings (only if not scanning)
+                      if (!isScanInProgress) {
+                        loadCurrentMicroscopeSettings();
+                        // Automatically enable rectangle selection when opening scan panel (only if not scanning)
+                        // Clear any existing selection first
+                        setRectangleStart(null);
+                        setRectangleEnd(null);
+                        setDragSelectedWell(null);
+                        setIsRectangleSelection(true);
+                      }
+                      setShowScanConfig(true);
+                    }
+                  }}
+                  className={`px-2 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed ${
+                    showScanConfig ? 'bg-blue-600 hover:bg-blue-500' : 
+                    isScanInProgress ? 'bg-orange-600 hover:bg-orange-500' : 'bg-gray-700 hover:bg-gray-600'
+                  }`}
+                  title={isSimulatedMicroscope ? "Scanning not supported for simulated microscope" : 
+                         isScanInProgress ? "View/stop current scan" : "Configure scan and select area (automatically switches to stage map view)"}
+                  disabled={!microscopeControlService || isSimulatedMicroscope || isHistoricalDataMode || isInteractionDisabled}
+                >
+                  <i className="fas fa-vector-square mr-1"></i>
+                  {isScanInProgress ? (showScanConfig ? 'Close Scan Panel' : 'View Scan Progress') : 
+                   (showScanConfig ? 'Close Scan Setup' : 'Scan Area')}
+                </button>
+                
+                {/* Quick Scan Button */}
+                <button
+                  onClick={() => {
+                    if (isSimulatedMicroscope) return;
+                    if (showQuickScanConfig) {
+                      // Close quick scan panel
+                      setShowQuickScanConfig(false);
+                    } else {
+                      // Close normal scan panel if open
+                      setShowScanConfig(false);
+                      setIsRectangleSelection(false);
+                      setRectangleStart(null);
+                      setRectangleEnd(null);
+                      setDragSelectedWell(null);
+                      // Clean up grid drawing states
+                      setGridDragStart(null);
+                      setGridDragEnd(null);
+                      setIsGridDragging(false);
+                      // Open quick scan panel (always allow opening, even during scanning)
+                      setShowQuickScanConfig(true);
+                    }
+                  }}
+                  className={`px-2 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed ${
+                    showQuickScanConfig ? 'bg-green-600 hover:bg-green-500' : 
+                    isQuickScanInProgress ? 'bg-orange-600 hover:bg-orange-500' : 'bg-gray-700 hover:bg-gray-600'
+                  }`}
+                  title={isSimulatedMicroscope ? "Quick scanning not supported for simulated microscope" : 
+                         isQuickScanInProgress ? "View/stop current quick scan" : "Quick scan entire well plate with high-speed acquisition"}
+                  disabled={!microscopeControlService || isSimulatedMicroscope || isHistoricalDataMode || isInteractionDisabled}
+                >
+                  <i className="fas fa-bolt mr-1"></i>
+                  {isQuickScanInProgress ? (showQuickScanConfig ? 'Close Quick Scan Panel' : 'View Quick Scan Progress') : 
+                   (showQuickScanConfig ? 'Cancel Quick Scan' : 'Quick Scan')}
+                </button>
+                
+                {/* Browse Data Button */}
+                <button
+                  onClick={() => {
+                    if (isHistoricalDataMode) {
+                      setIsHistoricalDataMode(false); // Exit historical data mode
+                      setStitchedTiles([]); // Optionally clear tiles to force reload
+                    } else {
+                      setShowBrowseDataModal(true);
+                    }
+                  }}
+                  className={`px-2 py-1 text-xs rounded disabled:opacity-50 disabled:cursor-not-allowed ${
+                    isHistoricalDataMode
+                      ? 'bg-yellow-700 hover:bg-yellow-600 text-white border-2 border-yellow-400' // Style for exit mode
+                      : 'bg-blue-700 hover:bg-blue-600 text-white'
+                  }`}
+                  title={isHistoricalDataMode ? 'Exit historical data map mode' : 'Browse imaging data for this microscope'}
+                  disabled={!microscopeControlService || isSimulatedMicroscope || isInteractionDisabled}
+                >
+                  <i className={`fas ${isHistoricalDataMode ? 'fa-sign-out-alt' : 'fa-database'} mr-1`}></i>
+                  {isHistoricalDataMode ? 'Exit Data Map' : 'Browse Data'}
+                </button>
               </div>
               
               {/* Layer selector dropdown */}
@@ -3391,112 +3493,7 @@ const MicroscopeMapDisplay = ({
                             ))}
                           </div>
                           
-                          {/* Scan Control Buttons - Moved to Right Side */}
-                          <div className="mt-3 space-y-2">
-                            <div className="text-sm text-gray-300 font-semibold mb-2">Scan Controls</div>
-                            
-                            {/* Scan Area Button */}
-                            <button
-                              onClick={() => {
-                                if (isSimulatedMicroscope) return;
-                                if (showScanConfig) {
-                                  // Close scan panel and cancel selection
-                                  setShowScanConfig(false);
-                                  setIsRectangleSelection(false);
-                                  setRectangleStart(null);
-                                  setRectangleEnd(null);
-                                  setDragSelectedWell(null);
-                                } else {
-                                  // Automatically switch to FREE_PAN mode if in FOV_FITTED mode
-                                  if (mapViewMode === 'FOV_FITTED') {
-                                    transitionToFreePan();
-                                    if (appendLog) {
-                                      appendLog('Switched to stage map view for scan area selection');
-                                    }
-                                  }
-                                  // Open scan panel and load current microscope settings (only if not scanning)
-                                  if (!isScanInProgress) {
-                                    loadCurrentMicroscopeSettings();
-                                    // Automatically enable rectangle selection when opening scan panel (only if not scanning)
-                                    // Clear any existing selection first
-                                    setRectangleStart(null);
-                                    setRectangleEnd(null);
-                                    setDragSelectedWell(null);
-                                    setIsRectangleSelection(true);
-                                  }
-                                  setShowScanConfig(true);
-                                }
-                              }}
-                              className={`w-full px-2 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed ${
-                                showScanConfig ? 'bg-blue-600 hover:bg-blue-500' : 
-                                isScanInProgress ? 'bg-orange-600 hover:bg-orange-500' : 'bg-gray-700 hover:bg-gray-600'
-                              }`}
-                              title={isSimulatedMicroscope ? "Scanning not supported for simulated microscope" : 
-                                     isScanInProgress ? "View/stop current scan" : "Configure scan and select area (automatically switches to stage map view)"}
-                              disabled={!microscopeControlService || isSimulatedMicroscope || isHistoricalDataMode}
-                            >
-                              <i className="fas fa-vector-square mr-1"></i>
-                              {isScanInProgress ? (showScanConfig ? 'Close Scan Panel' : 'View Scan Progress') : 
-                               (showScanConfig ? 'Close Scan Setup' : 'Scan Area')}
-                            </button>
-                            
-                            {/* Quick Scan Button */}
-                            <button
-                              onClick={() => {
-                                if (isSimulatedMicroscope) return;
-                                if (showQuickScanConfig) {
-                                  // Close quick scan panel
-                                  setShowQuickScanConfig(false);
-                                } else {
-                                  // Close normal scan panel if open
-                                  setShowScanConfig(false);
-                                  setIsRectangleSelection(false);
-                                  setRectangleStart(null);
-                                  setRectangleEnd(null);
-                                  setDragSelectedWell(null);
-                                  // Clean up grid drawing states
-                                  setGridDragStart(null);
-                                  setGridDragEnd(null);
-                                  setIsGridDragging(false);
-                                  // Open quick scan panel (always allow opening, even during scanning)
-                                  setShowQuickScanConfig(true);
-                                }
-                              }}
-                              className={`w-full px-2 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed ${
-                                showQuickScanConfig ? 'bg-green-600 hover:bg-green-500' : 
-                                isQuickScanInProgress ? 'bg-orange-600 hover:bg-orange-500' : 'bg-gray-700 hover:bg-gray-600'
-                              }`}
-                              title={isSimulatedMicroscope ? "Quick scanning not supported for simulated microscope" : 
-                                     isQuickScanInProgress ? "View/stop current quick scan" : "Quick scan entire well plate with high-speed acquisition"}
-                              disabled={!microscopeControlService || isSimulatedMicroscope || isHistoricalDataMode}
-                            >
-                              <i className="fas fa-bolt mr-1"></i>
-                              {isQuickScanInProgress ? (showQuickScanConfig ? 'Close Quick Scan Panel' : 'View Quick Scan Progress') : 
-                               (showQuickScanConfig ? 'Cancel Quick Scan' : 'Quick Scan')}
-                            </button>
-                            
-                            {/* Browse Data Button */}
-                            <button
-                              onClick={() => {
-                                if (isHistoricalDataMode) {
-                                  setIsHistoricalDataMode(false); // Exit historical data mode
-                                  setStitchedTiles([]); // Optionally clear tiles to force reload
-                                } else {
-                                  setShowBrowseDataModal(true);
-                                }
-                              }}
-                              className={`w-full px-2 py-1 text-xs rounded disabled:opacity-50 disabled:cursor-not-allowed ${
-                                isHistoricalDataMode
-                                  ? 'bg-yellow-700 hover:bg-yellow-600 text-white border-2 border-yellow-400' // Style for exit mode
-                                  : 'bg-blue-700 hover:bg-blue-600 text-white'
-                              }`}
-                              title={isHistoricalDataMode ? 'Exit historical data map mode' : 'Browse imaging data for this microscope'}
-                              disabled={!microscopeControlService || isSimulatedMicroscope}
-                            >
-                              <i className={`fas ${isHistoricalDataMode ? 'fa-sign-out-alt' : 'fa-database'} mr-1`}></i>
-                              {isHistoricalDataMode ? 'Exit Data Map' : 'Browse Data'}
-                            </button>
-                          </div>
+
                         </div>
                       )}
                     </div>
