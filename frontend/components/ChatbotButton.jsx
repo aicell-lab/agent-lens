@@ -18,37 +18,42 @@ const ChatbotButton = ({ microscopeControlService, appendLog, microscopeBusy}) =
         initializeHyphaCore();
     }, []);
 
-    const openChatbot = async () => {
-        try {
-            if (!window.hyphaCore || !window.hyphaApi) {
-                appendLog('HyphaCore is not initialized.');
-                return;
+    // Automatically load chatbot when component mounts
+    useEffect(() => {
+        const loadChatbot = async () => {
+            if (microscopeControlService && !chatUrl) {
+                try {
+                    if (!window.hyphaCore || !window.hyphaApi) {
+                        appendLog('HyphaCore is not initialized.');
+                        return;
+                    }
+                
+                    appendLog('Loading chatbot automatically...');
+                    const url = await microscopeControlService.get_chatbot_url();
+                    setChatUrl(url);
+                } catch (error) {
+                    appendLog(`Failed to load chatbot: ${error.message}`);
+                }
             }
+        };
         
-            appendLog('Opening chatbot window...');
-            const url = await microscopeControlService.get_chatbot_url();
-            setChatUrl(url);
-        } catch (error) {
-            appendLog(`Failed to open chatbot window: ${error.message}`);
-        }
-    };
+        loadChatbot();
+    }, [microscopeControlService, chatUrl, appendLog]);
 
     return (
         <div>
-            <button
-                className="control-button bg-blue-500 text-white hover:bg-blue-600 p-2 rounded mb-4"
-                onClick={openChatbot}
-                disabled={!microscopeControlService || microscopeBusy}
-            >
-                <i className="fas fa-comments"></i> Open Chat
-            </button>
-            {chatUrl && (
-                <div className="chat-window border border-gray-300 rounded p-2">
+            {chatUrl ? (
+                <div className="chat-window">
                     <iframe
                         src={chatUrl}
-                        style={{ width: '100%', height: '400px', border: 'none' }}
+                        style={{ width: '100%', height: '100%', border: 'none' }}
                         title="Chatbot"
                     ></iframe>
+                </div>
+            ) : (
+                <div className="chat-loading">
+                    <i className="fas fa-spinner fa-spin"></i>
+                    <span>Loading chatbot...</span>
                 </div>
             )}
         </div>

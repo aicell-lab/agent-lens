@@ -1357,3 +1357,566 @@
   opacity: 1;
   filter: none;
 }
+
+/* Floating Panel System for MicroscopeControlPanel */
+.floating-panel-toggles {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 100;
+}
+
+.floating-panel-toggle {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  background-color: rgba(0, 0, 0, 0.8);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(4px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  min-width: 100px;
+  justify-content: center;
+}
+
+.floating-panel-toggle:hover {
+  background-color: rgba(0, 0, 0, 0.9);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.floating-panel-toggle.sample-toggle {
+  background-color: rgba(34, 197, 94, 0.9);
+}
+
+.floating-panel-toggle.sample-toggle:hover {
+  background-color: rgba(34, 197, 94, 1);
+}
+
+.floating-panel-toggle.control-toggle {
+  background-color: rgba(59, 130, 246, 0.9);
+}
+
+.floating-panel-toggle.control-toggle:hover {
+  background-color: rgba(59, 130, 246, 1);
+}
+
+
+
+.floating-panel {
+  position: absolute;
+  background-color: #1f2937;
+  border: 1px solid #374151;
+  border-radius: 8px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  min-width: 300px;
+  max-width: 400px;
+  max-height: 80vh;
+  overflow: hidden;
+  backdrop-filter: blur(8px);
+}
+
+.floating-panel.sample-panel {
+  top: 60px;
+  left: 10px;
+  min-width: 500px;
+  max-width: 700px;
+  max-height: 85vh;
+}
+
+.floating-panel.control-panel {
+  top: 60px;
+  left: 520px;
+}
+
+/* Collapsible Chat Panel - Right Side */
+.collapsible-chat-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  background-color: white;
+  border-left: 2px solid #e5e7eb;
+  box-shadow: -2px 0 10px rgba(0, 0, 0, 0.1);
+  z-index: 1000;
+  transition: transform 0.3s ease-in-out;
+  display: flex;
+  flex-direction: column;
+}
+
+.collapsible-chat-panel.expanded {
+  width: 350px;
+  transform: translateX(0);
+}
+
+.collapsible-chat-panel.collapsed {
+  width: 350px;
+  transform: translateX(calc(100% - 40px));
+}
+
+.chat-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background-color: #f8fafc;
+  border-bottom: 1px solid #e5e7eb;
+  min-height: 60px;
+}
+
+.chat-panel-title {
+  display: flex;
+  align-items: center;
+  color: #374151;
+}
+
+.chat-panel-header h3 {
+  color: #374151;
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.chat-panel-toggle {
+  position: absolute;
+  left: -16px;
+  top: 50vh;
+  transform: translateY(-50%);
+  background-color: white;
+  border: 2px solid #e5e7eb;
+  border-right: none;
+  color: #6b7280;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 8px 4px;
+  border-radius: 6px 0 0 6px;
+  transition: all 0.2s ease;
+  width: 20px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: -2px 0 4px rgba(0, 0, 0, 0.1);
+  z-index: 1001;
+}
+
+.chat-panel-toggle:hover {
+  color: #374151;
+  background-color: #f3f4f6;
+  border-color: #d1d5db;
+}
+
+.chat-panel-content {
+  flex: 1;
+  padding: 0;
+  color: #374151;
+  overflow-y: auto;
+}
+
+/* Ensure chatbot content has no padding and fits perfectly */
+.chat-panel-content > div {
+  padding: 0;
+  margin: 0;
+  height: 100%;
+}
+
+.chat-panel-content .chat-window {
+  height: 100%;
+  border: none;
+  border-radius: 0;
+}
+
+.chat-panel-content .chat-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #6b7280;
+  font-size: 14px;
+  gap: 12px;
+}
+
+.chat-panel-content .chat-loading i {
+  font-size: 24px;
+  color: #9ca3af;
+}
+
+/* Ensure the main content area adjusts when chat panel is expanded */
+.mcp-image-display-area {
+  transition: margin-right 0.3s ease-in-out;
+}
+
+.collapsible-chat-panel.expanded + .mcp-image-display-area,
+.mcp-image-display-area:has(+ .collapsible-chat-panel.expanded) {
+  margin-right: 350px;
+}
+
+.floating-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background-color: #111827;
+  border-bottom: 1px solid #374151;
+  color: white;
+}
+
+.floating-panel-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #f9fafb;
+}
+
+.floating-panel-close {
+  background: none;
+  border: none;
+  color: #9ca3af;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.floating-panel-close:hover {
+  color: #f3f4f6;
+  background-color: #374151;
+}
+
+.floating-panel-content {
+  padding: 16px;
+  max-height: calc(80vh - 60px);
+  overflow-y: auto;
+  color: #f9fafb;
+}
+
+/* Scrollbar styling for floating panels */
+.floating-panel-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.floating-panel-content::-webkit-scrollbar-track {
+  background: #374151;
+  border-radius: 3px;
+}
+
+.floating-panel-content::-webkit-scrollbar-thumb {
+  background: #6b7280;
+  border-radius: 3px;
+}
+
+.floating-panel-content::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+/* Dark theme overrides for floating panel content */
+.floating-panel .control-group,
+.floating-panel .coordinate-container,
+.floating-panel .illumination-camera-container,
+.floating-panel .imaging-tasks-section {
+  background-color: transparent;
+  border-color: #4b5563;
+}
+
+/* Sample selector specific styling for better visibility */
+.floating-panel.sample-panel .floating-panel-content {
+  padding: 20px;
+}
+
+.floating-panel.sample-panel .sample-selector-container {
+  background-color: #374151;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.floating-panel.sample-panel .sample-selector-container h4 {
+  color: #f9fafb;
+  margin-bottom: 16px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.floating-panel.sample-panel .sample-list {
+  background-color: #1f2937;
+  border: 1px solid #4b5563;
+  border-radius: 6px;
+  max-height: 300px;
+  overflow-y: auto;
+  margin-bottom: 16px;
+}
+
+.floating-panel.sample-panel .sample-item {
+  padding: 12px 16px;
+  border-bottom: 1px solid #4b5563;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  color: #f3f4f6;
+}
+
+.floating-panel.sample-panel .sample-item:hover {
+  background-color: #4b5563;
+}
+
+.floating-panel.sample-panel .sample-item.selected {
+  background-color: #3b82f6;
+  color: white;
+}
+
+.floating-panel.sample-panel .sample-controls {
+  margin-top: 20px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.floating-panel.sample-panel .sample-button {
+  background-color: #3b82f6;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background-color 0.2s ease;
+  min-width: 120px;
+}
+
+.floating-panel.sample-panel .sample-button:hover:not(:disabled) {
+  background-color: #2563eb;
+  transform: translateY(-1px);
+}
+
+.floating-panel.sample-panel .sample-button:disabled {
+  background-color: #6b7280;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.floating-panel.sample-panel .workflow-messages {
+  background-color: #111827;
+  border: 1px solid #374151;
+  border-radius: 6px;
+  padding: 16px;
+  margin-top: 20px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.floating-panel.sample-panel .workflow-message {
+  color: #d1d5db;
+  font-size: 13px;
+  margin-bottom: 8px;
+  padding: 8px;
+  background-color: #1f2937;
+  border-radius: 4px;
+  border-left: 3px solid #3b82f6;
+}
+
+.floating-panel.sample-panel .workflow-message:last-child {
+  margin-bottom: 0;
+}
+
+.floating-panel.sample-panel .sample-info {
+  display: flex;
+  flex-direction: column;
+  margin-left: 8px;
+}
+
+.floating-panel.sample-panel .sample-name {
+  font-weight: 600;
+  color: #f3f4f6;
+  margin-bottom: 4px;
+}
+
+.floating-panel.sample-panel .sample-location {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.floating-panel .control-button {
+  background-color: #3b82f6;
+  color: white;
+  border: none;
+}
+
+.floating-panel .control-button:hover:not(:disabled) {
+  background-color: #2563eb;
+}
+
+.floating-panel .control-button:disabled {
+  background-color: #6b7280;
+  opacity: 0.6;
+}
+
+.floating-panel .control-input {
+  background-color: #374151;
+  border-color: #4b5563;
+  color: #f9fafb;
+}
+
+.floating-panel .control-input:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+}
+
+.floating-panel .control-input:disabled {
+  background-color: #1f2937;
+  color: #6b7280;
+}
+
+.floating-panel .coordinate-group {
+  border-color: #4b5563;
+  background-color: #374151;
+}
+
+.floating-panel .position-display {
+  background-color: #1f2937;
+  color: #d1d5db;
+}
+
+.floating-panel .illumination-settings,
+.floating-panel .camera-exposure-settings {
+  border-color: #4b5563;
+  background-color: #374151;
+}
+
+.floating-panel .imaging-tasks-section {
+  border-color: #4b5563;
+  background-color: #374151;
+}
+
+.floating-panel .well-plate-grid-container {
+  background-color: transparent;
+}
+
+.floating-panel .well-plate-grid {
+  background-color: #374151;
+  border-color: #4b5563;
+}
+
+.floating-panel .grid-label {
+  background-color: #1f2937;
+  color: #d1d5db;
+}
+
+.floating-panel .grid-cell {
+  background-color: #4b5563;
+  border-color: #6b7280;
+  color: #f9fafb;
+}
+
+.floating-panel .grid-cell:hover {
+  background-color: #6b7280;
+}
+
+.floating-panel .grid-cell.selected {
+  background-color: #3b82f6;
+  border-color: #2563eb;
+}
+
+.floating-panel .grid-cell:disabled {
+  background-color: #1f2937;
+  color: #6b7280;
+}
+
+/* Ensure proper contrast for text in floating panels */
+.floating-panel label,
+.floating-panel span,
+.floating-panel h4 {
+  color: #f9fafb;
+}
+
+.floating-panel .text-gray-500,
+.floating-panel .text-gray-600,
+.floating-panel .text-gray-700 {
+  color: #d1d5db !important;
+}
+
+.floating-panel .text-gray-800 {
+  color: #f3f4f6 !important;
+}
+
+/* Responsive adjustments for floating panels */
+@media (max-width: 1200px) {
+  .floating-panel.sample-panel {
+    min-width: 450px;
+    max-width: 600px;
+  }
+  
+  .floating-panel.control-panel {
+    left: 10px;
+    top: 140px;
+  }
+  
+  .collapsible-chat-panel.expanded {
+    width: 300px;
+  }
+  
+  .collapsible-chat-panel.collapsed {
+    width: 300px;
+    transform: translateX(calc(100% - 40px));
+  }
+  
+  .collapsible-chat-panel.expanded + .mcp-image-display-area,
+  .mcp-image-display-area:has(+ .collapsible-chat-panel.expanded) {
+    margin-right: 300px;
+  }
+  
+  .collapsible-chat-panel .chat-panel-toggle {
+    left: -14px;
+    width: 18px;
+    height: 36px;
+    top: 50vh;
+    transform: translateY(-50%);
+  }
+}
+
+@media (max-width: 768px) {
+  .floating-panel.sample-panel {
+    min-width: 320px;
+    max-width: calc(100vw - 40px);
+    left: 20px;
+    right: 20px;
+  }
+  
+  .floating-panel.control-panel {
+    left: 10px;
+    top: 220px;
+  }
+  
+  .collapsible-chat-panel.expanded {
+    width: 100vw;
+  }
+  
+  .collapsible-chat-panel.collapsed {
+    width: 100vw;
+    transform: translateX(calc(100% - 40px));
+  }
+  
+  .collapsible-chat-panel.expanded + .mcp-image-display-area,
+  .mcp-image-display-area:has(+ .collapsible-chat-panel.expanded) {
+    margin-right: 0;
+  }
+  
+  .collapsible-chat-panel .chat-panel-toggle {
+    left: -12px;
+    width: 16px;
+    height: 32px;
+    top: 50vh;
+    transform: translateY(-50%);
+  }
+}
