@@ -48,7 +48,7 @@ jobs:
           wget \
           ca-certificates \
           openssl \
-          libgl1-mesa-glx \
+          libgl1-mesa-dri \
           libglu1-mesa
     
     - name: Install Node.js 20
