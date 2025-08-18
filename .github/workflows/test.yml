@@ -19,7 +19,7 @@ jobs:
       run: |
         apt-get update
         apt-get install -y \
-          libgl1-mesa-glx \
+          libgl1 \
           libglib2.0-0 \
           libxrandr2 \
           libxss1 \
@@ -33,18 +33,11 @@ jobs:
           libxdamage1 \
           libxfixes3 \
           libcairo-gobject2 \
-          libgtk-3-0 \
-          libgdk-pixbuf2.0-0 \
+          libgdk-pixbuf-xlib-2.0-0 \
           libxinerama1 \
-          libxrandr2 \
-          libegl1-mesa \
-          libxss1 \
+          libegl1 \
           libnss3 \
           libatk-bridge2.0-0 \
-          libdrm2 \
-          libxcomposite1 \
-          libxdamage1 \
-          libxrandr2 \
           libgbm1 \
           libxkbcommon0 \
           libpango-1.0-0 \
