@@ -92,9 +92,7 @@ jobs:
           fonts-unifont \
           fonts-noto \
           fonts-dejavu-core \
-          fonts-liberation-sans \
-          fonts-liberation-serif \
-          fonts-liberation-mono
+          fonts-liberation2
         
         # Install Playwright browsers without system dependencies (we installed them manually)
         playwright install chromium
