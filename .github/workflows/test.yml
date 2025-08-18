@@ -49,7 +49,14 @@ jobs:
           ca-certificates \
           openssl \
           libgl1-mesa-dri \
-          libglu1-mesa
+          libglu1-mesa \
+          libx11-xcb1 \
+          libxcomposite1 \
+          libxdamage1 \
+          libxfixes3 \
+          libxrandr2 \
+          libxss1 \
+          libxtst6
     
     - name: Install Node.js 20
       run: |
@@ -78,7 +85,19 @@ jobs:
     
     - name: Install Playwright browsers with dependencies
       run: |
-        playwright install --with-deps chromium
+        # Install Debian 12 compatible font packages that Playwright needs
+        apt-get update
+        apt-get install -y \
+          fonts-liberation \
+          fonts-unifont \
+          fonts-noto \
+          fonts-dejavu-core \
+          fonts-liberation-sans \
+          fonts-liberation-serif \
+          fonts-liberation-mono
+        
+        # Install Playwright browsers without system dependencies (we installed them manually)
+        playwright install chromium
     
     - name: Install frontend dependencies and build
       run: |
