@@ -51,12 +51,7 @@ const WEBRTC_SERVICE_IDS = {
   "reef-imaging/mirror-microscope-control-squid-2": "reef-imaging/video-track-microscope-control-squid-2", // Assuming typo correction
 };
 
-// Define well plate configurations
-const WELL_PLATE_CONFIGS = {
-  '96': { rows: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'], cols: Array.from({ length: 12 }, (_, i) => i + 1) },
-  '48': { rows: ['A', 'B', 'C', 'D', 'E', 'F'], cols: Array.from({ length: 8 }, (_, i) => i + 1) },
-  '24': { rows: ['A', 'B', 'C', 'D'], cols: Array.from({ length: 6 }, (_, i) => i + 1) },
-};
+
 
 const MicroscopeControlPanel = ({
   map,
@@ -108,11 +103,7 @@ const MicroscopeControlPanel = ({
   const [configurationError, setConfigurationError] = useState(null);
   const [isConfigurationWindowOpen, setIsConfigurationWindowOpen] = useState(false);
 
-  // Well Plate Navigator State
-  const [selectedWellPlateType, setSelectedWellPlateType] = useState('96');
-  const [currentWellPlateRows, setCurrentWellPlateRows] = useState(WELL_PLATE_CONFIGS['96'].rows);
-  const [currentWellPlateCols, setCurrentWellPlateCols] = useState(WELL_PLATE_CONFIGS['96'].cols);
-  const [isWellPlateNavigatorOpen, setIsWellPlateNavigatorOpen] = useState(false); // Changed default to false
+
 
   // Renamed states for actual values from microscope (for display)
   const [actualIlluminationIntensity, setActualIlluminationIntensity] = useState(50);
@@ -1101,50 +1092,7 @@ const MicroscopeControlPanel = ({
     // fetchImagingTasks(); // if orchestratorManagerService.get_all_imaging_tasks was called inside modal.
   };
 
-  // Update well plate grid when type changes
-  useEffect(() => {
-    setCurrentWellPlateRows(WELL_PLATE_CONFIGS[selectedWellPlateType].rows);
-    setCurrentWellPlateCols(WELL_PLATE_CONFIGS[selectedWellPlateType].cols);
-  }, [selectedWellPlateType]);
 
-  const handleWellPlateTypeChange = (event) => {
-    setSelectedWellPlateType(event.target.value);
-  };
-
-  const toggleWellPlateNavigator = () => {
-    setIsWellPlateNavigatorOpen(!isWellPlateNavigatorOpen);
-  };
-
-  const handleWellDoubleClick = async (row, col) => {
-    if (!microscopeControlService) {
-      appendLog("Microscope control service not available.");
-      if (showNotification) showNotification("Microscope control service not available.", "error");
-      return;
-    }
-    if (microscopeBusy || currentOperation) {
-      appendLog("Microscope is busy or another operation is in progress.");
-      if (showNotification) showNotification("Microscope is busy or another operation is in progress.", "warning");
-      return;
-    }
-
-    const operationId = `navigate_well_${row}${col}`;
-    setCurrentOperation({ id: operationId, name: `Navigating to Well ${row}${col}` });
-    setMicroscopeBusy(true);
-    appendLog(`Navigating to well: ${row}${col}, Plate Type: ${selectedWellPlateType}`);
-    try {
-      await microscopeControlService.navigate_to_well(row, col, selectedWellPlateType);
-      appendLog(`Successfully navigated to well: ${row}${col}`);
-      if (showNotification) showNotification(`Successfully navigated to well: ${row}${col}`, "success");
-      await fetchStatusAndUpdateActuals(); // Update positions
-    } catch (error) {
-      appendLog(`Error navigating to well ${row}${col}: ${error.message}`);
-      if (showNotification) showNotification(`Error navigating to well ${row}${col}: ${error.message}`, "error");
-      console.error(`[MicroscopeControlPanel] Error navigating to well:`, error);
-    } finally {
-      setMicroscopeBusy(false);
-      setCurrentOperation(null);
-    }
-  };
 
   // Function to load microscope configuration
   const loadMicroscopeConfiguration = async () => {
@@ -1688,88 +1636,7 @@ const MicroscopeControlPanel = ({
               </div>
             </div>
 
-            {/* Well Plate Navigator */}
-            <div className="p-3 border border-gray-300 rounded-lg mb-3">
-              <div className="flex justify-between items-center mb-2">
-                <div className="flex items-center">
-                  <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Well Plate Navigator</h3>
-                  <button
-                    className="ml-2 px-2 py-0.5 text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 rounded border border-gray-300 flex items-center transition-colors duration-200"
-                    onClick={toggleWellPlateNavigator}
-                    aria-expanded={isWellPlateNavigatorOpen}
-                    aria-controls="well-plate-grid-content"
-                    title={isWellPlateNavigatorOpen ? "Hide Well Plate Grid" : "Show Well Plate Grid"}
-                  >
-                    <span className="mr-1">{isWellPlateNavigatorOpen ? "Hide" : "Show"}</span>
-                    <i className={`fas ${isWellPlateNavigatorOpen ? 'fa-chevron-up' : 'fa-chevron-down'} transition-transform duration-300`}></i>
-                  </button>
-                </div>
-                <div className="flex items-center">
-                  <label htmlFor="wellPlateTypeSelect" className="text-sm font-medium text-gray-700 dark:text-gray-400 mr-2">Type:</label>
-                  <select
-                    id="wellPlateTypeSelect"
-                    value={selectedWellPlateType}
-                    onChange={handleWellPlateTypeChange}
-                    disabled={!microscopeControlService || microscopeBusy || currentOperation !== null}
-                    className="control-input p-1 text-xs rounded shadow-sm border-gray-300 focus:ring-blue-500 focus:border-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white disabled:opacity-75 disabled:cursor-not-allowed"
-                  >
-                    <option value="96">96 Well</option>
-                    <option value="24">24 Well</option>
-                  </select>
-                </div>
-              </div>
 
-              <div 
-                id="well-plate-grid-content" 
-                className={`well-plate-grid-container overflow-x-auto transition-all duration-300 ease-in-out origin-top ${isWellPlateNavigatorOpen ? 'max-h-[500px] opacity-100' : 'max-h-0 opacity-0'}`}
-                style={{
-                  overflow: isWellPlateNavigatorOpen ? 'visible' : 'hidden',
-                }}
-              >
-                <div 
-                  className="well-plate-grid" 
-                  style={{ 
-                    gridTemplateColumns: `auto repeat(${currentWellPlateCols.length}, minmax(30px, 1fr))`,
-                    transform: isWellPlateNavigatorOpen ? 'scaleY(1)' : 'scaleY(0)',
-                    transition: 'transform 0.3s ease-in-out',
-                    transformOrigin: 'top'
-                  }}
-                >
-                  <div className="grid-col-labels">
-                    <div className="grid-label"></div>
-                    {currentWellPlateCols.map(col => (
-                      <div key={`col-label-${col}`} className="grid-label">{col}</div>
-                    ))}
-                  </div>
-                  {currentWellPlateRows.map(row => (
-                    <div key={`row-${row}`} className="grid-row">
-                      <div className="grid-label">{row}</div>
-                      {currentWellPlateCols.map(col => (
-                        <div
-                          key={`cell-${row}-${col}`}
-                          className={`grid-cell ${(!microscopeControlService || microscopeBusy || currentOperation !== null) ? 'disabled' : ''}`}
-                          onClick={() => {
-                            if (!microscopeControlService || microscopeBusy || currentOperation) return;
-                            handleWellDoubleClick(row, col);
-                          }}
-                          title={`Well ${row}${col} - Click to navigate`}
-                          role="button"
-                          tabIndex={0}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                              if (!microscopeControlService || microscopeBusy || currentOperation) return;
-                              handleWellDoubleClick(row, col);
-                            }
-                          }}
-                          disabled={!microscopeControlService || microscopeBusy || currentOperation !== null}
-                        >
-                        </div>
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
 
             {/* Imaging Tasks Section */}
             <div className="imaging-tasks-section mb-3 p-3 border border-gray-300 rounded-lg">

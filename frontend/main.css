@@ -1799,39 +1799,7 @@
   background-color: #374151;
 }
 
-.floating-panel .well-plate-grid-container {
-  background-color: transparent;
-}
 
-.floating-panel .well-plate-grid {
-  background-color: #374151;
-  border-color: #4b5563;
-}
-
-.floating-panel .grid-label {
-  background-color: #1f2937;
-  color: #d1d5db;
-}
-
-.floating-panel .grid-cell {
-  background-color: #4b5563;
-  border-color: #6b7280;
-  color: #f9fafb;
-}
-
-.floating-panel .grid-cell:hover {
-  background-color: #6b7280;
-}
-
-.floating-panel .grid-cell.selected {
-  background-color: #3b82f6;
-  border-color: #2563eb;
-}
-
-.floating-panel .grid-cell:disabled {
-  background-color: #1f2937;
-  color: #6b7280;
-}
 
 /* Ensure proper contrast for text in floating panels */
 .floating-panel label,
