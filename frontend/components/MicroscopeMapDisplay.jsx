@@ -2520,16 +2520,12 @@ const MicroscopeMapDisplay = ({
           
 
           
-          // 🚀 PERFORMANCE OPTIMIZATION: Throttle state updates to reduce CPU usage
+          // 🚀 REAL-TIME TILE UPDATES: Allow frequent updates for smooth progress visualization
           const now = Date.now();
           const lastUpdate = chunkProgressUpdateTimes.current.get(wellId) || 0;
           const UPDATE_INTERVAL = 200; // Only update state every 200ms per well
           
-          if (now - lastUpdate < UPDATE_INTERVAL && loadedChunks < totalChunks) {
-            return; // Skip update if too frequent
-          }
-          
-          // Update chunk progress with throttling
+          // Always update progress state for real-time feedback
           setRealTimeChunkProgress(prev => {
             const newProgress = new Map(prev);
             newProgress.set(wellId, { loadedChunks, totalChunks, partialCanvas });
@@ -2539,16 +2535,20 @@ const MicroscopeMapDisplay = ({
           // Update last update time
           chunkProgressUpdateTimes.current.set(wellId, now);
           
-          // 🚀 PERFORMANCE OPTIMIZATION: Only create tiles for significant progress or completion
+          // 🚀 FREQUENT TILE UPDATES: Create tiles more frequently for smooth progress visualization
           const progressPercentage = (loadedChunks / totalChunks) * 100;
-          const shouldCreateTile = progressPercentage >= 25 && progressPercentage % 25 === 0 || loadedChunks === totalChunks;
+          
+          // Create tiles more frequently for better progress visualization
+          const shouldCreateTile = progressPercentage >= 10 && progressPercentage % 10 === 0 || 
+                                  loadedChunks % Math.max(1, Math.floor(totalChunks / 10)) === 0 || 
+                                  loadedChunks === totalChunks;
           
           if (partialCanvas && loadedChunks > 0 && shouldCreateTile) {
             const wellRequest = wellRequests.find(req => req.wellId === wellId);
             if (!wellRequest) return;
             
-            // 🚀 PERFORMANCE OPTIMIZATION: Use lower quality for partial tiles to reduce CPU
-            const quality = loadedChunks === totalChunks ? 0.9 : 0.7; // Lower quality for partial tiles
+            // 🚀 IMPROVED QUALITY: Use higher quality for partial tiles for better visual feedback
+            const quality = loadedChunks === totalChunks ? 0.95 : 0.85;
             const partialDataUrl = partialCanvas.toDataURL('image/jpeg', quality);
             
             // Calculate bounds (use intersection bounds for now, will be updated with actual bounds later)
