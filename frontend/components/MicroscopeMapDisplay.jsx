@@ -251,8 +251,6 @@ const MicroscopeMapDisplay = ({
   const renderRealTimeProgress = useCallback(() => {
     if (!isRealTimeLoading || realTimeChunkProgress.size === 0) return null;
     
-    const totalWells = realTimeChunkProgress.size;
-    const completedWells = Array.from(realTimeChunkProgress.values()).filter(p => p.loadedChunks === p.totalChunks).length;
     const totalChunks = Array.from(realTimeChunkProgress.values()).reduce((sum, p) => sum + p.totalChunks, 0);
     const loadedChunks = Array.from(realTimeChunkProgress.values()).reduce((sum, p) => sum + p.loadedChunks, 0);
     
@@ -262,27 +260,25 @@ const MicroscopeMapDisplay = ({
         top: '10px',
         right: '10px',
         background: 'rgba(0, 0, 0, 0.8)',
-        color: 'white',
-        padding: '10px',
-        borderRadius: '5px',
-        fontSize: '12px',
+        padding: '8px',
+        borderRadius: '4px',
         zIndex: 1000,
-        minWidth: '200px'
+        width: '120px'
       }}>
-        <div style={{ fontWeight: 'bold', marginBottom: '5px' }}>
-          🔄 Real-time Loading
-        </div>
-        <div style={{ marginBottom: '3px' }}>
-          Wells: {completedWells}/{totalWells} completed
-        </div>
-        <div style={{ marginBottom: '3px' }}>
-          Chunks: {loadedChunks}/{totalChunks} loaded
+        <div style={{ 
+          color: 'white', 
+          fontSize: '11px', 
+          textAlign: 'center', 
+          marginBottom: '4px',
+          fontFamily: 'monospace'
+        }}>
+          {loadedChunks}/{totalChunks}
         </div>
         <div style={{ 
           width: '100%', 
-          height: '4px', 
+          height: '6px', 
           background: '#333', 
-          borderRadius: '2px',
+          borderRadius: '3px',
           overflow: 'hidden'
         }}>
           <div style={{
