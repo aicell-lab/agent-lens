@@ -2003,32 +2003,32 @@ class ArtifactZarrLoader {
   }
 
   /**
-   * Get list of available wells from dataset metadata
+   * Get list of available wells from dataset files endpoint
    * @param {string} datasetId - Dataset ID
    * @returns {Promise<Array<string>>} Array of available well IDs
    */
   async getAvailableWells(datasetId) {
     const correctDatasetId = this.extractDatasetId(datasetId);
-    const datasetUrl = `${this.baseUrl}/${correctDatasetId}`;
+    const filesUrl = `${this.baseUrl}/${correctDatasetId}/files/`;
     
     try {
-      console.log(`🔍 Getting available wells from: ${datasetUrl}`);
-      const response = await this.managedFetch(datasetUrl);
+      console.log(`🔍 Getting available wells from: ${filesUrl}`);
+      const response = await this.managedFetch(filesUrl);
       
       if (!response.ok) {
-        console.warn(`Failed to get dataset metadata: ${response.status}`);
+        console.warn(`Failed to get dataset files: ${response.status}`);
         return [];
       }
       
-      const datasetData = await response.json();
+      const filesData = await response.json();
       
-      // Extract well IDs from download_weights
-      if (datasetData.config && datasetData.config.download_weights) {
-        const availableWells = Object.keys(datasetData.config.download_weights)
-          .filter(filename => filename.startsWith('well_') && filename.endsWith('_96.zip'))
-          .map(filename => {
+      // Extract well IDs from file names
+      if (Array.isArray(filesData)) {
+        const availableWells = filesData
+          .filter(file => file.type === 'file' && file.name.startsWith('well_') && file.name.endsWith('_96.zip'))
+          .map(file => {
             // Extract well ID from filename (e.g., "well_A2_96.zip" -> "A2")
-            const match = filename.match(/well_([A-Z]\d+)_96\.zip/);
+            const match = file.name.match(/well_([A-Z]\d+)_96\.zip/);
             return match ? match[1] : null;
           })
           .filter(wellId => wellId !== null);
@@ -2037,7 +2037,7 @@ class ArtifactZarrLoader {
         return availableWells;
       }
       
-      console.warn('No download_weights found in dataset metadata');
+      console.warn('No files data found in response');
       return [];
       
     } catch (error) {
