@@ -3292,7 +3292,7 @@ const MicroscopeMapDisplay = ({
                       : 'bg-blue-700 hover:bg-blue-600 text-white'
                   }`}
                   title={isHistoricalDataMode ? 'Exit historical data map mode' : 'Browse imaging data for this microscope'}
-                  disabled={!microscopeControlService || isSimulatedMicroscope || isInteractionDisabled}
+                  disabled={!microscopeControlService || isSimulatedMicroscope || (!isHistoricalDataMode && isInteractionDisabled)}
                 >
                   <i className={`fas ${isHistoricalDataMode ? 'fa-sign-out-alt' : 'fa-database'} mr-1`}></i>
                   {isHistoricalDataMode ? 'Exit Data Map' : 'Browse Data'}
@@ -3303,7 +3303,9 @@ const MicroscopeMapDisplay = ({
               <div className="relative" ref={layerDropdownRef}>
                 <button
                   onClick={() => setIsLayerDropdownOpen(!isLayerDropdownOpen)}
-                  className="px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded flex items-center"
+                  className="px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={isHistoricalDataMode}
+                  title={isHistoricalDataMode ? 'Layers disabled in historical data mode' : 'Toggle layer visibility'}
                 >
                   <i className="fas fa-layer-group mr-1"></i>
                   Layers
