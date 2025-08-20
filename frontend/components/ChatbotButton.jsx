@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import PropTypes from 'prop-types';
 
-const ChatbotButton = ({ microscopeControlService, appendLog, microscopeBusy}) => {
+const ChatbotButton = ({ microscopeControlService, appendLog }) => {
     const [chatUrl, setChatUrl] = useState(null);
+    const [isHyphaReady, setIsHyphaReady] = useState(false);
 
     useEffect(() => {
         const initializeHyphaCore = async () => {
@@ -13,6 +14,7 @@ const ChatbotButton = ({ microscopeControlService, appendLog, microscopeBusy}) =
                 await window.hyphaCore.start();
                 window.hyphaApi = window.hyphaCore.api;
             }
+            setIsHyphaReady(true);
         };
         
         initializeHyphaCore();
@@ -20,25 +22,35 @@ const ChatbotButton = ({ microscopeControlService, appendLog, microscopeBusy}) =
 
     // Automatically load chatbot when component mounts
     useEffect(() => {
+        let cancelled = false;
         const loadChatbot = async () => {
-            if (microscopeControlService && !chatUrl) {
-                try {
-                    if (!window.hyphaCore || !window.hyphaApi) {
-                        appendLog('HyphaCore is not initialized.');
+            if (!microscopeControlService || chatUrl || !isHyphaReady) return;
+            try {
+                if (!window.hyphaCore || !window.hyphaApi) {
+                    appendLog('HyphaCore is not initialized yet, waiting...');
+                    return;
+                }
+
+                appendLog('Loading chatbot automatically...');
+                const maxAttempts = 20; // ~10s total with 500ms delay
+                const delayMs = 500;
+                for (let attempt = 1; attempt <= maxAttempts && !cancelled; attempt++) {
+                    const url = await microscopeControlService.get_chatbot_url();
+                    if (url && typeof url === 'string' && url.trim() !== '') {
+                        if (!cancelled) setChatUrl(url);
+                        appendLog('Chatbot is ready.');
                         return;
                     }
-                
-                    appendLog('Loading chatbot automatically...');
-                    const url = await microscopeControlService.get_chatbot_url();
-                    setChatUrl(url);
-                } catch (error) {
-                    appendLog(`Failed to load chatbot: ${error.message}`);
+                    await new Promise(resolve => setTimeout(resolve, delayMs));
                 }
+                if (!cancelled) appendLog('Chatbot URL not available yet (timeout).');
+            } catch (error) {
+                if (!cancelled) appendLog(`Failed to load chatbot: ${error.message}`);
             }
         };
-        
         loadChatbot();
-    }, [microscopeControlService, chatUrl, appendLog]);
+        return () => { cancelled = true; };
+    }, [microscopeControlService, chatUrl, appendLog, isHyphaReady]);
 
     return (
         <div>
@@ -63,7 +75,6 @@ const ChatbotButton = ({ microscopeControlService, appendLog, microscopeBusy}) =
 ChatbotButton.propTypes = {
     microscopeControlService: PropTypes.object,
     appendLog: PropTypes.func.isRequired,
-    microscopeBusy: PropTypes.bool,
 };
 
 export default ChatbotButton;
