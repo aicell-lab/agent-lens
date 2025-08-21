@@ -5,6 +5,7 @@ that serves the frontend application.
 
 import os
 from fastapi import FastAPI, Request
+from fastapi import UploadFile, File, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from agent_lens.artifact_manager import ZarrTileManager, AgentLensArtifactManager
@@ -14,6 +15,9 @@ import io
 import httpx
 import numpy as np
 from PIL import Image
+# CLIP and Torch for embeddings
+import clip
+import torch
 # Import scikit-image for more professional bioimage processing
 from skimage import exposure, util, color
 import sys
@@ -47,6 +51,49 @@ def setup_logging(log_file="agent_lens_frontend_service.log", max_bytes=100000, 
 
 logger = setup_logging()
 
+
+# -------------------- CLIP Embedding Helpers --------------------
+# Lazy-load CLIP model for generating embeddings
+device = "cuda" if torch.cuda.is_available() else "cpu"
+_clip_model = None
+_clip_preprocess = None
+
+def _load_clip_model():
+    """Load CLIP ViT-B/32 model lazily and cache it in memory."""
+    global _clip_model, _clip_preprocess
+    if _clip_model is None:
+        logger.info(f"Loading CLIP ViT-B/32 on {device}")
+        _clip_model, _clip_preprocess = clip.load("ViT-B/32", device=device)
+        logger.info("CLIP model loaded")
+    return _clip_model, _clip_preprocess
+
+def _normalize_features(features: np.ndarray) -> np.ndarray:
+    """L2-normalize feature vectors."""
+    if features.ndim == 1:
+        features = np.expand_dims(features, axis=0)
+    norm = np.linalg.norm(features, axis=1, keepdims=True)
+    return features / (norm + 1e-12)
+
+async def _generate_image_embedding(image_bytes: bytes) -> np.ndarray:
+    """Generate a unit-normalized CLIP embedding for an image."""
+    model, preprocess = _load_clip_model()
+    image_tensor = None
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as image:
+            image = image.convert("RGB")
+            image.thumbnail((224, 224), Image.Resampling.LANCZOS)
+            image_tensor = preprocess(image).unsqueeze(0).to(device)
+
+        with torch.no_grad():
+            image_features = model.encode_image(image_tensor).cpu().numpy()
+
+        embedding = _normalize_features(image_features)[0].astype(np.float32)
+        return embedding
+    finally:
+        if image_tensor is not None:
+            del image_tensor
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
 # Fixed the ARTIFACT_ALIAS to prevent duplication of 'agent-lens'
 # ARTIFACT_ALIAS = "agent-lens/20250506-scan-time-lapse-2025-05-06_16-56-52"  // This was the OLD default image map.
@@ -92,6 +139,28 @@ def get_frontend_api():
     @app.get("/", response_class=HTMLResponse)
     async def root():
         return FileResponse(os.path.join(dist_dir, "index.html"))
+
+    @app.post("/embedding")
+    async def generate_image_embedding(image: UploadFile = File(...)):
+        """Generate a CLIP image embedding from an uploaded image.
+
+        Returns a JSON object with a 512-d float array.
+        """
+        try:
+            if not image.content_type or not image.content_type.startswith("image/"):
+                raise HTTPException(status_code=400, detail="Uploaded file must be an image")
+            image_bytes = await image.read()
+            if not image_bytes:
+                raise HTTPException(status_code=400, detail="Empty image upload")
+            embedding = await _generate_image_embedding(image_bytes)
+            return {"model": "ViT-B/32", "embedding": embedding.tolist()}
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error generating embedding: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
 
     # Updated endpoint to serve tiles using ZarrTileManager
     @app.get("/tile")

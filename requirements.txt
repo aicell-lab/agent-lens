@@ -11,6 +11,9 @@ blosc==1.11.2
 aiohttp==3.11.14
 scikit-image==0.25.2
 zarr==2.15.0
+# CLIP and PyTorch for image embeddings
+torch==2.5.1
+clip @ git+https://github.com/openai/CLIP.git
 # Segmentation service (unused):
 #torch==2.5.1
 # segment-anything==1.0
