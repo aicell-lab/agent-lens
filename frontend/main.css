@@ -1434,8 +1434,13 @@
 }
 
 .floating-panel.control-panel {
-  top: 60px;
-  left: 520px;
+  top: 140px;
+  left: 10px;
+}
+
+/* Configuration window - ensure it appears above everything */
+.configuration-window-overlay {
+  z-index: 10000 !important;
 }
 
 /* Collapsible Chat Panel - Right Side */
@@ -1827,7 +1832,7 @@
   
   .floating-panel.control-panel {
     left: 10px;
-    top: 140px;
+    top: 200px;
   }
   
   .collapsible-chat-panel.expanded {
@@ -1863,7 +1868,7 @@
   
   .floating-panel.control-panel {
     left: 10px;
-    top: 220px;
+    top: 280px;
   }
   
   .collapsible-chat-panel.expanded {
