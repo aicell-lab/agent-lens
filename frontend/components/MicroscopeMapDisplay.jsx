@@ -926,21 +926,21 @@ const MicroscopeMapDisplay = ({
       let initialScaleLevel = 1; // Default to scale 1
       let initialZoomLevel;
       
-      // Aggressively adjust scale level based on effective zoom to bias heavily towards higher scale levels (lower resolution)
-      if (baseEffectiveScale < 0.05) { // Very zoomed out
+      // STRONGLY bias towards higher scale levels (lower resolution) for better performance
+      if (baseEffectiveScale < 0.08) { // Very zoomed out - expanded threshold to favor scale 4
         initialScaleLevel = 4; // Use lowest resolution
         initialZoomLevel = baseEffectiveScale * Math.pow(4, 4);
-      } else if (baseEffectiveScale < 0.25) { // Zoomed out - increased threshold to push more users to low resolution
+      } else if (baseEffectiveScale < 0.4) { // Zoomed out - expanded threshold to favor scale 3
         initialScaleLevel = 3; // Use low resolution  
         initialZoomLevel = baseEffectiveScale * Math.pow(4, 3);
-      } else if (baseEffectiveScale < 1.0) { // Medium zoom - increased threshold significantly
+      } else if (baseEffectiveScale < 1.2) { // Medium zoom - reduced threshold to favor scale 2
         initialScaleLevel = 2; // Use medium resolution
         initialZoomLevel = baseEffectiveScale * Math.pow(4, 2);
-      } else if (baseEffectiveScale < 4.0) { // Close zoom - use scale 1 instead of 0 for better performance
+      } else if (baseEffectiveScale < 1.8) { // Close zoom - much narrower threshold for scale 1
         initialScaleLevel = 1; // Use higher resolution (but not highest)
         initialZoomLevel = baseEffectiveScale * Math.pow(4, 1);
-      } else { // Extremely close zoom - only then use highest resolution
-        initialScaleLevel = 0; // Use highest resolution only when extremely zoomed in
+      } else { // Close zoom - use highest resolution when zoomed in close
+        initialScaleLevel = 0; // Use highest resolution when zoomed in
         initialZoomLevel = baseEffectiveScale;
       }
       
@@ -1101,16 +1101,16 @@ const MicroscopeMapDisplay = ({
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
     
-    // Check if we should change scale level - aggressively bias towards higher scale levels to reduce data loading
-    if (newZoomLevel > (scaleLevel === 1 ? 12.0 : 4.0) && scaleLevel > 0) {
+    // Check if we should change scale level - STRONGLY bias towards higher scale levels (lower resolution) to reduce data loading
+    if (newZoomLevel > (scaleLevel === 1 ? 4.0 : 12.0) && scaleLevel > 0) {
       // Zoom in to higher resolution (lower scale number = less zoomed out)
-      // Extra restrictive for scale 1→0 transition (12.0) to avoid loading highest resolution unless really needed
-      // Regular restrictive threshold (4.0) for other scale transitions
+      // Much more responsive for scale 1→0 transition (4.0) to allow quick access to highest resolution
+      // Very restrictive threshold (12.0) for other scale transitions
       const equivalentZoom = (newZoomLevel * (1 / Math.pow(4, scaleLevel))) / (1 / Math.pow(4, scaleLevel - 1));
       zoomToPoint(Math.min(16.0, equivalentZoom), scaleLevel - 1, mouseX, mouseY);
-    } else if (newZoomLevel < 1.5 && scaleLevel < 4) {
+    } else if (newZoomLevel < 1.8 && scaleLevel < 4) {
       // Zoom out to lower resolution (higher scale number = more zoomed out)
-      // Much more aggressive threshold (1.5 instead of 0.5) to push users to lower resolution much sooner
+      // More aggressive threshold (1.8) to push users to lower resolution much sooner
       const equivalentZoom = (newZoomLevel * (1 / Math.pow(4, scaleLevel))) / (1 / Math.pow(4, scaleLevel + 1));
       zoomToPoint(Math.max(0.25, equivalentZoom), scaleLevel + 1, mouseX, mouseY);
     } else {
@@ -3052,7 +3052,7 @@ const MicroscopeMapDisplay = ({
           console.log('[scaleLevel cleanup] User not zooming - scheduling tile load');
           setTimeout(() => {
             scheduleTileUpdate(); // Use scheduleTileUpdate instead of direct call
-          }, 200); // Small delay to ensure cleanup is complete
+          }, 800); // Increased delay to 800ms for less aggressive loading
         }
       } else {
         console.log('[scaleLevel cleanup] User is zooming or no microscope service - skipping tile load');
