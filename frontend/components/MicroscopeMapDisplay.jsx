@@ -251,8 +251,6 @@ const MicroscopeMapDisplay = ({
   const renderRealTimeProgress = useCallback(() => {
     if (!isRealTimeLoading || realTimeChunkProgress.size === 0) return null;
     
-    const totalWells = realTimeChunkProgress.size;
-    const completedWells = Array.from(realTimeChunkProgress.values()).filter(p => p.loadedChunks === p.totalChunks).length;
     const totalChunks = Array.from(realTimeChunkProgress.values()).reduce((sum, p) => sum + p.totalChunks, 0);
     const loadedChunks = Array.from(realTimeChunkProgress.values()).reduce((sum, p) => sum + p.loadedChunks, 0);
     
@@ -262,27 +260,25 @@ const MicroscopeMapDisplay = ({
         top: '10px',
         right: '10px',
         background: 'rgba(0, 0, 0, 0.8)',
-        color: 'white',
-        padding: '10px',
-        borderRadius: '5px',
-        fontSize: '12px',
+        padding: '8px',
+        borderRadius: '4px',
         zIndex: 1000,
-        minWidth: '200px'
+        width: '120px'
       }}>
-        <div style={{ fontWeight: 'bold', marginBottom: '5px' }}>
-          🔄 Real-time Loading
-        </div>
-        <div style={{ marginBottom: '3px' }}>
-          Wells: {completedWells}/{totalWells} completed
-        </div>
-        <div style={{ marginBottom: '3px' }}>
-          Chunks: {loadedChunks}/{totalChunks} loaded
+        <div style={{ 
+          color: 'white', 
+          fontSize: '11px', 
+          textAlign: 'center', 
+          marginBottom: '4px',
+          fontFamily: 'monospace'
+        }}>
+          {loadedChunks}/{totalChunks}
         </div>
         <div style={{ 
           width: '100%', 
-          height: '4px', 
+          height: '6px', 
           background: '#333', 
-          borderRadius: '2px',
+          borderRadius: '3px',
           overflow: 'hidden'
         }}>
           <div style={{
@@ -751,7 +747,7 @@ const MicroscopeMapDisplay = ({
   // In FOV_FITTED mode, automatically calculate scale and pan to fit video in the display
   // In FREE_PAN mode, use manual scale and pan controls
   // Scale levels: 0=1x, 1=0.25x, 2=0.0625x, 3=0.015625x, 4=0.00390625x (4x difference between levels)
-  // Zoom range: 25% to 1600% (0.25x to 16x) within each scale level
+  // Zoom range: 25% to 6400% (0.25x to 64x) within each scale level - increased to allow scale level transitions
   const baseScale = 1 / Math.pow(4, scaleLevel);
   const calculatedMapScale = baseScale * zoomLevel;
   
@@ -930,35 +926,60 @@ const MicroscopeMapDisplay = ({
       let initialScaleLevel = 1; // Default to scale 1
       let initialZoomLevel;
       
-      // Aggressively adjust scale level based on effective zoom to bias heavily towards higher scale levels (lower resolution)
-      if (baseEffectiveScale < 0.05) { // Very zoomed out
+      // STRONG bias towards higher scale levels (lower resolution) - much harder to reach scale 0 and scale 1
+      if (baseEffectiveScale < 1.0) { // Very zoomed out - scale 4 (doubled threshold)
         initialScaleLevel = 4; // Use lowest resolution
         initialZoomLevel = baseEffectiveScale * Math.pow(4, 4);
-      } else if (baseEffectiveScale < 0.25) { // Zoomed out - increased threshold to push more users to low resolution
+      } else if (baseEffectiveScale < 4.0) { // Zoomed out - scale 3 (doubled threshold)
         initialScaleLevel = 3; // Use low resolution  
         initialZoomLevel = baseEffectiveScale * Math.pow(4, 3);
-      } else if (baseEffectiveScale < 1.0) { // Medium zoom - increased threshold significantly
+      } else if (baseEffectiveScale < 16.0) { // Medium zoom - scale 2 (doubled threshold)
         initialScaleLevel = 2; // Use medium resolution
         initialZoomLevel = baseEffectiveScale * Math.pow(4, 2);
-      } else if (baseEffectiveScale < 4.0) { // Close zoom - use scale 1 instead of 0 for better performance
+      } else if (baseEffectiveScale < 60.0) { // Close zoom - scale 1 (doubled threshold)
         initialScaleLevel = 1; // Use higher resolution (but not highest)
         initialZoomLevel = baseEffectiveScale * Math.pow(4, 1);
-      } else { // Extremely close zoom - only then use highest resolution
-        initialScaleLevel = 0; // Use highest resolution only when extremely zoomed in
+      } else { // Very close zoom - scale 0 (much harder to reach)
+        initialScaleLevel = 0; // Use highest resolution only when extremely close
         initialZoomLevel = baseEffectiveScale;
       }
       
       // Clamp zoom level to valid range
-      initialZoomLevel = Math.max(0.25, Math.min(16.0, initialZoomLevel));
+      initialZoomLevel = Math.max(0.25, Math.min(64.0, initialZoomLevel));
+      
+      // Calculate new map scale for FREE_PAN mode
+      const newMapScale = (1 / Math.pow(4, initialScaleLevel)) * initialZoomLevel;
+      
+      // Calculate pan position to keep FOV box in view during transition
+      // This maintains the FOV position relative to the container at the new scale level
+      let calculatedPan = { x: 0, y: 0 };
+      if (currentStagePosition && stageDimensions && containerDimensions.width > 0) {
+        // Calculate where the FOV should be positioned on the new scale
+        const stagePosX = (currentStagePosition.x - stageDimensions.xMin) * pixelsPerMm * newMapScale;
+        const stagePosY = (currentStagePosition.y - stageDimensions.yMin) * pixelsPerMm * newMapScale;
+        
+        // Center the FOV in the container
+        calculatedPan = {
+          x: containerDimensions.width / 2 - stagePosX,
+          y: containerDimensions.height / 2 - stagePosY
+        };
+      } else {
+        // Fallback: use the autoFittedPan scaled appropriately
+        const scaleRatio = newMapScale / autoFittedScale;
+        calculatedPan = {
+          x: autoFittedPan.x * scaleRatio,
+          y: autoFittedPan.y * scaleRatio
+        };
+      }
       
       setScaleLevel(initialScaleLevel);
       setZoomLevel(initialZoomLevel);
-      setMapPan(autoFittedPan);
+      setMapPan(calculatedPan);
       if (appendLog) {
         appendLog(`Switched to stage map view (scale ${initialScaleLevel}, zoom ${(initialZoomLevel * 100).toFixed(1)}%)`);
       }
     }
-  }, [mapViewMode, autoFittedScale, autoFittedPan, appendLog]);
+  }, [mapViewMode, autoFittedScale, autoFittedPan, appendLog, currentStagePosition, stageDimensions, pixelsPerMm, containerDimensions]);
   
   // Switch back to FOV_FITTED mode
   const fitToView = useCallback(() => {
@@ -1105,21 +1126,20 @@ const MicroscopeMapDisplay = ({
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
     
-    // Check if we should change scale level - aggressively bias towards higher scale levels to reduce data loading
-    if (newZoomLevel > (scaleLevel === 1 ? 12.0 : 4.0) && scaleLevel > 0) {
+    // Check if we should change scale level - STRONG bias towards higher scale levels (lower resolution)
+    if (newZoomLevel > 16.0 && scaleLevel > 0) {
       // Zoom in to higher resolution (lower scale number = less zoomed out)
-      // Extra restrictive for scale 1→0 transition (12.0) to avoid loading highest resolution unless really needed
-      // Regular restrictive threshold (4.0) for other scale transitions
+      // Much more restrictive threshold (16.0) to avoid loading high resolution unless really needed
       const equivalentZoom = (newZoomLevel * (1 / Math.pow(4, scaleLevel))) / (1 / Math.pow(4, scaleLevel - 1));
-      zoomToPoint(Math.min(16.0, equivalentZoom), scaleLevel - 1, mouseX, mouseY);
-    } else if (newZoomLevel < 1.5 && scaleLevel < 4) {
+      zoomToPoint(Math.min(64.0, equivalentZoom), scaleLevel - 1, mouseX, mouseY);
+    } else if (newZoomLevel < 4.0 && scaleLevel < 4) {
       // Zoom out to lower resolution (higher scale number = more zoomed out)
-      // Much more aggressive threshold (1.5 instead of 0.5) to push users to lower resolution much sooner
+      // Much more aggressive threshold (4.0) to push users to lower resolution much sooner
       const equivalentZoom = (newZoomLevel * (1 / Math.pow(4, scaleLevel))) / (1 / Math.pow(4, scaleLevel + 1));
       zoomToPoint(Math.max(0.25, equivalentZoom), scaleLevel + 1, mouseX, mouseY);
     } else {
       // Smooth zoom within current scale level
-      newZoomLevel = Math.max(0.25, Math.min(16.0, newZoomLevel));
+      newZoomLevel = Math.max(0.25, Math.min(64.0, newZoomLevel));
       zoomToPoint(newZoomLevel, scaleLevel, mouseX, mouseY);
     }
   }, [mapViewMode, zoomLevel, scaleLevel, zoomToPoint, transitionToFreePan, setVideoZoom]);
@@ -2524,16 +2544,12 @@ const MicroscopeMapDisplay = ({
           
 
           
-          // 🚀 PERFORMANCE OPTIMIZATION: Throttle state updates to reduce CPU usage
+          // 🚀 REAL-TIME TILE UPDATES: Allow frequent updates for smooth progress visualization
           const now = Date.now();
           const lastUpdate = chunkProgressUpdateTimes.current.get(wellId) || 0;
           const UPDATE_INTERVAL = 200; // Only update state every 200ms per well
           
-          if (now - lastUpdate < UPDATE_INTERVAL && loadedChunks < totalChunks) {
-            return; // Skip update if too frequent
-          }
-          
-          // Update chunk progress with throttling
+          // Always update progress state for real-time feedback
           setRealTimeChunkProgress(prev => {
             const newProgress = new Map(prev);
             newProgress.set(wellId, { loadedChunks, totalChunks, partialCanvas });
@@ -2543,16 +2559,20 @@ const MicroscopeMapDisplay = ({
           // Update last update time
           chunkProgressUpdateTimes.current.set(wellId, now);
           
-          // 🚀 PERFORMANCE OPTIMIZATION: Only create tiles for significant progress or completion
+          // 🚀 FREQUENT TILE UPDATES: Create tiles more frequently for smooth progress visualization
           const progressPercentage = (loadedChunks / totalChunks) * 100;
-          const shouldCreateTile = progressPercentage >= 25 && progressPercentage % 25 === 0 || loadedChunks === totalChunks;
+          
+          // Create tiles more frequently for better progress visualization
+          const shouldCreateTile = progressPercentage >= 10 && progressPercentage % 10 === 0 || 
+                                  loadedChunks % Math.max(1, Math.floor(totalChunks / 10)) === 0 || 
+                                  loadedChunks === totalChunks;
           
           if (partialCanvas && loadedChunks > 0 && shouldCreateTile) {
             const wellRequest = wellRequests.find(req => req.wellId === wellId);
             if (!wellRequest) return;
             
-            // 🚀 PERFORMANCE OPTIMIZATION: Use lower quality for partial tiles to reduce CPU
-            const quality = loadedChunks === totalChunks ? 0.9 : 0.7; // Lower quality for partial tiles
+            // 🚀 IMPROVED QUALITY: Use higher quality for partial tiles for better visual feedback
+            const quality = loadedChunks === totalChunks ? 0.95 : 0.85;
             const partialDataUrl = partialCanvas.toDataURL('image/jpeg', quality);
             
             // Calculate bounds (use intersection bounds for now, will be updated with actual bounds later)
@@ -3056,7 +3076,7 @@ const MicroscopeMapDisplay = ({
           console.log('[scaleLevel cleanup] User not zooming - scheduling tile load');
           setTimeout(() => {
             scheduleTileUpdate(); // Use scheduleTileUpdate instead of direct call
-          }, 200); // Small delay to ensure cleanup is complete
+          }, 800); // Increased delay to 800ms for less aggressive loading
         }
       } else {
         console.log('[scaleLevel cleanup] User is zooming or no microscope service - skipping tile load');
@@ -3167,11 +3187,11 @@ const MicroscopeMapDisplay = ({
                     const centerX = rect.width / 2;
                     const centerY = rect.height / 2;
                     
-                    if (newZoom > 16.0 && scaleLevel > 0) {
-                      zoomToPoint(0.25, scaleLevel - 1, centerX, centerY);
-                    } else {
-                      zoomToPoint(Math.min(16.0, newZoom), scaleLevel, centerX, centerY);
-                    }
+                          if (newZoom > 64.0 && scaleLevel > 0) {
+        zoomToPoint(0.25, scaleLevel - 1, centerX, centerY);
+      } else {
+        zoomToPoint(Math.min(64.0, newZoom), scaleLevel, centerX, centerY);
+      }
                   }}
                   className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Zoom In"
@@ -3199,13 +3219,117 @@ const MicroscopeMapDisplay = ({
                   <i className="fas fa-crosshairs mr-1"></i>
                   Fit to View
                 </button>
+                
+                {/* Scan Area Button */}
+                <button
+                  onClick={() => {
+                    if (isSimulatedMicroscope) return;
+                    if (showScanConfig) {
+                      // Close scan panel and cancel selection
+                      setShowScanConfig(false);
+                      setIsRectangleSelection(false);
+                      setRectangleStart(null);
+                      setRectangleEnd(null);
+                      setDragSelectedWell(null);
+                    } else {
+                      // Automatically switch to FREE_PAN mode if in FOV_FITTED mode
+                      if (mapViewMode === 'FOV_FITTED') {
+                        transitionToFreePan();
+                        if (appendLog) {
+                          appendLog('Switched to stage map view for scan area selection');
+                        }
+                      }
+                      // Open scan panel and load current microscope settings (only if not scanning)
+                      if (!isScanInProgress) {
+                        loadCurrentMicroscopeSettings();
+                        // Automatically enable rectangle selection when opening scan panel (only if not scanning)
+                        // Clear any existing selection first
+                        setRectangleStart(null);
+                        setRectangleEnd(null);
+                        setDragSelectedWell(null);
+                        setIsRectangleSelection(true);
+                      }
+                      setShowScanConfig(true);
+                    }
+                  }}
+                  className={`px-2 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed ${
+                    showScanConfig ? 'bg-blue-600 hover:bg-blue-500' : 
+                    isScanInProgress ? 'bg-orange-600 hover:bg-orange-500' : 'bg-gray-700 hover:bg-gray-600'
+                  }`}
+                  title={isSimulatedMicroscope ? "Scanning not supported for simulated microscope" : 
+                         isScanInProgress ? "View/stop current scan" : "Configure scan and select area (automatically switches to stage map view)"}
+                  disabled={!microscopeControlService || isSimulatedMicroscope || isHistoricalDataMode || isInteractionDisabled}
+                >
+                  <i className="fas fa-vector-square mr-1"></i>
+                  {isScanInProgress ? (showScanConfig ? 'Close Scan Panel' : 'View Scan Progress') : 
+                   (showScanConfig ? 'Close Scan Setup' : 'Scan Area')}
+                </button>
+                
+                {/* Quick Scan Button */}
+                <button
+                  onClick={() => {
+                    if (isSimulatedMicroscope) return;
+                    if (showQuickScanConfig) {
+                      // Close quick scan panel
+                      setShowQuickScanConfig(false);
+                    } else {
+                      // Close normal scan panel if open
+                      setShowScanConfig(false);
+                      setIsRectangleSelection(false);
+                      setRectangleStart(null);
+                      setRectangleEnd(null);
+                      setDragSelectedWell(null);
+                      // Clean up grid drawing states
+                      setGridDragStart(null);
+                      setGridDragEnd(null);
+                      setIsGridDragging(false);
+                      // Open quick scan panel (always allow opening, even during scanning)
+                      setShowQuickScanConfig(true);
+                    }
+                  }}
+                  className={`px-2 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed ${
+                    showQuickScanConfig ? 'bg-green-600 hover:bg-green-500' : 
+                    isQuickScanInProgress ? 'bg-orange-600 hover:bg-orange-500' : 'bg-gray-700 hover:bg-gray-600'
+                  }`}
+                  title={isSimulatedMicroscope ? "Quick scanning not supported for simulated microscope" : 
+                         isQuickScanInProgress ? "View/stop current quick scan" : "Quick scan entire well plate with high-speed acquisition"}
+                  disabled={!microscopeControlService || isSimulatedMicroscope || isHistoricalDataMode || isInteractionDisabled}
+                >
+                  <i className="fas fa-bolt mr-1"></i>
+                  {isQuickScanInProgress ? (showQuickScanConfig ? 'Close Quick Scan Panel' : 'View Quick Scan Progress') : 
+                   (showQuickScanConfig ? 'Cancel Quick Scan' : 'Quick Scan')}
+                </button>
+                
+                {/* Browse Data Button */}
+                <button
+                  onClick={() => {
+                    if (isHistoricalDataMode) {
+                      setIsHistoricalDataMode(false); // Exit historical data mode
+                      setStitchedTiles([]); // Optionally clear tiles to force reload
+                    } else {
+                      setShowBrowseDataModal(true);
+                    }
+                  }}
+                  className={`px-2 py-1 text-xs rounded disabled:opacity-50 disabled:cursor-not-allowed ${
+                    isHistoricalDataMode
+                      ? 'bg-yellow-700 hover:bg-yellow-600 text-white border-2 border-yellow-400' // Style for exit mode
+                      : 'bg-blue-700 hover:bg-blue-600 text-white'
+                  }`}
+                  title={isHistoricalDataMode ? 'Exit historical data map mode' : 'Browse imaging data for this microscope'}
+                  disabled={!microscopeControlService || isSimulatedMicroscope || (!isHistoricalDataMode && isInteractionDisabled)}
+                >
+                  <i className={`fas ${isHistoricalDataMode ? 'fa-sign-out-alt' : 'fa-database'} mr-1`}></i>
+                  {isHistoricalDataMode ? 'Exit Data Map' : 'Browse Data'}
+                </button>
               </div>
               
               {/* Layer selector dropdown */}
               <div className="relative" ref={layerDropdownRef}>
                 <button
                   onClick={() => setIsLayerDropdownOpen(!isLayerDropdownOpen)}
-                  className="px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded flex items-center"
+                  className="px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={isHistoricalDataMode}
+                  title={isHistoricalDataMode ? 'Layers disabled in historical data mode' : 'Toggle layer visibility'}
                 >
                   <i className="fas fa-layer-group mr-1"></i>
                   Layers
@@ -3390,6 +3514,8 @@ const MicroscopeMapDisplay = ({
                               </label>
                             ))}
                           </div>
+                          
+
                         </div>
                       )}
                     </div>
@@ -3397,7 +3523,7 @@ const MicroscopeMapDisplay = ({
                 )}
               </div>
               
-              {/* Well Selection and Scan controls */}
+              {/* Well Selection Controls */}
               <div className="flex items-center space-x-2">
                 {/* Well Plate Type Selector */}
                 <div className="flex items-center space-x-1">
@@ -3410,127 +3536,8 @@ const MicroscopeMapDisplay = ({
                   >
                     <option value="96">96-well</option>
                     <option value="96">only 96-well for now</option>
-
                   </select>
                 </div>
-
-                 {/* Well Padding Control
-                 <div className="flex items-center space-x-1">
-                   <label className="text-white text-xs">Padding:</label>
-                   <input
-                     type="number"
-                     value={wellPaddingMm}
-                     onChange={(e) => setWellPaddingMm(parseFloat(e.target.value) || 2.0)}
-                     className="w-12 px-1 py-0.5 text-xs bg-gray-700 border border-gray-600 rounded text-white"
-                     min="0"
-                     max="10"
-                     step="0.1"
-                     disabled={isSimulatedMicroscope}
-                     title="Well padding in mm"
-                   />
-                   <span className="text-gray-400 text-xs">mm</span>
-                 </div> */}
-                
-                <button
-                onClick={() => {
-                  if (isSimulatedMicroscope) return;
-                  if (showScanConfig) {
-                    // Close scan panel and cancel selection
-                    setShowScanConfig(false);
-                    setIsRectangleSelection(false);
-                    setRectangleStart(null);
-                    setRectangleEnd(null);
-                    setDragSelectedWell(null);
-                  } else {
-                    // Automatically switch to FREE_PAN mode if in FOV_FITTED mode
-                    if (mapViewMode === 'FOV_FITTED') {
-                      transitionToFreePan();
-                      if (appendLog) {
-                        appendLog('Switched to stage map view for scan area selection');
-                      }
-                    }
-                    // Open scan panel and load current microscope settings (only if not scanning)
-                    if (!isScanInProgress) {
-                      loadCurrentMicroscopeSettings();
-                      // Automatically enable rectangle selection when opening scan panel (only if not scanning)
-                      // Clear any existing selection first
-                      setRectangleStart(null);
-                      setRectangleEnd(null);
-                      setDragSelectedWell(null);
-                      setIsRectangleSelection(true);
-                    }
-                    setShowScanConfig(true);
-                  }
-                }}
-                className={`px-2 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed ${
-                  showScanConfig ? 'bg-blue-600 hover:bg-blue-500' : 
-                  isScanInProgress ? 'bg-orange-600 hover:bg-orange-500' : 'bg-gray-700 hover:bg-gray-600'
-                }`}
-                title={isSimulatedMicroscope ? "Scanning not supported for simulated microscope" : 
-                       isScanInProgress ? "View/stop current scan" : "Configure scan and select area (automatically switches to stage map view)"}
-                disabled={!microscopeControlService || isSimulatedMicroscope || isHistoricalDataMode}
-              >
-                <i className="fas fa-vector-square mr-1"></i>
-                {isScanInProgress ? (showScanConfig ? 'Close Scan Panel' : 'View Scan Progress') : 
-                 (showScanConfig ? 'Close Scan Setup' : 'Scan Area')}
-              </button>
-                
-                <button
-                  onClick={() => {
-                    if (isSimulatedMicroscope) return;
-                    if (showQuickScanConfig) {
-                      // Close quick scan panel
-                      setShowQuickScanConfig(false);
-                    } else {
-                      // Close normal scan panel if open
-                      setShowScanConfig(false);
-                      setIsRectangleSelection(false);
-                      setRectangleStart(null);
-                      setRectangleEnd(null);
-                      setDragSelectedWell(null);
-                      // Clean up grid drawing states
-                      setGridDragStart(null);
-                      setGridDragEnd(null);
-                      setIsGridDragging(false);
-                      // Open quick scan panel (always allow opening, even during scanning)
-                      setShowQuickScanConfig(true);
-                    }
-                  }}
-                  className={`px-2 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed ${
-                    showQuickScanConfig ? 'bg-green-600 hover:bg-green-500' : 
-                    isQuickScanInProgress ? 'bg-orange-600 hover:bg-orange-500' : 'bg-gray-700 hover:bg-gray-600'
-                  }`}
-                  title={isSimulatedMicroscope ? "Quick scanning not supported for simulated microscope" : 
-                         isQuickScanInProgress ? "View/stop current quick scan" : "Quick scan entire well plate with high-speed acquisition"}
-                  disabled={!microscopeControlService || isSimulatedMicroscope || isHistoricalDataMode}
-                >
-                  <i className="fas fa-bolt mr-1"></i>
-                  {isQuickScanInProgress ? (showQuickScanConfig ? 'Close Quick Scan Panel' : 'View Quick Scan Progress') : 
-                   (showQuickScanConfig ? 'Cancel Quick Scan' : 'Quick Scan')}
-                </button>
-                
-
-                {/* New Browse Data Button */}
-                <button
-                  onClick={() => {
-                    if (isHistoricalDataMode) {
-                      setIsHistoricalDataMode(false); // Exit historical data mode
-                      setStitchedTiles([]); // Optionally clear tiles to force reload
-                    } else {
-                      setShowBrowseDataModal(true);
-                    }
-                  }}
-                  className={`px-2 py-1 text-xs rounded disabled:opacity-50 disabled:cursor-not-allowed ${
-                    isHistoricalDataMode
-                      ? 'bg-yellow-700 hover:bg-yellow-600 text-white border-2 border-yellow-400' // Style for exit mode
-                      : 'bg-blue-700 hover:bg-blue-600 text-white'
-                  }`}
-                  title={isHistoricalDataMode ? 'Exit historical data map mode' : 'Browse imaging data for this microscope'}
-                  disabled={!microscopeControlService || isSimulatedMicroscope}
-                >
-                  <i className={`fas ${isHistoricalDataMode ? 'fa-sign-out-alt' : 'fa-database'} mr-1`}></i>
-                  {isHistoricalDataMode ? 'Exit Data Map' : 'Browse Data'}
-                </button>
               </div>
             </>
           )}
@@ -3539,74 +3546,6 @@ const MicroscopeMapDisplay = ({
             <div className="flex items-center space-x-2">
               <span className="text-xs text-gray-300">Zoom: {Math.round(videoZoom * 100)}%</span>
               <span className="text-xs text-gray-400">• Scroll down to see stage map</span>
-              {/* Scan buttons visible in FOV_FITTED mode */}
-              <button
-                onClick={() => {
-                  if (isSimulatedMicroscope) return;
-                  if (isScanInProgress && showScanConfig) {
-                    // Just close the panel if it's already open during scanning
-                    setShowScanConfig(false);
-                    setIsRectangleSelection(false);
-                    setRectangleStart(null);
-                    setRectangleEnd(null);
-                    // Clean up grid drawing states
-                    setGridDragStart(null);
-                    setGridDragEnd(null);
-                    setIsGridDragging(false);
-                  } else if (isScanInProgress) {
-                    // Switch to FREE_PAN mode and open scan panel to view progress
-                    transitionToFreePan();
-                    setShowScanConfig(true);
-                    if (appendLog) {
-                      appendLog('Switched to stage map view to monitor scan progress');
-                    }
-                  } else {
-                    // Automatically switch to FREE_PAN mode and open scan configuration
-                    transitionToFreePan();
-                    loadCurrentMicroscopeSettings();
-                    setShowScanConfig(true);
-                    // Clear any existing selection first
-                    setRectangleStart(null);
-                    setRectangleEnd(null);
-                    setDragSelectedWell(null);
-                    setIsRectangleSelection(true);
-                    if (appendLog) {
-                      appendLog('Switched to stage map view for scan area selection');
-                    }
-                  }
-                }}
-                className={`px-2 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed ${
-                  isScanInProgress ? 'bg-orange-600 hover:bg-orange-500' : 'bg-green-600 hover:bg-green-500'
-                }`}
-                title={isSimulatedMicroscope ? "Scanning not supported for simulated microscope" : 
-                       isScanInProgress ? "View/stop current scan" : "Switch to stage map and configure scan area"}
-                disabled={!microscopeControlService || isSimulatedMicroscope}
-              >
-                <i className="fas fa-vector-square mr-1"></i>
-                {isScanInProgress ? (showScanConfig ? 'Close Scan Panel' : 'View Scan Progress') : 'Scan Area'}
-              </button>
-              
-              <button
-                onClick={() => {
-                  if (isSimulatedMicroscope) return;
-                  if (showQuickScanConfig) {
-                    // Close the panel if it's open
-                    setShowQuickScanConfig(false);
-                  } else {
-                    // Open quick scan configuration (always allow, even during scanning)
-                    setShowQuickScanConfig(true);
-                  }
-                }}
-                className={`px-2 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed ${
-                  isQuickScanInProgress ? 'bg-orange-600 hover:bg-orange-500' : 'bg-blue-600 hover:bg-blue-500'
-                }`}
-                title={isSimulatedMicroscope ? "Quick scanning not supported for simulated microscope" : 
-                       isQuickScanInProgress ? "View/stop current quick scan" : "Quick scan entire well plate with high-speed acquisition"}
-                disabled={!microscopeControlService || isSimulatedMicroscope}
-              >
-                <i className="fas fa-bolt mr-1"></i>
-                {isQuickScanInProgress ? (showQuickScanConfig ? 'Close Quick Scan Panel' : 'View Quick Scan Progress') : 'Quick Scan'}
-              </button>
             </div>
           )}
         </div>
