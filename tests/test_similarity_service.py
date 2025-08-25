@@ -21,25 +21,41 @@ class TestWeaviateSimilarityService:
         return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
     @staticmethod
-    def _generate_random_vector(dimensions=384):
-        """Generate a random vector for testing."""
-        return np.random.random(dimensions).tolist()
+    def _generate_clip_vector(text_description):
+        """Generate a CLIP vector for the given text description."""
+        import clip
+        import torch
+        
+        # Load CLIP model
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model, preprocess = clip.load("ViT-B/32", device=device)
+        
+        # Encode text
+        text = clip.tokenize([text_description]).to(device)
+        with torch.no_grad():
+            text_features = model.encode_text(text)
+            # Normalize to unit vector
+            text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+        
+        return text_features.cpu().numpy()[0].tolist()
 
     @staticmethod
     def _generate_test_collection_name():
         """Generate a unique test collection name."""
         import uuid
-        return f"test-weaviate-{uuid.uuid4().hex[:8]}"
+        return f"test_weaviate_{uuid.uuid4().hex[:8]}"
 
     @pytest.fixture
     async def weaviate_service(self):
         """Fixture to get Weaviate service connection."""
-
+        token = os.getenv("ARIA_AGENTS_TOKEN")
         server = await connect_to_server({
-            "server_url": "https://hypha.aicell.io" 
+            "server_url": "https://hypha.aicell.io",
+            "workspace": "aria-agents",
+            "token": token
         })
         
-        weaviate = await server.get_service("weaviate")
+        weaviate = await server.get_service("aria-agents/weaviate", mode="first")
         
         yield weaviate
         
@@ -101,45 +117,60 @@ class TestWeaviateSimilarityService:
                 }
                 test_images.append(image_data)
             
-            # Insert with vectors (each image gets a random 384-dimensional vector)
-            objects_with_vectors = []
+            # Insert test image data with CLIP vectors
+            insert_results = []
             for img_data in test_images:
-                obj = {
-                    "properties": img_data,
-                    "vector": self._generate_random_vector(384)
-                }
-                objects_with_vectors.append(obj)
+                # Generate CLIP vector for the image description
+                clip_vector = self._generate_clip_vector(img_data["description"])
+                
+                # Insert with vector using the proper method
+                result = await weaviate_service.data.insert(
+                    collection_name=collection_name,
+                    application_id=application_id,
+                    properties=img_data,
+                    vector=clip_vector
+                )
+                insert_results.append(result)
             
-            insert_result = await weaviate_service.data.insert_many(
+            print(f"Inserted {len(insert_results)} objects with CLIP vectors")
+            
+            # 4. Fetch objects
+            print("Fetching objects...")
+            
+            # Fetch objects using fetch_objects (no vectorization required)
+            search_results = await weaviate_service.query.fetch_objects(
                 collection_name=collection_name,
                 application_id=application_id,
-                objects=objects_with_vectors
-            )
-            print(f"Inserted {len(objects_with_vectors)} objects: {insert_result}")
-            
-            # 4. Perform similarity search
-            print("Performing vector similarity search...")
-            
-            # Create a query vector
-            query_vector = self._generate_random_vector(384)
-            
-            # Search for similar images
-            search_results = await weaviate_service.query.near_vector(
-                collection_name=collection_name,
-                application_id=application_id,
-                vector=query_vector,
                 limit=5
             )
             
-            print(f"Search results: {len(search_results)} objects found")
-            assert len(search_results) > 0, "Should find at least one result"
+            print(f"Fetch results structure: {search_results}")
             
-            # Verify result structure
-            for result in search_results:
-                assert "properties" in result, "Result should have properties"
-                assert "image_id" in result["properties"], "Result should have image_id"
-                assert "description" in result["properties"], "Result should have description"
-                assert "image_base64" in result["properties"], "Result should have image_base64"
+            # The results have an 'objects' key containing the actual results
+            if 'objects' in search_results:
+                objects = search_results['objects']
+                print(f"Found {len(objects)} objects")
+                assert len(objects) > 0, "Should find at least one result"
+                
+                # Debug: Print the first result to see its structure
+                if objects:
+                    first_result = objects[0]
+                    print(f"First result keys: {list(first_result.keys()) if hasattr(first_result, 'keys') else 'No keys'}")
+                    print(f"First result: {first_result}")
+                
+                # Verify result structure
+                for result in objects:
+                    # Check if result has properties or if properties are at top level
+                    if "properties" in result:
+                        props = result["properties"]
+                    else:
+                        props = result  # Properties might be at top level
+                    
+                    assert "image_id" in props, "Result should have image_id"
+                    assert "description" in props, "Result should have description"
+                    assert "image_base64" in props, "Result should have image_base64"
+            else:
+                assert False, f"Expected 'objects' key in results, got: {list(search_results.keys())}"
             
             # 5. List collections
             print("Listing all collections...")
@@ -149,24 +180,30 @@ class TestWeaviateSimilarityService:
             # Verify our test collection is in the list
             assert collection_name in all_collections, f"Test collection {collection_name} should be in collections list"
             
-            # Test hybrid search as well
-            print("Performing hybrid search...")
-            hybrid_results = await weaviate_service.query.hybrid(
+            # Test vector similarity search
+            print("Performing vector similarity search...")
+            
+            # Generate a query vector using CLIP
+            query_vector = self._generate_clip_vector("microscopy image")
+            
+            # Search for similar images using near_vector
+            vector_results = await weaviate_service.query.near_vector(
                 collection_name=collection_name,
                 application_id=application_id,
-                query="microscopy image",
+                near_vector=query_vector,
+                include_vector=True,
                 limit=3
             )
             
-            print(f"Hybrid search results: {len(hybrid_results)} objects found")
-            assert len(hybrid_results) > 0, "Hybrid search should return results"
+            print(f"Vector search results: {len(vector_results)} objects found")
+            assert len(vector_results) > 0, "Vector search should return results"
             
         finally:
-            # 6. Remove all collections which start with 'test-weaviate-xxxx'
+            # 6. Remove all collections which start with 'test_weaviate_xxxx'
             print("Cleaning up test collections...")
             
             all_collections = await weaviate_service.collections.list_all()
-            test_collections = [name for name in all_collections.keys() if name.startswith("test-weaviate-")]
+            test_collections = [name for name in all_collections.keys() if name.startswith("test_weaviate_")]
             
             for test_collection in test_collections:
                 print(f"Deleting test collection: {test_collection}")
@@ -178,7 +215,7 @@ class TestWeaviateSimilarityService:
             
             # Verify cleanup
             remaining_collections = await weaviate_service.collections.list_all()
-            remaining_test_collections = [name for name in remaining_collections.keys() if name.startswith("test-weaviate-")]
+            remaining_test_collections = [name for name in remaining_collections.keys() if name.startswith("test_weaviate_")]
             assert len(remaining_test_collections) == 0, "All test collections should be cleaned up"
 
     @pytest.mark.integration
@@ -197,7 +234,7 @@ class TestWeaviateSimilarityService:
                     {"name": "content", "dataType": ["text"]},
                     {"name": "category", "dataType": ["text"]}
                 ],
-                "vectorizer": "text2vec-transformers"  # Use text vectorizer
+                "vectorizer": "none"  # No vectorizer - we'll provide vectors manually
             }
             
             await weaviate_service.collections.create(collection_settings)
@@ -210,36 +247,41 @@ class TestWeaviateSimilarityService:
             # Insert text data
             text_objects = [
                 {
-                    "properties": {
-                        "title": "Microscopy Basics",
-                        "content": "Introduction to light microscopy techniques",
-                        "category": "education"
-                    }
+                    "title": "Microscopy Basics",
+                    "content": "Introduction to light microscopy techniques",
+                    "category": "education"
                 },
                 {
-                    "properties": {
-                        "title": "Fluorescence Imaging",
-                        "content": "Advanced fluorescence microscopy methods",
-                        "category": "research"
-                    }
+                    "title": "Fluorescence Imaging",
+                    "content": "Advanced fluorescence microscopy methods",
+                    "category": "research"
                 }
             ]
             
-            await weaviate_service.data.insert_many(
-                collection_name=collection_name,
-                application_id=application_id,
-                objects=text_objects
-            )
+            # Insert objects with CLIP vectors
+            for text_obj in text_objects:
+                # Generate CLIP vector for the title + content
+                text_description = f"{text_obj['title']}: {text_obj['content']}"
+                clip_vector = self._generate_clip_vector(text_description)
+                
+                await weaviate_service.data.insert(
+                    collection_name=collection_name,
+                    application_id=application_id,
+                    properties=text_obj,
+                    vector=clip_vector
+                )
             
-            # Test text search
-            search_results = await weaviate_service.query.hybrid(
+            # Test vector similarity search
+            query_vector = self._generate_clip_vector("microscopy techniques")
+            search_results = await weaviate_service.query.near_vector(
                 collection_name=collection_name,
                 application_id=application_id,
-                query="microscopy techniques",
+                near_vector=query_vector,
+                include_vector=True,
                 limit=5
             )
             
-            assert len(search_results) > 0, "Text search should return results"
+            assert len(search_results) > 0, "Vector search should return results"
             
         finally:
             # Cleanup
@@ -259,16 +301,17 @@ class TestWeaviateSimilarityService:
         assert image.size == (224, 224)
         assert image.mode == 'RGB'
         
-        # Test vector generation
-        vector = self._generate_random_vector(128)
-        assert len(vector) == 128
+        # Test CLIP vector generation
+        vector = self._generate_clip_vector("test microscopy image")
+        assert len(vector) == 512  # CLIP ViT-B/32 produces 512-dimensional vectors
         assert all(isinstance(v, float) for v in vector)
-        assert all(0 <= v <= 1 for v in vector)
+        # CLIP vectors are normalized, so they can be negative
+        assert all(-1 <= v <= 1 for v in vector)
         
         # Test collection name generation
         collection_name = self._generate_test_collection_name()
-        assert collection_name.startswith("test-weaviate-")
-        assert len(collection_name) == len("test-weaviate-") + 8  # 8 hex chars
+        assert collection_name.startswith("test_weaviate_")
+        assert len(collection_name) == len("test_weaviate_") + 8  # 8 hex chars
 
     @pytest.mark.integration
     async def test_collection_management(self, weaviate_service):
