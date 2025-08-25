@@ -1,24 +1,12 @@
 import pytest
-import base64
-import io
 import os
-import numpy as np
-from PIL import Image
 import dotenv
 from hypha_rpc import connect_to_server
 
 dotenv.load_dotenv()
 
 class TestWeaviateSimilarityService:
-    @staticmethod
-    def _generate_random_image():
-        """Generate a random test image and return as base64 string."""
-        image = Image.fromarray(
-            np.random.randint(0, 256, (224, 224, 3), dtype=np.uint8)
-        )
-        buffered = io.BytesIO()
-        image.save(buffered, format="PNG")
-        return base64.b64encode(buffered.getvalue()).decode("utf-8")
+
 
     @staticmethod
     def _generate_clip_vector(text_description):
@@ -77,7 +65,6 @@ class TestWeaviateSimilarityService:
                 "properties": [
                     {"name": "image_id", "dataType": ["text"]},
                     {"name": "description", "dataType": ["text"]},
-                    {"name": "image_base64", "dataType": ["text"]},
                     {"name": "metadata", "dataType": ["text"]}
                 ],
                 "vectorizer": "none"  # We'll provide vectors manually
@@ -112,7 +99,6 @@ class TestWeaviateSimilarityService:
                 image_data = {
                     "image_id": f"test_img_{i}",
                     "description": f"Test microscopy image {i}",
-                    "image_base64": self._generate_random_image(),
                     "metadata": f"{{'channel': 'BF_LED_matrix_full', 'exposure': {100 + i * 50}}}"
                 }
                 test_images.append(image_data)
@@ -168,7 +154,6 @@ class TestWeaviateSimilarityService:
                     
                     assert "image_id" in props, "Result should have image_id"
                     assert "description" in props, "Result should have description"
-                    assert "image_base64" in props, "Result should have image_base64"
             else:
                 assert False, f"Expected 'objects' key in results, got: {list(search_results.keys())}"
             
@@ -195,7 +180,7 @@ class TestWeaviateSimilarityService:
                 limit=3
             )
             
-            print(f"Vector search results: {len(vector_results)} objects found")
+            print(f"Vector search results: {len(vector_results)} objects found, vector_results: {vector_results}")
             assert len(vector_results) > 0, "Vector search should return results"
             
         finally:
@@ -293,14 +278,6 @@ class TestWeaviateSimilarityService:
     @pytest.mark.unit
     def test_utility_functions(self):
         """Test utility functions for test data generation."""
-        # Test image generation
-        image_b64 = self._generate_random_image()
-        image_data = base64.b64decode(image_b64)
-        image = Image.open(io.BytesIO(image_data))
-        
-        assert image.size == (224, 224)
-        assert image.mode == 'RGB'
-        
         # Test CLIP vector generation
         vector = self._generate_clip_vector("test microscopy image")
         assert len(vector) == 512  # CLIP ViT-B/32 produces 512-dimensional vectors
