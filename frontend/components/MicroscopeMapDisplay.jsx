@@ -232,6 +232,31 @@ const MicroscopeMapDisplay = ({
     return layouts[wellPlateType] || layouts['96'];
   }, [wellPlateType]);
 
+  // Helper function to get selected channels for API calls
+  const getSelectedChannels = useCallback(() => {
+    const selectedChannels = Object.entries(visibleLayers.channels)
+      .filter(([, isVisible]) => isVisible)
+      .map(([channelName]) => channelName);
+    
+    // Ensure at least one channel is selected
+    if (selectedChannels.length === 0) {
+      return ['BF LED matrix full']; // Default to brightfield
+    }
+    
+    return selectedChannels;
+  }, [visibleLayers.channels]);
+
+  // Helper function to check if any channels are selected
+  const hasSelectedChannels = useCallback(() => {
+    return Object.values(visibleLayers.channels).some(isVisible => isVisible);
+  }, [visibleLayers.channels]);
+
+  // Helper function to get channel string for API calls
+  const getChannelString = useCallback(() => {
+    const selectedChannels = getSelectedChannels();
+    return selectedChannels.join(',');
+  }, [getSelectedChannels]);
+
   // State to track the well being selected during drag operations
   const [dragSelectedWell, setDragSelectedWell] = useState(null);
 
@@ -1205,20 +1230,21 @@ const MicroscopeMapDisplay = ({
 
   // Helper functions for tile management
   const getTileKey = useCallback((bounds, scale, channel) => {
-    return `${bounds.topLeft.x.toFixed(1)}_${bounds.topLeft.y.toFixed(1)}_${bounds.bottomRight.x.toFixed(1)}_${bounds.bottomRight.y.toFixed(1)}_${scale}_${channel}`;
+    // For merged channels, use the sorted channel string to ensure consistent keys
+    const normalizedChannel = channel.includes(',') ? channel.split(',').sort().join(',') : channel;
+    return `${bounds.topLeft.x.toFixed(1)}_${bounds.topLeft.y.toFixed(1)}_${bounds.bottomRight.x.toFixed(1)}_${bounds.bottomRight.y.toFixed(1)}_${scale}_${normalizedChannel}`;
   }, []);
 
   // Memoize visible tiles with smart cleanup strategy
   const visibleTiles = useMemo(() => {
     if (!visibleLayers.scanResults) return [];
     
-    const activeChannel = Object.entries(visibleLayers.channels)
-      .find(([, isVisible]) => isVisible)?.[0] || 'BF LED matrix full';
+    const channelString = getChannelString();
     
-    // Get tiles for current scale and channel
+    // Get tiles for current scale and channel selection
     const currentScaleTiles = stitchedTiles.filter(tile => 
       tile.scale === scaleLevel && 
-      tile.channel === activeChannel
+      tile.channel === channelString
     );
     
     if (currentScaleTiles.length > 0) {
@@ -1235,7 +1261,7 @@ const MicroscopeMapDisplay = ({
     for (const scale of availableScales) {
       const scaleTiles = stitchedTiles.filter(tile => 
         tile.scale === scale && 
-        tile.channel === activeChannel
+        tile.channel === channelString
       );
       if (scaleTiles.length > 0) {
         return scaleTiles;
@@ -1243,7 +1269,7 @@ const MicroscopeMapDisplay = ({
     }
     
     return [];
-  }, [stitchedTiles, scaleLevel, visibleLayers.channels, visibleLayers.scanResults]);
+  }, [stitchedTiles, scaleLevel, visibleLayers.channels, visibleLayers.scanResults, getSelectedChannels, getChannelString]);
 
   const addOrUpdateTile = useCallback((newTile) => {
     setStitchedTiles(prevTiles => {
@@ -1291,18 +1317,14 @@ const MicroscopeMapDisplay = ({
   // Effect to clean up old tiles when channel changes  
   useEffect(() => {
     if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
-      // Clean up but don't immediately clear everything - let new tiles load first
-      const activeChannel = Object.entries(visibleLayers.channels)
-        .find(([, isVisible]) => isVisible)?.[0] || 'BF LED matrix full';
-      
       // Trigger cleanup of old tiles after a delay to allow new ones to load
       const cleanupTimer = setTimeout(() => {
-        cleanupOldTiles(scaleLevel, activeChannel);
+        cleanupOldTiles(scaleLevel, getChannelString());
       }, 1000);
       
       return () => clearTimeout(cleanupTimer);
     }
-  }, [visibleLayers.channels, mapViewMode, visibleLayers.scanResults, scaleLevel]);
+  }, [visibleLayers.channels, mapViewMode, visibleLayers.scanResults, scaleLevel, cleanupOldTiles, getChannelString]);
 
 
 
@@ -1775,15 +1797,29 @@ const MicroscopeMapDisplay = ({
       const exposure_time = pair ? pair[1] : 100;
       
       // Update scan parameters with current microscope settings
-      setScanParameters(prev => ({
-        ...prev,
-        illumination_settings: [
-          {
-            channel: channelName,
+      // For merged display, include all selected channels with default settings
+      const selectedChannels = getSelectedChannels();
+      const illuminationSettings = selectedChannels.map(channel => {
+        // Use current microscope settings for the active channel, defaults for others
+        if (channel === channelName) {
+          return {
+            channel: channel,
             intensity: intensity,
             exposure_time: exposure_time
-          }
-        ]
+          };
+        } else {
+          // Default settings for other channels
+          return {
+            channel: channel,
+            intensity: 50,
+            exposure_time: 100
+          };
+        }
+      });
+      
+      setScanParameters(prev => ({
+        ...prev,
+        illumination_settings: illuminationSettings
       }));
       
       if (appendLog) {
@@ -1795,7 +1831,38 @@ const MicroscopeMapDisplay = ({
       }
       console.error('[MicroscopeMapDisplay] Failed to load microscope settings:', error);
     }
-  }, [microscopeControlService, appendLog]);
+  }, [microscopeControlService, appendLog, getSelectedChannels]);
+
+  // Effect to update scan parameters when channel selection changes
+  useEffect(() => {
+    if (microscopeControlService && !isSimulatedMicroscope) {
+      loadCurrentMicroscopeSettings();
+    }
+  }, [visibleLayers.channels, loadCurrentMicroscopeSettings, microscopeControlService, isSimulatedMicroscope]);
+
+  // Effect to refresh tiles when channel selection changes
+  useEffect(() => {
+    if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && !isSimulatedMicroscope) {
+      // Clear existing tiles to force reload with new channel selection
+      setStitchedTiles([]);
+      activeTileRequestsRef.current.clear();
+      
+      // Schedule tile loading after a short delay
+      const refreshTimer = setTimeout(() => {
+        if (appendLog) {
+          const selectedChannels = Object.entries(visibleLayers.channels)
+            .filter(([, isVisible]) => isVisible)
+            .map(([channelName]) => channelName);
+          const channelList = selectedChannels.length > 0 ? selectedChannels : ['BF LED matrix full'];
+          appendLog(`Channel selection changed to: ${channelList.join(', ')} - refreshing tiles`);
+        }
+        // We'll trigger the tile update through a state change rather than calling scheduleTileUpdate directly
+        setNeedsTileReload(true);
+      }, 500);
+      
+      return () => clearTimeout(refreshTimer);
+    }
+  }, [visibleLayers.channels, mapViewMode, visibleLayers.scanResults, isSimulatedMicroscope, appendLog]);
 
   // Helper function to check if a region is covered by existing tiles
   const isRegionCovered = useCallback((bounds, scale, channel, existingTiles) => {
@@ -2339,9 +2406,8 @@ const MicroscopeMapDisplay = ({
       const container = mapContainerRef.current;
       if (!container || !stageDimensions || !pixelsPerMm) return;
       
-      // Get the active channel
-      const activeChannel = Object.entries(visibleLayers.channels)
-        .find(([_, isVisible]) => isVisible)?.[0] || 'BF LED matrix full';
+      // Get the active channel string for API calls
+      const activeChannel = getChannelString();
       
       // Calculate visible region in stage coordinates with buffer
       const bufferPercent = 0.2; // 20% buffer around visible area for smoother panning
@@ -2715,7 +2781,7 @@ const MicroscopeMapDisplay = ({
           console.log(`✅ REAL-TIME: Completed loading ${successfulResults.length}/${wellRequests.length} well regions`);
           
           // Clean up old tiles for this scale/channel combination to prevent memory bloat
-          cleanupOldTiles(scaleLevel, activeChannel);
+          cleanupOldTiles(scaleLevel, getChannelString());
           
           if (appendLog) {
             appendLog(`✅ REAL-TIME: Loaded ${successfulResults.length} historical well tiles for scale ${scaleLevel}`);
@@ -2779,9 +2845,8 @@ const MicroscopeMapDisplay = ({
     const container = mapContainerRef.current;
     if (!container || !stageDimensions || !pixelsPerMm) return;
     
-    // Get the active channel
-    const activeChannel = Object.entries(visibleLayers.channels)
-      .find(([_, isVisible]) => isVisible)?.[0] || 'BF LED matrix full';
+    // Get the active channel string for API calls
+    const activeChannel = getChannelString();
     
     // Calculate visible region in stage coordinates with buffer
     const bufferPercent = 0.2; // 20% buffer around visible area for smoother panning
@@ -2844,7 +2909,7 @@ const MicroscopeMapDisplay = ({
         height_mm,
         wellPlateType, // wellplate_type parameter
         scaleLevel,
-        activeChannel,
+        getChannelString(), // Use comma-separated channel string for merged display
         0, // timepoint index
         wellPaddingMm, // well_padding_mm parameter
         'base64'
@@ -2860,14 +2925,16 @@ const MicroscopeMapDisplay = ({
           width_mm,
           height_mm,
           scale: scaleLevel,
-          channel: activeChannel,
-          timestamp: Date.now()
+          channel: getChannelString(), // Store the channel string used for this tile
+          timestamp: Date.now(),
+          isMerged: getSelectedChannels().length > 1, // Flag to indicate if this is a merged tile
+          channelsUsed: getSelectedChannels() // Store which channels were used
         };
         
         addOrUpdateTile(newTile);
         
         // Clean up old tiles for this scale/channel combination to prevent memory bloat
-        cleanupOldTiles(scaleLevel, activeChannel);
+        cleanupOldTiles(scaleLevel, getChannelString());
         
         if (appendLog) {
           appendLog(`Loaded tile for scale ${scaleLevel}, region (${clampedTopLeft.x.toFixed(1)}, ${clampedTopLeft.y.toFixed(1)}) to (${clampedBottomRight.x.toFixed(1)}, ${clampedBottomRight.y.toFixed(1)})`);
@@ -3061,8 +3128,7 @@ const MicroscopeMapDisplay = ({
   useEffect(() => {
     if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
       console.log('[scaleLevel cleanup] Triggering cleanup and potential tile load');
-      const activeChannel = Object.entries(visibleLayers.channels)
-        .find(([_, isVisible]) => isVisible)?.[0] || 'BF LED matrix full';
+      const activeChannel = getChannelString();
       
       // Always cleanup immediately when scale changes to save memory
       cleanupOldTiles(scaleLevel, activeChannel);
@@ -3088,8 +3154,7 @@ const MicroscopeMapDisplay = ({
   // EXCLUDES historical mode - no automatic tile loading needed for historical data
   useEffect(() => {
     if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && !isZooming && !isHistoricalDataMode) {
-      const activeChannel = Object.entries(visibleLayers.channels)
-        .find(([_, isVisible]) => isVisible)?.[0] || 'BF LED matrix full';
+      const activeChannel = getChannelString();
       
       // 🚀 PERFORMANCE OPTIMIZATION: Check if microscope service is available before attempting tile loading
       if (!microscopeControlService || isSimulatedMicroscope) {
@@ -3499,14 +3564,14 @@ const MicroscopeMapDisplay = ({
                             {Object.entries(visibleLayers.channels).map(([channel, isVisible]) => (
                               <label key={channel} className="flex items-center text-white text-xs mb-1 hover:bg-gray-600 p-1 rounded cursor-pointer">
                                 <input
-                                  type="radio"
-                                  name="channel"
+                                  type="checkbox"
                                   checked={isVisible}
                                   onChange={() => setVisibleLayers(prev => ({
                                     ...prev,
-                                    channels: Object.fromEntries(
-                                      Object.keys(prev.channels).map(ch => [ch, ch === channel])
-                                    )
+                                    channels: {
+                                      ...prev.channels,
+                                      [channel]: !isVisible
+                                    }
                                   }))}
                                   className="mr-2"
                                 />
@@ -3515,7 +3580,23 @@ const MicroscopeMapDisplay = ({
                             ))}
                           </div>
                           
-
+                          {/* Channel Selection Info */}
+                          <div className="mt-2 text-xs text-gray-400">
+                            {!hasSelectedChannels() ? (
+                              <span className="text-yellow-400">⚠️ Select at least one channel</span>
+                            ) : Object.values(visibleLayers.channels).filter(Boolean).length === 1 ? (
+                              <span className="text-blue-400">🔵 Single channel mode</span>
+                            ) : (
+                              <span className="text-green-400">🟢 Multi-channel merge mode ({Object.values(visibleLayers.channels).filter(Boolean).length} channels)</span>
+                            )}
+                          </div>
+                          
+                          {/* Channel Selection Help */}
+                          <div className="mt-1 text-xs text-gray-500">
+                            {hasSelectedChannels() && Object.values(visibleLayers.channels).filter(Boolean).length > 1 && (
+                              <span>Channels will be merged using backend color mapping</span>
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>
@@ -3608,7 +3689,12 @@ const MicroscopeMapDisplay = ({
               {/* Debug info for tiles */}
               {process.env.NODE_ENV === 'development' && (
                 <div className="absolute top-0 left-0 bg-black bg-opacity-50 text-white text-xs p-1">
-                  S{tile.scale} {tile.channel.substring(0, 3)}
+                  S{tile.scale} {tile.isMerged ? 'MERGED' : tile.channel.substring(0, 3)}
+                  {tile.isMerged && tile.channelsUsed && (
+                    <div className="text-xs opacity-75">
+                      {tile.channelsUsed.map(ch => ch.substring(0, 3)).join('+')}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
