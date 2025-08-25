@@ -747,7 +747,7 @@ const MicroscopeMapDisplay = ({
   // In FOV_FITTED mode, automatically calculate scale and pan to fit video in the display
   // In FREE_PAN mode, use manual scale and pan controls
   // Scale levels: 0=1x, 1=0.25x, 2=0.0625x, 3=0.015625x, 4=0.00390625x (4x difference between levels)
-  // Zoom range: 25% to 1600% (0.25x to 16x) within each scale level
+  // Zoom range: 25% to 6400% (0.25x to 64x) within each scale level - increased to allow scale level transitions
   const baseScale = 1 / Math.pow(4, scaleLevel);
   const calculatedMapScale = baseScale * zoomLevel;
   
@@ -926,35 +926,60 @@ const MicroscopeMapDisplay = ({
       let initialScaleLevel = 1; // Default to scale 1
       let initialZoomLevel;
       
-      // STRONGLY bias towards higher scale levels (lower resolution) for better performance
-      if (baseEffectiveScale < 0.08) { // Very zoomed out - expanded threshold to favor scale 4
+      // STRONG bias towards higher scale levels (lower resolution) - much harder to reach scale 0 and scale 1
+      if (baseEffectiveScale < 1.0) { // Very zoomed out - scale 4 (doubled threshold)
         initialScaleLevel = 4; // Use lowest resolution
         initialZoomLevel = baseEffectiveScale * Math.pow(4, 4);
-      } else if (baseEffectiveScale < 0.4) { // Zoomed out - expanded threshold to favor scale 3
+      } else if (baseEffectiveScale < 4.0) { // Zoomed out - scale 3 (doubled threshold)
         initialScaleLevel = 3; // Use low resolution  
         initialZoomLevel = baseEffectiveScale * Math.pow(4, 3);
-      } else if (baseEffectiveScale < 1.2) { // Medium zoom - reduced threshold to favor scale 2
+      } else if (baseEffectiveScale < 16.0) { // Medium zoom - scale 2 (doubled threshold)
         initialScaleLevel = 2; // Use medium resolution
         initialZoomLevel = baseEffectiveScale * Math.pow(4, 2);
-      } else if (baseEffectiveScale < 1.8) { // Close zoom - much narrower threshold for scale 1
+      } else if (baseEffectiveScale < 60.0) { // Close zoom - scale 1 (doubled threshold)
         initialScaleLevel = 1; // Use higher resolution (but not highest)
         initialZoomLevel = baseEffectiveScale * Math.pow(4, 1);
-      } else { // Close zoom - use highest resolution when zoomed in close
-        initialScaleLevel = 0; // Use highest resolution when zoomed in
+      } else { // Very close zoom - scale 0 (much harder to reach)
+        initialScaleLevel = 0; // Use highest resolution only when extremely close
         initialZoomLevel = baseEffectiveScale;
       }
       
       // Clamp zoom level to valid range
-      initialZoomLevel = Math.max(0.25, Math.min(16.0, initialZoomLevel));
+      initialZoomLevel = Math.max(0.25, Math.min(64.0, initialZoomLevel));
+      
+      // Calculate new map scale for FREE_PAN mode
+      const newMapScale = (1 / Math.pow(4, initialScaleLevel)) * initialZoomLevel;
+      
+      // Calculate pan position to keep FOV box in view during transition
+      // This maintains the FOV position relative to the container at the new scale level
+      let calculatedPan = { x: 0, y: 0 };
+      if (currentStagePosition && stageDimensions && containerDimensions.width > 0) {
+        // Calculate where the FOV should be positioned on the new scale
+        const stagePosX = (currentStagePosition.x - stageDimensions.xMin) * pixelsPerMm * newMapScale;
+        const stagePosY = (currentStagePosition.y - stageDimensions.yMin) * pixelsPerMm * newMapScale;
+        
+        // Center the FOV in the container
+        calculatedPan = {
+          x: containerDimensions.width / 2 - stagePosX,
+          y: containerDimensions.height / 2 - stagePosY
+        };
+      } else {
+        // Fallback: use the autoFittedPan scaled appropriately
+        const scaleRatio = newMapScale / autoFittedScale;
+        calculatedPan = {
+          x: autoFittedPan.x * scaleRatio,
+          y: autoFittedPan.y * scaleRatio
+        };
+      }
       
       setScaleLevel(initialScaleLevel);
       setZoomLevel(initialZoomLevel);
-      setMapPan(autoFittedPan);
+      setMapPan(calculatedPan);
       if (appendLog) {
         appendLog(`Switched to stage map view (scale ${initialScaleLevel}, zoom ${(initialZoomLevel * 100).toFixed(1)}%)`);
       }
     }
-  }, [mapViewMode, autoFittedScale, autoFittedPan, appendLog]);
+  }, [mapViewMode, autoFittedScale, autoFittedPan, appendLog, currentStagePosition, stageDimensions, pixelsPerMm, containerDimensions]);
   
   // Switch back to FOV_FITTED mode
   const fitToView = useCallback(() => {
@@ -1101,21 +1126,20 @@ const MicroscopeMapDisplay = ({
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
     
-    // Check if we should change scale level - STRONGLY bias towards higher scale levels (lower resolution) to reduce data loading
-    if (newZoomLevel > (scaleLevel === 1 ? 4.0 : 12.0) && scaleLevel > 0) {
+    // Check if we should change scale level - STRONG bias towards higher scale levels (lower resolution)
+    if (newZoomLevel > 16.0 && scaleLevel > 0) {
       // Zoom in to higher resolution (lower scale number = less zoomed out)
-      // Much more responsive for scale 1→0 transition (4.0) to allow quick access to highest resolution
-      // Very restrictive threshold (12.0) for other scale transitions
+      // Much more restrictive threshold (16.0) to avoid loading high resolution unless really needed
       const equivalentZoom = (newZoomLevel * (1 / Math.pow(4, scaleLevel))) / (1 / Math.pow(4, scaleLevel - 1));
-      zoomToPoint(Math.min(16.0, equivalentZoom), scaleLevel - 1, mouseX, mouseY);
-    } else if (newZoomLevel < 1.8 && scaleLevel < 4) {
+      zoomToPoint(Math.min(64.0, equivalentZoom), scaleLevel - 1, mouseX, mouseY);
+    } else if (newZoomLevel < 4.0 && scaleLevel < 4) {
       // Zoom out to lower resolution (higher scale number = more zoomed out)
-      // More aggressive threshold (1.8) to push users to lower resolution much sooner
+      // Much more aggressive threshold (4.0) to push users to lower resolution much sooner
       const equivalentZoom = (newZoomLevel * (1 / Math.pow(4, scaleLevel))) / (1 / Math.pow(4, scaleLevel + 1));
       zoomToPoint(Math.max(0.25, equivalentZoom), scaleLevel + 1, mouseX, mouseY);
     } else {
       // Smooth zoom within current scale level
-      newZoomLevel = Math.max(0.25, Math.min(16.0, newZoomLevel));
+      newZoomLevel = Math.max(0.25, Math.min(64.0, newZoomLevel));
       zoomToPoint(newZoomLevel, scaleLevel, mouseX, mouseY);
     }
   }, [mapViewMode, zoomLevel, scaleLevel, zoomToPoint, transitionToFreePan, setVideoZoom]);
@@ -3163,11 +3187,11 @@ const MicroscopeMapDisplay = ({
                     const centerX = rect.width / 2;
                     const centerY = rect.height / 2;
                     
-                    if (newZoom > 16.0 && scaleLevel > 0) {
-                      zoomToPoint(0.25, scaleLevel - 1, centerX, centerY);
-                    } else {
-                      zoomToPoint(Math.min(16.0, newZoom), scaleLevel, centerX, centerY);
-                    }
+                          if (newZoom > 64.0 && scaleLevel > 0) {
+        zoomToPoint(0.25, scaleLevel - 1, centerX, centerY);
+      } else {
+        zoomToPoint(Math.min(64.0, newZoom), scaleLevel, centerX, centerY);
+      }
                   }}
                   className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Zoom In"
