@@ -7,8 +7,7 @@ conda activate agent-lens
 
 # Install Python dependencies
 echo "Installing Python dependencies..."
-pip install -r requirements_test.txt
-pip install -e .
+pip install -e ".[test]"
 
 # Prompt user for secret tokens
 read -sp "Enter your agent-lens workspace token: " WORKSPACE_TOKEN
