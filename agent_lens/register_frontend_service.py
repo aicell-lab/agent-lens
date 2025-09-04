@@ -30,26 +30,9 @@ from starlette.requests import ClientDisconnect  # Import at the top of the func
 from starlette.responses import Response as StarletteResponse # Import for 499 response
 
 # Configure logging
-import logging
-import logging.handlers
-def setup_logging(log_file="agent_lens_frontend_service.log", max_bytes=100000, backup_count=3):
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-    logger = logging.getLogger(__name__)
-    logger.setLevel(logging.INFO)
+from .log import setup_logging
 
-    # Rotating file handler
-    file_handler = logging.handlers.RotatingFileHandler(log_file, maxBytes=max_bytes, backupCount=backup_count)
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
-
-    # Console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
-
-    return logger
-
-logger = setup_logging()
+logger = setup_logging("agent_lens_frontend_service.log")
 
 
 # -------------------- CLIP Embedding Helpers --------------------
