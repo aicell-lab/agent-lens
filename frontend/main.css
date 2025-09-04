@@ -1654,6 +1654,45 @@
   font-weight: 600;
 }
 
+/* Live Lab Video Feed Styling */
+.floating-panel.sample-panel .lab-video-feed {
+  background-color: #1f2937;
+  border: 1px solid #4b5563;
+  border-radius: 6px;
+  padding: 8px;
+  margin-bottom: 12px;
+}
+
+.floating-panel.sample-panel .video-feed-title {
+  color: #f9fafb;
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+}
+
+.floating-panel.sample-panel .video-container {
+  position: relative;
+  width: 100%;
+  height: 250px;
+  border-radius: 4px;
+  overflow: hidden;
+  background-color: #000;
+  /* Remove fixed aspect ratio to allow natural image dimensions */
+}
+
+.floating-panel.sample-panel .lab-video-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border: none;
+  background-color: #000;
+  /* Show complete image without cropping */
+  display: block;
+}
+
+
 .floating-panel.sample-panel .sample-list {
   background-color: #1f2937;
   border: 1px solid #4b5563;
@@ -1899,6 +1938,10 @@
     max-width: calc(100vw - 40px);
     left: 20px;
     right: 20px;
+  }
+  
+  .floating-panel.sample-panel .video-container {
+    height: 180px;
   }
   
   .floating-panel.control-panel {

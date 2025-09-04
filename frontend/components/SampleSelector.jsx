@@ -23,8 +23,6 @@ const SampleSelector = ({
   const [workflowMessages, setWorkflowMessages] = useState([]);
   // Track loaded sample ID on current microscope
   const [loadedSampleOnMicroscope, setLoadedSampleOnMicroscope] = useState(null);
-  // Track transport queue status
-  const [transportQueueStatus, setTransportQueueStatus] = useState(null);
 
   // Define the mapping of sample IDs to their data aliases
   const sampleDataAliases = {
@@ -77,7 +75,6 @@ const SampleSelector = ({
     
     try {
       const status = await orchestratorManagerService.get_transport_queue_status();
-      setTransportQueueStatus(status);
       
       // Add status information to workflow messages if there's an active task
       if (status && status.active_task) {
@@ -88,30 +85,6 @@ const SampleSelector = ({
     }
   };
 
-  // Helper function to update sample location
-  const updateSampleLocation = async (incubatorSlot, newLocation) => {
-    if (!incubatorControlService) return;
-    try {
-      await incubatorControlService.update_sample_location(incubatorSlot, newLocation);
-      addWorkflowMessage(`Sample location updated to: ${newLocation}`);
-      
-      // If this is a location related to a microscope, track the loaded sample
-      if (newLocation === 'microscope1' || newLocation === 'microscope2') {
-        setLoadedSampleOnMicroscope(`slot-${incubatorSlot}`);
-      } else if (newLocation === 'incubator_slot') {
-        // If moved back to incubator, ensure it's not marked as loaded on this scope
-        if (loadedSampleOnMicroscope === `slot-${incubatorSlot}`) {
-            setLoadedSampleOnMicroscope(null);
-        }
-      }
-      
-      // Refresh the slots data after location update
-      await fetchIncubatorData();
-    } catch (error) {
-      console.error(`Failed to update sample location to ${newLocation}:`, error);
-      addWorkflowMessage(`Error updating sample location: ${error.message}`);
-    }
-  };
 
 
   // Load current data alias when component becomes visible
@@ -122,7 +95,7 @@ const SampleSelector = ({
           const currentDataAlias = await microscopeControlService.get_simulated_sample_data_alias();
           // Find the sample ID that matches the current data alias
           const matchingSampleId = Object.entries(sampleDataAliases)
-            .find(([_, alias]) => alias === currentDataAlias)?.[0];
+            .find(([, alias]) => alias === currentDataAlias)?.[0];
           
           if (matchingSampleId) {
             setSelectedSampleId(matchingSampleId);
@@ -452,7 +425,24 @@ const SampleSelector = ({
 
   return (
     <div className={`sample-selector-container ${!isVisible ? 'hidden' : ''}`}>
-      <h4>Select Sample</h4>
+      {/* Live Lab Video Feed - Only show for real microscopes */}
+      {isVisible && isRealMicroscopeSelected && (
+        <div className="lab-video-feed">
+          <h5 className="video-feed-title">
+            <i className="fas fa-video mr-2"></i>
+            Live Lab Feed
+          </h5>
+          <div className="video-container">
+            <img
+              src="https://hypha.aicell.io/reef-imaging/apps/reef-live-feed/"
+              alt="Live Lab Feed"
+              className="lab-video-img"
+              onLoad={() => console.log('Lab video feed loaded')}
+              onError={() => console.log('Lab video feed failed to load')}
+            />
+          </div>
+        </div>
+      )}
       
       <div className="sample-options-container">
         {/* Sample Control Buttons */}
