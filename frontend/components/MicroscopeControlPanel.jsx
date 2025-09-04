@@ -1409,9 +1409,9 @@ const MicroscopeControlPanel = ({
             <SampleSelector 
               isVisible={true}
               selectedMicroscopeId={selectedMicroscopeId}
-              microscopeControlService={microscopeControlService}
+              microscopeControlService={selectedMicroscopeId === 'agent-lens/squid-control-reef' ? microscopeControlService : null}
               incubatorControlService={incubatorControlService}
-              roboticArmService={roboticArmService}
+              orchestratorManagerService={orchestratorManagerService}
               currentOperation={currentOperation}
               setCurrentOperation={setCurrentOperation}
               onSampleLoadStatusChange={handleSampleLoadStatusChange}

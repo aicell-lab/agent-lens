@@ -10,7 +10,7 @@ const SampleSelector = ({
   selectedMicroscopeId, 
   microscopeControlService,
   incubatorControlService,
-  roboticArmService,
+  orchestratorManagerService,
   currentOperation,
   setCurrentOperation,
   onSampleLoadStatusChange,
@@ -20,10 +20,11 @@ const SampleSelector = ({
   const [incubatorSlots, setIncubatorSlots] = useState([]);
   const [loadingStatus, setLoadingStatus] = useState('');
   const [isSampleLoaded, setIsSampleLoaded] = useState(false);
-  const [roboticArmServiceState, setRoboticArmServiceState] = useState(null);
   const [workflowMessages, setWorkflowMessages] = useState([]);
   // Track loaded sample ID on current microscope
   const [loadedSampleOnMicroscope, setLoadedSampleOnMicroscope] = useState(null);
+  // Track transport queue status
+  const [transportQueueStatus, setTransportQueueStatus] = useState(null);
 
   // Define the mapping of sample IDs to their data aliases
   const sampleDataAliases = {
@@ -61,6 +62,32 @@ const SampleSelector = ({
     setWorkflowMessages([]);
   };
 
+  // Helper function to convert full service ID to orchestrator microscope ID format
+  const getMicroscopeIdForOrchestrator = (fullServiceId) => {
+    if (fullServiceId.includes('squid-1')) return 'microscope-control-squid-1';
+    if (fullServiceId.includes('squid-2')) return 'microscope-control-squid-2';
+    return fullServiceId; // Fallback for other formats
+  };
+
+  // Check transport queue status
+  const checkTransportQueueStatus = async () => {
+    if (!orchestratorManagerService || !isRealMicroscopeSelected) {
+      return;
+    }
+    
+    try {
+      const status = await orchestratorManagerService.get_transport_queue_status();
+      setTransportQueueStatus(status);
+      
+      // Add status information to workflow messages if there's an active task
+      if (status && status.active_task) {
+        addWorkflowMessage(`Transport queue: ${status.active_task} (Queue size: ${status.queue_size})`);
+      }
+    } catch (error) {
+      console.error('Failed to get transport queue status:', error);
+    }
+  };
+
   // Helper function to update sample location
   const updateSampleLocation = async (incubatorSlot, newLocation) => {
     if (!incubatorControlService) return;
@@ -86,38 +113,6 @@ const SampleSelector = ({
     }
   };
 
-  // Connect to robotic arm service when real microscope is selected
-  useEffect(() => {
-    const connectToRoboticArm = async () => {
-      if (isRealMicroscopeSelected && !roboticArmService) {
-        try {
-          const robotic_arm_id = "reef-imaging/mirror-robotic-arm-control";
-          
-          // This is a placeholder for the actual connection method
-          // In a real application, you would need to properly connect to the service
-          const service = {
-            connect: async () => addWorkflowMessage("Connected to robotic arm"),
-            disconnect: async () => addWorkflowMessage("Disconnected from robotic arm"),
-            light_on: async () => addWorkflowMessage("Robotic arm light turned on"),
-            light_off: async () => addWorkflowMessage("Robotic arm light turned off"),
-            grab_sample_from_incubator: async () => addWorkflowMessage("Sample grabbed from incubator"),
-            incubator_to_microscope: async (microscopeNumber) => addWorkflowMessage(`Sample transported to microscope ${microscopeNumber}`),
-            microscope_to_incubator: async (microscopeNumber) => addWorkflowMessage(`Sample transported from microscope ${microscopeNumber} to incubator`),
-            put_sample_on_incubator: async () => addWorkflowMessage("Sample placed on incubator")
-          };
-          
-          setRoboticArmServiceState(service);
-          addWorkflowMessage("Robotic arm service initialized");
-        } catch (error) {
-          console.error("Failed to connect to robotic arm service:", error);
-          setLoadingStatus("Failed to connect to robotic arm. Please try again.");
-          setTimeout(() => setLoadingStatus(''), 6000);
-        }
-      }
-    };
-
-    connectToRoboticArm();
-  }, [isRealMicroscopeSelected, roboticArmService]);
 
   // Load current data alias when component becomes visible
   useEffect(() => {
@@ -204,6 +199,19 @@ const SampleSelector = ({
     fetchIncubatorData();
   }, [selectedMicroscopeId, incubatorControlService, currentMicroscopeNumber]);
 
+  // Check transport queue status periodically and when operations complete
+  useEffect(() => {
+    if (isRealMicroscopeSelected && orchestratorManagerService) {
+      // Check immediately
+      checkTransportQueueStatus();
+      
+      // Set up periodic checking every 5 seconds
+      const interval = setInterval(checkTransportQueueStatus, 5000);
+      
+      return () => clearInterval(interval);
+    }
+  }, [isRealMicroscopeSelected, orchestratorManagerService]);
+
   const handleSampleSelect = (sampleId) => {
     if (isSampleLoaded) {
       // If a sample is loaded, only allow re-selecting the currently loaded sample.
@@ -251,9 +259,9 @@ const SampleSelector = ({
       }
     } else { // Real Microscope
       console.log(`[SampleSelector] Loading sample on microscope. Selected ID: ${selectedMicroscopeId}`);
-      if (!microscopeControlService) {
-        addWorkflowMessage("Error: No microscope service available");
-        setLoadingStatus('Error: No microscope service available');
+      if (!orchestratorManagerService) {
+        addWorkflowMessage("Error: No orchestrator service available");
+        setLoadingStatus('Error: No orchestrator service available');
         setTimeout(() => setLoadingStatus(''), 3000);
         return;
       }
@@ -268,44 +276,30 @@ const SampleSelector = ({
         if (!slotMatch) throw new Error("Invalid slot ID format");
         const incubatorSlot = parseInt(slotMatch[1], 10);
 
-        addWorkflowMessage(`Loading sample from incubator slot ${incubatorSlot}`);
-        const sampleStatus = await incubatorControlService.get_sample_status(incubatorSlot);
-        addWorkflowMessage(`Sample status: ${sampleStatus}`);
-        if (sampleStatus !== "IN") throw new Error("Plate is not inside incubator");
+        // Convert full service ID to the format expected by orchestrator
+        const microscopeIdForOrchestrator = getMicroscopeIdForOrchestrator(selectedMicroscopeId);
         
-        const armService = roboticArmService || roboticArmServiceState;
-        if (!armService) throw new Error("Robotic arm service not available");
+        addWorkflowMessage(`Queuing load operation for incubator slot ${incubatorSlot} to microscope ${microscopeIdForOrchestrator}`);
         
-        addWorkflowMessage("Getting sample from slot to transfer station and homing microscope stage simultaneously");
+        // Use orchestrator service to handle the entire load operation
+        const result = await orchestratorManagerService.load_plate_from_incubator_to_microscope(
+          incubatorSlot, 
+          microscopeIdForOrchestrator
+        );
         
-        // Start both operations concurrently
-        const [transferResult, homeResult] = await Promise.all([
-          incubatorControlService.get_sample_from_slot_to_transfer_station(incubatorSlot),
-          microscopeControlService.home_stage()
-        ]);
+        if (result && result.success) {
+          addWorkflowMessage("Sample plate successfully loaded onto microscope stage");
+          setLoadingStatus('Sample successfully loaded onto microscope.');
+          setIsSampleLoaded(true);
+          setLoadedSampleOnMicroscope(selectedSampleId);
+          // Refresh incubator data to get updated locations
+          await fetchIncubatorData();
+          // Check transport queue status after operation
+          await checkTransportQueueStatus();
+        } else {
+          throw new Error(result ? result.message : 'Unknown error from orchestrator');
+        }
         
-        await updateSampleLocation(incubatorSlot, "incubator_station");
-        addWorkflowMessage("Plate loaded onto transfer station");
-        addWorkflowMessage(`Microscope ${expectedMicroscopeNumber} stage homed successfully`);
-        
-        await armService.connect();
-        await armService.light_on();
-        
-        await updateSampleLocation(incubatorSlot, "robotic_arm");
-        addWorkflowMessage(`Transporting sample to microscope ${expectedMicroscopeNumber}`);
-        await armService.incubator_to_microscope(expectedMicroscopeNumber);
-        
-        await updateSampleLocation(incubatorSlot, `microscope${expectedMicroscopeNumber}`);
-        addWorkflowMessage("Sample placed on microscope");
-        
-        await microscopeControlService.return_stage();
-        await armService.light_off();
-        await armService.disconnect();
-        
-        addWorkflowMessage("Sample plate successfully loaded onto microscope stage");
-        setLoadingStatus('Sample successfully loaded onto microscope.');
-        setIsSampleLoaded(true);
-        setLoadedSampleOnMicroscope(selectedSampleId);
         setCurrentOperation(null);
         setTimeout(() => setLoadingStatus(''), 3000);
       } catch (error) {
@@ -313,15 +307,6 @@ const SampleSelector = ({
         addWorkflowMessage(`Error: ${error.message}`);
         setLoadingStatus(`Error loading sample: ${error.message}`);
         setCurrentOperation(null);
-        // Attempt to revert location if arm transfer failed mid-way
-        const slotMatch = selectedSampleId.match(/slot-(\d+)/);
-        if(slotMatch){
-            const incubatorSlot = parseInt(slotMatch[1], 10);
-            const currentSlotInfo = incubatorSlots.find(s => s.id === selectedSampleId);
-            if(currentSlotInfo && currentSlotInfo.location !== 'incubator_slot'){
-                try { await updateSampleLocation(incubatorSlot, "incubator_slot"); } catch (e) { console.error("Error reverting location:", e);}
-            }
-        }
         setTimeout(() => setLoadingStatus(''), 3000);
       }
     }
@@ -365,9 +350,9 @@ const SampleSelector = ({
         return;
       }
       console.log(`[SampleSelector] Unloading sample ${sampleToUnloadId} from microscope ${selectedMicroscopeId}`);
-      if (!microscopeControlService) { 
-        addWorkflowMessage("Error: No microscope service available");
-        setLoadingStatus('Error: No microscope service available');
+      if (!orchestratorManagerService) { 
+        addWorkflowMessage("Error: No orchestrator service available");
+        setLoadingStatus('Error: No orchestrator service available');
         setTimeout(() => setLoadingStatus(''), 3000);
         return;
       }
@@ -382,41 +367,31 @@ const SampleSelector = ({
         if (!slotMatch) throw new Error("Invalid slot ID format for unloading");
         const incubatorSlot = parseInt(slotMatch[1], 10);
 
-        addWorkflowMessage(`Unloading sample to incubator slot ${incubatorSlot}`);
-        const selectedSlotInfo = incubatorSlots.find(slot => slot.id === sampleToUnloadId);
-        if (!selectedSlotInfo || selectedSlotInfo.location !== `microscope${expectedMicroscopeNumber}`) {
-          throw new Error(`Sample ${sampleToUnloadId} is not on microscope ${expectedMicroscopeNumber}. Location: ${selectedSlotInfo?.location}`);
+        // Convert full service ID to the format expected by orchestrator
+        const microscopeIdForOrchestrator = getMicroscopeIdForOrchestrator(selectedMicroscopeId);
+        
+        addWorkflowMessage(`Queuing unload operation for incubator slot ${incubatorSlot} from microscope ${microscopeIdForOrchestrator}`);
+        
+        // Use orchestrator service to handle the entire unload operation
+        const result = await orchestratorManagerService.unload_plate_from_microscope(
+          incubatorSlot, 
+          microscopeIdForOrchestrator
+        );
+        
+        if (result && result.success) {
+          addWorkflowMessage("Sample successfully unloaded from the microscopy stage");
+          setLoadingStatus('Sample successfully unloaded to incubator.');
+          setIsSampleLoaded(false);
+          setLoadedSampleOnMicroscope(null);
+          setSelectedSampleId(null);
+          // Refresh incubator data to get updated locations
+          await fetchIncubatorData();
+          // Check transport queue status after operation
+          await checkTransportQueueStatus();
+        } else {
+          throw new Error(result ? result.message : 'Unknown error from orchestrator');
         }
         
-        const armService = roboticArmService || roboticArmServiceState;
-        if (!armService) throw new Error("Robotic arm service not available");
-        
-        addWorkflowMessage(`Homing microscope stage for Microscope ${expectedMicroscopeNumber}`);
-        await microscopeControlService.home_stage();
-        addWorkflowMessage(`Microscope ${expectedMicroscopeNumber} stage homed successfully`);
-        
-        await armService.connect();
-        await armService.light_on();
-        
-        await updateSampleLocation(incubatorSlot, "robotic_arm");
-        addWorkflowMessage(`Transporting sample from microscope ${expectedMicroscopeNumber} to incubator`);
-        await armService.microscope_to_incubator(expectedMicroscopeNumber);
-        await updateSampleLocation(incubatorSlot, "incubator_station");
-        addWorkflowMessage("Sample transported to incubator transfer station");
-        
-        await incubatorControlService.put_sample_from_transfer_station_to_slot(incubatorSlot);
-        await updateSampleLocation(incubatorSlot, "incubator_slot"); // This will trigger fetchIncubatorData
-        addWorkflowMessage("Sample moved to incubator slot");
-        
-        await microscopeControlService.return_stage();
-        await armService.light_off();
-        await armService.disconnect();
-        
-        addWorkflowMessage("Sample successfully unloaded from the microscopy stage");
-        setLoadingStatus('Sample successfully unloaded to incubator.');
-        setIsSampleLoaded(false);
-        setLoadedSampleOnMicroscope(null);
-        setSelectedSampleId(null);
         setCurrentOperation(null);
         setTimeout(() => setLoadingStatus(''), 3000);
       } catch (error) {
@@ -602,7 +577,7 @@ SampleSelector.propTypes = {
   selectedMicroscopeId: PropTypes.string.isRequired,
   microscopeControlService: PropTypes.object,
   incubatorControlService: PropTypes.object,
-  roboticArmService: PropTypes.object,
+  orchestratorManagerService: PropTypes.object,
   currentOperation: PropTypes.string,
   setCurrentOperation: PropTypes.func.isRequired,
   onSampleLoadStatusChange: PropTypes.func.isRequired,
