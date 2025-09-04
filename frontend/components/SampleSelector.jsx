@@ -475,7 +475,7 @@ const SampleSelector = ({
             </button>
           ) : isSampleLoaded ? (
             <button 
-              className="sample-button"
+              className="sample-button unload-button"
               onClick={handleUnloadSample}
               disabled={currentOperation !== null || microscopeBusy || 
                           (isSimulatedMicroscopeSelected && selectedSampleId === null) || 
@@ -487,7 +487,7 @@ const SampleSelector = ({
             </button>
           ) : (
             <button 
-              className="sample-button"
+              className="sample-button load-button"
               onClick={handleLoadSample}
               disabled={!selectedSampleId || currentOperation !== null || microscopeBusy ||
                           (isRealMicroscopeSelected && incubatorSlots.find(s=>s.id === selectedSampleId)?.location !== 'incubator_slot')
@@ -518,7 +518,7 @@ const SampleSelector = ({
           {isRealMicroscopeSelected && incubatorSlots.length > 0 && incubatorSlots.map(slot => (
             <div
               key={slot.id}
-              className={`sample-item ${getSampleButtonClass(slot).includes('active') ? 'selected' : ''}`}
+              className={`sample-item ${getSampleButtonClass(slot).includes('active') ? 'selected' : ''} ${!canSelectSample(slot) ? 'unavailable' : ''}`}
               onClick={() => currentOperation === null && canSelectSample(slot) ? handleSampleSelect(slot.id) : null}
               style={{ cursor: currentOperation !== null || !canSelectSample(slot) ? 'not-allowed' : 'pointer' }}
             >
