@@ -4,7 +4,6 @@ and handling file uploads and downloads.
 """
 
 import httpx
-from hypha_rpc.rpc import RemoteException
 import asyncio
 import os
 import io
@@ -14,14 +13,9 @@ from PIL import Image
 import numpy as np
 import base64
 import numcodecs
-import blosc
 import aiohttp
-from collections import deque
-import zarr
-from zarr.storage import LRUStoreCache, FSStore
 import time
 from asyncio import Lock
-import threading
 import json
 import uuid
 # Configure logging

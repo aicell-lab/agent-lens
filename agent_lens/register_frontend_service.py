@@ -4,7 +4,7 @@ that serves the frontend application.
 """
 
 import os
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi import UploadFile, File, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -12,22 +12,18 @@ from agent_lens.artifact_manager import ZarrTileManager, AgentLensArtifactManage
 from hypha_rpc import connect_to_server
 import base64
 import io
-import httpx
 import numpy as np
 from PIL import Image
 # CLIP and Torch for embeddings
 import clip
 import torch
 # Import scikit-image for more professional bioimage processing
-from skimage import exposure, util, color
+from skimage import exposure, util
 import sys
-import asyncio
 from fastapi.middleware.gzip import GZipMiddleware
 import hashlib
 import time
 import uuid
-from starlette.requests import ClientDisconnect  # Import at the top of the function or module
-from starlette.responses import Response as StarletteResponse # Import for 499 response
 
 # Configure logging
 from .log import setup_logging
