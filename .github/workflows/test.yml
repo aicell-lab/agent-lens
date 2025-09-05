@@ -174,12 +174,7 @@ jobs:
       run: |
         echo "⚡ Running backend fast tests..."
         # Use timeout and kill any hanging processes
-        timeout 600 python scripts/run_tests.py --backend-only --type fast --verbose || {
-          echo "Test run completed with timeout/error"
-          # Kill any remaining Python processes to prevent hanging
-          pkill -f python || true
-          sleep 2
-        }
+        timeout 600 python scripts/run_tests.py --backend-only --type fast --verbose
         
     - name: Step 3 - Run frontend service tests (Playwright with Coverage)
       env:
@@ -193,11 +188,10 @@ jobs:
           echo "Testing network connectivity..."
           curl -s https://hypha.aicell.io || echo "Network test failed, but continuing..."
           # Run Playwright tests with coverage enabled
-          timeout 300 python -m pytest tests/test_frontend_service.py -v -s || echo "Frontend service tests completed with timeout/error"
+          timeout 300 python -m pytest tests/test_frontend_service.py -v -s
         else
           echo "⚠️ Skipping frontend service tests - WORKSPACE_TOKEN not available"
         fi
-      continue-on-error: true
     
     - name: Upload frontend Playwright coverage reports as artifacts
       uses: actions/upload-artifact@v4
@@ -217,11 +211,10 @@ jobs:
           # Test network connectivity first
           echo "Testing network connectivity..."
           curl -s https://hypha.aicell.io || echo "Network test failed, but continuing..."
-          timeout 600 python scripts/run_tests.py --backend-only --type integration --verbose || echo "Integration tests completed with timeout/error"
+          timeout 600 python scripts/run_tests.py --backend-only --type integration --verbose
         else
           echo "⚠️ Skipping integration tests - WORKSPACE_TOKEN not available"
         fi
-      continue-on-error: true
     
     - name: Generate test coverage report
       env:
