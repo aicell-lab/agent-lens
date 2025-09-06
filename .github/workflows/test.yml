@@ -4,7 +4,7 @@ on: push
 
 jobs:
   test-step-by-step:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container:
       image: python:3.11-slim
     strategy:
@@ -169,6 +169,7 @@ jobs:
     - name: Step 2 - Run backend fast tests (non-slow)
       env:
         WORKSPACE_TOKEN: ${{ secrets.WORKSPACE_TOKEN }}
+        HYPHA_AGENTS_TOKEN: ${{ secrets.HYPHA_AGENTS_TOKEN }}
         PYTHONUNBUFFERED: 1
         PYTEST_TIMEOUT: 300
       run: |
@@ -204,6 +205,7 @@ jobs:
     - name: Step 4 - Run backend integration tests (if token available)
       env:
         WORKSPACE_TOKEN: ${{ secrets.WORKSPACE_TOKEN }}
+        HYPHA_AGENTS_TOKEN: ${{ secrets.HYPHA_AGENTS_TOKEN }}
         PYTHONUNBUFFERED: 1
       run: |
         echo "🔗 Running backend integration tests..."

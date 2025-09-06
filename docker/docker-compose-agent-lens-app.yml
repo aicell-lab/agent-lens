@@ -3,7 +3,7 @@ services:
     image: ghcr.io/aicell-lab/agent-lens:sha-e37c5f1
     container_name: agent-lens
     environment:
-      - WORKSPACE_TOKEN=${AGENT_LENS_WORKSPACE_TOKEN}
+      - WORKSPACE_TOKEN=${WORKSPACE_TOKEN}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - CLIP_CACHE=/app/.cache
       - JWT_SECRET=${JWT_SECRET}
@@ -43,7 +43,7 @@ services:
       - WORKSPACE_TOKEN_CHATBOT=${WORKSPACE_TOKEN_CHATBOT}
       - REEF_WORKSPACE_TOKEN=${REEF_WORKSPACE_TOKEN}
       - MICROSCOPE_SERVICE_ID=${MICROSCOPE_SERVICE_ID}
-      - AGENT_LENS_WORKSPACE_TOKEN=${AGENT_LENS_WORKSPACE_TOKEN}
+      - WORKSPACE_TOKEN=${WORKSPACE_TOKEN}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
     labels:
       - "autoheal.enable=true"

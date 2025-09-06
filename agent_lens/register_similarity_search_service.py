@@ -589,11 +589,11 @@ async def start_hypha_service(server, service_id="image-text-similarity-search")
 
 async def setup():
     server_url = os.getenv("HYPHA_SERVER_URL", "https://hypha.aicell.io")
-    token = os.getenv("AGENT_LENS_WORKSPACE_TOKEN")
+    token = os.getenv("WORKSPACE_TOKEN")
     workspace_name = os.getenv("HYPHA_WORKSPACE", "agent-lens") 
 
     if not token:
-        print("Error: AGENT_LENS_WORKSPACE_TOKEN environment variable not set.")
+        print("Error: WORKSPACE_TOKEN environment variable not set.")
         return
         
     server = await connect_to_server({

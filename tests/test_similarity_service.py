@@ -37,6 +37,8 @@ class TestWeaviateSimilarityService:
     async def weaviate_service(self):
         """Fixture to get Weaviate service connection."""
         token = os.getenv("HYPHA_AGENTS_TOKEN")
+        if not token:
+            raise ValueError("HYPHA_AGENTS_TOKEN not set in environment - required for Weaviate tests")
         server = await connect_to_server({
             "server_url": "https://hypha.aicell.io",
             "workspace": "hypha-agents",
