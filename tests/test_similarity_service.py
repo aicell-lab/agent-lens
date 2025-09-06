@@ -36,14 +36,14 @@ class TestWeaviateSimilarityService:
     @pytest.fixture
     async def weaviate_service(self):
         """Fixture to get Weaviate service connection."""
-        token = os.getenv("ARIA_AGENTS_TOKEN")
+        token = os.getenv("HYPHA_AGENTS_TOKEN")
         server = await connect_to_server({
             "server_url": "https://hypha.aicell.io",
-            "workspace": "aria-agents",
+            "workspace": "hypha-agents",
             "token": token
         })
         
-        weaviate = await server.get_service("aria-agents/weaviate", mode="first")
+        weaviate = await server.get_service("hypha-agents/weaviate", mode="first")
         
         yield weaviate
         
