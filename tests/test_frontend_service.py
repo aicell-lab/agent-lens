@@ -840,7 +840,7 @@ async def test_frontend_simulated_microscope_controls(test_frontend_service):
             
             # Test simulated sample loading if sample selector is available
             print("🔍 Testing simulated sample loading...")
-            sample_selector = page.locator('button:has-text("Select Samples"), .sample-selector-button').first
+            sample_selector = page.locator('button:has-text("Samples"), button .fa-flask, button:has-text("Select Samples"), .sample-selector-button').first
             if await sample_selector.count() > 0:
                 try:
                     await sample_selector.click()
@@ -1243,9 +1243,38 @@ async def test_frontend_webrtc_operations(test_frontend_service):
             # Wait for microscope control panel to load
             await page.wait_for_timeout(3000)
             
+            # First, try to open the control panel
+            print("🔍 Looking for Controls button to open control panel...")
+            control_button_selectors = [
+                'button:has-text("Controls")',
+                '.control-toggle',
+                'button:has-text("Control")',
+                '.floating-panel-toggle'
+            ]
+            
+            control_panel_opened = False
+            for selector in control_button_selectors:
+                try:
+                    control_button = page.locator(selector).first
+                    if await control_button.count() > 0:
+                        await control_button.click()
+                        await page.wait_for_timeout(2000)  # Wait for panel to open
+                        print(f"✅ Clicked Controls button (selector: {selector})")
+                        control_panel_opened = True
+                        break
+                except Exception as e:
+                    print(f"  - Selector '{selector}' failed: {e}")
+                    continue
+            
+            if not control_panel_opened:
+                print("⚠️  Could not find or click Controls button - testing controls without opening panel")
+            
             # Look for WebRTC start button and start streaming
             print("🔍 Starting WebRTC streaming...")
             webrtc_selectors = [
+                '.control-panel button:has-text("Start Live")',
+                '.control-panel .live-button:has-text("Start Live")',
+                '.control-panel button[title*="Start Live"]',
                 'button:has-text("Start Live")',
                 '.live-button:has-text("Start Live")',
                 'button[title*="Start Live"]'
@@ -1271,6 +1300,9 @@ async def test_frontend_webrtc_operations(test_frontend_service):
             # Check if WebRTC is active by looking for stop button
             print("🔍 Verifying WebRTC is active...")
             stop_button_selectors = [
+                '.control-panel button:has-text("Stop Live")',
+                '.control-panel .live-button:has-text("Stop Live")',
+                '.control-panel button[title*="Stop Live"]',
                 'button:has-text("Stop Live")',
                 '.live-button:has-text("Stop Live")',
                 'button[title*="Stop Live"]'
@@ -1490,7 +1522,7 @@ async def test_frontend_webrtc_operations(test_frontend_service):
             # TEST 1: Verify New Task button behavior for simulated microscope
             print("🧪 TEST 1: Verifying 'New Task' button behavior for simulated microscope...")
             
-            new_task_button = page.locator('button:has-text("New Task")').first
+            new_task_button = page.locator('.control-panel button:has-text("New Task"), button:has-text("New Task")').first
             if await new_task_button.count() > 0:
                 is_disabled = await new_task_button.get_attribute('disabled')
                 button_title = await new_task_button.get_attribute('title')
@@ -1523,9 +1555,10 @@ async def test_frontend_webrtc_operations(test_frontend_service):
             
             # Open sample selector
             sample_selector_selectors = [
+                'button:has-text("Samples")',
+                'button .fa-flask',
                 'button:has-text("Select Samples")',
-                '.sample-selector-toggle-button',
-                'button .fa-flask'
+                '.sample-selector-toggle-button'
             ]
             
             sample_selector_opened = False
