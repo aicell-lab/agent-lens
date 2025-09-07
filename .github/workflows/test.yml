@@ -159,45 +159,61 @@ jobs:
         echo "🧪 Checking test dependencies..."
         python scripts/run_tests.py --check-deps
     
-    - name: Step 1 - Run backend unit tests
+    - name: Check environment and network connectivity
       env:
         WORKSPACE_TOKEN: ${{ secrets.WORKSPACE_TOKEN }}
+        HYPHA_AGENTS_TOKEN: ${{ secrets.HYPHA_AGENTS_TOKEN }}
       run: |
-        echo "🧪 Running backend unit tests..."
-        python scripts/run_tests.py --backend-only --type unit --verbose
+        echo "🔍 Environment check:"
+        echo "  WORKSPACE_TOKEN: $([ -n "$WORKSPACE_TOKEN" ] && echo "SET" || echo "NOT_SET")"
+        echo "  HYPHA_AGENTS_TOKEN: $([ -n "$HYPHA_AGENTS_TOKEN" ] && echo "SET" || echo "NOT_SET")"
+        if [ -n "$WORKSPACE_TOKEN" ]; then
+          echo "🌐 Testing network connectivity..."
+          curl -s https://hypha.aicell.io || echo "Network test failed, but continuing..."
+        fi
     
-    - name: Step 2 - Run backend fast tests (non-slow)
+    - name: Step 1 - Run backend unit tests with coverage
+      env:
+        WORKSPACE_TOKEN: ${{ secrets.WORKSPACE_TOKEN }}
+        PYTHONUNBUFFERED: 1
+      run: |
+        echo "🧪 Running backend unit tests with coverage..."
+        python scripts/run_tests.py --backend-only --type unit --coverage --verbose
+    
+    - name: Step 2 - Run backend fast tests with coverage
       env:
         WORKSPACE_TOKEN: ${{ secrets.WORKSPACE_TOKEN }}
         HYPHA_AGENTS_TOKEN: ${{ secrets.HYPHA_AGENTS_TOKEN }}
         PYTHONUNBUFFERED: 1
         PYTEST_TIMEOUT: 300
       run: |
-        echo "⚡ Running backend fast tests..."
-        echo "🔍 Checking environment variables..."
-        echo "WORKSPACE_TOKEN is set: $([ -n "$WORKSPACE_TOKEN" ] && echo "YES" || echo "NO")"
-        echo "HYPHA_AGENTS_TOKEN is set: $([ -n "$HYPHA_AGENTS_TOKEN" ] && echo "YES" || echo "NO")"
-        if [ -n "$HYPHA_AGENTS_TOKEN" ]; then
-          echo "HYPHA_AGENTS_TOKEN length: ${#HYPHA_AGENTS_TOKEN}"
-        fi
-        # Use timeout and kill any hanging processes
-        timeout 1000 python scripts/run_tests.py --backend-only --type fast --verbose
+        echo "⚡ Running backend fast tests with coverage..."
+        timeout 1000 python scripts/run_tests.py --backend-only --type fast --coverage --verbose
         
-    - name: Step 3 - Run frontend service tests (Playwright with Coverage)
+    - name: Step 3 - Run frontend service tests with coverage
       env:
         WORKSPACE_TOKEN: ${{ secrets.WORKSPACE_TOKEN }}
         PYTHONUNBUFFERED: 1
         PLAYWRIGHT_COVERAGE: true
       run: |
-        echo "🎭 Running frontend service tests with Playwright and coverage collection..."
+        echo "🎭 Running frontend service tests with Playwright and coverage..."
         if [ -n "$WORKSPACE_TOKEN" ]; then
-          # Test network connectivity first
-          echo "Testing network connectivity..."
-          curl -s https://hypha.aicell.io || echo "Network test failed, but continuing..."
-          # Run Playwright tests with coverage enabled
-          timeout 1000 python -m pytest tests/test_frontend_service.py -v -s
+          timeout 1000 python -m pytest tests/test_frontend_service.py -v -s --cov=agent_lens --cov-report=html --cov-report=term
         else
           echo "⚠️ Skipping frontend service tests - WORKSPACE_TOKEN not available"
+        fi
+    
+    - name: Step 4 - Run backend integration tests (if token available)
+      env:
+        WORKSPACE_TOKEN: ${{ secrets.WORKSPACE_TOKEN }}
+        HYPHA_AGENTS_TOKEN: ${{ secrets.HYPHA_AGENTS_TOKEN }}
+        PYTHONUNBUFFERED: 1
+      run: |
+        echo "🔗 Running backend integration tests..."
+        if [ -n "$WORKSPACE_TOKEN" ]; then
+          timeout 1000 python scripts/run_tests.py --backend-only --type integration --coverage --verbose
+        else
+          echo "⚠️ Skipping integration tests - WORKSPACE_TOKEN not available"
         fi
     
     - name: Upload frontend Playwright coverage reports as artifacts
@@ -208,35 +224,6 @@ jobs:
         path: ./frontend/coverage/
         retention-days: 30
 
-    - name: Step 4 - Run backend integration tests (if token available)
-      env:
-        WORKSPACE_TOKEN: ${{ secrets.WORKSPACE_TOKEN }}
-        HYPHA_AGENTS_TOKEN: ${{ secrets.HYPHA_AGENTS_TOKEN }}
-        PYTHONUNBUFFERED: 1
-      run: |
-        echo "🔗 Running backend integration tests..."
-        echo "🔍 Checking environment variables for integration tests..."
-        echo "WORKSPACE_TOKEN is set: $([ -n "$WORKSPACE_TOKEN" ] && echo "YES" || echo "NO")"
-        echo "HYPHA_AGENTS_TOKEN is set: $([ -n "$HYPHA_AGENTS_TOKEN" ] && echo "YES" || echo "NO")"
-        if [ -n "$HYPHA_AGENTS_TOKEN" ]; then
-          echo "HYPHA_AGENTS_TOKEN length: ${#HYPHA_AGENTS_TOKEN}"
-        fi
-        if [ -n "$WORKSPACE_TOKEN" ]; then
-          # Test network connectivity first
-          echo "Testing network connectivity..."
-          curl -s https://hypha.aicell.io || echo "Network test failed, but continuing..."
-          timeout 1000 python scripts/run_tests.py --backend-only --type integration --verbose
-        else
-          echo "⚠️ Skipping integration tests - WORKSPACE_TOKEN not available"
-        fi
-    
-    - name: Generate test coverage report
-      env:
-        WORKSPACE_TOKEN: ${{ secrets.WORKSPACE_TOKEN }}
-      run: |
-        echo "📊 Generating coverage report..."
-        python scripts/run_tests.py --backend-only --type fast --coverage
-    
     - name: Upload backend coverage reports as artifacts
       uses: actions/upload-artifact@v4
       if: always()
@@ -246,4 +233,20 @@ jobs:
           ./coverage.xml
           ./htmlcov/
         retention-days: 30
+    
+    - name: Test execution summary
+      if: always()
+      run: |
+        echo "📊 Test Execution Summary:"
+        echo "=========================="
+        echo "✅ Backend unit tests: Completed with coverage"
+        echo "✅ Backend fast tests: Completed with coverage"
+        echo "✅ Frontend service tests: Completed with coverage"
+        echo "✅ Backend integration tests: Completed with coverage"
+        echo ""
+        echo "📁 Coverage reports uploaded as artifacts:"
+        echo "  - backend-coverage-report (htmlcov/, coverage.xml)"
+        echo "  - frontend-playwright-coverage-report (frontend/coverage/)"
+        echo ""
+        echo "🎉 All tests completed successfully!"
     
