@@ -174,6 +174,12 @@ jobs:
         PYTEST_TIMEOUT: 300
       run: |
         echo "⚡ Running backend fast tests..."
+        echo "🔍 Checking environment variables..."
+        echo "WORKSPACE_TOKEN is set: $([ -n "$WORKSPACE_TOKEN" ] && echo "YES" || echo "NO")"
+        echo "HYPHA_AGENTS_TOKEN is set: $([ -n "$HYPHA_AGENTS_TOKEN" ] && echo "YES" || echo "NO")"
+        if [ -n "$HYPHA_AGENTS_TOKEN" ]; then
+          echo "HYPHA_AGENTS_TOKEN length: ${#HYPHA_AGENTS_TOKEN}"
+        fi
         # Use timeout and kill any hanging processes
         timeout 1000 python scripts/run_tests.py --backend-only --type fast --verbose
         
@@ -209,6 +215,12 @@ jobs:
         PYTHONUNBUFFERED: 1
       run: |
         echo "🔗 Running backend integration tests..."
+        echo "🔍 Checking environment variables for integration tests..."
+        echo "WORKSPACE_TOKEN is set: $([ -n "$WORKSPACE_TOKEN" ] && echo "YES" || echo "NO")"
+        echo "HYPHA_AGENTS_TOKEN is set: $([ -n "$HYPHA_AGENTS_TOKEN" ] && echo "YES" || echo "NO")"
+        if [ -n "$HYPHA_AGENTS_TOKEN" ]; then
+          echo "HYPHA_AGENTS_TOKEN length: ${#HYPHA_AGENTS_TOKEN}"
+        fi
         if [ -n "$WORKSPACE_TOKEN" ]; then
           # Test network connectivity first
           echo "Testing network connectivity..."
