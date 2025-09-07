@@ -779,13 +779,39 @@ async def test_frontend_simulated_microscope_controls(test_frontend_service):
             else:
                 print("ℹ️  Simulated microscope option not immediately visible")
             
-            # Test common microscope controls
+            # First, try to open the control panel
+            print("🔍 Looking for Controls button to open control panel...")
+            control_button_selectors = [
+                'button:has-text("Controls")',
+                '.control-toggle',
+                'button:has-text("Control")',
+                '.floating-panel-toggle'
+            ]
+            
+            control_panel_opened = False
+            for selector in control_button_selectors:
+                try:
+                    control_button = page.locator(selector).first
+                    if await control_button.count() > 0:
+                        await control_button.click()
+                        await page.wait_for_timeout(2000)  # Wait for panel to open
+                        print(f"✅ Clicked Controls button (selector: {selector})")
+                        control_panel_opened = True
+                        break
+                except Exception as e:
+                    print(f"  - Selector '{selector}' failed: {e}")
+                    continue
+            
+            if not control_panel_opened:
+                print("⚠️  Could not find or click Controls button - testing controls without opening panel")
+            
+            # Test common microscope controls - now in floating control panel
             microscope_controls = [
-                {'name': 'Snap Image', 'selectors': ['button:has-text("Snap Image")', '[data-action="snap"]', '.snap-button']},
-                {'name': 'Move Controls', 'selectors': ['.movement-controls', '.position-controls', 'button:has-text("Move")']},
-                {'name': 'Light Controls', 'selectors': ['.light-controls', 'button:has-text("Light")', '.illumination-controls']},
-                {'name': 'Sample Selector', 'selectors': ['button:has-text("Select Samples")', '.sample-selector', '[data-action="samples"]']},
-                {'name': 'Camera Settings', 'selectors': ['.camera-settings', 'button:has-text("Camera")', '.exposure-controls']},
+                {'name': 'Snap Image', 'selectors': ['.control-panel button:has-text("Snap")', '.snap-button', 'button:has-text("Snap Image")']},
+                {'name': 'Move Controls', 'selectors': ['.control-panel .coordinate-container', '.control-panel .coordinate-group', '.movement-controls']},
+                {'name': 'Light Controls', 'selectors': ['.control-panel .illumination-settings', '.control-panel .illumination-intensity', '.light-controls']},
+                {'name': 'Sample Selector', 'selectors': ['button:has-text("Samples")', '.sample-selector', '[data-action="samples"]']},
+                {'name': 'Camera Settings', 'selectors': ['.control-panel .camera-settings', '.control-panel .exposure-controls', '.camera-settings']},
             ]
             
             for control in microscope_controls:
@@ -814,7 +840,7 @@ async def test_frontend_simulated_microscope_controls(test_frontend_service):
             
             # Test simulated sample loading if sample selector is available
             print("🔍 Testing simulated sample loading...")
-            sample_selector = page.locator('button:has-text("Select Samples"), .sample-selector-button').first
+            sample_selector = page.locator('button:has-text("Samples"), button .fa-flask, button:has-text("Select Samples"), .sample-selector-button').first
             if await sample_selector.count() > 0:
                 try:
                     await sample_selector.click()
@@ -1073,7 +1099,7 @@ async def test_frontend_service_health_comprehensive(test_frontend_service):
             for i in range(3):
                 print(f"📊 Health check {i+1}/3...")
                 
-                response = await page.goto(service_url, timeout=20000)
+                response = await page.goto(service_url, timeout=30000)
                 assert response.status < 400, f"Health check {i+1} failed with status: {response.status}"
                 
                 # Wait for page to be interactive
@@ -1217,9 +1243,38 @@ async def test_frontend_webrtc_operations(test_frontend_service):
             # Wait for microscope control panel to load
             await page.wait_for_timeout(3000)
             
+            # First, try to open the control panel
+            print("🔍 Looking for Controls button to open control panel...")
+            control_button_selectors = [
+                'button:has-text("Controls")',
+                '.control-toggle',
+                'button:has-text("Control")',
+                '.floating-panel-toggle'
+            ]
+            
+            control_panel_opened = False
+            for selector in control_button_selectors:
+                try:
+                    control_button = page.locator(selector).first
+                    if await control_button.count() > 0:
+                        await control_button.click()
+                        await page.wait_for_timeout(2000)  # Wait for panel to open
+                        print(f"✅ Clicked Controls button (selector: {selector})")
+                        control_panel_opened = True
+                        break
+                except Exception as e:
+                    print(f"  - Selector '{selector}' failed: {e}")
+                    continue
+            
+            if not control_panel_opened:
+                print("⚠️  Could not find or click Controls button - testing controls without opening panel")
+            
             # Look for WebRTC start button and start streaming
             print("🔍 Starting WebRTC streaming...")
             webrtc_selectors = [
+                '.control-panel button:has-text("Start Live")',
+                '.control-panel .live-button:has-text("Start Live")',
+                '.control-panel button[title*="Start Live"]',
                 'button:has-text("Start Live")',
                 '.live-button:has-text("Start Live")',
                 'button[title*="Start Live"]'
@@ -1245,6 +1300,9 @@ async def test_frontend_webrtc_operations(test_frontend_service):
             # Check if WebRTC is active by looking for stop button
             print("🔍 Verifying WebRTC is active...")
             stop_button_selectors = [
+                '.control-panel button:has-text("Stop Live")',
+                '.control-panel .live-button:has-text("Stop Live")',
+                '.control-panel button[title*="Stop Live"]',
                 'button:has-text("Stop Live")',
                 '.live-button:has-text("Stop Live")',
                 'button[title*="Stop Live"]'
@@ -1464,7 +1522,7 @@ async def test_frontend_webrtc_operations(test_frontend_service):
             # TEST 1: Verify New Task button behavior for simulated microscope
             print("🧪 TEST 1: Verifying 'New Task' button behavior for simulated microscope...")
             
-            new_task_button = page.locator('button:has-text("New Task")').first
+            new_task_button = page.locator('.control-panel button:has-text("New Task"), button:has-text("New Task")').first
             if await new_task_button.count() > 0:
                 is_disabled = await new_task_button.get_attribute('disabled')
                 button_title = await new_task_button.get_attribute('title')
@@ -1497,9 +1555,10 @@ async def test_frontend_webrtc_operations(test_frontend_service):
             
             # Open sample selector
             sample_selector_selectors = [
+                'button:has-text("Samples")',
+                'button .fa-flask',
                 'button:has-text("Select Samples")',
-                '.sample-selector-toggle-button',
-                'button .fa-flask'
+                '.sample-selector-toggle-button'
             ]
             
             sample_selector_opened = False
@@ -1686,22 +1745,22 @@ async def test_frontend_incubator_control_slot_management(test_frontend_service)
                 },
                 {
                     'name': 'Temperature Display',
-                    'selectors': ['label:has-text("Temperature")', 'input[type="number"][readonly]'],
+                    'selectors': ['label:has-text("Temperature")', 'input[type="number"][readonly]', 'label:has-text("Temperature (°C)")'],
                     'required': True
                 },
                 {
                     'name': 'CO2 Display',
-                    'selectors': ['label:has-text("CO2")', 'input[value][readonly]'],
+                    'selectors': ['label:has-text("CO2")', 'input[type="number"][readonly]', 'label:has-text("CO2 (%)")'],
                     'required': True
                 },
                 {
                     'name': 'Microplate Slots',
-                    'selectors': ['h4:has-text("Microplate Slots")', '.grid'],
+                    'selectors': ['h4:has-text("Microplate Slots")', '.grid', 'h4:has-text("Microplate Slots")'],
                     'required': True
                 },
                 {
                     'name': 'Slot Buttons',
-                    'selectors': ['button:has-text("1")', '.grid button'],
+                    'selectors': ['button:has-text("1")', '.grid button', 'button[class*="slot"]'],
                     'required': True
                 }
             ]

@@ -1,11 +1,9 @@
 """
 This module provides the ArtifactManager class, which manages artifacts for the application.
-It includes methods for creating vector collections, adding vectors, searching vectors,
 and handling file uploads and downloads.
 """
 
 import httpx
-from hypha_rpc.rpc import RemoteException
 import asyncio
 import os
 import io
@@ -15,37 +13,15 @@ from PIL import Image
 import numpy as np
 import base64
 import numcodecs
-import blosc
 import aiohttp
-from collections import deque
-import zarr
-from zarr.storage import LRUStoreCache, FSStore
 import time
 from asyncio import Lock
-import threading
 import json
 import uuid
 # Configure logging
-import logging
-import logging.handlers
-def setup_logging(log_file="artifact_manager.log", max_bytes=100000, backup_count=3):
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-    logger = logging.getLogger(__name__)
-    logger.setLevel(logging.INFO)
+from .log import setup_logging
 
-    # Rotating file handler
-    file_handler = logging.handlers.RotatingFileHandler(log_file, maxBytes=max_bytes, backupCount=backup_count)
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
-
-    # Console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
-
-    return logger
-
-logger = setup_logging()
+logger = setup_logging("artifact_manager.log")
 
 dotenv.load_dotenv()  
 ENV_FILE = dotenv.find_dotenv()  
@@ -83,62 +59,6 @@ class AgentLensArtifactManager:
             str: The artifact ID.
         """
         return f"{workspace}/{name}"
-
-    async def create_vector_collection(
-        self, workspace, name, manifest, config, overwrite=False, exists_ok=False
-    ):
-        """
-        Create a vector collection.
-
-        Args:
-            workspace (str): The workspace.
-            name (str): The collection name.
-            manifest (dict): The collection manifest.
-            config (dict): The collection configuration.
-            overwrite (bool, optional): Whether to overwrite the existing collection.
-        """
-        art_id = self._artifact_id(workspace, name)
-        try:
-            await self._svc.create(
-                alias=art_id,
-                type="vector-collection",
-                manifest=manifest,
-                config=config,
-                overwrite=overwrite,
-            )
-        except RemoteException as e:
-            if not exists_ok:
-                raise e
-
-    async def add_vectors(self, workspace, coll_name, vectors):
-        """
-        Add vectors to the collection.
-
-        Args:
-            workspace (str): The workspace.
-            coll_name (str): The collection name.
-            vectors (list): The vectors to add.
-        """
-        art_id = self._artifact_id(workspace, coll_name)
-        await self._svc.add_vectors(artifact_id=art_id, vectors=vectors)
-
-    async def search_vectors(self, workspace, coll_name, vector, top_k=None):
-        """
-        Search for vectors in the collection.
-
-        Args:
-            workspace (str): The workspace.
-            coll_name (str): The collection name.
-            vector (ndarray): The query vector.
-            top_k (int, optional): The number of top results to return.
-
-        Returns:
-            list: The search results.
-        """
-        art_id = self._artifact_id(workspace, coll_name)
-        return await self._svc.search_vectors(
-            artifact_id=art_id, query={"cell_image_vector": vector}, limit=top_k
-        )
 
     async def add_file(self, workspace, coll_name, file_content, file_path):
         """
@@ -179,24 +99,6 @@ class AgentLensArtifactManager:
             response.raise_for_status()
 
         return response.content
-
-    async def remove_vectors(self, workspace, coll_name, vector_ids=None):
-        """
-        Clear the vectors in the collection.
-
-        Args:
-            workspace (str): The workspace.
-            coll_name (str): The collection name.
-        """
-        art_id = self._artifact_id(workspace, coll_name)
-        if vector_ids is None:
-            all_vectors = await self._svc.list_vectors(art_id)
-            while len(all_vectors) > 0:
-                vector_ids = [vector["id"] for vector in all_vectors]
-                await self._svc.remove_vectors(art_id, vector_ids)
-                all_vectors = await self._svc.list_vectors(art_id)
-        else:
-            await self._svc.remove_vectors(art_id, vector_ids)
 
     async def list_files_in_dataset(self, dataset_id):
         """

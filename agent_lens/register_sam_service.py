@@ -317,7 +317,7 @@ async def register_service(args: dict) -> None:
     """
     Register the SAM annotation service on the BioImageIO Colab workspace.
     """
-    token = os.getenv("AGENT_LENS_WORKSPACE_TOKEN")
+    token = os.getenv("WORKSPACE_TOKEN")
     server = await connect_to_server(
         {
             "client_id": f"sam-model-server-{uuid.uuid4()}",

@@ -10,7 +10,7 @@ const SampleSelector = ({
   selectedMicroscopeId, 
   microscopeControlService,
   incubatorControlService,
-  roboticArmService,
+  orchestratorManagerService,
   currentOperation,
   setCurrentOperation,
   onSampleLoadStatusChange,
@@ -20,7 +20,6 @@ const SampleSelector = ({
   const [incubatorSlots, setIncubatorSlots] = useState([]);
   const [loadingStatus, setLoadingStatus] = useState('');
   const [isSampleLoaded, setIsSampleLoaded] = useState(false);
-  const [roboticArmServiceState, setRoboticArmServiceState] = useState(null);
   const [workflowMessages, setWorkflowMessages] = useState([]);
   // Track loaded sample ID on current microscope
   const [loadedSampleOnMicroscope, setLoadedSampleOnMicroscope] = useState(null);
@@ -61,63 +60,32 @@ const SampleSelector = ({
     setWorkflowMessages([]);
   };
 
-  // Helper function to update sample location
-  const updateSampleLocation = async (incubatorSlot, newLocation) => {
-    if (!incubatorControlService) return;
+  // Helper function to convert full service ID to orchestrator microscope ID format
+  const getMicroscopeIdForOrchestrator = (fullServiceId) => {
+    if (fullServiceId.includes('squid-1')) return 'microscope-control-squid-1';
+    if (fullServiceId.includes('squid-2')) return 'microscope-control-squid-2';
+    return fullServiceId; // Fallback for other formats
+  };
+
+  // Check transport queue status
+  const checkTransportQueueStatus = async () => {
+    if (!orchestratorManagerService || !isRealMicroscopeSelected) {
+      return;
+    }
+    
     try {
-      await incubatorControlService.update_sample_location(incubatorSlot, newLocation);
-      addWorkflowMessage(`Sample location updated to: ${newLocation}`);
+      const status = await orchestratorManagerService.get_transport_queue_status();
       
-      // If this is a location related to a microscope, track the loaded sample
-      if (newLocation === 'microscope1' || newLocation === 'microscope2') {
-        setLoadedSampleOnMicroscope(`slot-${incubatorSlot}`);
-      } else if (newLocation === 'incubator_slot') {
-        // If moved back to incubator, ensure it's not marked as loaded on this scope
-        if (loadedSampleOnMicroscope === `slot-${incubatorSlot}`) {
-            setLoadedSampleOnMicroscope(null);
-        }
+      // Add status information to workflow messages if there's an active task
+      if (status && status.active_task) {
+        addWorkflowMessage(`Transport queue: ${status.active_task} (Queue size: ${status.queue_size})`);
       }
-      
-      // Refresh the slots data after location update
-      await fetchIncubatorData();
     } catch (error) {
-      console.error(`Failed to update sample location to ${newLocation}:`, error);
-      addWorkflowMessage(`Error updating sample location: ${error.message}`);
+      console.error('Failed to get transport queue status:', error);
     }
   };
 
-  // Connect to robotic arm service when real microscope is selected
-  useEffect(() => {
-    const connectToRoboticArm = async () => {
-      if (isRealMicroscopeSelected && !roboticArmService) {
-        try {
-          const robotic_arm_id = "reef-imaging/mirror-robotic-arm-control";
-          
-          // This is a placeholder for the actual connection method
-          // In a real application, you would need to properly connect to the service
-          const service = {
-            connect: async () => addWorkflowMessage("Connected to robotic arm"),
-            disconnect: async () => addWorkflowMessage("Disconnected from robotic arm"),
-            light_on: async () => addWorkflowMessage("Robotic arm light turned on"),
-            light_off: async () => addWorkflowMessage("Robotic arm light turned off"),
-            grab_sample_from_incubator: async () => addWorkflowMessage("Sample grabbed from incubator"),
-            incubator_to_microscope: async (microscopeNumber) => addWorkflowMessage(`Sample transported to microscope ${microscopeNumber}`),
-            microscope_to_incubator: async (microscopeNumber) => addWorkflowMessage(`Sample transported from microscope ${microscopeNumber} to incubator`),
-            put_sample_on_incubator: async () => addWorkflowMessage("Sample placed on incubator")
-          };
-          
-          setRoboticArmServiceState(service);
-          addWorkflowMessage("Robotic arm service initialized");
-        } catch (error) {
-          console.error("Failed to connect to robotic arm service:", error);
-          setLoadingStatus("Failed to connect to robotic arm. Please try again.");
-          setTimeout(() => setLoadingStatus(''), 6000);
-        }
-      }
-    };
 
-    connectToRoboticArm();
-  }, [isRealMicroscopeSelected, roboticArmService]);
 
   // Load current data alias when component becomes visible
   useEffect(() => {
@@ -127,7 +95,7 @@ const SampleSelector = ({
           const currentDataAlias = await microscopeControlService.get_simulated_sample_data_alias();
           // Find the sample ID that matches the current data alias
           const matchingSampleId = Object.entries(sampleDataAliases)
-            .find(([_, alias]) => alias === currentDataAlias)?.[0];
+            .find(([, alias]) => alias === currentDataAlias)?.[0];
           
           if (matchingSampleId) {
             setSelectedSampleId(matchingSampleId);
@@ -204,6 +172,19 @@ const SampleSelector = ({
     fetchIncubatorData();
   }, [selectedMicroscopeId, incubatorControlService, currentMicroscopeNumber]);
 
+  // Check transport queue status periodically and when operations complete
+  useEffect(() => {
+    if (isRealMicroscopeSelected && orchestratorManagerService) {
+      // Check immediately
+      checkTransportQueueStatus();
+      
+      // Set up periodic checking every 5 seconds
+      const interval = setInterval(checkTransportQueueStatus, 5000);
+      
+      return () => clearInterval(interval);
+    }
+  }, [isRealMicroscopeSelected, orchestratorManagerService]);
+
   const handleSampleSelect = (sampleId) => {
     if (isSampleLoaded) {
       // If a sample is loaded, only allow re-selecting the currently loaded sample.
@@ -251,9 +232,9 @@ const SampleSelector = ({
       }
     } else { // Real Microscope
       console.log(`[SampleSelector] Loading sample on microscope. Selected ID: ${selectedMicroscopeId}`);
-      if (!microscopeControlService) {
-        addWorkflowMessage("Error: No microscope service available");
-        setLoadingStatus('Error: No microscope service available');
+      if (!orchestratorManagerService) {
+        addWorkflowMessage("Error: No orchestrator service available");
+        setLoadingStatus('Error: No orchestrator service available');
         setTimeout(() => setLoadingStatus(''), 3000);
         return;
       }
@@ -268,44 +249,30 @@ const SampleSelector = ({
         if (!slotMatch) throw new Error("Invalid slot ID format");
         const incubatorSlot = parseInt(slotMatch[1], 10);
 
-        addWorkflowMessage(`Loading sample from incubator slot ${incubatorSlot}`);
-        const sampleStatus = await incubatorControlService.get_sample_status(incubatorSlot);
-        addWorkflowMessage(`Sample status: ${sampleStatus}`);
-        if (sampleStatus !== "IN") throw new Error("Plate is not inside incubator");
+        // Convert full service ID to the format expected by orchestrator
+        const microscopeIdForOrchestrator = getMicroscopeIdForOrchestrator(selectedMicroscopeId);
         
-        const armService = roboticArmService || roboticArmServiceState;
-        if (!armService) throw new Error("Robotic arm service not available");
+        addWorkflowMessage(`Queuing load operation for incubator slot ${incubatorSlot} to microscope ${microscopeIdForOrchestrator}`);
         
-        addWorkflowMessage("Getting sample from slot to transfer station and homing microscope stage simultaneously");
+        // Use orchestrator service to handle the entire load operation
+        const result = await orchestratorManagerService.load_plate_from_incubator_to_microscope(
+          incubatorSlot, 
+          microscopeIdForOrchestrator
+        );
         
-        // Start both operations concurrently
-        const [transferResult, homeResult] = await Promise.all([
-          incubatorControlService.get_sample_from_slot_to_transfer_station(incubatorSlot),
-          microscopeControlService.home_stage()
-        ]);
+        if (result && result.success) {
+          addWorkflowMessage("Sample plate successfully loaded onto microscope stage");
+          setLoadingStatus('Sample successfully loaded onto microscope.');
+          setIsSampleLoaded(true);
+          setLoadedSampleOnMicroscope(selectedSampleId);
+          // Refresh incubator data to get updated locations
+          await fetchIncubatorData();
+          // Check transport queue status after operation
+          await checkTransportQueueStatus();
+        } else {
+          throw new Error(result ? result.message : 'Unknown error from orchestrator');
+        }
         
-        await updateSampleLocation(incubatorSlot, "incubator_station");
-        addWorkflowMessage("Plate loaded onto transfer station");
-        addWorkflowMessage(`Microscope ${expectedMicroscopeNumber} stage homed successfully`);
-        
-        await armService.connect();
-        await armService.light_on();
-        
-        await updateSampleLocation(incubatorSlot, "robotic_arm");
-        addWorkflowMessage(`Transporting sample to microscope ${expectedMicroscopeNumber}`);
-        await armService.incubator_to_microscope(expectedMicroscopeNumber);
-        
-        await updateSampleLocation(incubatorSlot, `microscope${expectedMicroscopeNumber}`);
-        addWorkflowMessage("Sample placed on microscope");
-        
-        await microscopeControlService.return_stage();
-        await armService.light_off();
-        await armService.disconnect();
-        
-        addWorkflowMessage("Sample plate successfully loaded onto microscope stage");
-        setLoadingStatus('Sample successfully loaded onto microscope.');
-        setIsSampleLoaded(true);
-        setLoadedSampleOnMicroscope(selectedSampleId);
         setCurrentOperation(null);
         setTimeout(() => setLoadingStatus(''), 3000);
       } catch (error) {
@@ -313,15 +280,6 @@ const SampleSelector = ({
         addWorkflowMessage(`Error: ${error.message}`);
         setLoadingStatus(`Error loading sample: ${error.message}`);
         setCurrentOperation(null);
-        // Attempt to revert location if arm transfer failed mid-way
-        const slotMatch = selectedSampleId.match(/slot-(\d+)/);
-        if(slotMatch){
-            const incubatorSlot = parseInt(slotMatch[1], 10);
-            const currentSlotInfo = incubatorSlots.find(s => s.id === selectedSampleId);
-            if(currentSlotInfo && currentSlotInfo.location !== 'incubator_slot'){
-                try { await updateSampleLocation(incubatorSlot, "incubator_slot"); } catch (e) { console.error("Error reverting location:", e);}
-            }
-        }
         setTimeout(() => setLoadingStatus(''), 3000);
       }
     }
@@ -365,9 +323,9 @@ const SampleSelector = ({
         return;
       }
       console.log(`[SampleSelector] Unloading sample ${sampleToUnloadId} from microscope ${selectedMicroscopeId}`);
-      if (!microscopeControlService) { 
-        addWorkflowMessage("Error: No microscope service available");
-        setLoadingStatus('Error: No microscope service available');
+      if (!orchestratorManagerService) { 
+        addWorkflowMessage("Error: No orchestrator service available");
+        setLoadingStatus('Error: No orchestrator service available');
         setTimeout(() => setLoadingStatus(''), 3000);
         return;
       }
@@ -382,41 +340,31 @@ const SampleSelector = ({
         if (!slotMatch) throw new Error("Invalid slot ID format for unloading");
         const incubatorSlot = parseInt(slotMatch[1], 10);
 
-        addWorkflowMessage(`Unloading sample to incubator slot ${incubatorSlot}`);
-        const selectedSlotInfo = incubatorSlots.find(slot => slot.id === sampleToUnloadId);
-        if (!selectedSlotInfo || selectedSlotInfo.location !== `microscope${expectedMicroscopeNumber}`) {
-          throw new Error(`Sample ${sampleToUnloadId} is not on microscope ${expectedMicroscopeNumber}. Location: ${selectedSlotInfo?.location}`);
+        // Convert full service ID to the format expected by orchestrator
+        const microscopeIdForOrchestrator = getMicroscopeIdForOrchestrator(selectedMicroscopeId);
+        
+        addWorkflowMessage(`Queuing unload operation for incubator slot ${incubatorSlot} from microscope ${microscopeIdForOrchestrator}`);
+        
+        // Use orchestrator service to handle the entire unload operation
+        const result = await orchestratorManagerService.unload_plate_from_microscope(
+          incubatorSlot, 
+          microscopeIdForOrchestrator
+        );
+        
+        if (result && result.success) {
+          addWorkflowMessage("Sample successfully unloaded from the microscopy stage");
+          setLoadingStatus('Sample successfully unloaded to incubator.');
+          setIsSampleLoaded(false);
+          setLoadedSampleOnMicroscope(null);
+          setSelectedSampleId(null);
+          // Refresh incubator data to get updated locations
+          await fetchIncubatorData();
+          // Check transport queue status after operation
+          await checkTransportQueueStatus();
+        } else {
+          throw new Error(result ? result.message : 'Unknown error from orchestrator');
         }
         
-        const armService = roboticArmService || roboticArmServiceState;
-        if (!armService) throw new Error("Robotic arm service not available");
-        
-        addWorkflowMessage(`Homing microscope stage for Microscope ${expectedMicroscopeNumber}`);
-        await microscopeControlService.home_stage();
-        addWorkflowMessage(`Microscope ${expectedMicroscopeNumber} stage homed successfully`);
-        
-        await armService.connect();
-        await armService.light_on();
-        
-        await updateSampleLocation(incubatorSlot, "robotic_arm");
-        addWorkflowMessage(`Transporting sample from microscope ${expectedMicroscopeNumber} to incubator`);
-        await armService.microscope_to_incubator(expectedMicroscopeNumber);
-        await updateSampleLocation(incubatorSlot, "incubator_station");
-        addWorkflowMessage("Sample transported to incubator transfer station");
-        
-        await incubatorControlService.put_sample_from_transfer_station_to_slot(incubatorSlot);
-        await updateSampleLocation(incubatorSlot, "incubator_slot"); // This will trigger fetchIncubatorData
-        addWorkflowMessage("Sample moved to incubator slot");
-        
-        await microscopeControlService.return_stage();
-        await armService.light_off();
-        await armService.disconnect();
-        
-        addWorkflowMessage("Sample successfully unloaded from the microscopy stage");
-        setLoadingStatus('Sample successfully unloaded to incubator.');
-        setIsSampleLoaded(false);
-        setLoadedSampleOnMicroscope(null);
-        setSelectedSampleId(null);
         setCurrentOperation(null);
         setTimeout(() => setLoadingStatus(''), 3000);
       } catch (error) {
@@ -476,104 +424,95 @@ const SampleSelector = ({
   };
 
   return (
-    <div className={`sample-selector-dropdown ${!isVisible ? 'hidden' : ''}`}>
-      <h3 className="sample-sidebar-title">Select Sample</h3>
+    <div className={`sample-selector-container ${!isVisible ? 'hidden' : ''}`}>
+      {/* Live Lab Video Feed - Only show for real microscopes */}
+      {isVisible && isRealMicroscopeSelected && (
+        <div className="lab-video-feed">
+          <h5 className="video-feed-title">
+            <i className="fas fa-video mr-2"></i>
+            Live Lab Feed
+          </h5>
+          <div className="video-container">
+            <img
+              src="https://hypha.aicell.io/reef-imaging/apps/reef-live-feed/"
+              alt="Live Lab Feed"
+              className="lab-video-img"
+              onLoad={() => console.log('Lab video feed loaded')}
+              onError={() => console.log('Lab video feed failed to load')}
+            />
+          </div>
+        </div>
+      )}
       
       <div className="sample-options-container">
-        {/* Revised button rendering logic to prioritize currentOperation */}
-        {currentOperation === 'unloading' ? (
-          <button 
-            className={`unload-sample-button processing`}
-            disabled={true} // Always disabled while processing
-          >
-            <div className="button-content">
-              <i className="fas fa-spinner fa-spin"></i>
+        {/* Sample Control Buttons */}
+        <div className="sample-controls">
+          {currentOperation === 'unloading' ? (
+            <button 
+              className="sample-button"
+              disabled={true}
+            >
+              <i className="fas fa-spinner fa-spin mr-2"></i>
               <span>Unloading Sample...</span>
-            </div>
-          </button>
-        ) : currentOperation === 'loading' ? (
-          <button 
-            className={`load-sample-button processing`}
-            disabled={true} // Always disabled while processing
-          >
-            <div className="button-content">
-              <i className="fas fa-spinner fa-spin"></i>
+            </button>
+          ) : currentOperation === 'loading' ? (
+            <button 
+              className="sample-button"
+              disabled={true}
+            >
+              <i className="fas fa-spinner fa-spin mr-2"></i>
               <span>Loading Sample...</span>
-            </div>
-          </button>
-        ) : isSampleLoaded ? (
-          <button 
-            className={`unload-sample-button ${currentOperation /* Should be null here */ ? 'processing' : ''}`}
-            onClick={handleUnloadSample}
-            disabled={currentOperation !== null || microscopeBusy || 
-                        (isSimulatedMicroscopeSelected && selectedSampleId === null) || 
-                        (isRealMicroscopeSelected && loadedSampleOnMicroscope === null)
-            }
-          >
-            <div className="button-content">
-              {currentOperation === 'unloading' ? (
-                <>
-                  <i className="fas fa-spinner fa-spin"></i>
-                  <span>Unloading Sample...</span>
-                </>
-              ) : (
-                <>
-                  <i className="fas fa-download"></i>
-                  <span>Unload Sample</span>
-                </>
-              )}
-            </div>
-          </button>
-        ) : (
-          <button 
-            className={`load-sample-button ${currentOperation /* Should be null here */ ? 'processing' : ''}`}
-            onClick={handleLoadSample}
-            disabled={!selectedSampleId || currentOperation !== null || microscopeBusy ||
-                        (isRealMicroscopeSelected && incubatorSlots.find(s=>s.id === selectedSampleId)?.location !== 'incubator_slot')
-            }
-          >
-            <div className="button-content">
-              {currentOperation === 'loading' /* Should be false here */ ? (
-                <>
-                  <i className="fas fa-spinner fa-spin"></i>
-                  <span>Loading Sample...</span>
-                </>
-              ) : (
-                <>
-                  <i className="fas fa-upload"></i>
-                  <span>Load Sample on Microscope</span>
-                </>
-              )}
-            </div>
-          </button>
-        )}
+            </button>
+          ) : isSampleLoaded ? (
+            <button 
+              className="sample-button unload-button"
+              onClick={handleUnloadSample}
+              disabled={currentOperation !== null || microscopeBusy || 
+                          (isSimulatedMicroscopeSelected && selectedSampleId === null) || 
+                          (isRealMicroscopeSelected && loadedSampleOnMicroscope === null)
+              }
+            >
+              <i className="fas fa-download mr-2"></i>
+              <span>Unload Sample</span>
+            </button>
+          ) : (
+            <button 
+              className="sample-button load-button"
+              onClick={handleLoadSample}
+              disabled={!selectedSampleId || currentOperation !== null || microscopeBusy ||
+                          (isRealMicroscopeSelected && incubatorSlots.find(s=>s.id === selectedSampleId)?.location !== 'incubator_slot')
+              }
+            >
+              <i className="fas fa-upload mr-2"></i>
+              <span>Load Sample on Microscope</span>
+            </button>
+          )}
+        </div>
         
-        <hr className="sidebar-divider" />
-        
-        <div className="sample-options">
+        <div className="sample-list">
           {isSimulatedMicroscopeSelected && (
             <>
               {Object.keys(sampleDataAliases).map(sampleKey => (
-                <button
+                <div
                   key={sampleKey}
-                  className={`sample-option ${(isSampleLoaded ? selectedSampleId === sampleKey : selectedSampleId === sampleKey) ? 'active' : ''}`}
+                  className={`sample-item ${(isSampleLoaded ? selectedSampleId === sampleKey : selectedSampleId === sampleKey) ? 'selected' : ''}`}
                   onClick={() => handleSampleSelect(sampleKey)}
-                  disabled={currentOperation !== null || (isSampleLoaded && selectedSampleId !== sampleKey)}
+                  style={{ cursor: currentOperation !== null || (isSampleLoaded && selectedSampleId !== sampleKey) ? 'not-allowed' : 'pointer' }}
                 >
-                  <i className="fas fa-flask"></i> 
+                  <i className="fas fa-flask mr-2"></i> 
                   <span>{sampleKey.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</span>
-                </button>
+                </div>
               ))}
             </>
           )}
           {isRealMicroscopeSelected && incubatorSlots.length > 0 && incubatorSlots.map(slot => (
-            <button
+            <div
               key={slot.id}
-              className={getSampleButtonClass(slot)}
-              onClick={() => handleSampleSelect(slot.id)}
-              disabled={currentOperation !== null || !canSelectSample(slot)}
+              className={`sample-item ${getSampleButtonClass(slot).includes('active') ? 'selected' : ''} ${!canSelectSample(slot) ? 'unavailable' : ''}`}
+              onClick={() => currentOperation === null && canSelectSample(slot) ? handleSampleSelect(slot.id) : null}
+              style={{ cursor: currentOperation !== null || !canSelectSample(slot) ? 'not-allowed' : 'pointer' }}
             >
-              <i className="fas fa-vial"></i> 
+              <i className="fas fa-vial mr-2"></i> 
               <div className="sample-info">
                 <span className="sample-name">{slot.name || `Slot ${slot.incubator_slot}`}</span>
                 <span className="sample-location">
@@ -581,34 +520,41 @@ const SampleSelector = ({
                   {slot.location === 'incubator_slot' && ` (Slot #${slot.incubator_slot})`}
                 </span>
               </div>
-            </button>
+            </div>
           ))}
           {isRealMicroscopeSelected && incubatorSlots.length === 0 && (
-                <p className="no-samples-message">No occupied incubator slots found or service unavailable.</p>
+                <div className="sample-item" style={{ color: '#9ca3af', fontStyle: 'italic' }}>
+                  No occupied incubator slots found or service unavailable.
+                </div>
           )}
         </div>
       </div>
 
       {workflowMessages.length > 0 && (
-        <div className="workflow-messages-container mt-4 mb-2 border border-gray-200 rounded p-2 bg-gray-50 max-h-48 overflow-y-auto">
-          <h4 className="text-sm font-semibold mb-1">Operation Progress:</h4>
-          <ul className="workflow-messages text-xs">
-            {workflowMessages.map((msg, index) => (
-              <li key={index} className="mb-1 py-1 px-2 border-b border-gray-100">
-                <span className="operation-step"><i className="fas fa-circle-notch text-blue-500 mr-2"></i>{msg.message}</span>
-              </li>
-            ))}
-          </ul>
+        <div className="workflow-messages">
+          <h4 className="text-sm font-semibold mb-3">Operation Progress:</h4>
+          {workflowMessages.map((msg, index) => (
+            <div key={index} className="workflow-message">
+              <i className="fas fa-circle-notch text-blue-400 mr-2"></i>
+              {msg.message}
+            </div>
+          ))}
         </div>
       )}
 
       {loadingStatus && (
-        <div className={`sample-loading-status my-2 py-2 px-3 rounded text-center ${
-          loadingStatus.includes('successfully') || loadingStatus.includes('Sample loaded!') || loadingStatus.includes('Sample unloaded!') ? 'bg-green-100 text-green-700' : 
-          loadingStatus.includes('Error') ? 'bg-red-100 text-red-700' :
-          currentOperation === 'loading' || currentOperation === 'unloading' ? 'bg-blue-100 text-blue-700' :
-          'bg-blue-100 text-blue-700'
+        <div className={`workflow-message ${
+          loadingStatus.includes('successfully') || loadingStatus.includes('Sample loaded!') || loadingStatus.includes('Sample unloaded!') ? 'border-green-500' : 
+          loadingStatus.includes('Error') ? 'border-red-500' :
+          currentOperation === 'loading' || currentOperation === 'unloading' ? 'border-blue-500' :
+          'border-blue-500'
         }`}>
+          <i className={`fas ${
+            loadingStatus.includes('successfully') || loadingStatus.includes('Sample loaded!') || loadingStatus.includes('Sample unloaded!') ? 'fa-check-circle text-green-400' : 
+            loadingStatus.includes('Error') ? 'fa-exclamation-circle text-red-400' :
+            currentOperation === 'loading' || currentOperation === 'unloading' ? 'fa-spinner fa-spin text-blue-400' :
+            'fa-info-circle text-blue-400'
+          } mr-2`}></i>
           {loadingStatus}
         </div>
       )}
@@ -621,7 +567,7 @@ SampleSelector.propTypes = {
   selectedMicroscopeId: PropTypes.string.isRequired,
   microscopeControlService: PropTypes.object,
   incubatorControlService: PropTypes.object,
-  roboticArmService: PropTypes.object,
+  orchestratorManagerService: PropTypes.object,
   currentOperation: PropTypes.string,
   setCurrentOperation: PropTypes.func.isRequired,
   onSampleLoadStatusChange: PropTypes.func.isRequired,

@@ -23,16 +23,12 @@ def run_command(cmd, description):
     print(f"{'='*60}")
     
     try:
-        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-        print(result.stdout)
-        if result.stderr:
-            print("STDERR:", result.stderr)
+        # Use real-time output for better visibility in CI
+        result = subprocess.run(cmd, check=True, text=True)
         return True
     except subprocess.CalledProcessError as e:
         print(f"ERROR: {description} failed!")
         print(f"Exit code: {e.returncode}")
-        print(f"STDOUT: {e.stdout}")
-        print(f"STDERR: {e.stderr}")
         return False
 
 def run_backend_tests(test_type="all", verbose=False, coverage=False):

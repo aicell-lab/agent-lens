@@ -1,0 +1,13 @@
+/logs/
+/bin/
+/agent_lens.egg-info/
+/frontend/dist/
+/frontend/node_modules/
+/frontend/package-lock.json
+/frontend/server.js
+/frontend/tiles_output/
+/frontend/vips-properties.xml
+/frontend/html/
+/frontend/venv/
+/frontend/env/
+/frontend/logs/

@@ -1,254 +1,328 @@
 import pytest
-import base64
-import io
 import os
-import numpy as np
-from PIL import Image
 import dotenv
-from unittest.mock import patch, AsyncMock
 from hypha_rpc import connect_to_server
-try:
-    from agent_lens import register_similarity_search_service
-except ImportError:
-    # Mock the module if it can't be imported due to missing dependencies
-    class MockSimilarityService:
-        @staticmethod
-        async def start_hypha_service(server, service_id="image-text-similarity-search"):
-            pass
-    
-    register_similarity_search_service = MockSimilarityService()
 
 dotenv.load_dotenv()
 
-# Skip the entire test file
-pytestmark = pytest.mark.skip(reason="Similarity service tests temporarily disabled")
+class TestWeaviateSimilarityService:
 
-
-class TestSimilaritySearchService:
-    @staticmethod
-    def _generate_random_image():
-        image = Image.fromarray(
-            np.random.randint(0, 256, (224, 224, 3), dtype=np.uint8)
-        )
-        buffered = io.BytesIO()
-        image.save(buffered, format="PNG")
-        return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
     @staticmethod
-    def _generate_random_image_bytes():
-        """Generate random image as bytes for the service."""
-        image = Image.fromarray(
-            np.random.randint(0, 256, (224, 224, 3), dtype=np.uint8)
-        )
-        buffered = io.BytesIO()
-        image.save(buffered, format="PNG")
-        return buffered.getvalue()
+    def _generate_clip_vector(text_description):
+        """Generate a CLIP vector for the given text description."""
+        import clip
+        import torch
+        
+        # Load CLIP model
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model, preprocess = clip.load("ViT-B/32", device=device)
+        
+        # Encode text
+        text = clip.tokenize([text_description]).to(device)
+        with torch.no_grad():
+            text_features = model.encode_text(text)
+            # Normalize to unit vector
+            text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+        
+        return text_features.cpu().numpy()[0].tolist()
 
     @staticmethod
-    def _generate_random_strings(count):
-        random_strings = []
-        for _ in range(count):
-            random_strings.append(
-                "".join(np.random.choice(list("abcdefghijklmnopqrstuvwxyz"), 10))
+    def _generate_test_collection_name():
+        """Generate a unique test collection name."""
+        import uuid
+        return f"test_weaviate_{uuid.uuid4().hex[:8]}"
+
+    @pytest.fixture
+    async def weaviate_service(self):
+        """Fixture to get Weaviate service connection."""
+        token = os.getenv("HYPHA_AGENTS_TOKEN")
+        if not token:
+            raise ValueError("HYPHA_AGENTS_TOKEN not set in environment - required for Weaviate tests")
+        server = await connect_to_server({
+            "server_url": "https://hypha.aicell.io",
+            "workspace": "hypha-agents",
+            "token": token
+        })
+        
+        weaviate = await server.get_service("hypha-agents/weaviate", mode="first")
+        
+        yield weaviate
+        
+        # Cleanup: disconnect server
+        await server.disconnect()
+
+    @pytest.mark.integration
+    async def test_weaviate_collection_lifecycle(self, weaviate_service):
+        """Test creating, using, and deleting a Weaviate collection."""
+        collection_name = self._generate_test_collection_name()
+        application_id = "test-app-001"
+        
+        try:
+            # 1. Create collection for test
+            print(f"Creating test collection: {collection_name}")
+            collection_settings = {
+                "class": collection_name,
+                "description": "Test collection for microscopy images",
+                "properties": [
+                    {"name": "image_id", "dataType": ["text"]},
+                    {"name": "description", "dataType": ["text"]},
+                    {"name": "metadata", "dataType": ["text"]}
+                ],
+                "vectorizer": "none"  # We'll provide vectors manually
+            }
+            
+            result = await weaviate_service.collections.create(collection_settings)
+            print(f"Collection created: {result}")
+            
+            # Verify collection exists
+            exists = await weaviate_service.collections.exists(collection_name)
+            assert exists, f"Collection {collection_name} should exist after creation"
+            
+            # 2. Create an application
+            print(f"Creating application: {application_id}")
+            app_result = await weaviate_service.applications.create(
+                collection_name=collection_name,
+                application_id=application_id,
+                description="Test application for microscopy image similarity search"
             )
-
-        return random_strings
-
-    @pytest.mark.unit
-    def test_generate_random_image(self):
-        """Test image generation utility."""
-        image_b64 = self._generate_random_image()
-        
-        # Verify it's valid base64
-        image_data = base64.b64decode(image_b64)
-        image = Image.open(io.BytesIO(image_data))
-        
-        assert image.size == (224, 224)
-        assert image.mode == 'RGB'
-    
-    @pytest.mark.unit
-    def test_generate_random_strings(self):
-        """Test string generation utility."""
-        strings = self._generate_random_strings(5)
-        
-        assert len(strings) == 5
-        assert all(len(s) == 10 for s in strings)
-        assert all(s.isalpha() for s in strings)
-
-    @pytest.mark.integration
-    @pytest.mark.slow
-    async def test_find_similar_cells(self):
-        """Test adding cell images and finding similar ones."""
-        # Generate test data
-        cell_images_bytes = [
-            TestSimilaritySearchService._generate_random_image_bytes() for _ in range(3)
-        ]
-        annotations = TestSimilaritySearchService._generate_random_strings(3)
-        
-        token = os.getenv("AGENT_LENS_WORKSPACE_TOKEN")
-        if not token:
-            raise EnvironmentError("AGENT_LENS_WORKSPACE_TOKEN not found in environment variables")
-        
-        server = None
-        similarity_service = None
-        
-        try:
-            server = await connect_to_server({
-                "server_url": "https://hypha.aicell.io", 
-                "token": token,
-                "workspace": "agent-lens"
-            })
+            print(f"Application created: {app_result}")
             
-            import asyncio
+            # Verify application exists
+            app_exists = await weaviate_service.applications.exists(collection_name, application_id)
+            assert app_exists, f"Application {application_id} should exist after creation"
             
-            # Register the service
-            print("Starting service registration...")
-            service_info = await register_similarity_search_service.start_hypha_service(server, "image-text-similarity-search-test")
-            print(f"Service registration completed: {service_info}")
+            # 3. Insert image data with vectors
+            print("Inserting test image data with vectors...")
             
-            # Wait for service to be fully available
-            await asyncio.sleep(3)
+            # Generate test data
+            test_images = []
+            for i in range(3):
+                image_data = {
+                    "image_id": f"test_img_{i}",
+                    "description": f"Test microscopy image {i}",
+                    "metadata": f"{{'channel': 'BF_LED_matrix_full', 'exposure': {100 + i * 50}}}"
+                }
+                test_images.append(image_data)
             
-            # List services to debug
-            services = await server.list_services()
-            print(f"Available services: {[s['id'] for s in services]}")
-            
-            # Check if our test service is in the list
-            test_service_found = any("image-text-similarity-search-test" in s['id'] for s in services)
-            print(f"Test service found in list: {test_service_found}")
-            
-            similarity_service = await server.get_service("image-text-similarity-search-test")
-            print("Successfully connected to test service")
-            
-            # Add cell images to the service
-            added_cell_ids = []
-            for i, (cell_image_bytes, annotation) in enumerate(zip(cell_images_bytes, annotations)):
-                result = await similarity_service.add_cell(
-                    cell_image_bytes, 
-                    f"test_cell_{i}", 
-                    annotation
+            # Insert test image data with CLIP vectors
+            insert_results = []
+            for img_data in test_images:
+                # Generate CLIP vector for the image description
+                clip_vector = self._generate_clip_vector(img_data["description"])
+                
+                # Insert with vector using the proper method
+                result = await weaviate_service.data.insert(
+                    collection_name=collection_name,
+                    application_id=application_id,
+                    properties=img_data,
+                    vector=clip_vector
                 )
-                assert result["status"] == "success"
-                added_cell_ids.append(result["id"])
+                insert_results.append(result)
             
-            # Test finding similar cells with image query
-            query_image_bytes = TestSimilaritySearchService._generate_random_image_bytes()
-            results = await similarity_service.find_similar_cells(query_image_bytes, top_k=3)
+            print(f"Inserted {len(insert_results)} objects with CLIP vectors")
             
-            # Check results format
-            if isinstance(results, list):
-                assert len(results) <= 3
-                for result in results:
-                    assert "id" in result
-                    assert "similarity" in result
-                    assert "image_base64" in result
-                    assert "text_description" in result
-                    assert "annotation" in result
-                    assert isinstance(result["similarity"], float)
-                    assert 0 <= result["similarity"] <= 1
-
-            elif isinstance(results, dict):
-                # Handle case where no results are found or there's an info message
-                assert "status" in results
+            # 4. Fetch objects
+            print("Fetching objects...")
+            
+            # Fetch objects using fetch_objects (no vectorization required)
+            search_results = await weaviate_service.query.fetch_objects(
+                collection_name=collection_name,
+                application_id=application_id,
+                limit=5
+            )
+            
+            print(f"Fetch results structure: {search_results}")
+            
+            # The results have an 'objects' key containing the actual results
+            if 'objects' in search_results:
+                objects = search_results['objects']
+                print(f"Found {len(objects)} objects")
+                assert len(objects) > 0, "Should find at least one result"
+                
+                # Debug: Print the first result to see its structure
+                if objects:
+                    first_result = objects[0]
+                    print(f"First result keys: {list(first_result.keys()) if hasattr(first_result, 'keys') else 'No keys'}")
+                    print(f"First result: {first_result}")
+                
+                # Verify result structure
+                for result in objects:
+                    # Check if result has properties or if properties are at top level
+                    if "properties" in result:
+                        props = result["properties"]
+                    else:
+                        props = result  # Properties might be at top level
+                    
+                    assert "image_id" in props, "Result should have image_id"
+                    assert "description" in props, "Result should have description"
+            else:
+                assert False, f"Expected 'objects' key in results, got: {list(search_results.keys())}"
+            
+            # 5. List collections
+            print("Listing all collections...")
+            all_collections = await weaviate_service.collections.list_all()
+            print(f"Available collections: {list(all_collections.keys())}")
+            
+            # Verify our test collection is in the list
+            assert collection_name in all_collections, f"Test collection {collection_name} should be in collections list"
+            
+            # Test vector similarity search
+            print("Performing vector similarity search...")
+            
+            # Generate a query vector using CLIP
+            query_vector = self._generate_clip_vector("microscopy image")
+            
+            # Search for similar images using near_vector
+            vector_results = await weaviate_service.query.near_vector(
+                collection_name=collection_name,
+                application_id=application_id,
+                near_vector=query_vector,
+                include_vector=True,
+                limit=3
+            )
+            
+            print(f"Vector search results: {len(vector_results)} objects found, vector_results: {vector_results}")
+            assert len(vector_results) > 0, "Vector search should return results"
+            
         finally:
-            # Properly cleanup connections
-            if similarity_service is not None:
+            # 6. Remove all collections which start with 'test_weaviate_xxxx'
+            print("Cleaning up test collections...")
+            
+            all_collections = await weaviate_service.collections.list_all()
+            test_collections = [name for name in all_collections.keys() if name.startswith("test_weaviate_")]
+            
+            for test_collection in test_collections:
+                print(f"Deleting test collection: {test_collection}")
                 try:
-                    await similarity_service.disconnect()
+                    delete_result = await weaviate_service.collections.delete(test_collection)
+                    print(f"Deleted {test_collection}: {delete_result}")
                 except Exception as e:
-                    print(f"Error disconnecting similarity service: {e}")
+                    print(f"Error deleting {test_collection}: {e}")
             
-            if server is not None:
-                try:
-                    await server.disconnect()
-                except Exception as e:
-                    print(f"Error disconnecting server: {e}")
-            
-            # Allow time for cleanup
-            import asyncio
-            await asyncio.sleep(0.5)
-            
+            # Verify cleanup
+            remaining_collections = await weaviate_service.collections.list_all()
+            remaining_test_collections = [name for name in remaining_collections.keys() if name.startswith("test_weaviate_")]
+            assert len(remaining_test_collections) == 0, "All test collections should be cleaned up"
+
     @pytest.mark.integration
-    @pytest.mark.slow
-    async def test_find_similar_images_with_text_query(self):
-        """Test adding images and finding similar ones with text query."""
-        # Generate test data
-        image_bytes_list = [
-            TestSimilaritySearchService._generate_random_image_bytes() for _ in range(3)
-        ]
-        descriptions = ["microscopy image 1", "cell culture sample", "fluorescence microscopy"]
-        
-        token = os.getenv("AGENT_LENS_WORKSPACE_TOKEN")
-        if not token:
-            raise EnvironmentError("AGENT_LENS_WORKSPACE_TOKEN not found in environment variables")
-        
-        server = None
-        similarity_service = None
+    async def test_weaviate_text_search(self, weaviate_service):
+        """Test text-based search functionality."""
+        collection_name = self._generate_test_collection_name()
+        application_id = "test-text-search"
         
         try:
-            server = await connect_to_server({
-                "server_url": "https://hypha.aicell.io", 
-                "token": token,
-                "workspace": "agent-lens"
-            })
+            # Create collection
+            collection_settings = {
+                "class": collection_name,
+                "description": "Test collection for text search",
+                "properties": [
+                    {"name": "title", "dataType": ["text"]},
+                    {"name": "content", "dataType": ["text"]},
+                    {"name": "category", "dataType": ["text"]}
+                ],
+                "vectorizer": "none"  # No vectorizer - we'll provide vectors manually
+            }
             
-            import asyncio
+            await weaviate_service.collections.create(collection_settings)
+            await weaviate_service.applications.create(
+                collection_name=collection_name,
+                application_id=application_id,
+                description="Test text search application"
+            )
             
-            # Register the service
-            print("Starting service registration...")
-            service_info = await register_similarity_search_service.start_hypha_service(server, "image-text-similarity-search-test")
-            print(f"Service registration completed: {service_info}")
+            # Insert text data
+            text_objects = [
+                {
+                    "title": "Microscopy Basics",
+                    "content": "Introduction to light microscopy techniques",
+                    "category": "education"
+                },
+                {
+                    "title": "Fluorescence Imaging",
+                    "content": "Advanced fluorescence microscopy methods",
+                    "category": "research"
+                }
+            ]
             
-            # Wait for service to be fully available
-            await asyncio.sleep(3)
+            # Insert objects with CLIP vectors
+            for text_obj in text_objects:
+                # Generate CLIP vector for the title + content
+                text_description = f"{text_obj['title']}: {text_obj['content']}"
+                clip_vector = self._generate_clip_vector(text_description)
+                
+                await weaviate_service.data.insert(
+                    collection_name=collection_name,
+                    application_id=application_id,
+                    properties=text_obj,
+                    vector=clip_vector
+                )
             
-            # List services to debug
-            services = await server.list_services()
-            print(f"Available services: {[s['id'] for s in services]}")
+            # Test vector similarity search
+            query_vector = self._generate_clip_vector("microscopy techniques")
+            search_results = await weaviate_service.query.near_vector(
+                collection_name=collection_name,
+                application_id=application_id,
+                near_vector=query_vector,
+                include_vector=True,
+                limit=5
+            )
             
-            # Check if our test service is in the list
-            test_service_found = any("image-text-similarity-search-test" in s['id'] for s in services)
-            print(f"Test service found in list: {test_service_found}")
+            assert len(search_results) > 0, "Vector search should return results"
             
-            similarity_service = await server.get_service("image-text-similarity-search-test")
-            print("Successfully connected to test service")
-            
-            # Add images to the service
-            added_image_ids = []
-            for image_bytes, description in zip(image_bytes_list, descriptions):
-                result = await similarity_service.add_image(image_bytes, description)
-                assert result["status"] == "success"
-                added_image_ids.append(result["id"])
-            
-            # Test finding similar images with text query
-            text_query = "microscopy"
-            results = await similarity_service.find_similar_images(text_query, top_k=2)
-            
-            # Check results format
-            assert isinstance(results, list)
-            assert len(results) <= 2
-            for result in results:
-                assert "id" in result
-                assert "similarity" in result
-                assert "image_base64" in result
-                assert "text_description" in result
-                assert "file_path" in result
-                assert isinstance(result["similarity"], float)
-                assert 0 <= result["similarity"] <= 1
         finally:
-            # Properly cleanup connections
-            if similarity_service is not None:
-                try:
-                    await similarity_service.disconnect()
-                except Exception as e:
-                    print(f"Error disconnecting similarity service: {e}")
+            # Cleanup
+            try:
+                await weaviate_service.collections.delete(collection_name)
+            except Exception as e:
+                print(f"Error cleaning up {collection_name}: {e}")
+
+    @pytest.mark.unit
+    def test_utility_functions(self):
+        """Test utility functions for test data generation."""
+        # Test CLIP vector generation
+        vector = self._generate_clip_vector("test microscopy image")
+        assert len(vector) == 512  # CLIP ViT-B/32 produces 512-dimensional vectors
+        assert all(isinstance(v, float) for v in vector)
+        # CLIP vectors are normalized, so they can be negative
+        assert all(-1 <= v <= 1 for v in vector)
+        
+        # Test collection name generation
+        collection_name = self._generate_test_collection_name()
+        assert collection_name.startswith("test_weaviate_")
+        assert len(collection_name) == len("test_weaviate_") + 8  # 8 hex chars
+
+    @pytest.mark.integration
+    async def test_collection_management(self, weaviate_service):
+        """Test collection management operations."""
+        collection_name = self._generate_test_collection_name()
+        
+        try:
+            # Test collection creation
+            settings = {
+                "class": collection_name,
+                "description": "Test collection",
+                "properties": [{"name": "test", "dataType": ["text"]}]
+            }
             
-            if server is not None:
-                try:
-                    await server.disconnect()
-                except Exception as e:
-                    print(f"Error disconnecting server: {e}")
+            result = await weaviate_service.collections.create(settings)
+            assert result is not None
             
-            # Allow time for cleanup
-            import asyncio
-            await asyncio.sleep(0.5)
+            # Test collection retrieval
+            collection = await weaviate_service.collections.get(collection_name)
+            assert collection is not None
+            
+            # Test collection existence check
+            exists = await weaviate_service.collections.exists(collection_name)
+            assert exists is True
+            
+            # Test artifact retrieval
+            artifact = await weaviate_service.collections.get_artifact(collection_name)
+            assert artifact is not None
+            
+        finally:
+            # Cleanup
+            try:
+                await weaviate_service.collections.delete(collection_name)
+            except Exception as e:
+                print(f"Error cleaning up {collection_name}: {e}")

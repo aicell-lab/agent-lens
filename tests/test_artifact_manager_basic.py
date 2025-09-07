@@ -117,9 +117,9 @@ TEST_WORKSPACE = "agent-lens"
 
 @pytest_asyncio.fixture(scope="function")
 async def artifact_manager():
-    token = os.environ.get("AGENT_LENS_WORKSPACE_TOKEN")
+    token = os.environ.get("WORKSPACE_TOKEN")
     if not token:
-        pytest.skip("AGENT_LENS_WORKSPACE_TOKEN not set in environment")
+        raise ValueError("WORKSPACE_TOKEN not set in environment - required for artifact manager tests")
     from hypha_rpc import connect_to_server
     print(f"🔗 Connecting to {TEST_SERVER_URL} workspace {TEST_WORKSPACE}...")
     async with connect_to_server({

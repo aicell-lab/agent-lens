@@ -1,13 +1,11 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import PropTypes from 'prop-types';
-import ControlButton from './ControlButton';
-import CameraSettings from './CameraSettings';
 import ChatbotButton from './ChatbotButton';
 import SampleSelector from './SampleSelector';
 import ImagingTasksModal from './ImagingTasksModal';
-import MicroscopeMapDisplay from './MicroscopeMapDisplay'; // New import
-import { useValidatedNumberInput, getInputValidationClasses } from '../utils'; // Import validation utilities
-import './ImagingTasksModal.css'; // Added for well plate styles
+import MicroscopeMapDisplay from './MicroscopeMapDisplay';
+import { useValidatedNumberInput, getInputValidationClasses } from '../utils';
+import './ImagingTasksModal.css';
 
 // Helper function to convert a uint8 hypha-rpc numpy array to a displayable Data URL
 const numpyArrayToDataURL = (numpyArray) => {
@@ -53,12 +51,7 @@ const WEBRTC_SERVICE_IDS = {
   "reef-imaging/mirror-microscope-control-squid-2": "reef-imaging/video-track-microscope-control-squid-2", // Assuming typo correction
 };
 
-// Define well plate configurations
-const WELL_PLATE_CONFIGS = {
-  '96': { rows: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'], cols: Array.from({ length: 12 }, (_, i) => i + 1) },
-  '48': { rows: ['A', 'B', 'C', 'D', 'E', 'F'], cols: Array.from({ length: 8 }, (_, i) => i + 1) },
-  '24': { rows: ['A', 'B', 'C', 'D'], cols: Array.from({ length: 6 }, (_, i) => i + 1) },
-};
+
 
 const MicroscopeControlPanel = ({
   map,
@@ -76,13 +69,13 @@ const MicroscopeControlPanel = ({
   roboticArmService,
   currentOperation,
   setCurrentOperation,
-  hyphaManager, // Changed from hyphaServer and hyphaAuthToken
-  showNotification = null, // New prop for showing notifications
-  orchestratorManagerService, // New prop for orchestrator service
-  onOpenImageJ = null, // New prop for opening image in ImageJ
-  imjoyApi = null, // New prop for ImJoy API
-  onFreePanAutoCollapse = null, // New prop for FREE_PAN auto-collapse
-  onFitToViewUncollapse = null, // New prop for Fit to View uncollapse
+  hyphaManager,
+  showNotification = null,
+  orchestratorManagerService,
+  onOpenImageJ = null,
+  imjoyApi = null,
+  onFreePanAutoCollapse = null,
+  onFitToViewUncollapse = null,
 }) => {
   const [isLightOn, setIsLightOn] = useState(false);
   const [xPosition, setXPosition] = useState(0);
@@ -110,11 +103,7 @@ const MicroscopeControlPanel = ({
   const [configurationError, setConfigurationError] = useState(null);
   const [isConfigurationWindowOpen, setIsConfigurationWindowOpen] = useState(false);
 
-  // Well Plate Navigator State
-  const [selectedWellPlateType, setSelectedWellPlateType] = useState('96');
-  const [currentWellPlateRows, setCurrentWellPlateRows] = useState(WELL_PLATE_CONFIGS['96'].rows);
-  const [currentWellPlateCols, setCurrentWellPlateCols] = useState(WELL_PLATE_CONFIGS['96'].cols);
-  const [isWellPlateNavigatorOpen, setIsWellPlateNavigatorOpen] = useState(false); // Changed default to false
+
 
   // Renamed states for actual values from microscope (for display)
   const [actualIlluminationIntensity, setActualIlluminationIntensity] = useState(50);
@@ -188,23 +177,28 @@ const MicroscopeControlPanel = ({
   const [frameMetadata, setFrameMetadata] = useState(null);
   const [isDataChannelConnected, setIsDataChannelConnected] = useState(false);
 
-  // Function to handle right panel auto-collapse
-  const handleRightPanelAutoCollapse = useCallback(() => {
-    if (!isRightPanelCollapsed) {
-      setIsRightPanelCollapsed(true);
-      return true; // Indicate that collapse happened
-    }
-    return false; // Already collapsed
-  }, [isRightPanelCollapsed]);
+  // New state for floating panels
+  const [isSamplePanelOpen, setIsSamplePanelOpen] = useState(false);
+  const [isControlPanelOpen, setIsControlPanelOpen] = useState(false);
+  
 
-  // Function to handle right panel expansion
-  const handleRightPanelExpansion = useCallback(() => {
-    if (isRightPanelCollapsed) {
-      setIsRightPanelCollapsed(false);
-      return true; // Indicate that expansion happened
-    }
-    return false; // Already expanded
-  }, [isRightPanelCollapsed]);
+      // Function to handle right panel auto-collapse (now for chat panel)
+    const handleRightPanelAutoCollapse = useCallback(() => {
+      if (!isRightPanelCollapsed) {
+        setIsRightPanelCollapsed(true);
+        return true; // Indicate that collapse happened
+      }
+      return false; // Already collapsed
+    }, [isRightPanelCollapsed]);
+
+    // Function to handle right panel expansion (now for chat panel)
+    const handleRightPanelExpansion = useCallback(() => {
+      if (isRightPanelCollapsed) {
+        setIsRightPanelCollapsed(false);
+        return true; // Indicate that expansion happened
+      }
+      return false; // Already expanded
+    }, [isRightPanelCollapsed]);
 
   // Combined auto-collapse function that handles both sidebar and right panel
   const handleCombinedAutoCollapse = useCallback(() => {
@@ -1098,50 +1092,7 @@ const MicroscopeControlPanel = ({
     // fetchImagingTasks(); // if orchestratorManagerService.get_all_imaging_tasks was called inside modal.
   };
 
-  // Update well plate grid when type changes
-  useEffect(() => {
-    setCurrentWellPlateRows(WELL_PLATE_CONFIGS[selectedWellPlateType].rows);
-    setCurrentWellPlateCols(WELL_PLATE_CONFIGS[selectedWellPlateType].cols);
-  }, [selectedWellPlateType]);
 
-  const handleWellPlateTypeChange = (event) => {
-    setSelectedWellPlateType(event.target.value);
-  };
-
-  const toggleWellPlateNavigator = () => {
-    setIsWellPlateNavigatorOpen(!isWellPlateNavigatorOpen);
-  };
-
-  const handleWellDoubleClick = async (row, col) => {
-    if (!microscopeControlService) {
-      appendLog("Microscope control service not available.");
-      if (showNotification) showNotification("Microscope control service not available.", "error");
-      return;
-    }
-    if (microscopeBusy || currentOperation) {
-      appendLog("Microscope is busy or another operation is in progress.");
-      if (showNotification) showNotification("Microscope is busy or another operation is in progress.", "warning");
-      return;
-    }
-
-    const operationId = `navigate_well_${row}${col}`;
-    setCurrentOperation({ id: operationId, name: `Navigating to Well ${row}${col}` });
-    setMicroscopeBusy(true);
-    appendLog(`Navigating to well: ${row}${col}, Plate Type: ${selectedWellPlateType}`);
-    try {
-      await microscopeControlService.navigate_to_well(row, col, selectedWellPlateType);
-      appendLog(`Successfully navigated to well: ${row}${col}`);
-      if (showNotification) showNotification(`Successfully navigated to well: ${row}${col}`, "success");
-      await fetchStatusAndUpdateActuals(); // Update positions
-    } catch (error) {
-      appendLog(`Error navigating to well ${row}${col}: ${error.message}`);
-      if (showNotification) showNotification(`Error navigating to well ${row}${col}: ${error.message}`, "error");
-      console.error(`[MicroscopeControlPanel] Error navigating to well:`, error);
-    } finally {
-      setMicroscopeBusy(false);
-      setCurrentOperation(null);
-    }
-  };
 
   // Function to load microscope configuration
   const loadMicroscopeConfiguration = async () => {
@@ -1357,9 +1308,8 @@ const MicroscopeControlPanel = ({
 
   return (
     <div className="control-view microscope-control-panel-container new-mcp-layout">
-      {/* Left Side: Image Display */}
-      <div className={`mcp-image-display-area ${isRightPanelCollapsed ? 'expanded' : ''}`}>
-        {/* Unified Map/Video Display */}
+      {/* Main Image Display Area */}
+      <div className="mcp-image-display-area">
         <div
           className="w-full border border-gray-300 bg-black relative"
           style={{
@@ -1370,7 +1320,7 @@ const MicroscopeControlPanel = ({
         >
           <MicroscopeMapDisplay
             isOpen={true}
-            onClose={() => {}} // No longer needed since it's always displayed
+            onClose={() => {}}
             microscopeConfiguration={microscopeConfiguration}
             isWebRtcActive={isWebRtcActive}
             videoRef={videoRef}
@@ -1407,7 +1357,6 @@ const MicroscopeControlPanel = ({
             isContrastControlsCollapsed={isContrastControlsCollapsed}
             setIsContrastControlsCollapsed={setIsContrastControlsCollapsed}
             selectedMicroscopeId={selectedMicroscopeId}
-            // Pass drag handlers
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
@@ -1418,58 +1367,75 @@ const MicroscopeControlPanel = ({
           />
         </div>
 
+        {/* Floating Panel Toggle Buttons */}
+        <div className="floating-panel-toggles">
+          {/* Sample Selection Panel Toggle */}
+          <button 
+            onClick={() => setIsSamplePanelOpen(!isSamplePanelOpen)}
+            className="floating-panel-toggle sample-toggle"
+            title={isSamplePanelOpen ? "Close Sample Panel" : "Open Sample Panel"}
+          >
+            <i className="fas fa-flask mr-1"></i>
+            Samples
+          </button>
+
+          {/* Control Panel Toggle */}
+          <button 
+            onClick={() => setIsControlPanelOpen(!isControlPanelOpen)}
+            className="floating-panel-toggle control-toggle"
+            title={isControlPanelOpen ? "Close Control Panel" : "Open Control Panel"}
+          >
+            <i className="fas fa-cogs mr-1"></i>
+            Controls
+          </button>
 
 
-        {/* Toggle button for the right panel */}
-        <button 
-          onClick={toggleRightPanel}
-          className="right-panel-toggle-button"
-          title={isRightPanelCollapsed ? "Show Controls" : "Hide Controls"}
-        >
-          <i className={`fas ${isRightPanelCollapsed ? 'fa-chevron-left' : 'fa-chevron-right'}`}></i>
-        </button>
+        </div>
       </div>
 
-      {/* Right Side: Controls and Chatbot - Always visible */}
-      <div className={`mcp-controls-chatbot-area ${isRightPanelCollapsed ? 'collapsed' : ''}`} style={{ display: 'block', visibility: 'visible' }}>
-        {/* Top-Right: Microscope Controls */}
-        <div className="mcp-microscope-controls-area">
-          {/* SampleSelector is moved here for better positioning context of its dropdown */}
-          <SampleSelector 
-            isVisible={isSampleSelectorOpen}
-            selectedMicroscopeId={selectedMicroscopeId}
-            microscopeControlService={microscopeControlService}
-            incubatorControlService={incubatorControlService}
-            roboticArmService={roboticArmService}
-            currentOperation={currentOperation}
-            setCurrentOperation={setCurrentOperation}
-            onSampleLoadStatusChange={handleSampleLoadStatusChange}
-            microscopeBusy={microscopeBusy}
-          />
+      {/* Floating Sample Selection Panel */}
+      {isSamplePanelOpen && (
+        <div className="floating-panel sample-panel">
+          <div className="floating-panel-header">
+            <h3>Sample Selection</h3>
+            <button 
+              onClick={() => setIsSamplePanelOpen(false)}
+              className="floating-panel-close"
+            >
+              <i className="fas fa-times"></i>
+            </button>
+          </div>
+          <div className="floating-panel-content">
+            <SampleSelector 
+              isVisible={true}
+              selectedMicroscopeId={selectedMicroscopeId}
+              microscopeControlService={selectedMicroscopeId === 'agent-lens/squid-control-reef' ? microscopeControlService : null}
+              incubatorControlService={incubatorControlService}
+              orchestratorManagerService={orchestratorManagerService}
+              currentOperation={currentOperation}
+              setCurrentOperation={setCurrentOperation}
+              onSampleLoadStatusChange={handleSampleLoadStatusChange}
+              microscopeBusy={microscopeBusy}
+            />
+          </div>
+        </div>
+      )}
 
-          <div className="flex justify-between items-center mb-4">
-            <div className="flex items-center justify-start flex-grow">
-              <h3 className="text-lg font-medium mr-3">
-                {selectedMicroscopeId === 'agent-lens/squid-control-reef' ? 'Simulated Microscope' :
-                 selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 'Real Microscope 1' :
-                 selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2' ? 'Real Microscope 2' :
-                 'Microscope Control'}
-              </h3>
-              {selectedMicroscopeId && (
-                <button 
-                  onClick={toggleSampleSelector}
-                  className="sample-selector-toggle-button p-1 bg-gray-200 hover:bg-gray-300 rounded shadow text-sm"
-                  title="Select or manage samples"
-                >
-                  <i className="fas fa-flask mr-1"></i>
-                  Select Samples
-                  <i className={`fas ${isSampleSelectorOpen ? 'fa-chevron-up' : 'fa-chevron-down'} ml-1`}></i>
-                </button>
-              )}
-            </div>
-            
-            {/* Configuration button in upper right corner */}
-            <div className="flex items-center space-x-2">
+      {/* Floating Control Panel */}
+      {isControlPanelOpen && (
+        <div className="floating-panel control-panel">
+          <div className="floating-panel-header">
+            <h3>Microscope Controls</h3>
+            <button 
+              onClick={() => setIsControlPanelOpen(false)}
+              className="floating-panel-close"
+            >
+              <i className="fas fa-times"></i>
+            </button>
+          </div>
+          <div className="floating-panel-content">
+            {/* Microscope Configuration Button */}
+            <div className="flex justify-end mb-3">
               {selectedMicroscopeId && (
                 <button
                   onClick={isConfigurationLoaded ? openConfigurationWindow : loadMicroscopeConfiguration}
@@ -1508,307 +1474,242 @@ const MicroscopeControlPanel = ({
                 </button>
               )}
             </div>
-          </div>
-          
-          <div className="control-group mb-3">
-            <div className="horizontal-buttons flex justify-between space-x-1">
-              <button
-                className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/5 px-1.5 py-0.5 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
-                onClick={contrastAutoFocus}
-                disabled={!microscopeControlService || currentOperation !== null || microscopeBusy}
-              >
-                <i className="fas fa-crosshairs icon mr-1"></i> Contrast AF
-              </button>
-              <button
-                className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/5 px-1.5 py-0.5 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
-                onClick={laserAutoFocus}
-                disabled={!microscopeControlService || currentOperation !== null || microscopeBusy}
-              >
-                <i className="fas fa-bullseye icon mr-1"></i> Laser AF
-              </button>
-              <button
-                className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/5 px-1.5 py-0.5 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
-                onClick={setLaserReference}
-                disabled={!microscopeControlService || currentOperation !== null || microscopeBusy}
-              >
-                <i className="fas fa-bookmark icon mr-1"></i> Set Ref
-              </button>
-              <button
-                className="control-button snap-button bg-green-500 text-white hover:bg-green-600 w-1/5 px-1.5 py-0.5 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
-                onClick={snapImage}
-                disabled={!microscopeControlService || currentOperation !== null || microscopeBusy}
-              >
-                <i className="fas fa-camera icon mr-1"></i> Snap
-              </button>
-              <button
-                className={`control-button live-button ${isWebRtcActive ? 'bg-red-500 hover:bg-red-600' : 'bg-purple-500 hover:bg-purple-600'} text-white w-1/5 px-1.5 py-0.5 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed`}
-                onClick={toggleWebRtcStream}
-                disabled={!microscopeControlService || currentOperation !== null || !hyphaManager || microscopeBusy}
-                title={!hyphaManager ? "HyphaManager not connected" : (isWebRtcActive ? "Stop Live Stream" : "Start Live Stream")}
-              >
-                <i className="fas fa-video icon mr-1"></i> {isWebRtcActive ? 'Stop Live' : 'Start Live'}
-              </button>
-            </div>
-          </div>
 
-
-
-          <div className="coordinate-container mb-3 flex justify-between space-x-1">
-            {['x', 'y', 'z'].map((axis) => (
-              <div key={axis} className="coordinate-group p-1 border border-gray-300 rounded-lg w-1/3">
-                <div className="flex justify-between mb-1">
-                  <div className="position-display w-1/2 mr-1 bg-gray-100 p-1 rounded flex items-center text-xs">
-                    <span className="text-gray-600 font-normal text-xs">{axis.toUpperCase()}:</span>
-                    <span className="ml-1 text-gray-800 text-xs">
-                      {(axis === 'x' ? xPosition : axis === 'y' ? yPosition : zPosition).toFixed(3)} mm
-                    </span>
-                  </div>
-                  <div className="input-container w-1/2">
-                    <input
-                      type="number"
-                      className={`control-input w-full p-1 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed ${getInputValidationClasses(
-                        (axis === 'x' ? xMoveInput : axis === 'y' ? yMoveInput : zMoveInput).isValid,
-                        (axis === 'x' ? xMoveInput : axis === 'y' ? yMoveInput : zMoveInput).hasUnsavedChanges,
-                        'border'
-                      )}`}
-                      placeholder={`d${axis.toUpperCase()}(mm)`}
-                      value={(axis === 'x' ? xMoveInput : axis === 'y' ? yMoveInput : zMoveInput).inputValue}
-                      min="0"
-                      onChange={(axis === 'x' ? xMoveInput : axis === 'y' ? yMoveInput : zMoveInput).handleInputChange}
-                      onKeyDown={(axis === 'x' ? xMoveInput : axis === 'y' ? yMoveInput : zMoveInput).handleKeyDown}
-                      onBlur={(axis === 'x' ? xMoveInput : axis === 'y' ? yMoveInput : zMoveInput).handleBlur}
-                      disabled={currentOperation !== null || microscopeBusy}
-                    />
-                  </div>
-                </div>
-                <div className="aligned-buttons flex justify-between space-x-1">
-                  <button
-                    className="half-button bg-blue-500 text-white hover:bg-blue-600 w-1/2 p-1 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
-                    onClick={() => moveMicroscope(axis, -1)}
-                    disabled={!microscopeControlService || currentOperation !== null || microscopeBusy}
-                  >
-                    <i className={`fas fa-arrow-${axis === 'x' ? 'left' : axis === 'y' ? 'up' : 'down'} mr-1`}></i> {axis.toUpperCase()}-
-                  </button>
-                  <button
-                    className="half-button bg-blue-500 text-white hover:bg-blue-600 w-1/2 p-1 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
-                    onClick={() => moveMicroscope(axis, 1)}
-                    disabled={!microscopeControlService || currentOperation !== null || microscopeBusy}
-                  >
-                    {axis.toUpperCase()}+ <i className={`fas fa-arrow-${axis === 'x' ? 'right' : axis === 'y' ? 'down' : 'up'} ml-1`}></i>
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="illumination-camera-container mb-3 flex justify-between space-x-1">
-            <div className="illumination-settings p-1 border border-gray-300 rounded-lg w-1/2">
-              <div className="illumination-intensity mb-2">
-                <div className="intensity-label-row flex justify-between mb-1 text-xs">
-                  <label>Illumination Intensity: </label>
-                  <span>{actualIlluminationIntensity}%</span>
-                </div>
-                <input
-                  type="range"
-                  className="control-input w-full disabled:opacity-75 disabled:cursor-not-allowed"
-                  min="0"
-                  max="100"
-                  value={desiredIlluminationIntensity}
-                  onChange={(e) => {
-                    if (!microscopeControlService || currentOperation || microscopeBusy) return;
-                    setDesiredIlluminationIntensity(parseInt(e.target.value, 10));
-                  }}
-                  disabled={!microscopeControlService || microscopeBusy || currentOperation !== null}
-                />
-              </div>
-
-              <div className="illumination-channel text-xs">
-                <label>Illumination Channel:</label>
-                <select
-                  className="control-input w-full mt-1 p-1 border border-gray-300 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
-                  value={illuminationChannel}
-                  onChange={(e) => {
-                    if (!microscopeControlService || currentOperation || microscopeBusy) return;
-                    const newChannel = e.target.value;
-                    if (illuminationChannel !== newChannel) { // Only if channel actually changes
-                      setIlluminationChannel(newChannel); // This triggers the set_illumination effect
-                      channelSetByUIFlagRef.current = true; // Indicate change is fresh from UI, pending hardware ack
-                    }
-                  }}
+            {/* Control Buttons */}
+            <div className="control-group mb-3">
+              <div className="horizontal-buttons flex justify-between space-x-1">
+                <button
+                  className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/5 px-1.5 py-0.5 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
+                  onClick={contrastAutoFocus}
                   disabled={!microscopeControlService || currentOperation !== null || microscopeBusy}
                 >
-                  <option value="0">BF LED matrix full</option>
-                  <option value="11">Fluorescence 405 nm Ex</option>
-                  <option value="12">Fluorescence 488 nm Ex</option>
-                  <option value="14">Fluorescence 561 nm Ex</option>
-                  <option value="13">Fluorescence 638 nm Ex</option>
-                  <option value="15">Fluorescence 730 nm Ex</option>
-                </select>
+                  <i className="fas fa-crosshairs icon mr-1"></i> Contrast AF
+                </button>
+                <button
+                  className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/5 px-1.5 py-0.5 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
+                  onClick={laserAutoFocus}
+                  disabled={!microscopeControlService || currentOperation !== null || microscopeBusy}
+                >
+                  <i className="fas fa-bullseye icon mr-1"></i> Laser AF
+                </button>
+                <button
+                  className="control-button bg-blue-500 text-white hover:bg-blue-600 w-1/5 px-1.5 py-0.5 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
+                  onClick={setLaserReference}
+                  disabled={!microscopeControlService || currentOperation !== null || microscopeBusy}
+                >
+                  <i className="fas fa-bookmark icon mr-1"></i> Set Ref
+                </button>
+                <button
+                  className="control-button snap-button bg-green-500 text-white hover:bg-green-600 w-1/5 px-1.5 py-0.5 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
+                  onClick={snapImage}
+                  disabled={!microscopeControlService || currentOperation !== null || microscopeBusy}
+                >
+                  <i className="fas fa-camera icon mr-1"></i> Snap
+                </button>
+                <button
+                  className={`control-button live-button ${isWebRtcActive ? 'bg-red-500 hover:bg-red-600' : 'bg-purple-500 hover:bg-purple-600'} text-white w-1/5 px-1.5 py-0.5 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed`}
+                  onClick={toggleWebRtcStream}
+                  disabled={!microscopeControlService || currentOperation !== null || !hyphaManager || microscopeBusy}
+                  title={!hyphaManager ? "HyphaManager not connected" : (isWebRtcActive ? "Stop Live Stream" : "Start Live Stream")}
+                >
+                  <i className="fas fa-video icon mr-1"></i> {isWebRtcActive ? 'Stop Live' : 'Start Live'}
+                </button>
               </div>
             </div>
 
-            <div className="camera-exposure-settings p-1 border border-gray-300 rounded-lg w-1/2 text-xs">
-              <label>Camera Exposure:</label>
-              <span className="ml-1 text-gray-800 text-xs">{actualCameraExposure} ms</span>
-              <div className="input-container">
-                <input
-                  type="number"
-                  className={`control-input w-full mt-1 p-1 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed ${getInputValidationClasses(
-                    exposureInput.isValid,
-                    exposureInput.hasUnsavedChanges,
-                    'border'
-                  )}`}
-                  value={exposureInput.inputValue}
-                  max="900"
-                  onChange={exposureInput.handleInputChange}
-                  onKeyDown={exposureInput.handleKeyDown}
-                  onBlur={exposureInput.handleBlur}
-                  disabled={currentOperation !== null || microscopeBusy}
-                  placeholder="1-900ms"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Well Plate Navigator Section */}
-        <div className="p-3 border border-gray-300 rounded-lg mb-3">
-          <div className="flex justify-between items-center mb-2">
-            <div className="flex items-center">
-              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Well Plate Navigator</h3>
-              <button
-                className="ml-2 px-2 py-0.5 text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 rounded border border-gray-300 flex items-center transition-colors duration-200"
-                onClick={toggleWellPlateNavigator}
-                aria-expanded={isWellPlateNavigatorOpen}
-                aria-controls="well-plate-grid-content"
-                title={isWellPlateNavigatorOpen ? "Hide Well Plate Grid" : "Show Well Plate Grid"}
-              >
-                <span className="mr-1">{isWellPlateNavigatorOpen ? "Hide" : "Show"}</span>
-                <i className={`fas ${isWellPlateNavigatorOpen ? 'fa-chevron-up' : 'fa-chevron-down'} transition-transform duration-300`}></i>
-              </button>
-            </div>
-            <div className="flex items-center">
-              <label htmlFor="wellPlateTypeSelect" className="text-sm font-medium text-gray-700 dark:text-gray-400 mr-2">Type:</label>
-              <select
-                id="wellPlateTypeSelect"
-                value={selectedWellPlateType}
-                onChange={handleWellPlateTypeChange}
-                disabled={!microscopeControlService || microscopeBusy || currentOperation !== null}
-                className="control-input p-1 text-xs rounded shadow-sm border-gray-300 focus:ring-blue-500 focus:border-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white disabled:opacity-75 disabled:cursor-not-allowed"
-              >
-                <option value="96">96 Well</option>
-                <option value="24">24 Well</option>
-              </select>
-            </div>
-          </div>
-
-          <div 
-            id="well-plate-grid-content" 
-            className={`well-plate-grid-container overflow-x-auto transition-all duration-300 ease-in-out origin-top ${isWellPlateNavigatorOpen ? 'max-h-[500px] opacity-100' : 'max-h-0 opacity-0'}`}
-            style={{
-              overflow: isWellPlateNavigatorOpen ? 'visible' : 'hidden',
-            }}
-          >
-            <div 
-              className="well-plate-grid" 
-              style={{ 
-                gridTemplateColumns: `auto repeat(${currentWellPlateCols.length}, minmax(30px, 1fr))`,
-                transform: isWellPlateNavigatorOpen ? 'scaleY(1)' : 'scaleY(0)',
-                transition: 'transform 0.3s ease-in-out',
-                transformOrigin: 'top'
-              }}
-            >
-              <div className="grid-col-labels">
-                <div className="grid-label"></div>
-                {currentWellPlateCols.map(col => (
-                  <div key={`col-label-${col}`} className="grid-label">{col}</div>
-                ))}
-              </div>
-              {currentWellPlateRows.map(row => (
-                <div key={`row-${row}`} className="grid-row">
-                  <div className="grid-label">{row}</div>
-                  {currentWellPlateCols.map(col => (
-                    <div
-                      key={`cell-${row}-${col}`}
-                      className={`grid-cell ${(!microscopeControlService || microscopeBusy || currentOperation !== null) ? 'disabled' : ''}`}
-                      onClick={() => {
-                        if (!microscopeControlService || microscopeBusy || currentOperation) return;
-                        handleWellDoubleClick(row, col);
-                      }}
-                      title={`Well ${row}${col} - Click to navigate`}
-                      role="button"
-                      tabIndex={0}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          if (!microscopeControlService || microscopeBusy || currentOperation) return;
-                          handleWellDoubleClick(row, col);
-                        }
-                      }}
-                      disabled={!microscopeControlService || microscopeBusy || currentOperation !== null}
-                    >
+            {/* Coordinate Controls */}
+            <div className="coordinate-container mb-3 flex justify-between space-x-1">
+              {['x', 'y', 'z'].map((axis) => (
+                <div key={axis} className="coordinate-group p-1 border border-gray-300 rounded-lg w-1/3">
+                  <div className="flex justify-between mb-1">
+                    <div className="position-display w-1/2 mr-1 bg-gray-100 p-1 rounded flex items-center text-xs">
+                      <span className="text-gray-600 font-normal text-xs">{axis.toUpperCase()}:</span>
+                      <span className="ml-1 text-gray-800 text-xs">
+                        {(axis === 'x' ? xPosition : axis === 'y' ? yPosition : zPosition).toFixed(3)} mm
+                      </span>
                     </div>
-                  ))}
+                    <div className="input-container w-1/2">
+                      <input
+                        type="number"
+                        className={`control-input w-full p-1 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed ${getInputValidationClasses(
+                          (axis === 'x' ? xMoveInput : axis === 'y' ? yMoveInput : axis === 'z' ? zMoveInput : null).isValid,
+                          (axis === 'x' ? xMoveInput : axis === 'y' ? yMoveInput : axis === 'z' ? zMoveInput : null).hasUnsavedChanges,
+                          'border'
+                        )}`}
+                        placeholder={`d${axis.toUpperCase()}(mm)`}
+                        value={(axis === 'x' ? xMoveInput : axis === 'y' ? yMoveInput : axis === 'z' ? zMoveInput : null).inputValue}
+                        min="0"
+                        onChange={(axis === 'x' ? xMoveInput : axis === 'y' ? yMoveInput : axis === 'z' ? zMoveInput : null).handleInputChange}
+                        onKeyDown={(axis === 'x' ? xMoveInput : axis === 'y' ? yMoveInput : axis === 'z' ? zMoveInput : null).handleKeyDown}
+                        onBlur={(axis === 'x' ? xMoveInput : axis === 'y' ? yMoveInput : axis === 'z' ? zMoveInput : null).handleBlur}
+                        disabled={currentOperation !== null || microscopeBusy}
+                      />
+                    </div>
+                  </div>
+                  <div className="aligned-buttons flex justify-between space-x-1">
+                    <button
+                      className="half-button bg-blue-500 text-white hover:bg-blue-600 w-1/2 p-1 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
+                      onClick={() => moveMicroscope(axis, -1)}
+                      disabled={!microscopeControlService || currentOperation !== null || microscopeBusy}
+                    >
+                      <i className={`fas fa-arrow-${axis === 'x' ? 'left' : axis === 'y' ? 'up' : 'down'} mr-1`}></i> {axis.toUpperCase()}-
+                    </button>
+                    <button
+                      className="half-button bg-blue-500 text-white hover:bg-blue-600 w-1/2 p-1 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
+                      onClick={() => moveMicroscope(axis, 1)}
+                      disabled={!microscopeControlService || currentOperation !== null || microscopeBusy}
+                    >
+                      {axis.toUpperCase()}+ <i className={`fas fa-arrow-${axis === 'x' ? 'right' : axis === 'y' ? 'down' : 'up'} ml-1`}></i>
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
-          </div>
-        </div>
 
-        {/* Imaging Tasks Section - Always show, but with different states based on availability */}
-        <div className="imaging-tasks-section mb-3 p-3 border border-gray-300 rounded-lg">
-          <div className="flex justify-between items-center mb-2">
-            <h4 className="text-sm font-medium">Time-Lapse Imaging Tasks</h4>
-            <button
-              className="control-button bg-green-500 text-white hover:bg-green-600 px-2 py-1 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
-              onClick={() => openImagingTaskModal(null)}
-              disabled={
-                selectedMicroscopeId === "agent-lens/squid-control-reef" || 
-                !orchestratorManagerService || 
-                currentOperation !== null || 
-                microscopeBusy || 
-                imagingTasks.some(t => t.operational_state?.status !== 'completed' && t.operational_state?.status !== 'failed')
-              }
-              title={
-                selectedMicroscopeId === "agent-lens/squid-control-reef" 
-                  ? "Time-lapse imaging not supported on simulated microscope"
-                  : !orchestratorManagerService 
-                    ? "Orchestrator service not available (check reef-imaging workspace access)"
-                    : sampleLoadStatus.isSampleLoaded
-                      ? "Microscope is occupied. Unload current sample first via 'Select Samples'"
-                      : imagingTasks.some(t => t.operational_state?.status !== 'completed' && t.operational_state?.status !== 'failed')
-                        ? "Microscope has an active/pending task. Cannot create new task."
-                        : "Create New Imaging Task"
-              }
-            >
-              <i className="fas fa-plus mr-1"></i> New Task
-            </button>
-          </div>
-          
-          {selectedMicroscopeId === "agent-lens/squid-control-reef" ? (
-            <p className="text-xs text-gray-500 italic">Time-lapse imaging is not supported on the simulated microscope.</p>
-          ) : !orchestratorManagerService ? (
-            <p className="text-xs text-gray-500 italic">Time-lapse imaging not available (orchestrator service not accessible - check reef-imaging workspace access).</p>
-          ) : imagingTasks.length === 0 ? (
-            <p className="text-xs text-gray-500">No imaging tasks found for this microscope.</p>
-          ) : (
-            <ul className="list-disc pl-5 space-y-1 text-xs">
-              {imagingTasks.map(task => (
-                <li 
-                  key={task.name} 
-                  className={`cursor-pointer hover:text-blue-600 ${task.operational_state?.status !== 'completed' && task.operational_state?.status !== 'failed' ? 'font-semibold text-blue-700' : 'text-gray-600'}`}
-                  onClick={() => openImagingTaskModal(task)}
-                  title={`Status: ${task.operational_state?.status || 'Unknown'}. Click to manage.`}
+            {/* Illumination and Camera Settings */}
+            <div className="illumination-camera-container mb-3 flex justify-between space-x-1">
+              <div className="illumination-settings p-1 border border-gray-300 rounded-lg w-1/2">
+                <div className="illumination-intensity mb-2">
+                  <div className="intensity-label-row flex justify-between mb-1 text-xs">
+                    <label>Illumination Intensity: </label>
+                    <span>{actualIlluminationIntensity}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    className="control-input w-full disabled:opacity-75 disabled:cursor-not-allowed"
+                    min="0"
+                    max="100"
+                    value={desiredIlluminationIntensity}
+                    onChange={(e) => {
+                      if (!microscopeControlService || currentOperation || microscopeBusy) return;
+                      setDesiredIlluminationIntensity(parseInt(e.target.value, 10));
+                    }}
+                    disabled={!microscopeControlService || microscopeBusy || currentOperation !== null}
+                  />
+                </div>
+
+                <div className="illumination-channel text-xs">
+                  <label>Illumination Channel:</label>
+                  <select
+                    className="control-input w-full mt-1 p-1 border border-gray-300 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
+                    value={illuminationChannel}
+                    onChange={(e) => {
+                      if (!microscopeControlService || currentOperation || microscopeBusy) return;
+                      const newChannel = e.target.value;
+                      if (illuminationChannel !== newChannel) {
+                        setIlluminationChannel(newChannel);
+                        channelSetByUIFlagRef.current = true;
+                      }
+                    }}
+                    disabled={!microscopeControlService || currentOperation !== null || microscopeBusy}
+                  >
+                    <option value="0">BF LED matrix full</option>
+                    <option value="11">Fluorescence 405 nm Ex</option>
+                    <option value="12">Fluorescence 488 nm Ex</option>
+                    <option value="14">Fluorescence 561 nm Ex</option>
+                    <option value="13">Fluorescence 638 nm Ex</option>
+                    <option value="15">Fluorescence 730 nm Ex</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="camera-exposure-settings p-1 border border-gray-300 rounded-lg w-1/2 text-xs">
+                <label>Camera Exposure:</label>
+                <span className="ml-1 text-gray-800 text-xs">{actualCameraExposure} ms</span>
+                <div className="input-container">
+                  <input
+                    type="number"
+                    className={`control-input w-full mt-1 p-1 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed ${getInputValidationClasses(
+                      exposureInput.isValid,
+                      exposureInput.hasUnsavedChanges,
+                      'border'
+                    )}`}
+                    value={exposureInput.inputValue}
+                    max="900"
+                    onChange={exposureInput.handleInputChange}
+                    onKeyDown={exposureInput.handleKeyDown}
+                    onBlur={exposureInput.handleBlur}
+                    disabled={currentOperation !== null || microscopeBusy}
+                    placeholder="1-900ms"
+                  />
+                </div>
+              </div>
+            </div>
+
+
+
+            {/* Imaging Tasks Section */}
+            <div className="imaging-tasks-section mb-3 p-3 border border-gray-300 rounded-lg">
+              <div className="flex justify-between items-center mb-2">
+                <h4 className="text-sm font-medium">Time-Lapse Imaging Tasks</h4>
+                <button
+                  className="control-button bg-green-500 text-white hover:bg-green-600 px-2 py-1 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
+                  onClick={() => openImagingTaskModal(null)}
+                  disabled={
+                    selectedMicroscopeId === "agent-lens/squid-control-reef" || 
+                    !orchestratorManagerService || 
+                    currentOperation !== null || 
+                    microscopeBusy || 
+                    imagingTasks.some(t => t.operational_state?.status !== 'completed' && t.operational_state?.status !== 'failed')
+                  }
+                  title={
+                    selectedMicroscopeId === "agent-lens/squid-control-reef" 
+                      ? "Time-lapse imaging not supported on simulated microscope"
+                      : !orchestratorManagerService 
+                        ? "Orchestrator service not available (check reef-imaging workspace access)"
+                        : sampleLoadStatus.isSampleLoaded
+                          ? "Microscope is occupied. Unload current sample first via 'Select Samples'"
+                          : imagingTasks.some(t => t.operational_state?.status !== 'completed' && t.operational_state?.status !== 'failed')
+                            ? "Microscope has an active/pending task. Cannot create new task."
+                            : "Create New Imaging Task"
+                  }
                 >
-                  {task.name} ({task.operational_state?.status || 'Unknown'})
-                  {task.operational_state?.status !== 'completed' && task.operational_state?.status !== 'failed' && <i className="fas fa-spinner fa-spin ml-2 text-blue-500"></i>}
-                </li>
-              ))}
-            </ul>
-          )}
+                  <i className="fas fa-plus mr-1"></i> New Task
+                </button>
+              </div>
+              
+              {selectedMicroscopeId === "agent-lens/squid-control-reef" ? (
+                <p className="text-xs text-gray-500 italic">Time-lapse imaging is not supported on the simulated microscope.</p>
+              ) : !orchestratorManagerService ? (
+                <p className="text-xs text-gray-500 italic">Time-lapse imaging not available (orchestrator service not accessible - check reef-imaging workspace access).</p>
+              ) : imagingTasks.length === 0 ? (
+                <p className="text-xs text-gray-500">No imaging tasks found for this microscope.</p>
+              ) : (
+                <ul className="list-disc pl-5 space-y-1 text-xs">
+                  {imagingTasks.map(task => (
+                    <li 
+                      key={task.name} 
+                      className={`cursor-pointer hover:text-blue-600 ${task.operational_state?.status !== 'completed' && task.operational_state?.status !== 'failed' ? 'font-semibold text-blue-700' : 'text-gray-600'}`}
+                      onClick={() => openImagingTaskModal(task)}
+                      title={`Status: ${task.operational_state?.status || 'Unknown'}. Click to manage.`}
+                    >
+                      {task.name} ({task.operational_state?.status || 'Unknown'})
+                      {task.operational_state?.status !== 'completed' && task.operational_state?.status !== 'failed' && <i className="fas fa-spinner fa-spin ml-2 text-blue-500"></i>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
         </div>
+      )}
 
-        {/* Bottom-Right: Chatbot */}
-        <div className="mcp-chatbot-area">
+      {/* Collapsible Chat Panel - Right Side */}
+      <div className={`collapsible-chat-panel ${isRightPanelCollapsed ? 'collapsed' : 'expanded'}`}>
+        <div className="chat-panel-header">
+          <div className="chat-panel-title">
+            <i className="fas fa-comments mr-2"></i>
+            <h3>AI Assistant</h3>
+          </div>
+          <button 
+            onClick={toggleRightPanel}
+            className="chat-panel-toggle"
+            title={isRightPanelCollapsed ? "Expand Chat Panel" : "Collapse Chat Panel"}
+          >
+            <i className={`fas ${isRightPanelCollapsed ? 'fa-chevron-left' : 'fa-chevron-right'}`}></i>
+          </button>
+        </div>
+        <div className="chat-panel-content">
           <ChatbotButton 
             key={selectedMicroscopeId}
             microscopeControlService={microscopeControlService} 
@@ -1818,6 +1719,7 @@ const MicroscopeControlPanel = ({
         </div>
       </div>
 
+      {/* Modals */}
       {isImagingModalOpen && (
         <ImagingTasksModal
           isOpen={isImagingModalOpen}
@@ -1835,9 +1737,8 @@ const MicroscopeControlPanel = ({
 
       {/* Configuration Display Modal */}
       {isConfigurationWindowOpen && microscopeConfiguration && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center configuration-window-overlay p-4">
           <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[70vh] flex flex-col">
-            {/* Modal Header - Fixed */}
             <div className="flex justify-between items-center p-3 border-b border-gray-200 flex-shrink-0">
               <h2 className="text-lg font-semibold text-gray-800">
                 Microscope Configuration
@@ -1859,14 +1760,12 @@ const MicroscopeControlPanel = ({
               </button>
             </div>
 
-            {/* Modal Body - Scrollable */}
             <div className="overflow-y-auto p-3" style={{ maxHeight: 'calc(70vh - 120px)' }}>
               <pre className="bg-gray-100 p-3 rounded text-xs overflow-x-auto whitespace-pre-wrap font-mono leading-tight">
                 {JSON.stringify(microscopeConfiguration, null, 2)}
               </pre>
             </div>
 
-            {/* Modal Footer - Fixed */}
             <div className="flex justify-end p-3 border-t border-gray-200 flex-shrink-0">
               <button
                 onClick={closeConfigurationWindow}
@@ -1878,8 +1777,6 @@ const MicroscopeControlPanel = ({
           </div>
         </div>
       )}
-
-
     </div>
   );
 };
@@ -1900,13 +1797,13 @@ MicroscopeControlPanel.propTypes = {
   roboticArmService: PropTypes.object,
   currentOperation: PropTypes.string,
   setCurrentOperation: PropTypes.func,
-  hyphaManager: PropTypes.object, // Changed prop type
-  showNotification: PropTypes.func, // Added prop type for notification function
-  orchestratorManagerService: PropTypes.object, // Added prop type
-  onOpenImageJ: PropTypes.func, // Added prop type for ImageJ integration
-  imjoyApi: PropTypes.object, // Added prop type for ImJoy API
-  onFreePanAutoCollapse: PropTypes.func, // Added prop type for FREE_PAN auto-collapse
-  onFitToViewUncollapse: PropTypes.func, // Added prop type for Fit to View uncollapse
+  hyphaManager: PropTypes.object,
+  showNotification: PropTypes.func,
+  orchestratorManagerService: PropTypes.object,
+  onOpenImageJ: PropTypes.func,
+  imjoyApi: PropTypes.object,
+  onFreePanAutoCollapse: PropTypes.func,
+  onFitToViewUncollapse: PropTypes.func,
 };
 
 export default MicroscopeControlPanel; 

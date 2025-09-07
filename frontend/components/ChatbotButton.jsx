@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import PropTypes from 'prop-types';
 
-const ChatbotButton = ({ microscopeControlService, appendLog, microscopeBusy}) => {
+const ChatbotButton = ({ microscopeControlService, appendLog }) => {
     const [chatUrl, setChatUrl] = useState(null);
+    const [isHyphaReady, setIsHyphaReady] = useState(false);
 
     useEffect(() => {
         const initializeHyphaCore = async () => {
@@ -13,42 +14,58 @@ const ChatbotButton = ({ microscopeControlService, appendLog, microscopeBusy}) =
                 await window.hyphaCore.start();
                 window.hyphaApi = window.hyphaCore.api;
             }
+            setIsHyphaReady(true);
         };
         
         initializeHyphaCore();
     }, []);
 
-    const openChatbot = async () => {
-        try {
-            if (!window.hyphaCore || !window.hyphaApi) {
-                appendLog('HyphaCore is not initialized.');
-                return;
+    // Automatically load chatbot when component mounts
+    useEffect(() => {
+        let cancelled = false;
+        const loadChatbot = async () => {
+            if (!microscopeControlService || chatUrl || !isHyphaReady) return;
+            try {
+                if (!window.hyphaCore || !window.hyphaApi) {
+                    appendLog('HyphaCore is not initialized yet, waiting...');
+                    return;
+                }
+
+                appendLog('Loading chatbot automatically...');
+                const maxAttempts = 20; // ~10s total with 500ms delay
+                const delayMs = 500;
+                for (let attempt = 1; attempt <= maxAttempts && !cancelled; attempt++) {
+                    const url = await microscopeControlService.get_chatbot_url();
+                    if (url && typeof url === 'string' && url.trim() !== '') {
+                        if (!cancelled) setChatUrl(url);
+                        appendLog('Chatbot is ready.');
+                        return;
+                    }
+                    await new Promise(resolve => setTimeout(resolve, delayMs));
+                }
+                if (!cancelled) appendLog('Chatbot URL not available yet (timeout).');
+            } catch (error) {
+                if (!cancelled) appendLog(`Failed to load chatbot: ${error.message}`);
             }
-        
-            appendLog('Opening chatbot window...');
-            const url = await microscopeControlService.get_chatbot_url();
-            setChatUrl(url);
-        } catch (error) {
-            appendLog(`Failed to open chatbot window: ${error.message}`);
-        }
-    };
+        };
+        loadChatbot();
+        return () => { cancelled = true; };
+    }, [microscopeControlService, chatUrl, appendLog, isHyphaReady]);
 
     return (
         <div>
-            <button
-                className="control-button bg-blue-500 text-white hover:bg-blue-600 p-2 rounded mb-4"
-                onClick={openChatbot}
-                disabled={!microscopeControlService || microscopeBusy}
-            >
-                <i className="fas fa-comments"></i> Open Chat
-            </button>
-            {chatUrl && (
-                <div className="chat-window border border-gray-300 rounded p-2">
+            {chatUrl ? (
+                <div className="chat-window">
                     <iframe
                         src={chatUrl}
-                        style={{ width: '100%', height: '400px', border: 'none' }}
+                        style={{ width: '100%', height: '100%', border: 'none' }}
                         title="Chatbot"
                     ></iframe>
+                </div>
+            ) : (
+                <div className="chat-loading">
+                    <i className="fas fa-spinner fa-spin"></i>
+                    <span>Loading chatbot...</span>
                 </div>
             )}
         </div>
@@ -58,7 +75,6 @@ const ChatbotButton = ({ microscopeControlService, appendLog, microscopeBusy}) =
 ChatbotButton.propTypes = {
     microscopeControlService: PropTypes.object,
     appendLog: PropTypes.func.isRequired,
-    microscopeBusy: PropTypes.bool,
 };
 
 export default ChatbotButton;

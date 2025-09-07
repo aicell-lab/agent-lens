@@ -135,8 +135,7 @@ bash scripts/setup_dev.sh
 
 2. **Python Dependencies**
    ```bash
-   pip install -r requirements.txt
-   pip install -e .
+   pip install -e ".[test]"
    ```
 
 3. **Frontend Dependencies**
@@ -202,7 +201,7 @@ agent-lens/
 │   └── 📄 dockerfile           # Application container
 ├── 📁 scripts/                 # Development scripts
 ├── 📁 docs/                    # Documentation
-└── 📄 requirements.txt         # Python dependencies
+└── 📄 pyproject.toml           # Python project configuration and dependencies
 ```
 
 ## Core Components

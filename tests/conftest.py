@@ -98,7 +98,7 @@ async def hypha_server():
     # Check for token first
     token = os.environ.get("WORKSPACE_TOKEN")
     if not token:
-        pytest.skip("WORKSPACE_TOKEN not set in environment")
+        raise ValueError("WORKSPACE_TOKEN not set in environment - required for Hypha server tests")
     
     from hypha_rpc import connect_to_server
     

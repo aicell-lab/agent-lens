@@ -232,6 +232,31 @@ const MicroscopeMapDisplay = ({
     return layouts[wellPlateType] || layouts['96'];
   }, [wellPlateType]);
 
+  // Helper function to get selected channels for API calls
+  const getSelectedChannels = useCallback(() => {
+    const selectedChannels = Object.entries(visibleLayers.channels)
+      .filter(([, isVisible]) => isVisible)
+      .map(([channelName]) => channelName);
+    
+    // Ensure at least one channel is selected
+    if (selectedChannels.length === 0) {
+      return ['BF LED matrix full']; // Default to brightfield
+    }
+    
+    return selectedChannels;
+  }, [visibleLayers.channels]);
+
+  // Helper function to check if any channels are selected
+  const hasSelectedChannels = useCallback(() => {
+    return Object.values(visibleLayers.channels).some(isVisible => isVisible);
+  }, [visibleLayers.channels]);
+
+  // Helper function to get channel string for API calls
+  const getChannelString = useCallback(() => {
+    const selectedChannels = getSelectedChannels();
+    return selectedChannels.join(',');
+  }, [getSelectedChannels]);
+
   // State to track the well being selected during drag operations
   const [dragSelectedWell, setDragSelectedWell] = useState(null);
 
@@ -251,8 +276,6 @@ const MicroscopeMapDisplay = ({
   const renderRealTimeProgress = useCallback(() => {
     if (!isRealTimeLoading || realTimeChunkProgress.size === 0) return null;
     
-    const totalWells = realTimeChunkProgress.size;
-    const completedWells = Array.from(realTimeChunkProgress.values()).filter(p => p.loadedChunks === p.totalChunks).length;
     const totalChunks = Array.from(realTimeChunkProgress.values()).reduce((sum, p) => sum + p.totalChunks, 0);
     const loadedChunks = Array.from(realTimeChunkProgress.values()).reduce((sum, p) => sum + p.loadedChunks, 0);
     
@@ -262,27 +285,25 @@ const MicroscopeMapDisplay = ({
         top: '10px',
         right: '10px',
         background: 'rgba(0, 0, 0, 0.8)',
-        color: 'white',
-        padding: '10px',
-        borderRadius: '5px',
-        fontSize: '12px',
+        padding: '8px',
+        borderRadius: '4px',
         zIndex: 1000,
-        minWidth: '200px'
+        width: '120px'
       }}>
-        <div style={{ fontWeight: 'bold', marginBottom: '5px' }}>
-          🔄 Real-time Loading
-        </div>
-        <div style={{ marginBottom: '3px' }}>
-          Wells: {completedWells}/{totalWells} completed
-        </div>
-        <div style={{ marginBottom: '3px' }}>
-          Chunks: {loadedChunks}/{totalChunks} loaded
+        <div style={{ 
+          color: 'white', 
+          fontSize: '11px', 
+          textAlign: 'center', 
+          marginBottom: '4px',
+          fontFamily: 'monospace'
+        }}>
+          {loadedChunks}/{totalChunks}
         </div>
         <div style={{ 
           width: '100%', 
-          height: '4px', 
+          height: '6px', 
           background: '#333', 
-          borderRadius: '2px',
+          borderRadius: '3px',
           overflow: 'hidden'
         }}>
           <div style={{
@@ -751,7 +772,7 @@ const MicroscopeMapDisplay = ({
   // In FOV_FITTED mode, automatically calculate scale and pan to fit video in the display
   // In FREE_PAN mode, use manual scale and pan controls
   // Scale levels: 0=1x, 1=0.25x, 2=0.0625x, 3=0.015625x, 4=0.00390625x (4x difference between levels)
-  // Zoom range: 25% to 1600% (0.25x to 16x) within each scale level
+  // Zoom range: 25% to 6400% (0.25x to 64x) within each scale level - increased to allow scale level transitions
   const baseScale = 1 / Math.pow(4, scaleLevel);
   const calculatedMapScale = baseScale * zoomLevel;
   
@@ -930,35 +951,60 @@ const MicroscopeMapDisplay = ({
       let initialScaleLevel = 1; // Default to scale 1
       let initialZoomLevel;
       
-      // Aggressively adjust scale level based on effective zoom to bias heavily towards higher scale levels (lower resolution)
-      if (baseEffectiveScale < 0.05) { // Very zoomed out
+      // MAXIMUM bias towards higher scale levels (lower resolution) - extremely hard to reach scale 0 and scale 1
+      if (baseEffectiveScale < 2.0) { // Very zoomed out - scale 4 (much larger threshold)
         initialScaleLevel = 4; // Use lowest resolution
         initialZoomLevel = baseEffectiveScale * Math.pow(4, 4);
-      } else if (baseEffectiveScale < 0.25) { // Zoomed out - increased threshold to push more users to low resolution
+      } else if (baseEffectiveScale < 8.0) { // Zoomed out - scale 3 (much larger threshold)
         initialScaleLevel = 3; // Use low resolution  
         initialZoomLevel = baseEffectiveScale * Math.pow(4, 3);
-      } else if (baseEffectiveScale < 1.0) { // Medium zoom - increased threshold significantly
+      } else if (baseEffectiveScale < 32.0) { // Medium zoom - scale 2 (much larger threshold)
         initialScaleLevel = 2; // Use medium resolution
         initialZoomLevel = baseEffectiveScale * Math.pow(4, 2);
-      } else if (baseEffectiveScale < 4.0) { // Close zoom - use scale 1 instead of 0 for better performance
+      } else if (baseEffectiveScale < 128.0) { // Close zoom - scale 1 (much larger threshold)
         initialScaleLevel = 1; // Use higher resolution (but not highest)
         initialZoomLevel = baseEffectiveScale * Math.pow(4, 1);
-      } else { // Extremely close zoom - only then use highest resolution
-        initialScaleLevel = 0; // Use highest resolution only when extremely zoomed in
+      } else { // Very close zoom - scale 0 (extremely hard to reach)
+        initialScaleLevel = 0; // Use highest resolution only when extremely close
         initialZoomLevel = baseEffectiveScale;
       }
       
       // Clamp zoom level to valid range
-      initialZoomLevel = Math.max(0.25, Math.min(16.0, initialZoomLevel));
+      initialZoomLevel = Math.max(0.25, Math.min(64.0, initialZoomLevel));
+      
+      // Calculate new map scale for FREE_PAN mode
+      const newMapScale = (1 / Math.pow(4, initialScaleLevel)) * initialZoomLevel;
+      
+      // Calculate pan position to keep FOV box in view during transition
+      // This maintains the FOV position relative to the container at the new scale level
+      let calculatedPan = { x: 0, y: 0 };
+      if (currentStagePosition && stageDimensions && containerDimensions.width > 0) {
+        // Calculate where the FOV should be positioned on the new scale
+        const stagePosX = (currentStagePosition.x - stageDimensions.xMin) * pixelsPerMm * newMapScale;
+        const stagePosY = (currentStagePosition.y - stageDimensions.yMin) * pixelsPerMm * newMapScale;
+        
+        // Center the FOV in the container
+        calculatedPan = {
+          x: containerDimensions.width / 2 - stagePosX,
+          y: containerDimensions.height / 2 - stagePosY
+        };
+      } else {
+        // Fallback: use the autoFittedPan scaled appropriately
+        const scaleRatio = newMapScale / autoFittedScale;
+        calculatedPan = {
+          x: autoFittedPan.x * scaleRatio,
+          y: autoFittedPan.y * scaleRatio
+        };
+      }
       
       setScaleLevel(initialScaleLevel);
       setZoomLevel(initialZoomLevel);
-      setMapPan(autoFittedPan);
+      setMapPan(calculatedPan);
       if (appendLog) {
         appendLog(`Switched to stage map view (scale ${initialScaleLevel}, zoom ${(initialZoomLevel * 100).toFixed(1)}%)`);
       }
     }
-  }, [mapViewMode, autoFittedScale, autoFittedPan, appendLog]);
+  }, [mapViewMode, autoFittedScale, autoFittedPan, appendLog, currentStagePosition, stageDimensions, pixelsPerMm, containerDimensions]);
   
   // Switch back to FOV_FITTED mode
   const fitToView = useCallback(() => {
@@ -1105,21 +1151,20 @@ const MicroscopeMapDisplay = ({
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
     
-    // Check if we should change scale level - aggressively bias towards higher scale levels to reduce data loading
-    if (newZoomLevel > (scaleLevel === 1 ? 12.0 : 4.0) && scaleLevel > 0) {
+    // Check if we should change scale level - MAXIMUM bias towards higher scale levels (lower resolution)
+    if (newZoomLevel > 32.0 && scaleLevel > 0) {
       // Zoom in to higher resolution (lower scale number = less zoomed out)
-      // Extra restrictive for scale 1→0 transition (12.0) to avoid loading highest resolution unless really needed
-      // Regular restrictive threshold (4.0) for other scale transitions
+      // Extremely restrictive threshold (32.0) to avoid loading high resolution unless really needed
       const equivalentZoom = (newZoomLevel * (1 / Math.pow(4, scaleLevel))) / (1 / Math.pow(4, scaleLevel - 1));
-      zoomToPoint(Math.min(16.0, equivalentZoom), scaleLevel - 1, mouseX, mouseY);
-    } else if (newZoomLevel < 1.5 && scaleLevel < 4) {
+      zoomToPoint(Math.min(64.0, equivalentZoom), scaleLevel - 1, mouseX, mouseY);
+    } else if (newZoomLevel < 8.0 && scaleLevel < 4) {
       // Zoom out to lower resolution (higher scale number = more zoomed out)
-      // Much more aggressive threshold (1.5 instead of 0.5) to push users to lower resolution much sooner
+      // Much more aggressive threshold (8.0) to push users to lower resolution much sooner
       const equivalentZoom = (newZoomLevel * (1 / Math.pow(4, scaleLevel))) / (1 / Math.pow(4, scaleLevel + 1));
       zoomToPoint(Math.max(0.25, equivalentZoom), scaleLevel + 1, mouseX, mouseY);
     } else {
       // Smooth zoom within current scale level
-      newZoomLevel = Math.max(0.25, Math.min(16.0, newZoomLevel));
+      newZoomLevel = Math.max(0.25, Math.min(64.0, newZoomLevel));
       zoomToPoint(newZoomLevel, scaleLevel, mouseX, mouseY);
     }
   }, [mapViewMode, zoomLevel, scaleLevel, zoomToPoint, transitionToFreePan, setVideoZoom]);
@@ -1185,20 +1230,21 @@ const MicroscopeMapDisplay = ({
 
   // Helper functions for tile management
   const getTileKey = useCallback((bounds, scale, channel) => {
-    return `${bounds.topLeft.x.toFixed(1)}_${bounds.topLeft.y.toFixed(1)}_${bounds.bottomRight.x.toFixed(1)}_${bounds.bottomRight.y.toFixed(1)}_${scale}_${channel}`;
+    // For merged channels, use the sorted channel string to ensure consistent keys
+    const normalizedChannel = channel.includes(',') ? channel.split(',').sort().join(',') : channel;
+    return `${bounds.topLeft.x.toFixed(1)}_${bounds.topLeft.y.toFixed(1)}_${bounds.bottomRight.x.toFixed(1)}_${bounds.bottomRight.y.toFixed(1)}_${scale}_${normalizedChannel}`;
   }, []);
 
   // Memoize visible tiles with smart cleanup strategy
   const visibleTiles = useMemo(() => {
     if (!visibleLayers.scanResults) return [];
     
-    const activeChannel = Object.entries(visibleLayers.channels)
-      .find(([, isVisible]) => isVisible)?.[0] || 'BF LED matrix full';
+    const channelString = getChannelString();
     
-    // Get tiles for current scale and channel
+    // Get tiles for current scale and channel selection
     const currentScaleTiles = stitchedTiles.filter(tile => 
       tile.scale === scaleLevel && 
-      tile.channel === activeChannel
+      tile.channel === channelString
     );
     
     if (currentScaleTiles.length > 0) {
@@ -1215,7 +1261,7 @@ const MicroscopeMapDisplay = ({
     for (const scale of availableScales) {
       const scaleTiles = stitchedTiles.filter(tile => 
         tile.scale === scale && 
-        tile.channel === activeChannel
+        tile.channel === channelString
       );
       if (scaleTiles.length > 0) {
         return scaleTiles;
@@ -1223,7 +1269,7 @@ const MicroscopeMapDisplay = ({
     }
     
     return [];
-  }, [stitchedTiles, scaleLevel, visibleLayers.channels, visibleLayers.scanResults]);
+  }, [stitchedTiles, scaleLevel, visibleLayers.channels, visibleLayers.scanResults, getSelectedChannels, getChannelString]);
 
   const addOrUpdateTile = useCallback((newTile) => {
     setStitchedTiles(prevTiles => {
@@ -1271,18 +1317,14 @@ const MicroscopeMapDisplay = ({
   // Effect to clean up old tiles when channel changes  
   useEffect(() => {
     if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
-      // Clean up but don't immediately clear everything - let new tiles load first
-      const activeChannel = Object.entries(visibleLayers.channels)
-        .find(([, isVisible]) => isVisible)?.[0] || 'BF LED matrix full';
-      
       // Trigger cleanup of old tiles after a delay to allow new ones to load
       const cleanupTimer = setTimeout(() => {
-        cleanupOldTiles(scaleLevel, activeChannel);
+        cleanupOldTiles(scaleLevel, getChannelString());
       }, 1000);
       
       return () => clearTimeout(cleanupTimer);
     }
-  }, [visibleLayers.channels, mapViewMode, visibleLayers.scanResults, scaleLevel]);
+  }, [visibleLayers.channels, mapViewMode, visibleLayers.scanResults, scaleLevel, cleanupOldTiles, getChannelString]);
 
 
 
@@ -1755,15 +1797,29 @@ const MicroscopeMapDisplay = ({
       const exposure_time = pair ? pair[1] : 100;
       
       // Update scan parameters with current microscope settings
-      setScanParameters(prev => ({
-        ...prev,
-        illumination_settings: [
-          {
-            channel: channelName,
+      // For merged display, include all selected channels with default settings
+      const selectedChannels = getSelectedChannels();
+      const illuminationSettings = selectedChannels.map(channel => {
+        // Use current microscope settings for the active channel, defaults for others
+        if (channel === channelName) {
+          return {
+            channel: channel,
             intensity: intensity,
             exposure_time: exposure_time
-          }
-        ]
+          };
+        } else {
+          // Default settings for other channels
+          return {
+            channel: channel,
+            intensity: 50,
+            exposure_time: 100
+          };
+        }
+      });
+      
+      setScanParameters(prev => ({
+        ...prev,
+        illumination_settings: illuminationSettings
       }));
       
       if (appendLog) {
@@ -1775,7 +1831,38 @@ const MicroscopeMapDisplay = ({
       }
       console.error('[MicroscopeMapDisplay] Failed to load microscope settings:', error);
     }
-  }, [microscopeControlService, appendLog]);
+  }, [microscopeControlService, appendLog, getSelectedChannels]);
+
+  // Effect to update scan parameters when channel selection changes
+  useEffect(() => {
+    if (microscopeControlService && !isSimulatedMicroscope) {
+      loadCurrentMicroscopeSettings();
+    }
+  }, [visibleLayers.channels, loadCurrentMicroscopeSettings, microscopeControlService, isSimulatedMicroscope]);
+
+  // Effect to refresh tiles when channel selection changes
+  useEffect(() => {
+    if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && !isSimulatedMicroscope) {
+      // Clear existing tiles to force reload with new channel selection
+      setStitchedTiles([]);
+      activeTileRequestsRef.current.clear();
+      
+      // Schedule tile loading after a short delay
+      const refreshTimer = setTimeout(() => {
+        if (appendLog) {
+          const selectedChannels = Object.entries(visibleLayers.channels)
+            .filter(([, isVisible]) => isVisible)
+            .map(([channelName]) => channelName);
+          const channelList = selectedChannels.length > 0 ? selectedChannels : ['BF LED matrix full'];
+          appendLog(`Channel selection changed to: ${channelList.join(', ')} - refreshing tiles`);
+        }
+        // We'll trigger the tile update through a state change rather than calling scheduleTileUpdate directly
+        setNeedsTileReload(true);
+      }, 500);
+      
+      return () => clearTimeout(refreshTimer);
+    }
+  }, [visibleLayers.channels, mapViewMode, visibleLayers.scanResults, isSimulatedMicroscope, appendLog]);
 
   // Helper function to check if a region is covered by existing tiles
   const isRegionCovered = useCallback((bounds, scale, channel, existingTiles) => {
@@ -2319,9 +2406,8 @@ const MicroscopeMapDisplay = ({
       const container = mapContainerRef.current;
       if (!container || !stageDimensions || !pixelsPerMm) return;
       
-      // Get the active channel
-      const activeChannel = Object.entries(visibleLayers.channels)
-        .find(([_, isVisible]) => isVisible)?.[0] || 'BF LED matrix full';
+      // Get the active channel string for API calls
+      const activeChannel = getChannelString();
       
       // Calculate visible region in stage coordinates with buffer
       const bufferPercent = 0.2; // 20% buffer around visible area for smoother panning
@@ -2524,16 +2610,12 @@ const MicroscopeMapDisplay = ({
           
 
           
-          // 🚀 PERFORMANCE OPTIMIZATION: Throttle state updates to reduce CPU usage
+          // 🚀 REAL-TIME TILE UPDATES: Allow frequent updates for smooth progress visualization
           const now = Date.now();
           const lastUpdate = chunkProgressUpdateTimes.current.get(wellId) || 0;
           const UPDATE_INTERVAL = 200; // Only update state every 200ms per well
           
-          if (now - lastUpdate < UPDATE_INTERVAL && loadedChunks < totalChunks) {
-            return; // Skip update if too frequent
-          }
-          
-          // Update chunk progress with throttling
+          // Always update progress state for real-time feedback
           setRealTimeChunkProgress(prev => {
             const newProgress = new Map(prev);
             newProgress.set(wellId, { loadedChunks, totalChunks, partialCanvas });
@@ -2543,16 +2625,20 @@ const MicroscopeMapDisplay = ({
           // Update last update time
           chunkProgressUpdateTimes.current.set(wellId, now);
           
-          // 🚀 PERFORMANCE OPTIMIZATION: Only create tiles for significant progress or completion
+          // 🚀 FREQUENT TILE UPDATES: Create tiles more frequently for smooth progress visualization
           const progressPercentage = (loadedChunks / totalChunks) * 100;
-          const shouldCreateTile = progressPercentage >= 25 && progressPercentage % 25 === 0 || loadedChunks === totalChunks;
+          
+          // Create tiles more frequently for better progress visualization
+          const shouldCreateTile = progressPercentage >= 10 && progressPercentage % 10 === 0 || 
+                                  loadedChunks % Math.max(1, Math.floor(totalChunks / 10)) === 0 || 
+                                  loadedChunks === totalChunks;
           
           if (partialCanvas && loadedChunks > 0 && shouldCreateTile) {
             const wellRequest = wellRequests.find(req => req.wellId === wellId);
             if (!wellRequest) return;
             
-            // 🚀 PERFORMANCE OPTIMIZATION: Use lower quality for partial tiles to reduce CPU
-            const quality = loadedChunks === totalChunks ? 0.9 : 0.7; // Lower quality for partial tiles
+            // 🚀 IMPROVED QUALITY: Use higher quality for partial tiles for better visual feedback
+            const quality = loadedChunks === totalChunks ? 0.95 : 0.85;
             const partialDataUrl = partialCanvas.toDataURL('image/jpeg', quality);
             
             // Calculate bounds (use intersection bounds for now, will be updated with actual bounds later)
@@ -2695,7 +2781,7 @@ const MicroscopeMapDisplay = ({
           console.log(`✅ REAL-TIME: Completed loading ${successfulResults.length}/${wellRequests.length} well regions`);
           
           // Clean up old tiles for this scale/channel combination to prevent memory bloat
-          cleanupOldTiles(scaleLevel, activeChannel);
+          cleanupOldTiles(scaleLevel, getChannelString());
           
           if (appendLog) {
             appendLog(`✅ REAL-TIME: Loaded ${successfulResults.length} historical well tiles for scale ${scaleLevel}`);
@@ -2759,9 +2845,8 @@ const MicroscopeMapDisplay = ({
     const container = mapContainerRef.current;
     if (!container || !stageDimensions || !pixelsPerMm) return;
     
-    // Get the active channel
-    const activeChannel = Object.entries(visibleLayers.channels)
-      .find(([_, isVisible]) => isVisible)?.[0] || 'BF LED matrix full';
+    // Get the active channel string for API calls
+    const activeChannel = getChannelString();
     
     // Calculate visible region in stage coordinates with buffer
     const bufferPercent = 0.2; // 20% buffer around visible area for smoother panning
@@ -2824,7 +2909,7 @@ const MicroscopeMapDisplay = ({
         height_mm,
         wellPlateType, // wellplate_type parameter
         scaleLevel,
-        activeChannel,
+        getChannelString(), // Use comma-separated channel string for merged display
         0, // timepoint index
         wellPaddingMm, // well_padding_mm parameter
         'base64'
@@ -2840,14 +2925,16 @@ const MicroscopeMapDisplay = ({
           width_mm,
           height_mm,
           scale: scaleLevel,
-          channel: activeChannel,
-          timestamp: Date.now()
+          channel: getChannelString(), // Store the channel string used for this tile
+          timestamp: Date.now(),
+          isMerged: getSelectedChannels().length > 1, // Flag to indicate if this is a merged tile
+          channelsUsed: getSelectedChannels() // Store which channels were used
         };
         
         addOrUpdateTile(newTile);
         
         // Clean up old tiles for this scale/channel combination to prevent memory bloat
-        cleanupOldTiles(scaleLevel, activeChannel);
+        cleanupOldTiles(scaleLevel, getChannelString());
         
         if (appendLog) {
           appendLog(`Loaded tile for scale ${scaleLevel}, region (${clampedTopLeft.x.toFixed(1)}, ${clampedTopLeft.y.toFixed(1)}) to (${clampedBottomRight.x.toFixed(1)}, ${clampedBottomRight.y.toFixed(1)})`);
@@ -3041,8 +3128,7 @@ const MicroscopeMapDisplay = ({
   useEffect(() => {
     if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
       console.log('[scaleLevel cleanup] Triggering cleanup and potential tile load');
-      const activeChannel = Object.entries(visibleLayers.channels)
-        .find(([_, isVisible]) => isVisible)?.[0] || 'BF LED matrix full';
+      const activeChannel = getChannelString();
       
       // Always cleanup immediately when scale changes to save memory
       cleanupOldTiles(scaleLevel, activeChannel);
@@ -3056,7 +3142,7 @@ const MicroscopeMapDisplay = ({
           console.log('[scaleLevel cleanup] User not zooming - scheduling tile load');
           setTimeout(() => {
             scheduleTileUpdate(); // Use scheduleTileUpdate instead of direct call
-          }, 200); // Small delay to ensure cleanup is complete
+          }, 800); // Increased delay to 800ms for less aggressive loading
         }
       } else {
         console.log('[scaleLevel cleanup] User is zooming or no microscope service - skipping tile load');
@@ -3068,8 +3154,7 @@ const MicroscopeMapDisplay = ({
   // EXCLUDES historical mode - no automatic tile loading needed for historical data
   useEffect(() => {
     if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && !isZooming && !isHistoricalDataMode) {
-      const activeChannel = Object.entries(visibleLayers.channels)
-        .find(([_, isVisible]) => isVisible)?.[0] || 'BF LED matrix full';
+      const activeChannel = getChannelString();
       
       // 🚀 PERFORMANCE OPTIMIZATION: Check if microscope service is available before attempting tile loading
       if (!microscopeControlService || isSimulatedMicroscope) {
@@ -3167,11 +3252,11 @@ const MicroscopeMapDisplay = ({
                     const centerX = rect.width / 2;
                     const centerY = rect.height / 2;
                     
-                    if (newZoom > 16.0 && scaleLevel > 0) {
-                      zoomToPoint(0.25, scaleLevel - 1, centerX, centerY);
-                    } else {
-                      zoomToPoint(Math.min(16.0, newZoom), scaleLevel, centerX, centerY);
-                    }
+                          if (newZoom > 64.0 && scaleLevel > 0) {
+        zoomToPoint(0.25, scaleLevel - 1, centerX, centerY);
+      } else {
+        zoomToPoint(Math.min(64.0, newZoom), scaleLevel, centerX, centerY);
+      }
                   }}
                   className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Zoom In"
@@ -3199,13 +3284,117 @@ const MicroscopeMapDisplay = ({
                   <i className="fas fa-crosshairs mr-1"></i>
                   Fit to View
                 </button>
+                
+                {/* Scan Area Button */}
+                <button
+                  onClick={() => {
+                    if (isSimulatedMicroscope) return;
+                    if (showScanConfig) {
+                      // Close scan panel and cancel selection
+                      setShowScanConfig(false);
+                      setIsRectangleSelection(false);
+                      setRectangleStart(null);
+                      setRectangleEnd(null);
+                      setDragSelectedWell(null);
+                    } else {
+                      // Automatically switch to FREE_PAN mode if in FOV_FITTED mode
+                      if (mapViewMode === 'FOV_FITTED') {
+                        transitionToFreePan();
+                        if (appendLog) {
+                          appendLog('Switched to stage map view for scan area selection');
+                        }
+                      }
+                      // Open scan panel and load current microscope settings (only if not scanning)
+                      if (!isScanInProgress) {
+                        loadCurrentMicroscopeSettings();
+                        // Automatically enable rectangle selection when opening scan panel (only if not scanning)
+                        // Clear any existing selection first
+                        setRectangleStart(null);
+                        setRectangleEnd(null);
+                        setDragSelectedWell(null);
+                        setIsRectangleSelection(true);
+                      }
+                      setShowScanConfig(true);
+                    }
+                  }}
+                  className={`px-2 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed ${
+                    showScanConfig ? 'bg-blue-600 hover:bg-blue-500' : 
+                    isScanInProgress ? 'bg-orange-600 hover:bg-orange-500' : 'bg-gray-700 hover:bg-gray-600'
+                  }`}
+                  title={isSimulatedMicroscope ? "Scanning not supported for simulated microscope" : 
+                         isScanInProgress ? "View/stop current scan" : "Configure scan and select area (automatically switches to stage map view)"}
+                  disabled={!microscopeControlService || isSimulatedMicroscope || isHistoricalDataMode || isInteractionDisabled}
+                >
+                  <i className="fas fa-vector-square mr-1"></i>
+                  {isScanInProgress ? (showScanConfig ? 'Close Scan Panel' : 'View Scan Progress') : 
+                   (showScanConfig ? 'Close Scan Setup' : 'Scan Area')}
+                </button>
+                
+                {/* Quick Scan Button */}
+                <button
+                  onClick={() => {
+                    if (isSimulatedMicroscope) return;
+                    if (showQuickScanConfig) {
+                      // Close quick scan panel
+                      setShowQuickScanConfig(false);
+                    } else {
+                      // Close normal scan panel if open
+                      setShowScanConfig(false);
+                      setIsRectangleSelection(false);
+                      setRectangleStart(null);
+                      setRectangleEnd(null);
+                      setDragSelectedWell(null);
+                      // Clean up grid drawing states
+                      setGridDragStart(null);
+                      setGridDragEnd(null);
+                      setIsGridDragging(false);
+                      // Open quick scan panel (always allow opening, even during scanning)
+                      setShowQuickScanConfig(true);
+                    }
+                  }}
+                  className={`px-2 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed ${
+                    showQuickScanConfig ? 'bg-green-600 hover:bg-green-500' : 
+                    isQuickScanInProgress ? 'bg-orange-600 hover:bg-orange-500' : 'bg-gray-700 hover:bg-gray-600'
+                  }`}
+                  title={isSimulatedMicroscope ? "Quick scanning not supported for simulated microscope" : 
+                         isQuickScanInProgress ? "View/stop current quick scan" : "Quick scan entire well plate with high-speed acquisition"}
+                  disabled={!microscopeControlService || isSimulatedMicroscope || isHistoricalDataMode || isInteractionDisabled}
+                >
+                  <i className="fas fa-bolt mr-1"></i>
+                  {isQuickScanInProgress ? (showQuickScanConfig ? 'Close Quick Scan Panel' : 'View Quick Scan Progress') : 
+                   (showQuickScanConfig ? 'Cancel Quick Scan' : 'Quick Scan')}
+                </button>
+                
+                {/* Browse Data Button */}
+                <button
+                  onClick={() => {
+                    if (isHistoricalDataMode) {
+                      setIsHistoricalDataMode(false); // Exit historical data mode
+                      setStitchedTiles([]); // Optionally clear tiles to force reload
+                    } else {
+                      setShowBrowseDataModal(true);
+                    }
+                  }}
+                  className={`px-2 py-1 text-xs rounded disabled:opacity-50 disabled:cursor-not-allowed ${
+                    isHistoricalDataMode
+                      ? 'bg-yellow-700 hover:bg-yellow-600 text-white border-2 border-yellow-400' // Style for exit mode
+                      : 'bg-blue-700 hover:bg-blue-600 text-white'
+                  }`}
+                  title={isHistoricalDataMode ? 'Exit historical data map mode' : 'Browse imaging data for this microscope'}
+                  disabled={!microscopeControlService || isSimulatedMicroscope || (!isHistoricalDataMode && isInteractionDisabled)}
+                >
+                  <i className={`fas ${isHistoricalDataMode ? 'fa-sign-out-alt' : 'fa-database'} mr-1`}></i>
+                  {isHistoricalDataMode ? 'Exit Data Map' : 'Browse Data'}
+                </button>
               </div>
               
               {/* Layer selector dropdown */}
               <div className="relative" ref={layerDropdownRef}>
                 <button
                   onClick={() => setIsLayerDropdownOpen(!isLayerDropdownOpen)}
-                  className="px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded flex items-center"
+                  className="px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={isHistoricalDataMode}
+                  title={isHistoricalDataMode ? 'Layers disabled in historical data mode' : 'Toggle layer visibility'}
                 >
                   <i className="fas fa-layer-group mr-1"></i>
                   Layers
@@ -3375,20 +3564,38 @@ const MicroscopeMapDisplay = ({
                             {Object.entries(visibleLayers.channels).map(([channel, isVisible]) => (
                               <label key={channel} className="flex items-center text-white text-xs mb-1 hover:bg-gray-600 p-1 rounded cursor-pointer">
                                 <input
-                                  type="radio"
-                                  name="channel"
+                                  type="checkbox"
                                   checked={isVisible}
                                   onChange={() => setVisibleLayers(prev => ({
                                     ...prev,
-                                    channels: Object.fromEntries(
-                                      Object.keys(prev.channels).map(ch => [ch, ch === channel])
-                                    )
+                                    channels: {
+                                      ...prev.channels,
+                                      [channel]: !isVisible
+                                    }
                                   }))}
                                   className="mr-2"
                                 />
                                 {channel}
                               </label>
                             ))}
+                          </div>
+                          
+                          {/* Channel Selection Info */}
+                          <div className="mt-2 text-xs text-gray-400">
+                            {!hasSelectedChannels() ? (
+                              <span className="text-yellow-400">⚠️ Select at least one channel</span>
+                            ) : Object.values(visibleLayers.channels).filter(Boolean).length === 1 ? (
+                              <span className="text-blue-400">🔵 Single channel mode</span>
+                            ) : (
+                              <span className="text-green-400">🟢 Multi-channel merge mode ({Object.values(visibleLayers.channels).filter(Boolean).length} channels)</span>
+                            )}
+                          </div>
+                          
+                          {/* Channel Selection Help */}
+                          <div className="mt-1 text-xs text-gray-500">
+                            {hasSelectedChannels() && Object.values(visibleLayers.channels).filter(Boolean).length > 1 && (
+                              <span>Channels will be merged using backend color mapping</span>
+                            )}
                           </div>
                         </div>
                       )}
@@ -3397,7 +3604,7 @@ const MicroscopeMapDisplay = ({
                 )}
               </div>
               
-              {/* Well Selection and Scan controls */}
+              {/* Well Selection Controls */}
               <div className="flex items-center space-x-2">
                 {/* Well Plate Type Selector */}
                 <div className="flex items-center space-x-1">
@@ -3410,127 +3617,8 @@ const MicroscopeMapDisplay = ({
                   >
                     <option value="96">96-well</option>
                     <option value="96">only 96-well for now</option>
-
                   </select>
                 </div>
-
-                 {/* Well Padding Control
-                 <div className="flex items-center space-x-1">
-                   <label className="text-white text-xs">Padding:</label>
-                   <input
-                     type="number"
-                     value={wellPaddingMm}
-                     onChange={(e) => setWellPaddingMm(parseFloat(e.target.value) || 2.0)}
-                     className="w-12 px-1 py-0.5 text-xs bg-gray-700 border border-gray-600 rounded text-white"
-                     min="0"
-                     max="10"
-                     step="0.1"
-                     disabled={isSimulatedMicroscope}
-                     title="Well padding in mm"
-                   />
-                   <span className="text-gray-400 text-xs">mm</span>
-                 </div> */}
-                
-                <button
-                onClick={() => {
-                  if (isSimulatedMicroscope) return;
-                  if (showScanConfig) {
-                    // Close scan panel and cancel selection
-                    setShowScanConfig(false);
-                    setIsRectangleSelection(false);
-                    setRectangleStart(null);
-                    setRectangleEnd(null);
-                    setDragSelectedWell(null);
-                  } else {
-                    // Automatically switch to FREE_PAN mode if in FOV_FITTED mode
-                    if (mapViewMode === 'FOV_FITTED') {
-                      transitionToFreePan();
-                      if (appendLog) {
-                        appendLog('Switched to stage map view for scan area selection');
-                      }
-                    }
-                    // Open scan panel and load current microscope settings (only if not scanning)
-                    if (!isScanInProgress) {
-                      loadCurrentMicroscopeSettings();
-                      // Automatically enable rectangle selection when opening scan panel (only if not scanning)
-                      // Clear any existing selection first
-                      setRectangleStart(null);
-                      setRectangleEnd(null);
-                      setDragSelectedWell(null);
-                      setIsRectangleSelection(true);
-                    }
-                    setShowScanConfig(true);
-                  }
-                }}
-                className={`px-2 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed ${
-                  showScanConfig ? 'bg-blue-600 hover:bg-blue-500' : 
-                  isScanInProgress ? 'bg-orange-600 hover:bg-orange-500' : 'bg-gray-700 hover:bg-gray-600'
-                }`}
-                title={isSimulatedMicroscope ? "Scanning not supported for simulated microscope" : 
-                       isScanInProgress ? "View/stop current scan" : "Configure scan and select area (automatically switches to stage map view)"}
-                disabled={!microscopeControlService || isSimulatedMicroscope || isHistoricalDataMode}
-              >
-                <i className="fas fa-vector-square mr-1"></i>
-                {isScanInProgress ? (showScanConfig ? 'Close Scan Panel' : 'View Scan Progress') : 
-                 (showScanConfig ? 'Close Scan Setup' : 'Scan Area')}
-              </button>
-                
-                <button
-                  onClick={() => {
-                    if (isSimulatedMicroscope) return;
-                    if (showQuickScanConfig) {
-                      // Close quick scan panel
-                      setShowQuickScanConfig(false);
-                    } else {
-                      // Close normal scan panel if open
-                      setShowScanConfig(false);
-                      setIsRectangleSelection(false);
-                      setRectangleStart(null);
-                      setRectangleEnd(null);
-                      setDragSelectedWell(null);
-                      // Clean up grid drawing states
-                      setGridDragStart(null);
-                      setGridDragEnd(null);
-                      setIsGridDragging(false);
-                      // Open quick scan panel (always allow opening, even during scanning)
-                      setShowQuickScanConfig(true);
-                    }
-                  }}
-                  className={`px-2 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed ${
-                    showQuickScanConfig ? 'bg-green-600 hover:bg-green-500' : 
-                    isQuickScanInProgress ? 'bg-orange-600 hover:bg-orange-500' : 'bg-gray-700 hover:bg-gray-600'
-                  }`}
-                  title={isSimulatedMicroscope ? "Quick scanning not supported for simulated microscope" : 
-                         isQuickScanInProgress ? "View/stop current quick scan" : "Quick scan entire well plate with high-speed acquisition"}
-                  disabled={!microscopeControlService || isSimulatedMicroscope || isHistoricalDataMode}
-                >
-                  <i className="fas fa-bolt mr-1"></i>
-                  {isQuickScanInProgress ? (showQuickScanConfig ? 'Close Quick Scan Panel' : 'View Quick Scan Progress') : 
-                   (showQuickScanConfig ? 'Cancel Quick Scan' : 'Quick Scan')}
-                </button>
-                
-
-                {/* New Browse Data Button */}
-                <button
-                  onClick={() => {
-                    if (isHistoricalDataMode) {
-                      setIsHistoricalDataMode(false); // Exit historical data mode
-                      setStitchedTiles([]); // Optionally clear tiles to force reload
-                    } else {
-                      setShowBrowseDataModal(true);
-                    }
-                  }}
-                  className={`px-2 py-1 text-xs rounded disabled:opacity-50 disabled:cursor-not-allowed ${
-                    isHistoricalDataMode
-                      ? 'bg-yellow-700 hover:bg-yellow-600 text-white border-2 border-yellow-400' // Style for exit mode
-                      : 'bg-blue-700 hover:bg-blue-600 text-white'
-                  }`}
-                  title={isHistoricalDataMode ? 'Exit historical data map mode' : 'Browse imaging data for this microscope'}
-                  disabled={!microscopeControlService || isSimulatedMicroscope}
-                >
-                  <i className={`fas ${isHistoricalDataMode ? 'fa-sign-out-alt' : 'fa-database'} mr-1`}></i>
-                  {isHistoricalDataMode ? 'Exit Data Map' : 'Browse Data'}
-                </button>
               </div>
             </>
           )}
@@ -3539,74 +3627,6 @@ const MicroscopeMapDisplay = ({
             <div className="flex items-center space-x-2">
               <span className="text-xs text-gray-300">Zoom: {Math.round(videoZoom * 100)}%</span>
               <span className="text-xs text-gray-400">• Scroll down to see stage map</span>
-              {/* Scan buttons visible in FOV_FITTED mode */}
-              <button
-                onClick={() => {
-                  if (isSimulatedMicroscope) return;
-                  if (isScanInProgress && showScanConfig) {
-                    // Just close the panel if it's already open during scanning
-                    setShowScanConfig(false);
-                    setIsRectangleSelection(false);
-                    setRectangleStart(null);
-                    setRectangleEnd(null);
-                    // Clean up grid drawing states
-                    setGridDragStart(null);
-                    setGridDragEnd(null);
-                    setIsGridDragging(false);
-                  } else if (isScanInProgress) {
-                    // Switch to FREE_PAN mode and open scan panel to view progress
-                    transitionToFreePan();
-                    setShowScanConfig(true);
-                    if (appendLog) {
-                      appendLog('Switched to stage map view to monitor scan progress');
-                    }
-                  } else {
-                    // Automatically switch to FREE_PAN mode and open scan configuration
-                    transitionToFreePan();
-                    loadCurrentMicroscopeSettings();
-                    setShowScanConfig(true);
-                    // Clear any existing selection first
-                    setRectangleStart(null);
-                    setRectangleEnd(null);
-                    setDragSelectedWell(null);
-                    setIsRectangleSelection(true);
-                    if (appendLog) {
-                      appendLog('Switched to stage map view for scan area selection');
-                    }
-                  }
-                }}
-                className={`px-2 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed ${
-                  isScanInProgress ? 'bg-orange-600 hover:bg-orange-500' : 'bg-green-600 hover:bg-green-500'
-                }`}
-                title={isSimulatedMicroscope ? "Scanning not supported for simulated microscope" : 
-                       isScanInProgress ? "View/stop current scan" : "Switch to stage map and configure scan area"}
-                disabled={!microscopeControlService || isSimulatedMicroscope}
-              >
-                <i className="fas fa-vector-square mr-1"></i>
-                {isScanInProgress ? (showScanConfig ? 'Close Scan Panel' : 'View Scan Progress') : 'Scan Area'}
-              </button>
-              
-              <button
-                onClick={() => {
-                  if (isSimulatedMicroscope) return;
-                  if (showQuickScanConfig) {
-                    // Close the panel if it's open
-                    setShowQuickScanConfig(false);
-                  } else {
-                    // Open quick scan configuration (always allow, even during scanning)
-                    setShowQuickScanConfig(true);
-                  }
-                }}
-                className={`px-2 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed ${
-                  isQuickScanInProgress ? 'bg-orange-600 hover:bg-orange-500' : 'bg-blue-600 hover:bg-blue-500'
-                }`}
-                title={isSimulatedMicroscope ? "Quick scanning not supported for simulated microscope" : 
-                       isQuickScanInProgress ? "View/stop current quick scan" : "Quick scan entire well plate with high-speed acquisition"}
-                disabled={!microscopeControlService || isSimulatedMicroscope}
-              >
-                <i className="fas fa-bolt mr-1"></i>
-                {isQuickScanInProgress ? (showQuickScanConfig ? 'Close Quick Scan Panel' : 'View Quick Scan Progress') : 'Quick Scan'}
-              </button>
             </div>
           )}
         </div>
@@ -3669,7 +3689,12 @@ const MicroscopeMapDisplay = ({
               {/* Debug info for tiles */}
               {process.env.NODE_ENV === 'development' && (
                 <div className="absolute top-0 left-0 bg-black bg-opacity-50 text-white text-xs p-1">
-                  S{tile.scale} {tile.channel.substring(0, 3)}
+                  S{tile.scale} {tile.isMerged ? 'MERGED' : tile.channel.substring(0, 3)}
+                  {tile.isMerged && tile.channelsUsed && (
+                    <div className="text-xs opacity-75">
+                      {tile.channelsUsed.map(ch => ch.substring(0, 3)).join('+')}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

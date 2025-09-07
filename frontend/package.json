@@ -15,7 +15,9 @@
     "bootstrap": "^5.3.3",
     "html2canvas": "^1.4.1",
     "hypha-rpc": "^0.20.55",
+    "node-fetch": "^3.3.2",
     "ol": "^10.2.1",
+    "pngjs": "^7.0.0",
     "prop-types": "^15.8.1",
     "react": "^18.3.1",
     "react-color": "^2.19.3",
@@ -23,10 +25,19 @@
     "react-rnd": "^10.4.14",
     "tailwindcss": "^3.4.17",
     "vite": "^5.4.10",
-    "winbox": "^0.2.82"
+    "winbox": "^0.2.82",
+    "zarr": "^0.6.3",
+    "zarrita": "^0.5.3"
   },
   "devDependencies": {
-    "vite-plugin-istanbul": "^6.0.0",
-    "c8": "^10.1.2"
+    "@eslint/js": "^9.34.0",
+    "@types/winbox": "^0.2.6",
+    "c8": "^10.1.2",
+    "eslint": "^9.34.0",
+    "eslint-plugin-react": "^7.37.5",
+    "globals": "^16.3.0",
+    "madge": "^8.0.0",
+    "typescript-eslint": "^8.42.0",
+    "vite-plugin-istanbul": "^6.0.0"
   }
 }

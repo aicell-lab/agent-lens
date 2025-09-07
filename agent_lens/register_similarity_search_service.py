@@ -173,8 +173,8 @@ def _get_cell_index():
 # Call initialization at startup
 initialize_data_stores()
 
-def hello_world():
-    return "Hello world"
+def ping():
+    return "pong"
 
 def find_similar_images(query_input, top_k=5):
     """
@@ -570,7 +570,7 @@ async def start_hypha_service(server, service_id="image-text-similarity-search")
             "run_in_executor": True,
             "require_context": False, 
         },
-        "hello_world": hello_world,
+        "ping": ping,
         "find_similar_images": find_similar_images, 
         "add_image": add_image_file_and_update_index, 
         "find_similar_cells": find_similar_cells,
@@ -589,11 +589,11 @@ async def start_hypha_service(server, service_id="image-text-similarity-search")
 
 async def setup():
     server_url = os.getenv("HYPHA_SERVER_URL", "https://hypha.aicell.io")
-    token = os.getenv("AGENT_LENS_WORKSPACE_TOKEN")
+    token = os.getenv("WORKSPACE_TOKEN")
     workspace_name = os.getenv("HYPHA_WORKSPACE", "agent-lens") 
 
     if not token:
-        print("Error: AGENT_LENS_WORKSPACE_TOKEN environment variable not set.")
+        print("Error: WORKSPACE_TOKEN environment variable not set.")
         return
         
     server = await connect_to_server({
