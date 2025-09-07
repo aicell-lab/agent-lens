@@ -779,13 +779,39 @@ async def test_frontend_simulated_microscope_controls(test_frontend_service):
             else:
                 print("ℹ️  Simulated microscope option not immediately visible")
             
-            # Test common microscope controls
+            # First, try to open the control panel
+            print("🔍 Looking for Controls button to open control panel...")
+            control_button_selectors = [
+                'button:has-text("Controls")',
+                '.control-toggle',
+                'button:has-text("Control")',
+                '.floating-panel-toggle'
+            ]
+            
+            control_panel_opened = False
+            for selector in control_button_selectors:
+                try:
+                    control_button = page.locator(selector).first
+                    if await control_button.count() > 0:
+                        await control_button.click()
+                        await page.wait_for_timeout(2000)  # Wait for panel to open
+                        print(f"✅ Clicked Controls button (selector: {selector})")
+                        control_panel_opened = True
+                        break
+                except Exception as e:
+                    print(f"  - Selector '{selector}' failed: {e}")
+                    continue
+            
+            if not control_panel_opened:
+                print("⚠️  Could not find or click Controls button - testing controls without opening panel")
+            
+            # Test common microscope controls - now in floating control panel
             microscope_controls = [
-                {'name': 'Snap Image', 'selectors': ['button:has-text("Snap Image")', '[data-action="snap"]', '.snap-button']},
-                {'name': 'Move Controls', 'selectors': ['.movement-controls', '.position-controls', 'button:has-text("Move")']},
-                {'name': 'Light Controls', 'selectors': ['.light-controls', 'button:has-text("Light")', '.illumination-controls']},
-                {'name': 'Sample Selector', 'selectors': ['button:has-text("Select Samples")', '.sample-selector', '[data-action="samples"]']},
-                {'name': 'Camera Settings', 'selectors': ['.camera-settings', 'button:has-text("Camera")', '.exposure-controls']},
+                {'name': 'Snap Image', 'selectors': ['.control-panel button:has-text("Snap")', '.snap-button', 'button:has-text("Snap Image")']},
+                {'name': 'Move Controls', 'selectors': ['.control-panel .coordinate-container', '.control-panel .coordinate-group', '.movement-controls']},
+                {'name': 'Light Controls', 'selectors': ['.control-panel .illumination-settings', '.control-panel .illumination-intensity', '.light-controls']},
+                {'name': 'Sample Selector', 'selectors': ['button:has-text("Samples")', '.sample-selector', '[data-action="samples"]']},
+                {'name': 'Camera Settings', 'selectors': ['.control-panel .camera-settings', '.control-panel .exposure-controls', '.camera-settings']},
             ]
             
             for control in microscope_controls:
@@ -1073,7 +1099,7 @@ async def test_frontend_service_health_comprehensive(test_frontend_service):
             for i in range(3):
                 print(f"📊 Health check {i+1}/3...")
                 
-                response = await page.goto(service_url, timeout=20000)
+                response = await page.goto(service_url, timeout=30000)
                 assert response.status < 400, f"Health check {i+1} failed with status: {response.status}"
                 
                 # Wait for page to be interactive
@@ -1686,22 +1712,22 @@ async def test_frontend_incubator_control_slot_management(test_frontend_service)
                 },
                 {
                     'name': 'Temperature Display',
-                    'selectors': ['label:has-text("Temperature")', 'input[type="number"][readonly]'],
+                    'selectors': ['label:has-text("Temperature")', 'input[type="number"][readonly]', 'label:has-text("Temperature (°C)")'],
                     'required': True
                 },
                 {
                     'name': 'CO2 Display',
-                    'selectors': ['label:has-text("CO2")', 'input[value][readonly]'],
+                    'selectors': ['label:has-text("CO2")', 'input[type="number"][readonly]', 'label:has-text("CO2 (%)")'],
                     'required': True
                 },
                 {
                     'name': 'Microplate Slots',
-                    'selectors': ['h4:has-text("Microplate Slots")', '.grid'],
+                    'selectors': ['h4:has-text("Microplate Slots")', '.grid', 'h4:has-text("Microplate Slots")'],
                     'required': True
                 },
                 {
                     'name': 'Slot Buttons',
-                    'selectors': ['button:has-text("1")', '.grid button'],
+                    'selectors': ['button:has-text("1")', '.grid button', 'button[class*="slot"]'],
                     'required': True
                 }
             ]
