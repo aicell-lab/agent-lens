@@ -31,6 +31,7 @@ dependencies = [
     "httpx==0.28.1",
     "python-dotenv==1.0.1",
     "fastapi==0.106.0",
+    "python-multipart==0.0.6",
     "aiobotocore==2.19.0",
     "requests==2.32.3",
     
