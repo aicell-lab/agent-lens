@@ -17,7 +17,6 @@ Agent-Lens is an AI-powered smart microscopy web application that provides auton
 #### Frontend (React)
 - **Framework**: React 18 with Vite build system
 - **Key Libraries**: 
-  - OpenLayers for high-performance image display and interaction
   - Bootstrap 5 for responsive UI components
   - FontAwesome for icons
   - Hypha-RPC for backend communication
@@ -67,11 +66,6 @@ async def setup_service(server, server_id="agent-lens"):
 The ASGI service provides specialized microscopy API endpoints:
 
 ```python
-# Tile-based image serving with processing
-@app.get("/tile")  # Single channel tiles with contrast/brightness controls
-@app.get("/merged-tiles")  # Multi-channel composite tiles with blending
-@app.get("/tile-for-timepoint")  # Time-lapse specific tile access
-
 # Data management endpoints  
 @app.get("/datasets")  # List available time-lapse datasets
 @app.get("/gallery-info")  # Gallery metadata and information
@@ -79,25 +73,24 @@ The ASGI service provides specialized microscopy API endpoints:
 @app.get("/file")  # Generate pre-signed URLs for file access
 @app.get("/download")  # Direct file downloads with redirects
 
-# Dataset configuration endpoints
-@app.get("/setup-image-map")  # Configure dataset for tile viewing
-@app.get("/setup-gallery-map")  # Configure gallery for dataset browsing
-@app.get("/list-timepoints")  # DEPRECATED: List temporal data points
+# OME-Zarr data access via artifact manager zip-files endpoint
+# URL pattern: {SERVER_URL}/{workspace}/artifacts/{dataset_id}/zip-files/{zip_path}?path={chunk_path} or: {SERVER_URL}/{workspace}/artifacts/{dataset_id}/zip-files/{zip_path}~/{chunk_path}
+# Example: https://hypha.aicell.io/agent-lens/artifacts/dataset123/zip-files/well_B2_96.zip/~/data.zarr/5/0.0.0.0.0
 ```
 
 #### Frontend-Backend Communication Pattern
 - **Base URL**: Frontend uses relative URLs that resolve to the same ASGI service
 - **Authentication**: Workspace tokens handled server-side, frontend uses session-based access
-- **Image Loading**: OpenLayers requests tiles via `/tile` and `/merged-tiles` endpoints
 - **Data Management**: React components call REST APIs for dataset browsing and configuration
+- **OME-Zarr Data Access**: Direct HTTP requests to artifact manager zip-files endpoint for chunked data
 - **Real-time Updates**: WebSocket connections (where needed) handled through Hypha-RPC integration
 
 #### Performance Optimization Features
-- **Tile Caching**: ETag-based caching with compression for image tiles
-- **Request Queuing**: Priority-based tile loading system in ZarrTileManager
+- **OME-Zarr Chunked Access**: Efficient data access via artifact manager zip-files endpoint with individual chunk requests
+- **Request Queuing**: Priority-based data loading system with concurrent request management
 - **Bandwidth Monitoring**: Request/response size logging for optimization
 - **Client Disconnect Handling**: Graceful cleanup when clients abort requests
-- **Compression**: PNG optimization and WebP support for different zoom levels
+- **Data Compression**: Optimized data transfer with zip-compressed OME-Zarr chunks
 
 #### Development vs Production Patterns
 ```python
@@ -116,19 +109,39 @@ service_id = "agent-lens-test" if (is_connect_server and not is_docker) else "ag
 - **Graceful Degradation**: Empty tile responses (204) when data unavailable
 - **Client Disconnect**: Proper 499 status codes for aborted requests
 
-#### Integration with Zarr Data Pipeline
-- **ZarrTileManager**: Efficient tile access from Zarr-formatted microscopy data
-- **AgentLensArtifactManager**: Dataset and gallery management through Hypha artifacts
-- **Image Processing**: Real-time contrast/brightness/color adjustments per request
-- **Multi-channel Composition**: On-demand blending of fluorescence channels with custom colors
+#### Integration with OME-Zarr Data Pipeline
+- **OME-Zarr Format**: Standard 5D array (T, C, Z, Y, X) with multi-scale pyramid for microscopy data
+- **Artifact Manager Integration**: Dataset and gallery management through Hypha artifacts with zip-files endpoint
+- **Chunked Data Access**: Individual chunk requests via artifact manager zip-files endpoint for efficient loading
+- **Multi-channel Support**: Efficient handling of multi-channel microscopy data with channel-specific zip files
+- **Real-time Processing**: Progressive chunk loading with onChunkProgress callbacks for live updates
+
+#### OME-Zarr Data Access Pattern
+The system uses a sophisticated chunked data access pattern for efficient microscopy data loading:
+
+```javascript
+// Frontend: ArtifactZarrLoader service
+const baseUrl = `${this.baseUrl}/${datasetId}/zip-files/well_${wellId}_96.zip/~/data.zarr/`;
+const chunkUrl = `${baseUrl}${channel}/scale${scale}/${y}.zip?path=${x}`;
+
+// Backend: ZarrTileManager
+const chunkDownloadUrl = `${SERVER_URL}/${workspace}/artifacts/${dataset_id}/zip-files/${zip_file_path}?path=${chunk_name}`;
+```
+
+**Key Components:**
+- **ArtifactZarrLoader**: Frontend service for OME-Zarr data access with caching and request management
+- **ZarrTileManager**: Backend service for tile processing and chunk fetching
+- **URL Pattern**: `{SERVER_URL}/{workspace}/artifacts/{dataset_id}/zip-files/{channel}/scale{scale}/{y}.zip?path={x}`
+- **Chunk Organization**: Data organized by channel, scale level, and spatial coordinates in zip files
+- **Progressive Loading**: Real-time chunk loading with progress callbacks for responsive UI
 
 ### 2.4. Data Storage & Image Processing
 
 #### Data Storage
 - **Data Management**: 
-  - Zarr format for efficient tile-based image storage
+  - OME-Zarr format with chunked data stored in zip files for efficient access
   - AgentLensArtifactManager for artifact and vector management
-  - ZarrTileManager for high-performance tile serving
+  - Artifact manager zip-files endpoint for high-performance chunked data serving
 - **Storage Architecture**:
   - Use artifact manager for persistent storage
   - Implement dataset and gallery management
@@ -200,17 +213,16 @@ docs/                    # Documentation and diagrams
 - **AVOID HOISTING/DEPENDENCY ISSUES**: Always define all state variables and functions that are dependencies of `useCallback`, `useMemo`, or other hooks *before* the hooks that use them. This prevents runtime errors like 'Cannot access X before initialization'.
 
 ### 3.3. Performance Optimization
-- Use Zarr format for efficient large image data handling
-- Implement tile-based image serving with LRU caching
+- Use OME-Zarr format for efficient large data handling with multi-scale pyramids
+- Implement efficient data serving with artifact manager zip-files endpoint
 - Use async/await patterns for non-blocking I/O operations
-- Implement request queuing and priority-based tile loading
-- Use compression for image data transfer (WebP/PNG)
-- Implement proper memory management for large datasets
+- Implement request queuing and priority-based data loading with concurrent request management
+- Use zip compression for optimized data transfer of individual chunks
+- Implement proper memory management for large datasets with cache cleanup
 
 ### 3.4. UI/UX Patterns
 - Create responsive layouts that work on different screen sizes
 - Implement collapsible panels for space optimization
-- Use OpenLayers for smooth pan/zoom image interaction
 - Provide real-time feedback for long-running operations
 - Implement proper loading states and error handling
 - Support keyboard shortcuts for common operations

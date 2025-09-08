@@ -50,10 +50,9 @@ Built for research laboratories, Agent-Lens combines modern web technologies wit
 ### 🎯 **Advanced Imaging**
 - **Time-lapse Imaging**: Automated multi-timepoint acquisition
 - **Multi-channel Acquisition**: Simultaneous fluorescence and brightfield
-- **High-resolution Display**: OpenLayers-based pan/zoom interface
 - **Annotation Tools**: Points, polygons, and custom markers
-- **Data Management**: Zarr-based efficient storage and retrieval
-- **Interactive Image Map**: Pan/zoomable stage map with well plate overlay, scan area selection, and multi-well support
+- **Data Management**: Zarrita-based efficient storage and retrieval with zip endpoints
+- **Interactive Stage Map**: Pan/zoomable stage map with well plate overlay, scan area selection, and multi-well support
 
 ### 🏭 **Hardware Integration**
 - **Robotic Automation**: Automated sample handling and transfer
@@ -74,12 +73,11 @@ Built for research laboratories, Agent-Lens combines modern web technologies wit
 ### **Backend**
 - **Framework**: FastAPI with Hypha-RPC communication
 - **AI/ML**: Segment Anything Model (SAM), vector embeddings
-- **Data**: Zarr format, S3-compatible storage
+- **Data**: Ome-Zarr format with zip endpoints, S3-compatible storage
 - **Languages**: Python 3.11+
 
 ### **Frontend** 
 - **Framework**: React 18 with Vite
-- **Visualization**: OpenLayers for high-performance imaging
 - **UI**: Bootstrap 5 + Tailwind CSS
 - **Communication**: Hypha-RPC client
 
@@ -211,26 +209,26 @@ agent-lens/
 - Multi-axis positioning and automated movements
 - Channel management and illumination control
 
-### **Microscope Image Map**
+### **Microscope Stage Map**
 - **Interactive Stage Map**: Visualize the entire microscope stage with pan and zoom controls.
 - **Well Plate Overlay**: See 96, 48, or 24-well plate layouts directly on the map.
 - **Scan Area Selection**: Click and drag to select scan regions within wells, with visual feedback.
 - **Multi-Well Support**: Select multiple wells for batch scanning or time-lapse imaging.
 - **Live Video Integration**: See the current field of view (FOV) and live video position on the map.
-- **Scan Results Overlay**: View stitched scan results as image tiles, with channel selection and layer controls.
+- **Scan Results Overlay**: View stitched scan results with channel selection and layer controls.
 - **Experiment Management**: Organize scan data by experiment, with per-well canvases and metadata.
 
-The image map is powered by the `MicroscopeMapDisplay` React component, integrated into the main control panel. It provides a seamless experience for both real and simulated microscopes, supporting advanced workflows like multi-well scanning and experiment-based data management.
+The stage map is integrated into the main control panel, providing a seamless experience for both real and simulated microscopes, supporting advanced workflows like multi-well scanning and experiment-based data management.
 
 ### **AI Segmentation Engine**
 - Multiple model support (SAM, custom models)
 - Interactive and batch processing modes
 - Vector embedding generation and management
 
-### **Image Analysis Pipeline**
-- High-performance tile-based rendering
+### **Data Analysis Pipeline**
+- High-performance data processing with Zarrita
 - Multi-format support (uint8, uint16)
-- Real-time contrast and brightness adjustment
+- Real-time data access and processing
 
 ### **Hardware Orchestration**
 - Sample handling workflow automation
@@ -307,7 +305,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Acknowledgments
 
 - **Hypha Team**: For the RPC framework and platform
-- **OpenLayers Community**: For the mapping and visualization library
+- **Zarrita Team**: For the efficient data storage and access library
 - **SAM Team**: For the Segment Anything model
 - **Research Community**: For feedback and use cases
 
