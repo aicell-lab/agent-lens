@@ -167,8 +167,7 @@
 
 /* Visibility for content inside collapsed panels */
 /* Removed .microscope-sidebar.collapsed > *:not(.toggle-sample-panel-button) */
-.sample-sidebar.collapsed > *,
-.image-view-sidebar.collapsed > * {
+.sample-sidebar.collapsed > * {
   opacity: 0;
   visibility: hidden;
   transition: opacity 0.3s ease, visibility 0.3s ease;
@@ -244,147 +243,8 @@
   visibility: hidden;
 }
 
-/* Image View Sidebar Styles */
-.image-view-sidebar {
-  width: 320px;
-  background-color: #ffffff;
-  border-left: 1px solid #dee2e6;
-  padding: 1.5rem;
-  box-shadow: -2px 0 5px rgba(0, 0, 0, 0.05);
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  transition: width 0.3s ease, padding 0.3s ease, border 0.3s ease, opacity 0.3s ease;
-  flex-shrink: 0;
-}
 
-.image-view-sidebar.collapsed {
-  width: 0;
-  padding-left: 0;
-  padding-right: 0;
-  border-left-width: 0;
-  opacity: 0;
-}
 
-.image-view-sidebar-title {
-  font-size: 1.2rem;
-  font-weight: 600;
-  margin-bottom: 1.5rem;
-  color: #495057;
-  white-space: nowrap;
-}
-
-/* Gallery Selection Styles */
-.gallery-selection {
-  margin-bottom: 1rem;
-}
-
-.gallery-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.75rem;
-}
-
-.gallery-label {
-  font-weight: 500;
-  color: #495057;
-  font-size: 0.9rem;
-}
-
-.gallery-actions {
-  display: flex;
-  gap: 0.25rem;
-}
-
-.gallery-action-btn {
-  width: 24px;
-  height: 24px;
-  border: none;
-  border-radius: 0.25rem;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.75rem;
-  transition: background-color 0.2s;
-}
-
-.gallery-action-btn.add-btn {
-  background-color: #28a745;
-  color: white;
-}
-
-.gallery-action-btn.add-btn:hover {
-  background-color: #218838;
-}
-
-.gallery-options {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.gallery-option {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem;
-  border: 1px solid #dee2e6;
-  border-radius: 0.25rem;
-  background: white;
-  transition: all 0.2s ease;
-}
-
-.gallery-option:hover {
-  background-color: #f8f9fa;
-  border-color: #adb5bd;
-}
-
-.gallery-option.active {
-  background-color: #e9ecef;
-  border-color: #6c757d;
-  font-weight: 500;
-}
-
-.gallery-select-btn {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  border: none;
-  background: none;
-  padding: 0;
-  cursor: pointer;
-  text-align: left;
-  font-size: 0.9rem;
-  color: #212529;
-}
-
-.gallery-select-btn i {
-  color: #6c757d;
-}
-
-.gallery-remove-btn {
-  width: 20px;
-  height: 20px;
-  border: none;
-  background-color: #dc3545;
-  color: white;
-  border-radius: 50%;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.7rem;
-  transition: background-color 0.2s;
-  flex-shrink: 0;
-}
-
-.gallery-remove-btn:hover {
-  background-color: #c82333;
-}
 
 /* Dataset Selection Styles */
 .dataset-selection {
@@ -691,36 +551,6 @@
   font-size: 0.9rem;
 }
 
-/* Map View Controls */
-.map-view-controls {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.exit-map-view-button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  padding: 0.75rem 1rem;
-  border: 1px solid #6c757d;
-  background-color: #6c757d;
-  color: white;
-  border-radius: 0.3rem;
-  cursor: pointer;
-  font-size: 0.9rem;
-  font-weight: 500;
-  text-align: center;
-  transition: background-color 0.2s, border-color 0.2s;
-  width: 100%;
-  white-space: nowrap;
-}
-
-.exit-map-view-button:hover {
-  background-color: #5a6268;
-  border-color: #5a6268;
-}
 
 /* Scrollbar styling for dataset options */
 .dataset-options::-webkit-scrollbar {
@@ -760,105 +590,9 @@
   background: #a8a8a8;
 }
 
-/* Gallery Actions Section */
-.gallery-actions-section {
-  margin-top: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
 
-/* View Gallery Image Data Button */
-.view-gallery-image-data-button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  padding: 0.75rem 1rem;
-  border: 1px solid #007bff;
-  background-color: #007bff;
-  color: white;
-  border-radius: 0.3rem;
-  cursor: pointer;
-  font-size: 0.9rem;
-  font-weight: 500;
-  text-align: center;
-  transition: background-color 0.2s, border-color 0.2s;
-  width: 100%;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
 
-.view-gallery-image-data-button:hover:not(:disabled) {
-  background-color: #0056b3;
-  border-color: #0056b3;
-}
 
-.view-gallery-image-data-button:disabled {
-  background-color: #cccccc;
-  border-color: #cccccc;
-  cursor: not-allowed;
-  opacity: 0.7;
-}
-
-/* Close Map View Button (Red version) */
-.close-map-view-button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  padding: 0.75rem 1rem;
-  border: 1px solid #dc3545;
-  background-color: #dc3545;
-  color: white;
-  border-radius: 0.3rem;
-  cursor: pointer;
-  font-size: 0.9rem;
-  font-weight: 500;
-  text-align: center;
-  transition: background-color 0.2s, border-color 0.2s;
-  width: 100%;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.close-map-view-button:hover {
-  background-color: #c82333;
-  border-color: #c82333;
-}
-
-/* Browse Data Button */
-.browse-data-button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  padding: 0.75rem 1rem;
-  border: 1px solid #28a745;
-  background-color: #28a745;
-  color: white;
-  border-radius: 0.3rem;
-  cursor: pointer;
-  font-size: 0.9rem;
-  font-weight: 500;
-  text-align: center;
-  transition: background-color 0.2s, border-color 0.2s;
-  width: 100%;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.browse-data-button:hover {
-  background-color: #218838;
-  border-color: #218838;
-}
-
-.browse-data-button:disabled {
-  background-color: #cccccc;
-  border-color: #cccccc;
-  cursor: not-allowed;
-  opacity: 0.7;
-}
 
 /* Styles for the main sidebar toggle button */
 .main-sidebar-toggle-container {

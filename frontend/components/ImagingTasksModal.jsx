@@ -104,6 +104,7 @@ const ImagingTasksModal = ({
 
   const [illuminationSettings, setIlluminationSettings] = useState(DEFAULT_ILLUMINATION_SETTINGS);
   const [illuminationLoading, setIlluminationLoading] = useState(false);
+  const [uploadLoading, setUploadLoading] = useState(false);
   const [doContrastAutofocus, setDoContrastAutofocus] = useState(false);
   const [doReflectionAf, setDoReflectionAf] = useState(true);
   
@@ -549,6 +550,40 @@ const ImagingTasksModal = ({
       showNotification(`Error creating task: ${error.message}`, 'error');
       appendLog(`Error creating task '${taskDefinition.name}': ${error.message}`);
       console.error("Error creating task:", error);
+    }
+  };
+
+  const handleUploadTask = async () => {
+    if (task && task.name) {
+      setUploadLoading(true);
+      appendLog(`Starting upload process for task '${task.name}'...`);
+      try {
+        // Extract experiment_id from task name (assuming task name contains experiment_id)
+        const experiment_id = task.name;
+        
+        const result = await orchestratorManagerService.offline_stitch_and_upload_timelapse(
+          experiment_id,
+          true,  // upload_immediately
+          true   // cleanup_temp_files
+        );
+        
+        if (result && result.success) {
+          showNotification(`Task '${task.name}' upload completed successfully.`, 'success');
+          appendLog(`Task '${task.name}' upload completed: ${result.message}`);
+          if(onTaskChange) onTaskChange(); // Refresh tasks in parent
+        } else {
+          showNotification(`Failed to upload task '${task.name}': ${result ? result.message : 'Unknown error'}`, 'error');
+          appendLog(`Failed to upload task '${task.name}': ${result ? result.message : 'Unknown error'}`);
+        }
+      } catch (error) {
+        showNotification(`Error uploading task '${task.name}': ${error.message}`, 'error');
+        appendLog(`Error uploading task '${task.name}': ${error.message}`);
+        console.error("Error uploading task:", error);
+      } finally {
+        setUploadLoading(false);
+      }
+    } else {
+      showNotification('No task selected for upload or task name is missing.', 'warning');
     }
   };
 
@@ -1011,12 +1046,25 @@ const ImagingTasksModal = ({
               </button>
             )}
             {task && (
-                <button 
-                    onClick={handleDeleteTask} 
-                    className="action-button danger"
-                >
-                    Delete Task
-                </button>
+                <>
+                    {task.operational_state?.status === 'completed' && (
+                        <button 
+                            onClick={handleUploadTask} 
+                            className="action-button primary mr-2"
+                            disabled={uploadLoading}
+                            title="Upload and stitch time-lapse images to artifact manager"
+                        >
+                            {uploadLoading ? 'Uploading...' : 'Upload Task'}
+                            <TutorialTooltip text="Upload and stitch completed time-lapse images to the artifact manager for viewing and analysis. This process will combine all time points into a single dataset." />
+                        </button>
+                    )}
+                    <button 
+                        onClick={handleDeleteTask} 
+                        className="action-button danger"
+                    >
+                        Delete Task
+                    </button>
+                </>
             )}
             <button onClick={onClose} className="action-button secondary ml-auto">
               Close

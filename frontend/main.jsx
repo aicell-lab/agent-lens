@@ -4,11 +4,9 @@ import 'bootstrap/dist/css/bootstrap.min.css';
 import '@fortawesome/fontawesome-free/css/all.min.css';
 import LogSection from './components/LogSection';
 import LoginPrompt from './components/LoginPrompt';
-import MapDisplay from './components/MapDisplay';
 import IncubatorControl from './components/IncubatorControl';
 import MicroscopeControlPanel from './components/MicroscopeControlPanel';
 import Sidebar from './components/Sidebar';
-import ImageViewBrowser from './components/ImageViewBrowser';
 import ImageSearchPanel from './components/ImageSearchPanel';
 import Notification from './components/Notification';
 import ImageJPanel from './components/ImageJPanel';
@@ -39,8 +37,7 @@ const MicroscopeControl = () => {
   const [segmentService, setSegmentService] = useState(null);
   const [incubatorControlService, setIncubatorControlService] = useState(null);
   const [roboticArmService, setRoboticArmService] = useState(null);
-  const [activeTab, setActiveTab] = useState('image-view');
-  const [currentMap, setCurrentMap] = useState(null);
+  const [activeTab, setActiveTab] = useState('microscope');
   const [snapshotImage, setSnapshotImage] = useState(null);
   const [addTileLayer, setAddTileLayer] = useState(null);
   const [channelNames, setChannelNames] = useState(null);
@@ -219,24 +216,8 @@ const MicroscopeControl = () => {
     }
   };
 
-  // Handle tab change with cleanup logic for image map
+  // Handle tab change
   const handleTabChange = (tab) => {
-    // If navigating away from the image map view, clean up resources
-    if ((activeTab === 'image-view-map') && (tab !== 'image-view' && tab !== 'image-view-map') && currentMap) {
-      // Clean up the map resources
-      appendLog("Stopping image map access");
-      
-      // Remove all layers from the map
-      if (currentMap) {
-        const layers = currentMap.getLayers().getArray().slice();
-        layers.forEach(layer => {
-          if (layer && layer !== vectorLayer) {
-            currentMap.removeLayer(layer);
-          }
-        });
-      }
-    }
-    
     // If switching to ImageJ tab, initialize the panel
     if (tab === 'imagej' && !isImageJPanelOpen) {
       setIsImageJPanelOpen(true);
@@ -289,23 +270,6 @@ const MicroscopeControl = () => {
 
   const renderContent = () => {
     switch (activeTab) {
-      case 'image-view':
-        return (
-          <ImageViewBrowser
-            appendLog={appendLog}
-          />
-        );
-      case 'image-view-map':
-        // Only render MapDisplay when in image-view-map mode
-        return (
-          <MapDisplay
-            appendLog={appendLog}
-            segmentService={segmentService}
-            microscopeControlService={microscopeControlService}
-            incubatorControlService={incubatorControlService}
-            setCurrentMap={setCurrentMap}
-          />
-        );
       case 'image-search':
         return (
           <ImageSearchPanel
@@ -320,13 +284,9 @@ const MicroscopeControl = () => {
             key={selectedMicroscopeId}
             microscopeControlService={microscopeControlService}
             appendLog={appendLog}
-            map={currentMap}
             setSnapshotImage={setSnapshotImage}
             snapshotImage={snapshotImage}
             segmentService={segmentService}
-            addTileLayer={addTileLayer}
-            channelNames={channelNames}
-            vectorLayer={vectorLayer}
             selectedMicroscopeId={selectedMicroscopeId}
             incubatorControlService={incubatorControlService}
             roboticArmService={roboticArmService}
