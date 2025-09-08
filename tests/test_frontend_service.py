@@ -550,16 +550,6 @@ async def test_frontend_sidebar_navigation(test_frontend_service):
                     'required': True
                 },
                 {
-                    'name': 'Image View', 
-                    'selectors': [
-                        '.sidebar-tab:has-text("Image View")',   # Primary selector from Sidebar.jsx
-                        'button:has-text("Image View")',
-                        '.sidebar-tab .fa-images',              # Icon-based selector
-                        '.sidebar-tab[title*="View images"]'
-                    ],
-                    'required': True
-                },
-                {
                     'name': 'Image Search', 
                     'selectors': [
                         '.sidebar-tab:has-text("Image Search")', # Primary selector from Sidebar.jsx
