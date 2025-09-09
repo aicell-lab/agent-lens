@@ -74,11 +74,6 @@ async def _generate_image_embedding(image_bytes: bytes) -> np.ndarray:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-# Fixed the ARTIFACT_ALIAS to prevent duplication of 'agent-lens'
-# ARTIFACT_ALIAS = "agent-lens/20250506-scan-time-lapse-2025-05-06_16-56-52"  // This was the OLD default image map.
-# Now, dataset_id will be the specific time-lapse dataset alias, e.g., "20250506-scan-time-lapse-YYYY-MM-DD_HH-MM-SS"
-# For local/fallback testing, we might need a default time-lapse dataset alias if the frontend doesn't provide one.
-DEFAULT_TIMELAPSE_DATASET_ALIAS = "20250506-scan-time-lapse-2025-05-06_16-56-52" # Placeholder: JUST the alias
 DEFAULT_CHANNEL = "BF_LED_matrix_full"
 
 # Create a global ZarrTileManager instance
