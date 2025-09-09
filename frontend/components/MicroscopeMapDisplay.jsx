@@ -4093,7 +4093,7 @@ const MicroscopeMapDisplay = ({
         
         {/* Hardware operations status indicator */}
         {isHardwareInteractionDisabled && (
-          <div className="absolute top-2 right-2 hardware-status-indicator text-white text-xs px-2 py-1 rounded pointer-events-none">
+          <div className="absolute bottom-2 right-2 hardware-status-indicator text-white text-xs px-2 py-1 rounded pointer-events-none">
             <i className="fas fa-cog mr-1"></i>
             {isScanInProgress ? 
               'Hardware locked • Map browsing available' :
