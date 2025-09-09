@@ -21,7 +21,7 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 try:
-    from agent_lens.artifact_manager import ZarrTileManager, AgentLensArtifactManager
+    from agent_lens.artifact_manager import AgentLensArtifactManager
     from hypha_rpc import connect_to_server
 except ImportError as e:
     pytest.skip(f"Failed to import required modules: {e}", allow_module_level=True)
