@@ -3364,7 +3364,7 @@ const MicroscopeMapDisplay = ({
                   }`}
                   title={isSimulatedMicroscope ? "Scanning not supported for simulated microscope" : 
                          isScanInProgress ? "View/stop current scan" : "Configure scan and select area (automatically switches to stage map view)"}
-                  disabled={!microscopeControlService || isSimulatedMicroscope || isHistoricalDataMode || isInteractionDisabled}
+                  disabled={!microscopeControlService || isSimulatedMicroscope || isHistoricalDataMode || (isInteractionDisabled && !isScanInProgress)}
                 >
                   <i className="fas fa-vector-square mr-1"></i>
                   {isScanInProgress ? (showScanConfig ? 'Close Scan Panel' : 'View Scan Progress') : 
@@ -3399,7 +3399,7 @@ const MicroscopeMapDisplay = ({
                   }`}
                   title={isSimulatedMicroscope ? "Quick scanning not supported for simulated microscope" : 
                          isQuickScanInProgress ? "View/stop current quick scan" : "Quick scan entire well plate with high-speed acquisition"}
-                  disabled={!microscopeControlService || isSimulatedMicroscope || isHistoricalDataMode || isInteractionDisabled}
+                  disabled={!microscopeControlService || isSimulatedMicroscope || isHistoricalDataMode || (isInteractionDisabled && !isQuickScanInProgress)}
                 >
                   <i className="fas fa-bolt mr-1"></i>
                   {isQuickScanInProgress ? (showQuickScanConfig ? 'Close Quick Scan Panel' : 'View Quick Scan Progress') : 
@@ -4093,15 +4093,15 @@ const MicroscopeMapDisplay = ({
         
         {/* Hardware operations status indicator */}
         {isHardwareInteractionDisabled && (
-          <div className="absolute top-2 left-2 hardware-status-indicator text-white text-xs px-2 py-1 rounded pointer-events-none">
+          <div className="absolute top-2 right-2 hardware-status-indicator text-white text-xs px-2 py-1 rounded pointer-events-none">
             <i className="fas fa-cog mr-1"></i>
             {isScanInProgress ? 
-              'Hardware locked during scanning • Map browsing available' :
+              'Hardware locked • Map browsing available' :
               isQuickScanInProgress ?
-                'Hardware locked during quick scanning • Map browsing available' :
+                'Hardware locked • Map browsing available' :
                 currentOperation === 'loading' || currentOperation === 'unloading' ? 
-                  `Hardware locked during ${currentOperation} • Map browsing available` : 
-                  'Hardware locked during operation • Map browsing available'}
+                  `Hardware locked • Map browsing available` : 
+                  'Hardware locked • Map browsing available'}
           </div>
         )}
         
