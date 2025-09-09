@@ -123,15 +123,10 @@ The system uses a sophisticated chunked data access pattern for efficient micros
 // Frontend: ArtifactZarrLoader service
 const baseUrl = `${this.baseUrl}/${datasetId}/zip-files/well_${wellId}_96.zip/~/data.zarr/`;
 const chunkUrl = `${baseUrl}${channel}/scale${scale}/${y}.zip?path=${x}`;
-
-// Backend: ZarrTileManager
-const chunkDownloadUrl = `${SERVER_URL}/${workspace}/artifacts/${dataset_id}/zip-files/${zip_file_path}?path=${chunk_name}`;
 ```
 
 **Key Components:**
 - **ArtifactZarrLoader**: Frontend service for OME-Zarr data access with caching and request management
-- **ZarrTileManager**: Backend service for tile processing and chunk fetching
-- **URL Pattern**: `{SERVER_URL}/{workspace}/artifacts/{dataset_id}/zip-files/{channel}/scale{scale}/{y}.zip?path={x}`
 - **Chunk Organization**: Data organized by channel, scale level, and spatial coordinates in zip files
 - **Progressive Loading**: Real-time chunk loading with progress callbacks for responsive UI
 

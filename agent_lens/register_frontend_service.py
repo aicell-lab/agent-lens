@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi import UploadFile, File, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
-from agent_lens.artifact_manager import ZarrTileManager, AgentLensArtifactManager
+from agent_lens.artifact_manager import AgentLensArtifactManager
 from hypha_rpc import connect_to_server
 import base64
 import io
@@ -74,15 +74,7 @@ async def _generate_image_embedding(image_bytes: bytes) -> np.ndarray:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-# Fixed the ARTIFACT_ALIAS to prevent duplication of 'agent-lens'
-# ARTIFACT_ALIAS = "agent-lens/20250506-scan-time-lapse-2025-05-06_16-56-52"  // This was the OLD default image map.
-# Now, dataset_id will be the specific time-lapse dataset alias, e.g., "20250506-scan-time-lapse-YYYY-MM-DD_HH-MM-SS"
-# For local/fallback testing, we might need a default time-lapse dataset alias if the frontend doesn't provide one.
-DEFAULT_TIMELAPSE_DATASET_ALIAS = "20250506-scan-time-lapse-2025-05-06_16-56-52" # Placeholder: JUST the alias
 DEFAULT_CHANNEL = "BF_LED_matrix_full"
-
-# Create a global ZarrTileManager instance
-tile_manager = ZarrTileManager()
 
 # Create a global AgentLensArtifactManager instance
 artifact_manager_instance = AgentLensArtifactManager()
@@ -427,16 +419,9 @@ async def _register_probes(server, probe_service_id):
     """
     async def is_service_healthy():
         logger.info("Checking service health")
-        # Minimal check: ensure tile_manager can attempt a connection
-        # and that its artifact_manager is not None after connection attempt.
+        # Minimal check: ensure artifact_manager can attempt a connection
+        # and that it's properly initialized after connection attempt.
         try:
-            if not tile_manager.artifact_manager:
-                logger.info("Tile manager not connected, attempting connection for health check...")
-                await tile_manager.connect(workspace_token=WORKSPACE_TOKEN, server_url=SERVER_URL)
-            
-            if not tile_manager.artifact_manager:
-                raise RuntimeError("ZarrTileManager failed to connect to artifact manager service.")
-
             # Try to list the default gallery to ensure it's accessible
             default_gallery_id = "agent-lens/20250506-scan-time-lapse-gallery"
             logger.info(f"Health check: Attempting to list default gallery: {default_gallery_id}")
@@ -493,14 +478,6 @@ async def setup_service(server, server_id="agent-lens"):
     if is_connect_server and not is_docker:
         server_id = "agent-lens-test"
     
-    # Ensure tile_manager is connected with the server (with proper token and so on)
-    connection_success = await tile_manager.connect(workspace_token=WORKSPACE_TOKEN, server_url=SERVER_URL)
-    if not connection_success:
-        logger.warning("Warning: Failed to connect ZarrTileManager to artifact manager service.")
-        logger.warning("The tile endpoints may not function correctly.")
-    else:
-        logger.info("ZarrTileManager connected successfully to artifact manager service.")
-    
     # Ensure artifact_manager_instance is connected
     if artifact_manager_instance.server is None:
         try:
@@ -543,5 +520,5 @@ async def setup_service(server, server_id="agent-lens"):
         logger.info(f"Skipping health probe registration for test service: {server_id}")
 
     # Store the cleanup function in the server's config
-    server.config["cleanup"] = tile_manager.close
+    # Note: No specific cleanup needed since artifact_manager_instance is global
  
