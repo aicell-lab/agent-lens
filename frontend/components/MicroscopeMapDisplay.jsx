@@ -57,7 +57,7 @@ const MicroscopeMapDisplay = ({
   // Check if using simulated microscope - disable scanning features
   const isSimulatedMicroscope = selectedMicroscopeId === 'agent-lens/squid-control-reef';
   
-  // Close scan configurations when switching to simulated microscope
+  // Close scan configurations when switching to simulated microscope (basic cleanup only)
   useEffect(() => {
     if (isSimulatedMicroscope) {
       // Close any open scan configurations
@@ -870,8 +870,8 @@ const MicroscopeMapDisplay = ({
     };
   }, [containerDimensions, mapViewMode, currentStagePosition, stageDimensions, mapScale, effectivePan, fovSize, pixelsPerMm]);
 
-  // Split interaction controls: hardware vs map browsing
-  const isHardwareInteractionDisabled = isHistoricalDataMode || microscopeBusy || currentOperation !== null || isScanInProgress || isQuickScanInProgress;
+  // Split interaction controls: hardware vs map browsing, exclude simulated microscope in historical mode
+  const isHardwareInteractionDisabled = (isHistoricalDataMode && !(isSimulatedMicroscope && isHistoricalDataMode)) || microscopeBusy || currentOperation !== null || isScanInProgress || isQuickScanInProgress;
   const isMapBrowsingDisabled = false; // Allow map browsing during all operations for real-time scan result viewing
   
   // Legacy compatibility - some UI elements still use the general disabled state
@@ -1020,6 +1020,15 @@ const MicroscopeMapDisplay = ({
     setScaleLevel(0); // FOV_FITTED mode always uses scale 0 (highest resolution)
     setZoomLevel(1.0); // Reset to 100% zoom
     
+    // For simulated microscope, quit historical mode when switching to FOV_FITTED
+    if (isSimulatedMicroscope && isHistoricalDataMode) {
+      console.log('[Simulated Microscope] Quitting historical data mode when switching to FOV_FITTED');
+      setIsHistoricalDataMode(false);
+      setSelectedHistoricalDataset(null);
+      setSelectedGallery(null);
+      setStitchedTiles([]); // Clear historical tiles
+    }
+    
     if (appendLog) {
       appendLog('Switched to fitted video view');
     }
@@ -1027,7 +1036,7 @@ const MicroscopeMapDisplay = ({
     // Container dimensions will be automatically updated by ResizeObserver
     // No need for setTimeout hack - memoized calculations will recalculate
     // when containerDimensions state updates
-  }, [onFitToViewUncollapse, appendLog]);
+  }, [onFitToViewUncollapse, appendLog, isSimulatedMicroscope, isHistoricalDataMode, setStitchedTiles]);
 
   const handleDoubleClick = async (e) => {
     if (!microscopeControlService || !microscopeConfiguration || !stageDimensions || isHardwareInteractionDisabled) {
@@ -1433,7 +1442,7 @@ const MicroscopeMapDisplay = ({
 
   // Handle well click for selection
   const handleWellClick = useCallback((wellId) => {
-    if (isSimulatedMicroscope) return;
+    if (isSimulatedMicroscope && !isHistoricalDataMode) return;
     
     setSelectedWells(prev => {
       if (prev.includes(wellId)) {
@@ -1444,7 +1453,7 @@ const MicroscopeMapDisplay = ({
         return [...prev, wellId];
       }
     });
-  }, [isSimulatedMicroscope]);
+  }, [isSimulatedMicroscope, isHistoricalDataMode]);
 
   // Render well plate overlay with interactive wells
   const render96WellPlate = () => {
@@ -1509,8 +1518,8 @@ const MicroscopeMapDisplay = ({
               fill="none"
               stroke="rgba(255, 255, 255, 0.6)"
               strokeWidth={isSelected ? "2" : "1"}
-              style={{ cursor: isSimulatedMicroscope ? 'default' : 'pointer' }}
-              onClick={() => !isSimulatedMicroscope && handleWellClick(wellId)}
+              style={{ cursor: (isSimulatedMicroscope && !isHistoricalDataMode) ? 'default' : 'pointer' }}
+              onClick={() => !(isSimulatedMicroscope && !isHistoricalDataMode) && handleWellClick(wellId)}
             />
             {scaleLevel >= 2 && (
               <text
@@ -1520,7 +1529,7 @@ const MicroscopeMapDisplay = ({
                 dominantBaseline="middle"
                 fill="rgba(255, 255, 255, 0.8)"
                 fontSize={`${Math.min(12, 6 + scaleLevel * 2)}px`}
-                style={{ cursor: isSimulatedMicroscope ? 'default' : 'pointer', pointerEvents: 'none' }}
+                style={{ cursor: (isSimulatedMicroscope && !isHistoricalDataMode) ? 'default' : 'pointer', pointerEvents: 'none' }}
               >
                 {wellId}
               </text>
@@ -1539,7 +1548,7 @@ const MicroscopeMapDisplay = ({
           left: 0,
           width: '100%',
           height: '100%',
-          pointerEvents: isSimulatedMicroscope ? 'none' : 'auto', // Allow clicks for well selection
+          pointerEvents: (isSimulatedMicroscope && !isHistoricalDataMode) ? 'none' : 'auto', // Allow clicks for well selection
           zIndex: 5 // Well plate overlay above scan results
         }}
       >
@@ -1924,7 +1933,7 @@ const MicroscopeMapDisplay = ({
   
   // Rectangle selection handlers
   const handleRectangleSelectionStart = useCallback((e) => {
-    if (!isRectangleSelection || isHardwareInteractionDisabled || isSimulatedMicroscope) return;
+    if (!isRectangleSelection || isHardwareInteractionDisabled || (isSimulatedMicroscope && !isHistoricalDataMode)) return;
     
     const rect = mapContainerRef.current.getBoundingClientRect();
     const startX = e.clientX - rect.left;
@@ -1949,10 +1958,10 @@ const MicroscopeMapDisplay = ({
     if (appendLog) {
       appendLog(`Started scan area selection in well ${detectedWell.id}`);
     }
-  }, [isRectangleSelection, isHardwareInteractionDisabled, isSimulatedMicroscope, displayToStageCoords, detectWellFromStageCoords, showNotification, appendLog]);
+  }, [isRectangleSelection, isHardwareInteractionDisabled, isSimulatedMicroscope, isHistoricalDataMode, displayToStageCoords, detectWellFromStageCoords, showNotification, appendLog]);
   
   const handleRectangleSelectionMove = useCallback((e) => {
-    if (!rectangleStart || !isRectangleSelection || isSimulatedMicroscope || !dragSelectedWell) return;
+    if (!rectangleStart || !isRectangleSelection || (isSimulatedMicroscope && !isHistoricalDataMode) || !dragSelectedWell) return;
     
     const rect = mapContainerRef.current.getBoundingClientRect();
     const currentX = e.clientX - rect.left;
@@ -1967,10 +1976,10 @@ const MicroscopeMapDisplay = ({
     const clampedDisplayCoords = stageToDisplayCoords(clampedStageCoords.x, clampedStageCoords.y);
     
     setRectangleEnd({ x: clampedDisplayCoords.x, y: clampedDisplayCoords.y });
-  }, [rectangleStart, isRectangleSelection, isSimulatedMicroscope, dragSelectedWell, displayToStageCoords, getWellBoundaries, clampToWellBoundaries, stageToDisplayCoords]);
+  }, [rectangleStart, isRectangleSelection, isSimulatedMicroscope, isHistoricalDataMode, dragSelectedWell, displayToStageCoords, getWellBoundaries, clampToWellBoundaries, stageToDisplayCoords]);
   
   const handleRectangleSelectionEnd = useCallback((e) => {
-    if (!rectangleStart || !rectangleEnd || !isRectangleSelection || isSimulatedMicroscope || !dragSelectedWell) return;
+    if (!rectangleStart || !rectangleEnd || !isRectangleSelection || (isSimulatedMicroscope && !isHistoricalDataMode) || !dragSelectedWell) return;
     
     // Convert rectangle corners to stage coordinates
     const topLeft = displayToStageCoords(
@@ -2016,7 +2025,7 @@ const MicroscopeMapDisplay = ({
     // This keeps the grid visible but makes it non-interactive (fixed)
     setIsRectangleSelection(false);
     setShowScanConfig(true);
-  }, [rectangleStart, rectangleEnd, isRectangleSelection, displayToStageCoords, scanParameters.dx_mm, scanParameters.dy_mm, isSimulatedMicroscope, dragSelectedWell, stageToRelativeCoords, appendLog]);
+  }, [rectangleStart, rectangleEnd, isRectangleSelection, displayToStageCoords, scanParameters.dx_mm, scanParameters.dy_mm, isSimulatedMicroscope, isHistoricalDataMode, dragSelectedWell, stageToRelativeCoords, appendLog]);
 
 
 
@@ -2250,6 +2259,38 @@ const MicroscopeMapDisplay = ({
 
   // Add state for selected dataset in historical mode
   const [selectedHistoricalDataset, setSelectedHistoricalDataset] = useState(null);
+  
+  // Auto-enable historical data mode for simulated microscope when switching to FREE_PAN mode
+  useEffect(() => {
+    if (isSimulatedMicroscope && mapViewMode === 'FREE_PAN' && !isHistoricalDataMode) {
+      console.log('[Simulated Microscope] Auto-enabling historical data mode in FREE_PAN mode');
+      setIsHistoricalDataMode(true);
+      setStitchedTiles([]); // Clear existing tiles
+      
+      // Auto-load default dataset for simulated microscope
+      const defaultDatasetId = 'agent-lens/20250824-example-data-20250824t211822-798933';
+      console.log('[Simulated Microscope] Auto-loading default dataset:', defaultDatasetId);
+      
+      // Create a mock dataset object for the default dataset
+      const mockDataset = {
+        id: defaultDatasetId,
+        name: 'Simulated Sample Data',
+        created_at: new Date().toISOString(),
+        metadata: {
+          microscope_service_id: selectedMicroscopeId,
+          sample_id: 'simulated-sample-1'
+        }
+      };
+      
+      // Set the dataset and gallery for immediate use
+      setSelectedHistoricalDataset(mockDataset);
+      setSelectedGallery({
+        id: 'agent-lens/1-20250824-example-data',
+        name: 'Simulated Microscope Gallery',
+        microscope_service_id: selectedMicroscopeId
+      });
+    }
+  }, [isSimulatedMicroscope, mapViewMode, isHistoricalDataMode, selectedMicroscopeId, setStitchedTiles, setSelectedGallery]);
   
   // Auto-select first dataset when datasets are loaded in historical mode
   useEffect(() => {
@@ -2821,8 +2862,8 @@ const MicroscopeMapDisplay = ({
     }
     
     // Handle live microscope mode
-    if (!microscopeControlService || isSimulatedMicroscope) {
-      console.log('[loadStitchedTiles] Skipping - no microscope service or simulated mode');
+    if (!microscopeControlService || (isSimulatedMicroscope && !isHistoricalDataMode)) {
+      console.log('[loadStitchedTiles] Skipping - no microscope service or simulated mode (not in historical data mode)');
       // 🚀 PERFORMANCE OPTIMIZATION: Clear loading state when no service available
       if (activeTileRequestsRef.current.size === 0) {
         setIsLoadingCanvas(false);
@@ -3265,7 +3306,7 @@ const MicroscopeMapDisplay = ({
                   <i className="fas fa-search-plus"></i>
                 </button>
                 <button
-                  onClick={isInteractionDisabled ? undefined : () => {
+                  onClick={(isInteractionDisabled && !(isSimulatedMicroscope && isHistoricalDataMode)) ? undefined : () => {
                     // Track zoom operation
                     setIsZooming(true);
                     if (zoomTimeoutRef.current) {
@@ -3279,7 +3320,7 @@ const MicroscopeMapDisplay = ({
                   }}
                   className="px-2 py-1 text-xs bg-green-600 hover:bg-green-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Fit to View"
-                  disabled={isInteractionDisabled}
+                  disabled={isInteractionDisabled && !(isSimulatedMicroscope && isHistoricalDataMode)}
                 >
                   <i className="fas fa-crosshairs mr-1"></i>
                   Fit to View
@@ -3911,7 +3952,7 @@ const MicroscopeMapDisplay = ({
         })()}
         
         {/* Current video frame position indicator */}
-        {videoFramePosition && !isHistoricalDataMode && (
+        {videoFramePosition && (!isHistoricalDataMode || (isSimulatedMicroscope && isHistoricalDataMode)) && (
           <div
             className="absolute border-2 border-yellow-400 pointer-events-none"
             style={{
@@ -3919,7 +3960,7 @@ const MicroscopeMapDisplay = ({
               top: `${videoFramePosition.y - videoFramePosition.height / 2}px`,
               width: `${videoFramePosition.width}px`,
               height: `${videoFramePosition.height}px`,
-              zIndex: 10 // FOV box should be on top of everything
+              zIndex: isSimulatedMicroscope ? 100 : 10 // Much higher z-index for simulated microscope
             }}
           >
             {/* Show video content based on mode */}
