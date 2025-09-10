@@ -325,15 +325,16 @@ const MicroscopeMapDisplay = ({
   }, []);
 
   const shouldUseMultiChannelLoading = useCallback(() => {
-    // For historical mode: use zarr channels
-    if (isHistoricalDataMode || mapViewMode === 'FOV_FITTED') {
+    // For historical mode only: use zarr channels
+    if (isHistoricalDataMode) {
       return availableZarrChannels.length > 0 && 
              Object.values(zarrChannelConfigs).some(config => config.enabled);
     }
-    // For real microscope: use visibleLayers.channels
+    // For real microscope (including FOV_FITTED mode): use visibleLayers.channels
+    // Let the microscope service handle channel merging
     return !isSimulatedMicroscope && 
            Object.values(visibleLayers.channels).some(isVisible => isVisible);
-  }, [isHistoricalDataMode, mapViewMode, availableZarrChannels.length, zarrChannelConfigs, isSimulatedMicroscope, visibleLayers.channels]);
+  }, [isHistoricalDataMode, availableZarrChannels.length, zarrChannelConfigs, isSimulatedMicroscope, visibleLayers.channels]);
 
   // State to track the well being selected during drag operations
   const [dragSelectedWell, setDragSelectedWell] = useState(null);
@@ -2382,11 +2383,11 @@ const MicroscopeMapDisplay = ({
     }
   }, [isHistoricalDataMode, datasets, selectedHistoricalDataset]);
 
-  // Load zarr channel metadata when dataset changes (historical or FOV_FITTED mode)
+  // Load zarr channel metadata when dataset changes (historical mode only)
   useEffect(() => {
     const loadZarrChannelMetadata = async () => {
       if (!artifactZarrLoaderRef.current || 
-          (!isHistoricalDataMode && mapViewMode !== 'FOV_FITTED') ||
+          !isHistoricalDataMode ||
           !selectedHistoricalDataset) {
         return;
       }
@@ -2423,7 +2424,7 @@ const MicroscopeMapDisplay = ({
     };
     
     loadZarrChannelMetadata();
-  }, [isHistoricalDataMode, mapViewMode, selectedHistoricalDataset, initializeZarrChannelsFromMetadata]);
+  }, [isHistoricalDataMode, selectedHistoricalDataset, initializeZarrChannelsFromMetadata]);
 
   
   // Initialize ArtifactZarrLoader for historical data
@@ -2546,6 +2547,12 @@ const MicroscopeMapDisplay = ({
   // Intelligent tile-based loading function (moved here after all dependencies are defined)
   const loadStitchedTiles = useCallback(async () => {
     console.log('[loadStitchedTiles] Called - checking conditions');
+    console.log(`🔍 [loadStitchedTiles] Channel analysis:`, {
+      visibleChannels: visibleLayers.channels,
+      selectedChannels: getSelectedChannels(),
+      channelString: getChannelString(),
+      hasSelectedChannels: hasSelectedChannels()
+    });
     
     // 🚀 PERFORMANCE OPTIMIZATION: Throttle tile loading attempts to prevent CPU overload
     const now = Date.now();
@@ -3109,6 +3116,12 @@ const MicroscopeMapDisplay = ({
       if (result.success) {
         // DIAGNOSTIC: Log coordinate transformation for comparison with historical mode
         console.log(`📍 FREE_PAN: center(${centerX.toFixed(2)}, ${centerY.toFixed(2)}) → bounds(${bounds.topLeft.x.toFixed(1)}, ${bounds.topLeft.y.toFixed(1)}) ${width_mm.toFixed(1)}×${height_mm.toFixed(1)}mm`);
+        console.log(`🎨 FREE_PAN: Successfully loaded data for channels: "${getChannelString()}"`);
+        
+        // DIAGNOSTIC: Check the response data format
+        if (result.channels_used) {
+          console.log(`🔍 FREE_PAN: Backend returned channels_used:`, result.channels_used);
+        }
         
         const newTile = {
           data: `data:image/png;base64,${result.data}`,
@@ -3129,6 +3142,12 @@ const MicroscopeMapDisplay = ({
         
         if (appendLog) {
           appendLog(`Loaded tile for scale ${scaleLevel}, region (${clampedTopLeft.x.toFixed(1)}, ${clampedTopLeft.y.toFixed(1)}) to (${clampedBottomRight.x.toFixed(1)}, ${clampedBottomRight.y.toFixed(1)})`);
+        }
+      } else {
+        // Log API call failure details
+        console.error(`❌ FREE_PAN API Call Failed for channels "${getChannelString()}":`, result);
+        if (appendLog) {
+          appendLog(`Failed to load scan tile for channels "${getChannelString()}": ${result.message || 'Unknown error'}`);
         }
       }
     } catch (error) {
@@ -3642,10 +3661,17 @@ const MicroscopeMapDisplay = ({
                               <div className="bg-gray-700 rounded p-2 mb-3 max-h-32 overflow-y-auto">
                                 <div className="text-xs text-gray-300 mb-2">Available Experiments:</div>
                                 {experiments.map((exp) => (
-                                  <div key={exp.name} className="flex items-center justify-between text-xs text-white mb-1 p-1 hover:bg-gray-600 rounded">
+                                  <div 
+                                    key={exp.name} 
+                                    className={`flex items-center justify-between text-xs text-white mb-1 p-1 hover:bg-gray-600 rounded cursor-pointer ${
+                                      exp.name === activeExperiment ? 'bg-gray-600' : ''
+                                    }`}
+                                    onClick={() => setActiveExperimentHandler(exp.name)}
+                                    title={`Click to activate experiment: ${exp.name}`}
+                                  >
                                     <span className={exp.name === activeExperiment ? 'font-bold text-green-400' : ''}>{exp.name}</span>
                                     {exp.name === activeExperiment && <i className="fas fa-check text-green-400"></i>}
-                                      </div>
+                                  </div>
                                 ))}
                                 </div>
                               )}
