@@ -20,17 +20,12 @@ class ArtifactZarrLoader {
     this.datasetZattrsCache = new Map(); // Cache for dataset-level zattrs
     this.currentDatasetId = null; // Track current dataset for cache invalidation
     
-    // MAXIMUM SPEED - No limits, just go as fast as possible!
-    this.maxConcurrentRequests = 200; // High concurrency for maximum speed
-    this.requestQueue = []; // Queue for requests when limit is reached
-    this.activeRequestCount = 0;
     this.requestPromises = new Map(); // Cache for pending requests to avoid duplicates
     
     // 🚀 REQUEST CANCELLATION: Track and manage cancellable requests
     this.requestControllers = new Map(); // Map of request ID to AbortController
     this.requestIds = new Map(); // Map of URL to request ID for tracking
     this.nextRequestId = 1; // Counter for unique request IDs
-    this.activeBatchRequests = new Set(); // Track active batch request IDs
     
     // 🚀 PERFORMANCE OPTIMIZATION: Add memory management
     this.maxCacheSize = 2000; // Limit cache size to prevent memory bloat
@@ -74,7 +69,6 @@ class ArtifactZarrLoader {
     }
     this.requestControllers.clear();
     this.requestIds.clear();
-    this.activeBatchRequests.clear();
     console.log(`🚫 Cancelled all ${cancelledCount} active requests`);
     return cancelledCount;
   }
@@ -97,8 +91,6 @@ class ArtifactZarrLoader {
         cancelledCount++;
       }
     }
-    
-    this.activeBatchRequests.delete(batchId);
     console.log(`🚫 Cancelled ${cancelledCount} requests for batch: ${batchId}`);
     return cancelledCount;
   }
@@ -156,32 +148,6 @@ class ArtifactZarrLoader {
     return fetchPromise;
   }
 
-  /**
-   * MAXIMUM SPEED batch fetch - fire ALL requests at once!
-   * @param {Array<string>} urls - URLs to fetch
-   * @param {Object} options - Fetch options
-   * @param {string} batchId - Optional batch ID for cancellation
-   * @returns {Promise<Array<Response>>} Array of responses
-   */
-  async batchFetch(urls, options = {}, batchId = null) {
-    const batchRequestId = batchId || `batch_${Date.now()}_${Math.random()}`;
-    this.activeBatchRequests.add(batchRequestId);
-    
-    console.log(`🚀 MAXIMUM SPEED: Firing ${urls.length} requests simultaneously! (Batch: ${batchRequestId})`);
-    
-    try {
-      // Fire ALL requests at once - no batching, no limits!
-      const allPromises = urls.map((url, index) => {
-        const requestId = `${batchRequestId}_${index}`;
-        return this.managedFetch(url, options, requestId);
-      });
-      
-      const results = await Promise.all(allPromises);
-      return results;
-    } finally {
-      this.activeBatchRequests.delete(batchRequestId);
-    }
-  }
 
   /**
    * Get multi-channel well region data with additive blending
@@ -199,7 +165,7 @@ class ArtifactZarrLoader {
    */
   async getMultiChannelWellRegion(
     wellId, centerX, centerY, width_mm, height_mm, channelConfigs, scaleLevel,
-    timepoint = 0, datasetId, outputFormat = 'base64'
+    timepoint = 0, datasetId, onChunkProgress = null, outputFormat = 'base64'
   ) {
     try {
       console.log(`🎨 Multi-channel well region request: well=${wellId}, channels=${channelConfigs.length}`);
@@ -214,9 +180,15 @@ class ArtifactZarrLoader {
       // Load each channel separately in parallel
       const channelPromises = enabledChannels.map(async (config) => {
         try {
-          const channelRegion = await this.getWellCanvasRegion(
+          const channelRegion = await this.getWellCanvasRegionRealTime(
             centerX, centerY, width_mm, height_mm,
-            config.channelName, scaleLevel, timepoint, datasetId, wellId
+            config.channelName, scaleLevel, timepoint, datasetId, wellId,
+            (loadedChunks, totalChunks, partialCanvas) => {
+              // Forward progress updates
+              if (onChunkProgress) {
+                onChunkProgress(loadedChunks, totalChunks, partialCanvas, config.channelName);
+              }
+            }
           );
           
           if (!channelRegion) {
@@ -361,6 +333,7 @@ class ArtifactZarrLoader {
     
     return adjustedCanvas;
   }
+
 
   /**
    * Get individual well region data
@@ -542,7 +515,6 @@ class ArtifactZarrLoader {
    */
   async getMultipleWellRegionsRealTime(wellRequests, onChunkProgress, onWellComplete, batchId = null) {
     const requestBatchId = batchId || `well_batch_${Date.now()}_${Math.random()}`;
-    this.activeBatchRequests.add(requestBatchId);
     
     // 🚀 PERFORMANCE OPTIMIZATION: Run memory cleanup before starting new batch
     this.cleanupMemory();
@@ -653,7 +625,7 @@ class ArtifactZarrLoader {
         message: `Well ${request.wellId} not available`
       }));
     } finally {
-      this.activeBatchRequests.delete(requestBatchId);
+      // Cleanup complete
     }
   }
 
@@ -698,7 +670,6 @@ class ArtifactZarrLoader {
    */
   async getMultipleWellRegionsMultiChannelRealTime(wellRequests, channelConfigs, onChunkProgress, onWellComplete, batchId = null) {
     const requestBatchId = batchId || `multi_channel_batch_${Date.now()}_${Math.random()}`;
-    this.activeBatchRequests.add(requestBatchId);
     
     this.cleanupMemory();
     
@@ -713,7 +684,13 @@ class ArtifactZarrLoader {
         try {
           const result = await this.getMultiChannelWellRegion(
             wellId, centerX, centerY, width_mm, height_mm,
-            channelConfigs, scaleLevel, timepoint, datasetId, outputFormat
+            channelConfigs, scaleLevel, timepoint, datasetId,
+            (loadedChunks, totalChunks, partialCanvas, channelName) => {
+              // Forward progress updates for this specific well
+              if (onChunkProgress) {
+                onChunkProgress(wellId, loadedChunks, totalChunks, partialCanvas);
+              }
+            }, outputFormat
           );
           
           if (!result || !result.success) {
@@ -786,7 +763,7 @@ class ArtifactZarrLoader {
         message: `Multi-channel well ${request.wellId} not available`
       }));
     } finally {
-      this.activeBatchRequests.delete(requestBatchId);
+      // Cleanup complete
     }
   }
 
@@ -1576,32 +1553,26 @@ class ArtifactZarrLoader {
       canvas.height = totalHeight;
       const ctx = canvas.getContext('2d');
       
-      // Batch fetch all chunk URLs for optimized parallel loading
-      const chunkUrls = chunks.map(chunk => {
+      // Fetch chunks individually using the caching system
+      const fetchTimerName = `Individual chunk fetch ${Date.now()}_${Math.random()}`;
+      console.time(fetchTimerName);
+      
+      // Process chunks in parallel: fetch, decode and prepare canvas data
+      const processingTimerName = `Parallel chunk processing ${Date.now()}_${Math.random()}`;
+      console.time(processingTimerName);
+      const chunkPromises = chunks.map(async (chunk, index) => {
         const [t, c, z, y, x] = chunk.coordinates;
-        return `${baseUrl}${scaleLevel}/${t}.${c}.${z}.${y}.${x}`;
-      });
-      
-      const batchTimerName = `Batch chunk fetch ${Date.now()}_${Math.random()}`;
-      console.time(batchTimerName);
-      const chunkResponses = await this.batchFetch(chunkUrls);
-      console.timeEnd(batchTimerName);
-      
-             // Process chunks in parallel: decode and prepare canvas data
-       const processingTimerName = `Parallel chunk processing ${Date.now()}_${Math.random()}`;
-       console.time(processingTimerName);
-       const chunkPromises = chunks.map(async (chunk, index) => {
-         const response = chunkResponses[index];
-         const [, , , y, x] = chunk.coordinates;
+        const chunkUrl = `${baseUrl}${scaleLevel}/${t}.${c}.${z}.${y}.${x}`;
         
-        if (!response || !response.ok) {
+        // Use fetchZarrChunk which has proper caching
+        const chunkData = await this.fetchZarrChunk(chunkUrl, dataType);
+        if (!chunkData) {
           console.warn(`Chunk not available: ${chunk.filename}`);
           return null;
         }
         
         try {
-          // Fetch and decode chunk data
-          const chunkData = await response.arrayBuffer();
+          // Decode chunk data (chunkData is already ArrayBuffer from fetchZarrChunk)
           const imageData = this.decodeChunk(chunkData, [yChunk, xChunk], dataType);
           
           if (imageData) {
@@ -1652,6 +1623,7 @@ class ArtifactZarrLoader {
       
       // Wait for all chunks to load in parallel
       const chunkResults = await Promise.all(chunkPromises);
+      console.timeEnd(fetchTimerName);
       console.timeEnd(processingTimerName);
       
       // Draw all loaded chunks onto the main canvas
