@@ -1322,7 +1322,7 @@ const MicroscopeMapDisplay = ({
     // Determine current channel configuration
     const useMultiChannel = shouldUseMultiChannelLoading();
     const channelString = useMultiChannel && isHistoricalDataMode ? 
-      getEnabledZarrChannels().map(ch => ch.channelName).join(',') : 
+      getEnabledZarrChannels().map(ch => ch.channelName).sort().join(',') : 
       getChannelString();
     
     console.log(`🔍 [visibleTiles] Filtering logic:`, {
@@ -1331,7 +1331,14 @@ const MicroscopeMapDisplay = ({
       channelString,
       scaleLevel,
       totalTiles: stitchedTiles.length,
-      tilesWithMatchingChannel: stitchedTiles.filter(tile => tile.channel === channelString).length
+      tilesWithMatchingChannel: stitchedTiles.filter(tile => tile.channel === channelString).length,
+      enabledZarrChannels: getEnabledZarrChannels().map(ch => ch.channelName),
+      tilesData: stitchedTiles.map(tile => ({
+        channel: tile.channel,
+        isMultiChannel: tile.metadata?.isMultiChannel,
+        channelsUsed: tile.metadata?.channelsUsed,
+        scale: tile.scale
+      }))
     });
     
     // Get tiles for current scale and channel selection
@@ -1344,6 +1351,8 @@ const MicroscopeMapDisplay = ({
       // For real microscope tiles (single or multi-channel), use channel string matching
       return tile.scale === scaleLevel && tile.channel === channelString;
     });
+    
+    console.log(`🔍 [visibleTiles] Current scale tiles found:`, currentScaleTiles.length);
     
     if (currentScaleTiles.length > 0) {
       // If we have current scale tiles, only show current scale
@@ -2567,7 +2576,7 @@ const MicroscopeMapDisplay = ({
     
     // 🚀 PERFORMANCE OPTIMIZATION: Throttle tile loading attempts to prevent CPU overload
     const now = Date.now();
-    const MIN_LOAD_INTERVAL = 3000; // Minimum 3 seconds between tile load attempts
+    const MIN_LOAD_INTERVAL = 300; // Minimum 0.3 seconds between tile load attempts
     if (now - lastTileLoadAttemptRef.current < MIN_LOAD_INTERVAL) {
       console.log('[loadStitchedTiles] Throttling tile load attempt - too soon since last attempt');
       return;
@@ -2852,7 +2861,7 @@ const MicroscopeMapDisplay = ({
               height_mm: wellRequest.height_mm,
               scale: scaleLevel,
               channel: useMultiChannel ? 
-                enabledChannels.map(ch => ch.channelName).join(',') : 
+                enabledChannels.map(ch => ch.channelName).sort().join(',') : 
                 activeChannel,
               timestamp: Date.now(),
               isHistorical: true,
@@ -2935,7 +2944,7 @@ const MicroscopeMapDisplay = ({
             height_mm: finalResult.metadata.height_mm,
             scale: scaleLevel,
             channel: useMultiChannel ? 
-              enabledChannels.map(ch => ch.channelName).join(',') : 
+              enabledChannels.map(ch => ch.channelName).sort().join(',') : 
               activeChannel,
             timestamp: Date.now(),
             isHistorical: true,
