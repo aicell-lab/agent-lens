@@ -2268,7 +2268,7 @@ const MicroscopeMapDisplay = ({
       setStitchedTiles([]); // Clear existing tiles
       
       // Auto-load default dataset for simulated microscope
-      const defaultDatasetId = 'agent-lens/20250824-example-data-20250824t211822-798933';
+      const defaultDatasetId = 'agent-lens/20250824-example-data-20250824-221822';
       console.log('[Simulated Microscope] Auto-loading default dataset:', defaultDatasetId);
       
       // Create a mock dataset object for the default dataset
