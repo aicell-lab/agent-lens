@@ -1321,18 +1321,27 @@ const MicroscopeMapDisplay = ({
     
     // Determine current channel configuration
     const useMultiChannel = shouldUseMultiChannelLoading();
-    const channelString = useMultiChannel ? 
+    const channelString = useMultiChannel && isHistoricalDataMode ? 
       getEnabledZarrChannels().map(ch => ch.channelName).join(',') : 
       getChannelString();
     
+    console.log(`🔍 [visibleTiles] Filtering logic:`, {
+      useMultiChannel,
+      isHistoricalDataMode,
+      channelString,
+      scaleLevel,
+      totalTiles: stitchedTiles.length,
+      tilesWithMatchingChannel: stitchedTiles.filter(tile => tile.channel === channelString).length
+    });
+    
     // Get tiles for current scale and channel selection
     const currentScaleTiles = stitchedTiles.filter(tile => {
-      // For multi-channel tiles, check if it's a multi-channel tile and matches current channels
-      if (useMultiChannel && tile.metadata?.isMultiChannel) {
+      // For historical mode multi-channel tiles
+      if (useMultiChannel && isHistoricalDataMode && tile.metadata?.isMultiChannel) {
         return tile.scale === scaleLevel && 
                JSON.stringify(tile.metadata.channelsUsed?.sort()) === JSON.stringify(getEnabledZarrChannels().map(ch => ch.channelName).sort());
       }
-      // For single-channel tiles, use the legacy channel string matching
+      // For real microscope tiles (single or multi-channel), use channel string matching
       return tile.scale === scaleLevel && tile.channel === channelString;
     });
     
@@ -1349,10 +1358,12 @@ const MicroscopeMapDisplay = ({
     
     for (const scale of availableScales) {
       const scaleTiles = stitchedTiles.filter(tile => {
-        if (useMultiChannel && tile.metadata?.isMultiChannel) {
+        // For historical mode multi-channel tiles
+        if (useMultiChannel && isHistoricalDataMode && tile.metadata?.isMultiChannel) {
           return tile.scale === scale && 
                  JSON.stringify(tile.metadata.channelsUsed?.sort()) === JSON.stringify(getEnabledZarrChannels().map(ch => ch.channelName).sort());
         }
+        // For real microscope tiles (single or multi-channel), use channel string matching
         return tile.scale === scale && tile.channel === channelString;
       });
       if (scaleTiles.length > 0) {
