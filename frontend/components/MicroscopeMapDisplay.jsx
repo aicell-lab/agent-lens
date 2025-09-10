@@ -176,6 +176,19 @@ const MicroscopeMapDisplay = ({
   const chunkProgressUpdateTimes = useRef(new Map()); // Track last update time for each well to throttle progress updates
   const lastTileLoadAttemptRef = useRef(0); // Track last tile load attempt to prevent excessive retries
 
+  // Multi-channel state management for zarr data (defined early to avoid hoisting issues)
+  const [zarrChannelConfigs, setZarrChannelConfigs] = useState({});
+  const [availableZarrChannels, setAvailableZarrChannels] = useState([]);
+  const [isMultiChannelMode, setIsMultiChannelMode] = useState(false);
+
+  // Add state for historical data mode
+  const [isHistoricalDataMode, setIsHistoricalDataMode] = useState(false);
+
+  // Add state for real-time chunk loading progress
+  const [realTimeChunkProgress, setRealTimeChunkProgress] = useState(new Map());
+  const [realTimeWellProgress, setRealTimeWellProgress] = useState(new Map());
+  const [isRealTimeLoading, setIsRealTimeLoading] = useState(false);
+
   // Function to refresh scan results (moved early to avoid dependency issues)
   const refreshScanResults = useCallback(() => {
     if (visibleLayers.scanResults && !isSimulatedMicroscope) {
@@ -257,16 +270,53 @@ const MicroscopeMapDisplay = ({
     return selectedChannels.join(',');
   }, [getSelectedChannels]);
 
+  // Helper functions for zarr multi-channel management
+  const getEnabledZarrChannels = useCallback(() => {
+    return Object.entries(zarrChannelConfigs)
+      .filter(([, config]) => config.enabled)
+      .map(([channelName, config]) => ({ channelName, ...config }));
+  }, [zarrChannelConfigs]);
+
+  const updateZarrChannelConfig = useCallback((channelName, updates) => {
+    setZarrChannelConfigs(prev => ({
+      ...prev,
+      [channelName]: {
+        ...prev[channelName],
+        ...updates
+      }
+    }));
+  }, []);
+
+  const initializeZarrChannelsFromMetadata = useCallback((channelMetadata) => {
+    if (!channelMetadata || !channelMetadata.activeChannels) return;
+    
+    const newConfigs = {};
+    channelMetadata.activeChannels.forEach(channel => {
+      newConfigs[channel.label] = {
+        enabled: true, // Auto-enable all active channels as requested
+        min: channel.window.start,
+        max: channel.window.end,
+        color: channel.color,
+        index: channel.index,
+        coefficient: channel.coefficient,
+        family: channel.family
+      };
+    });
+    
+    console.log(`🎨 Initialized ${Object.keys(newConfigs).length} zarr channels:`, Object.keys(newConfigs));
+    setZarrChannelConfigs(newConfigs);
+    setAvailableZarrChannels(channelMetadata.activeChannels);
+    setIsMultiChannelMode(Object.keys(newConfigs).length > 1);
+  }, []);
+
+  const shouldUseMultiChannelLoading = useCallback(() => {
+    return (isHistoricalDataMode || mapViewMode === 'FOV_FITTED') && 
+           availableZarrChannels.length > 0 && 
+           Object.values(zarrChannelConfigs).some(config => config.enabled);
+  }, [isHistoricalDataMode, mapViewMode, availableZarrChannels.length, zarrChannelConfigs]);
+
   // State to track the well being selected during drag operations
   const [dragSelectedWell, setDragSelectedWell] = useState(null);
-
-  // Add state for historical data mode
-  const [isHistoricalDataMode, setIsHistoricalDataMode] = useState(false);
-
-  // Add state for real-time chunk loading progress
-  const [realTimeChunkProgress, setRealTimeChunkProgress] = useState(new Map());
-  const [realTimeWellProgress, setRealTimeWellProgress] = useState(new Map());
-  const [isRealTimeLoading, setIsRealTimeLoading] = useState(false);
   
   // 🚀 REQUEST CANCELLATION: Track cancellable requests
   const [currentCancellableRequest, setCurrentCancellableRequest] = useState(null);
@@ -1248,13 +1298,22 @@ const MicroscopeMapDisplay = ({
   const visibleTiles = useMemo(() => {
     if (!visibleLayers.scanResults) return [];
     
-    const channelString = getChannelString();
+    // Determine current channel configuration
+    const useMultiChannel = shouldUseMultiChannelLoading();
+    const channelString = useMultiChannel ? 
+      getEnabledZarrChannels().map(ch => ch.channelName).join(',') : 
+      getChannelString();
     
     // Get tiles for current scale and channel selection
-    const currentScaleTiles = stitchedTiles.filter(tile => 
-      tile.scale === scaleLevel && 
-      tile.channel === channelString
-    );
+    const currentScaleTiles = stitchedTiles.filter(tile => {
+      // For multi-channel tiles, check if it's a multi-channel tile and matches current channels
+      if (useMultiChannel && tile.metadata?.isMultiChannel) {
+        return tile.scale === scaleLevel && 
+               JSON.stringify(tile.metadata.channelsUsed?.sort()) === JSON.stringify(getEnabledZarrChannels().map(ch => ch.channelName).sort());
+      }
+      // For single-channel tiles, use the legacy channel string matching
+      return tile.scale === scaleLevel && tile.channel === channelString;
+    });
     
     if (currentScaleTiles.length > 0) {
       // If we have current scale tiles, only show current scale
@@ -1268,17 +1327,20 @@ const MicroscopeMapDisplay = ({
       .sort((a, b) => a - b); // Sort ascending (lower numbers = higher resolution)
     
     for (const scale of availableScales) {
-      const scaleTiles = stitchedTiles.filter(tile => 
-        tile.scale === scale && 
-        tile.channel === channelString
-      );
+      const scaleTiles = stitchedTiles.filter(tile => {
+        if (useMultiChannel && tile.metadata?.isMultiChannel) {
+          return tile.scale === scale && 
+                 JSON.stringify(tile.metadata.channelsUsed?.sort()) === JSON.stringify(getEnabledZarrChannels().map(ch => ch.channelName).sort());
+        }
+        return tile.scale === scale && tile.channel === channelString;
+      });
       if (scaleTiles.length > 0) {
         return scaleTiles;
       }
     }
     
     return [];
-  }, [stitchedTiles, scaleLevel, visibleLayers.channels, visibleLayers.scanResults, getSelectedChannels, getChannelString]);
+  }, [stitchedTiles, scaleLevel, visibleLayers.channels, visibleLayers.scanResults, shouldUseMultiChannelLoading, getEnabledZarrChannels, getSelectedChannels, getChannelString]);
 
   const addOrUpdateTile = useCallback((newTile) => {
     setStitchedTiles(prevTiles => {
@@ -2300,6 +2362,49 @@ const MicroscopeMapDisplay = ({
     }
   }, [isHistoricalDataMode, datasets, selectedHistoricalDataset]);
 
+  // Load zarr channel metadata when dataset changes (historical or FOV_FITTED mode)
+  useEffect(() => {
+    const loadZarrChannelMetadata = async () => {
+      if (!artifactZarrLoaderRef.current || 
+          (!isHistoricalDataMode && mapViewMode !== 'FOV_FITTED') ||
+          !selectedHistoricalDataset) {
+        return;
+      }
+      
+      try {
+        console.log('[Zarr Channels] Loading channel metadata for dataset:', selectedHistoricalDataset.id);
+        
+        // Get available wells first to find a sample well for metadata
+        const availableWells = await artifactZarrLoaderRef.current.getAvailableWells(selectedHistoricalDataset.id);
+        if (availableWells.length === 0) {
+          console.warn('[Zarr Channels] No available wells found');
+          return;
+        }
+        
+        // Use first available well to get channel metadata
+        const sampleWell = availableWells[0];
+        const correctDatasetId = artifactZarrLoaderRef.current.extractDatasetId(selectedHistoricalDataset.id);
+        const baseUrl = `${artifactZarrLoaderRef.current.baseUrl}/${correctDatasetId}/zip-files/well_${sampleWell}_96.zip/~/data.zarr/`;
+        
+        // Get active channel metadata from zattrs
+        const channelMetadata = await artifactZarrLoaderRef.current.getActiveChannelsFromZattrs(baseUrl);
+        if (channelMetadata && channelMetadata.activeChannels.length > 0) {
+          console.log(`[Zarr Channels] Found ${channelMetadata.activeChannels.length} active channels`);
+          initializeZarrChannelsFromMetadata(channelMetadata);
+        } else {
+          console.warn('[Zarr Channels] No active channels found in metadata');
+          setIsMultiChannelMode(false);
+        }
+        
+      } catch (error) {
+        console.error('[Zarr Channels] Failed to load channel metadata:', error);
+        setIsMultiChannelMode(false);
+      }
+    };
+    
+    loadZarrChannelMetadata();
+  }, [isHistoricalDataMode, mapViewMode, selectedHistoricalDataset, initializeZarrChannelsFromMetadata]);
+
   
   // Initialize ArtifactZarrLoader for historical data
   const artifactZarrLoaderRef = useRef(null);
@@ -2636,6 +2741,13 @@ const MicroscopeMapDisplay = ({
         
         // 🚀 REAL-TIME CHUNK LOADING: Load wells progressively with live updates!
         console.log(`🚀 REAL-TIME: Starting progressive loading for ${wellRequests.length} wells`);
+        
+        // Check if we should use multi-channel loading
+        const useMultiChannel = shouldUseMultiChannelLoading();
+        const enabledChannels = useMultiChannel ? getEnabledZarrChannels() : [];
+        
+        console.log(`🎨 Loading mode: ${useMultiChannel ? 'Multi-channel' : 'Single-channel'}, channels: ${enabledChannels.length}`);
+        
         setIsRealTimeLoading(true);
         
         // Clear previous progress
@@ -2701,13 +2813,19 @@ const MicroscopeMapDisplay = ({
               width_mm: wellRequest.width_mm,
               height_mm: wellRequest.height_mm,
               scale: scaleLevel,
-              channel: activeChannel,
+              channel: useMultiChannel ? 
+                enabledChannels.map(ch => ch.channelName).join(',') : 
+                activeChannel,
               timestamp: Date.now(),
               isHistorical: true,
               datasetId: selectedHistoricalDataset.id,
               wellId: wellId,
               isPartial: loadedChunks < totalChunks, // Mark as partial for potential cleanup
-              progress: `${loadedChunks}/${totalChunks}`
+              progress: `${loadedChunks}/${totalChunks}`,
+              metadata: {
+                isMultiChannel: useMultiChannel,
+                channelsUsed: useMultiChannel ? enabledChannels.map(ch => ch.channelName) : [activeChannel]
+              }
             };
             
             // Add or update tile with partial data
@@ -2778,12 +2896,19 @@ const MicroscopeMapDisplay = ({
             width_mm: finalResult.metadata.width_mm,
             height_mm: finalResult.metadata.height_mm,
             scale: scaleLevel,
-            channel: activeChannel,
+            channel: useMultiChannel ? 
+              enabledChannels.map(ch => ch.channelName).join(',') : 
+              activeChannel,
             timestamp: Date.now(),
             isHistorical: true,
             datasetId: selectedHistoricalDataset.id,
             wellId: wellId,
-            isPartial: false // Mark as complete
+            isPartial: false, // Mark as complete
+            metadata: {
+              ...finalResult.metadata,
+              isMultiChannel: useMultiChannel,
+              channelsUsed: useMultiChannel ? enabledChannels.map(ch => ch.channelName) : [activeChannel]
+            }
           };
           
           // Replace partial tile with complete tile
@@ -2808,7 +2933,9 @@ const MicroscopeMapDisplay = ({
           artifactZarrLoaderRef.current.getMultipleWellRegionsRealTimeCancellable(
             wellRequests, 
             onChunkProgress, 
-            onWellComplete
+            onWellComplete,
+            useMultiChannel,
+            enabledChannels
           );
         
         // Store cancellation function for potential future cancellation
@@ -2822,7 +2949,10 @@ const MicroscopeMapDisplay = ({
           console.log(`✅ REAL-TIME: Completed loading ${successfulResults.length}/${wellRequests.length} well regions`);
           
           // Clean up old tiles for this scale/channel combination to prevent memory bloat
-          cleanupOldTiles(scaleLevel, getChannelString());
+          const channelKey = useMultiChannel ? 
+            enabledChannels.map(ch => ch.channelName).join(',') : 
+            getChannelString();
+          cleanupOldTiles(scaleLevel, channelKey);
           
           if (appendLog) {
             appendLog(`✅ REAL-TIME: Loaded ${successfulResults.length} historical well tiles for scale ${scaleLevel}`);
@@ -3433,9 +3563,8 @@ const MicroscopeMapDisplay = ({
               <div className="relative" ref={layerDropdownRef}>
                 <button
                   onClick={() => setIsLayerDropdownOpen(!isLayerDropdownOpen)}
-                  className="px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
-                  disabled={isHistoricalDataMode}
-                  title={isHistoricalDataMode ? 'Layers disabled in historical data mode' : 'Toggle layer visibility'}
+                  className="px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded flex items-center"
+                  title="Toggle layer visibility"
                 >
                   <i className="fas fa-layer-group mr-1"></i>
                   Layers
@@ -3443,7 +3572,7 @@ const MicroscopeMapDisplay = ({
                 </button>
                 
                 {isLayerDropdownOpen && (
-                  <div className="absolute top-full right-0 mt-1 bg-gray-800 rounded shadow-lg p-4 min-w-[480px] z-20">
+                  <div className="absolute top-full right-0 mt-1 bg-gray-800 rounded shadow-lg p-4 min-w-[580px] z-20">
                     {/* Map Layers Section */}
                     <div className="mb-4">
                       <div className="text-sm text-gray-300 font-semibold mb-2">Map Layers</div>
@@ -3468,179 +3597,106 @@ const MicroscopeMapDisplay = ({
                         </label>
                       </div>
                     </div>
-
-                    {/* Main Content Area */}
-                    <div className="flex gap-4">
-                      {/* Experiment Selection (Left Side) */}
-                      <div className="flex-1">
-                        <div className="text-sm text-gray-300 font-semibold mb-2 flex items-center justify-between">
-                          <span>Experiments</span>
-                          {isLoadingExperiments && <i className="fas fa-spinner fa-spin text-xs"></i>}
+                    
+                    {/* Multi-Channel Controls for Historical/FOV_FITTED Mode */}
+                    {shouldUseMultiChannelLoading() && availableZarrChannels.length > 0 && (
+                      <div className="mb-4 border-t border-gray-600 pt-4">
+                        <div className="text-sm text-gray-300 font-semibold mb-3 flex items-center">
+                          <i className="fas fa-palette mr-2"></i>
+                          Multi-Channel Controls ({availableZarrChannels.length} channels)
                         </div>
                         
-                        {!isSimulatedMicroscope ? (
-                          <div className="space-y-2">
-                            {/* Experiment List */}
-                            <div className="bg-gray-700 rounded p-2 max-h-40 overflow-y-auto">
-                              {experiments.length > 0 ? (
-                                experiments.map((experiment) => (
-                                  <div
-                                    key={experiment.name}
-                                    className={`flex items-center justify-between p-2 rounded text-xs hover:bg-gray-600 cursor-pointer ${
-                                      experiment.name === activeExperiment ? 'bg-blue-600 text-white' : 'text-gray-300'
-                                    }`}
-                                    onClick={() => experiment.name !== activeExperiment && setActiveExperimentHandler(experiment.name)}
-                                  >
-                                    <div className="flex-1">
-                                      <div className="font-medium">{experiment.name}</div>
-                                      <div className="text-xs opacity-75">
-                                        {experiment.name === activeExperiment && <span className="ml-1 text-green-300">• Active</span>}
-                                      </div>
-                                    </div>
-                                    {experiment.name !== activeExperiment && (
-                                      <div className="flex space-x-1">
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            setExperimentToReset(experiment.name);
-                                            setShowClearCanvasConfirmation(true);
-                                          }}
-                                          className="text-yellow-400 hover:text-yellow-300"
-                                          title="Reset experiment (clear data)"
-                                        >
-                                          <i className="fas fa-undo text-xs"></i>
-                                        </button>
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            removeExperiment(experiment.name);
-                                          }}
-                                          className="text-red-400 hover:text-red-300"
-                                          title="Remove experiment"
-                                        >
-                                          <i className="fas fa-trash text-xs"></i>
-                                        </button>
-                                      </div>
-                                    )}
-                                  </div>
-                                ))
-                              ) : (
-                                <div className="text-xs text-gray-400 p-2 text-center">
-                                  {isLoadingExperiments ? 'Loading...' : 'No experiments available'}
-                                </div>
-                              )}
-                            </div>
+                        <div className="space-y-3">
+                          {availableZarrChannels.map((channel) => {
+                            const config = zarrChannelConfigs[channel.label] || {};
+                            const channelColor = `#${channel.color}`;
                             
-                            {/* Experiment Actions */}
-                            <div className="space-y-2">
-                              <div className="flex gap-2">
-                                <button
-                                  onClick={() => setShowCreateExperimentDialog(true)}
-                                  className="flex-1 px-2 py-1 text-xs bg-green-600 hover:bg-green-500 text-white rounded"
-                                >
-                                  <i className="fas fa-plus mr-1"></i>
-                                  Create
-                                </button>
-                                <button
-                                  onClick={async () => {
-                                    if (!activeExperiment || !microscopeControlService) return;
-                                    // Show notification that upload started
-                                    if (showNotification) showNotification('Upload started in background', 'info');
-                                    try {
-                                      const result = await microscopeControlService.upload_zarr_dataset(
-                                        activeExperiment,
-                                        '', // description (optional, empty for now)
-                                        true // include_acquisition_settings
-                                      );
-                                      if (result && result.success) {
-                                        if (showNotification) showNotification('Upload completed successfully', 'success');
-                                        if (appendLog) appendLog(`Upload completed: ${result.dataset_name}`);
-                                      } else {
-                                        if (showNotification) showNotification(`Upload failed: ${result?.message || 'Unknown error'}`, 'error');
-                                        if (appendLog) appendLog(`Upload failed: ${result?.message || 'Unknown error'}`);
-                                      }
-                                    } catch (error) {
-                                      if (showNotification) showNotification(`Upload error: ${error.message}`, 'error');
-                                      if (appendLog) appendLog(`Upload error: ${error.message}`);
-                                    }
-                                  }}
-                                  className="flex-1 px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded disabled:opacity-50"
-                                  disabled={!activeExperiment}
-                                  title={!activeExperiment ? "Select an active experiment to upload" : "Upload experiment data to artifact manager"}
-                                >
-                                  <i className="fas fa-upload mr-1"></i>
-                                  Upload
-                                </button>
-                                <button
-                                  onClick={() => getExperimentInfo(activeExperiment)}
-                                  className="flex-1 px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded disabled:opacity-50"
-                                  disabled={!activeExperiment}
-                                  title={!activeExperiment ? "Select an active experiment to view info" : "View experiment information"}
-                                >
-                                  <i className="fas fa-info mr-1"></i>
-                                  Info
-                                </button>
-                                <button
-                                  onClick={() => loadExperiments()}
-                                  className="px-2 py-1 text-xs bg-gray-600 hover:bg-gray-500 text-white rounded"
-                                >
-                                  <i className="fas fa-refresh mr-1"></i>
-                                  Refresh
-                                </button>
+                            return (
+                              <div key={channel.label} className="bg-gray-700 rounded p-3">
+                                {/* Channel Header */}
+                                <div className="flex items-center justify-between mb-2">
+                                  <label className="flex items-center text-white text-xs cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={config.enabled || false}
+                                      onChange={(e) => updateZarrChannelConfig(channel.label, { enabled: e.target.checked })}
+                                      className="mr-2"
+                                    />
+                                    <div 
+                                      className="w-4 h-4 rounded mr-2 border border-gray-500"
+                                      style={{ backgroundColor: channelColor }}
+                                    ></div>
+                                    <span className="font-medium">{channel.label}</span>
+                                  </label>
+                                  <span className="text-xs text-gray-400">Ch {channel.index}</span>
+                                </div>
+                                
+                                {/* Contrast Controls */}
+                                {config.enabled && (
+                                  <div className="space-y-2">
+                                    <div className="flex items-center space-x-3">
+                                      <label className="text-xs text-gray-300 w-8">Min:</label>
+                                      <input
+                                        type="range"
+                                        min="0"
+                                        max="255"
+                                        value={config.min || 0}
+                                        onChange={(e) => updateZarrChannelConfig(channel.label, { min: parseInt(e.target.value) })}
+                                        className="flex-1 h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer"
+                                        style={{
+                                          background: `linear-gradient(to right, black 0%, ${channelColor} 100%)`
+                                        }}
+                                      />
+                                      <span className="text-xs text-gray-300 w-8">{config.min || 0}</span>
+                                    </div>
+                                    
+                                    <div className="flex items-center space-x-3">
+                                      <label className="text-xs text-gray-300 w-8">Max:</label>
+                                      <input
+                                        type="range"
+                                        min="0"
+                                        max="255"
+                                        value={config.max || 255}
+                                        onChange={(e) => updateZarrChannelConfig(channel.label, { max: parseInt(e.target.value) })}
+                                        className="flex-1 h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer"
+                                        style={{
+                                          background: `linear-gradient(to right, black 0%, ${channelColor} 100%)`
+                                        }}
+                                      />
+                                      <span className="text-xs text-gray-300 w-8">{config.max || 255}</span>
+                                    </div>
+                                    
+                                    {/* Quick Reset */}
+                                    <div className="flex justify-end">
+                                      <button
+                                        onClick={() => updateZarrChannelConfig(channel.label, { 
+                                          min: channel.window.start, 
+                                          max: channel.window.end 
+                                        })}
+                                        className="text-xs text-blue-400 hover:text-blue-300 cursor-pointer"
+                                      >
+                                        Reset to defaults
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
                               </div>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="text-xs text-gray-400 p-2 text-center">
-                            Experiment management not available for simulated microscope
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Channel Selection (Right Side) */}
-                      {visibleLayers.scanResults && (
-                        <div className="flex-1">
-                          <div className="text-sm text-gray-300 font-semibold mb-2">Channels</div>
-                          <div className="bg-gray-700 rounded p-2 max-h-40 overflow-y-auto">
-                            {Object.entries(visibleLayers.channels).map(([channel, isVisible]) => (
-                              <label key={channel} className="flex items-center text-white text-xs mb-1 hover:bg-gray-600 p-1 rounded cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  checked={isVisible}
-                                  onChange={() => setVisibleLayers(prev => ({
-                                    ...prev,
-                                    channels: {
-                                      ...prev.channels,
-                                      [channel]: !isVisible
-                                    }
-                                  }))}
-                                  className="mr-2"
-                                />
-                                {channel}
-                              </label>
-                            ))}
-                          </div>
-                          
-                          {/* Channel Selection Info */}
-                          <div className="mt-2 text-xs text-gray-400">
-                            {!hasSelectedChannels() ? (
-                              <span className="text-yellow-400">⚠️ Select at least one channel</span>
-                            ) : Object.values(visibleLayers.channels).filter(Boolean).length === 1 ? (
-                              <span className="text-blue-400">🔵 Single channel mode</span>
-                            ) : (
-                              <span className="text-green-400">🟢 Multi-channel merge mode ({Object.values(visibleLayers.channels).filter(Boolean).length} channels)</span>
-                            )}
-                          </div>
-                          
-                          {/* Channel Selection Help */}
-                          <div className="mt-1 text-xs text-gray-500">
-                            {hasSelectedChannels() && Object.values(visibleLayers.channels).filter(Boolean).length > 1 && (
-                              <span>Channels will be merged using backend color mapping</span>
-                            )}
-                          </div>
+                            );
+                          })}
                         </div>
-                      )}
-                    </div>
+                        
+                        {/* Multi-Channel Info */}
+                        <div className="mt-3 text-xs text-gray-400 flex items-center justify-between">
+                          <span>
+                            {getEnabledZarrChannels().length} of {availableZarrChannels.length} channels enabled
+                          </span>
+                          <span className="text-green-400">
+                            🟢 Additive Blending Mode
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                    
                   </div>
                 )}
               </div>

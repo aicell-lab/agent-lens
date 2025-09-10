@@ -184,6 +184,185 @@ class ArtifactZarrLoader {
   }
 
   /**
+   * Get multi-channel well region data with additive blending
+   * @param {string} wellId - Well ID (e.g., 'A2')
+   * @param {number} centerX - Center X coordinate in mm (well-relative)
+   * @param {number} centerY - Center Y coordinate in mm (well-relative)
+   * @param {number} width_mm - Width in mm
+   * @param {number} height_mm - Height in mm
+   * @param {Array} channelConfigs - Array of {channelName, enabled, min, max, color} objects
+   * @param {number} scaleLevel - Scale level
+   * @param {number} timepoint - Timepoint index
+   * @param {string} datasetId - Dataset ID
+   * @param {string} outputFormat - Output format ('base64', 'blob', 'array')
+   * @returns {Promise<Object>} Multi-channel composite well region data
+   */
+  async getMultiChannelWellRegion(
+    wellId, centerX, centerY, width_mm, height_mm, channelConfigs, scaleLevel,
+    timepoint = 0, datasetId, outputFormat = 'base64'
+  ) {
+    try {
+      console.log(`🎨 Multi-channel well region request: well=${wellId}, channels=${channelConfigs.length}`);
+      
+      // Filter to only enabled channels
+      const enabledChannels = channelConfigs.filter(config => config.enabled);
+      if (enabledChannels.length === 0) {
+        console.warn('No enabled channels for multi-channel request');
+        return { success: false, message: 'No enabled channels' };
+      }
+      
+      // Load each channel separately in parallel
+      const channelPromises = enabledChannels.map(async (config) => {
+        try {
+          const channelRegion = await this.getWellCanvasRegion(
+            centerX, centerY, width_mm, height_mm,
+            config.channelName, scaleLevel, timepoint, datasetId, wellId
+          );
+          
+          if (!channelRegion) {
+            console.warn(`Channel ${config.channelName} not available for well ${wellId}`);
+            return null;
+          }
+          
+          return {
+            config,
+            canvas: channelRegion.canvas,
+            width: channelRegion.width,
+            height: channelRegion.height,
+            actualBounds: channelRegion.actualBounds,
+            actualStageBounds: channelRegion.actualStageBounds
+          };
+        } catch (error) {
+          console.warn(`Failed to load channel ${config.channelName}:`, error);
+          return null;
+        }
+      });
+      
+      const channelResults = await Promise.all(channelPromises);
+      const validResults = channelResults.filter(result => result !== null);
+      
+      if (validResults.length === 0) {
+        console.warn(`No valid channels loaded for well ${wellId}`);
+        return { success: false, message: `No valid channels for well ${wellId}` };
+      }
+      
+      // Use the first valid result as the reference for dimensions
+      const referenceResult = validResults[0];
+      const compositeWidth = referenceResult.width;
+      const compositeHeight = referenceResult.height;
+      
+      // Create composite canvas for additive blending
+      const compositeCanvas = document.createElement('canvas');
+      compositeCanvas.width = compositeWidth;
+      compositeCanvas.height = compositeHeight;
+      const compositeCtx = compositeCanvas.getContext('2d');
+      
+      // Clear to black (important for additive blending)
+      compositeCtx.fillStyle = 'black';
+      compositeCtx.fillRect(0, 0, compositeWidth, compositeHeight);
+      
+      // Apply additive blending for each channel
+      for (const result of validResults) {
+        const { config, canvas } = result;
+        
+        // Apply contrast adjustment and channel color
+        const adjustedCanvas = this.applyChannelAdjustments(canvas, config);
+        
+        // Additive blend with existing composite
+        compositeCtx.globalCompositeOperation = 'lighter'; // Additive blending
+        compositeCtx.drawImage(adjustedCanvas, 0, 0);
+      }
+      
+      // Reset composite operation
+      compositeCtx.globalCompositeOperation = 'source-over';
+      
+      console.log(`✅ Multi-channel composite created: ${validResults.length} channels, ${compositeWidth}x${compositeHeight}px`);
+      
+      // Convert to requested output format
+      const outputData = await this.normalizeAndEncodeImage({ canvas: compositeCanvas }, null, outputFormat);
+      
+      return {
+        success: true,
+        data: outputData,
+        metadata: {
+          width: compositeWidth,
+          height: compositeHeight,
+          channelsUsed: validResults.map(r => r.config.channelName),
+          scale: scaleLevel,
+          timepoint,
+          wellId,
+          centerX,
+          centerY,
+          width_mm,
+          height_mm,
+          actualBounds: referenceResult.actualBounds,
+          actualStageBounds: referenceResult.actualStageBounds,
+          isMultiChannel: true
+        }
+      };
+      
+    } catch (error) {
+      console.warn(`Multi-channel well ${wellId} failed: ${error.message}`);
+      return { 
+        success: false, 
+        message: `Multi-channel well ${wellId} not available` 
+      };
+    }
+  }
+
+  /**
+   * Apply channel-specific adjustments (contrast, color, min/max)
+   * @param {HTMLCanvasElement} sourceCanvas - Source channel canvas
+   * @param {Object} config - Channel configuration {channelName, enabled, min, max, color}
+   * @returns {HTMLCanvasElement} Adjusted canvas
+   */
+  applyChannelAdjustments(sourceCanvas, config) {
+    const adjustedCanvas = document.createElement('canvas');
+    adjustedCanvas.width = sourceCanvas.width;
+    adjustedCanvas.height = sourceCanvas.height;
+    const adjustedCtx = adjustedCanvas.getContext('2d');
+    
+    // Get source image data
+    const sourceCtx = sourceCanvas.getContext('2d');
+    const sourceImageData = sourceCtx.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
+    const sourceData = sourceImageData.data;
+    
+    // Create adjusted image data
+    const adjustedImageData = adjustedCtx.createImageData(sourceCanvas.width, sourceCanvas.height);
+    const adjustedData = adjustedImageData.data;
+    
+    // Parse channel color (hex string like "FFFFFF" or "00FF00")
+    const color = config.color || 'FFFFFF';
+    const r = parseInt(color.substr(0, 2), 16) / 255;
+    const g = parseInt(color.substr(2, 2), 16) / 255;
+    const b = parseInt(color.substr(4, 2), 16) / 255;
+    
+    // Apply min/max contrast and channel color
+    const min = config.min || 0;
+    const max = config.max || 255;
+    const range = max - min;
+    
+    for (let i = 0; i < sourceData.length; i += 4) {
+      // Get grayscale value (assuming source is grayscale)
+      const gray = sourceData[i]; // Red channel as grayscale
+      
+      // Apply contrast adjustment
+      let adjustedGray = range > 0 ? Math.max(0, Math.min(255, (gray - min) * 255 / range)) : 0;
+      
+      // Apply channel color
+      adjustedData[i] = adjustedGray * r;     // Red
+      adjustedData[i + 1] = adjustedGray * g; // Green
+      adjustedData[i + 2] = adjustedGray * b; // Blue
+      adjustedData[i + 3] = sourceData[i + 3]; // Alpha (preserve)
+    }
+    
+    // Put adjusted data back to canvas
+    adjustedCtx.putImageData(adjustedImageData, 0, 0);
+    
+    return adjustedCanvas;
+  }
+
+  /**
    * Get individual well region data
    * This is the primary method for historical data - handles single well requests
    * @param {string} wellId - Well ID (e.g., 'A2')
@@ -484,12 +663,21 @@ class ArtifactZarrLoader {
    * @param {Array} wellRequests - Array of well request objects
    * @param {Function} onChunkProgress - Callback for chunk loading progress
    * @param {Function} onWellComplete - Callback when a well is fully loaded
+   * @param {boolean} useMultiChannel - Whether to use multi-channel loading
+   * @param {Array} channelConfigs - Array of channel configurations for multi-channel mode
    * @returns {Object} { promise, cancel } - Promise and cancellation function
    */
-  getMultipleWellRegionsRealTimeCancellable(wellRequests, onChunkProgress, onWellComplete) {
+  getMultipleWellRegionsRealTimeCancellable(wellRequests, onChunkProgress, onWellComplete, useMultiChannel = false, channelConfigs = []) {
     const batchId = `cancellable_batch_${Date.now()}_${Math.random()}`;
     
-    const promise = this.getMultipleWellRegionsRealTime(wellRequests, onChunkProgress, onWellComplete, batchId);
+    let promise;
+    if (useMultiChannel && channelConfigs.length > 0) {
+      console.log(`🎨 Using multi-channel real-time loading with ${channelConfigs.length} channels`);
+      promise = this.getMultipleWellRegionsMultiChannelRealTime(wellRequests, channelConfigs, onChunkProgress, onWellComplete, batchId);
+    } else {
+      console.log(`📡 Using single-channel real-time loading`);
+      promise = this.getMultipleWellRegionsRealTime(wellRequests, onChunkProgress, onWellComplete, batchId);
+    }
     
     const cancel = () => {
       console.log(`🚫 Cancelling batch: ${batchId}`);
@@ -497,6 +685,109 @@ class ArtifactZarrLoader {
     };
     
     return { promise, cancel };
+  }
+
+  /**
+   * 🎨 MULTI-CHANNEL REAL-TIME: Load multiple wells with multi-channel support
+   * @param {Array} wellRequests - Array of well request objects
+   * @param {Array} channelConfigs - Array of channel configurations
+   * @param {Function} onChunkProgress - Callback for chunk loading progress
+   * @param {Function} onWellComplete - Callback when a well is fully loaded
+   * @param {string} batchId - Batch ID for cancellation
+   * @returns {Promise<Array>} Array of well region results
+   */
+  async getMultipleWellRegionsMultiChannelRealTime(wellRequests, channelConfigs, onChunkProgress, onWellComplete, batchId = null) {
+    const requestBatchId = batchId || `multi_channel_batch_${Date.now()}_${Math.random()}`;
+    this.activeBatchRequests.add(requestBatchId);
+    
+    this.cleanupMemory();
+    
+    try {
+      console.log(`🎨 MULTI-CHANNEL REAL-TIME: Starting progressive loading for ${wellRequests.length} wells with ${channelConfigs.length} channels`);
+      
+      // Process each well with multi-channel support
+      const wellPromises = wellRequests.map(async (request, index) => {
+        const { wellId, centerX, centerY, width_mm, height_mm, scaleLevel, timepoint, datasetId, outputFormat } = request;
+        const wellRequestId = `${requestBatchId}_well_${index}`;
+        
+        try {
+          const result = await this.getMultiChannelWellRegion(
+            wellId, centerX, centerY, width_mm, height_mm,
+            channelConfigs, scaleLevel, timepoint, datasetId, outputFormat
+          );
+          
+          if (!result || !result.success) {
+            console.warn(`Multi-channel well ${wellId} not available`);
+            return {
+              success: false,
+              wellId,
+              message: `Multi-channel well ${wellId} not available`
+            };
+          }
+          
+          const finalResult = {
+            ...result,
+            wellId,
+            centerX,
+            centerY,
+            width_mm,
+            height_mm
+          };
+          
+          // Call completion callback with progress simulation for multi-channel
+          if (onChunkProgress) {
+            onChunkProgress(wellId, channelConfigs.filter(c => c.enabled).length, channelConfigs.filter(c => c.enabled).length, null);
+          }
+          
+          if (onWellComplete) {
+            onWellComplete(wellId, finalResult);
+          }
+          
+          return finalResult;
+          
+        } catch (error) {
+          if (error.name === 'AbortError') {
+            console.log(`🚫 Multi-channel well ${wellId} loading aborted`);
+            return {
+              success: false,
+              wellId,
+              message: `Multi-channel well ${wellId} loading cancelled`
+            };
+          }
+          console.warn(`Multi-channel well ${wellId} failed: ${error.message}`);
+          return {
+            success: false,
+            wellId,
+            message: `Multi-channel well ${wellId} not available`
+          };
+        }
+      });
+      
+      const results = await Promise.all(wellPromises);
+      
+      const successfulResults = results.filter(r => r.success);
+      console.log(`✅ MULTI-CHANNEL REAL-TIME: Completed loading ${successfulResults.length}/${wellRequests.length} well regions`);
+      
+      return results;
+      
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        console.log(`🚫 Multi-channel batch well loading aborted: ${requestBatchId}`);
+        return wellRequests.map(request => ({
+          success: false,
+          wellId: request.wellId,
+          message: `Multi-channel well ${request.wellId} loading cancelled`
+        }));
+      }
+      console.warn(`Multi-channel real-time loading failed: ${error.message}`);
+      return wellRequests.map(request => ({
+        success: false,
+        wellId: request.wellId,
+        message: `Multi-channel well ${request.wellId} not available`
+      }));
+    } finally {
+      this.activeBatchRequests.delete(requestBatchId);
+    }
   }
 
   /**
@@ -1031,6 +1322,90 @@ class ArtifactZarrLoader {
   }
 
   /**
+   * Get active channels from zattrs metadata
+   * @param {string} baseUrl - Base URL for zarr data
+   * @returns {Promise<Array|null>} Array of active channel objects with metadata
+   */
+  async getActiveChannelsFromZattrs(baseUrl) {
+    try {
+      const zattrsUrl = `${baseUrl}.zattrs`;
+      const zattrsCacheKey = zattrsUrl;
+      
+      let zattrs;
+      if (this.datasetZattrsCache.has(zattrsCacheKey)) {
+        console.log(`📋 Using cached zattrs for active channels: ${zattrsUrl}`);
+        zattrs = this.datasetZattrsCache.get(zattrsCacheKey);
+      } else {
+        console.log(`📥 Fetching zattrs for active channels: ${zattrsUrl}`);
+        
+        // Create a unique cache key for the JSON parsing promise to prevent concurrent parsing
+        const jsonCacheKey = `${zattrsCacheKey}_json_promise`;
+        if (this.requestPromises.has(jsonCacheKey)) {
+          console.log(`⏳ Waiting for concurrent zattrs parsing (active channels): ${zattrsUrl}`);
+          zattrs = await this.requestPromises.get(jsonCacheKey);
+        } else {
+          const jsonPromise = (async () => {
+            const response = await this.managedFetch(zattrsUrl);
+            if (!response.ok) {
+              throw new Error(`Failed to fetch zattrs: ${response.status}`);
+            }
+            const parsedZattrs = await response.json();
+            this.datasetZattrsCache.set(zattrsCacheKey, parsedZattrs);
+            console.log(`✅ Cached zattrs for active channels: ${zattrsUrl}`);
+            return parsedZattrs;
+          })();
+          
+          this.requestPromises.set(jsonCacheKey, jsonPromise);
+          try {
+            zattrs = await jsonPromise;
+          } finally {
+            this.requestPromises.delete(jsonCacheKey);
+          }
+        }
+      }
+      
+      if (!zattrs.omero || !zattrs.omero.channels) {
+        console.warn('No omero channels found in zattrs');
+        return null;
+      }
+      
+      // Extract active channels with all metadata
+      const activeChannels = zattrs.omero.channels
+        .map((channel, index) => ({
+          index,
+          label: channel.label,
+          active: channel.active,
+          color: channel.color,
+          window: channel.window,
+          coefficient: channel.coefficient || 1.0,
+          family: channel.family || 'linear'
+        }))
+        .filter(channel => channel.active === true);
+      
+      console.log(`🎨 Found ${activeChannels.length} active channels:`, activeChannels.map(ch => `${ch.label} (index: ${ch.index}, color: #${ch.color})`));
+      
+      // Also include channel mapping for index lookups
+      const channelMapping = zattrs.squid_canvas?.channel_mapping || {};
+      const zarrIndexMapping = zattrs.squid_canvas?.zarr_index_mapping || {};
+      
+      return {
+        activeChannels,
+        channelMapping,
+        zarrIndexMapping,
+        totalChannels: zattrs.omero.channels.length
+      };
+      
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        console.log(`🚫 Active channels request aborted`);
+        throw error;
+      }
+      console.error('Error getting active channels from zattrs:', error);
+      return null;
+    }
+  }
+
+  /**
    * Get channel index from channel name
    * @param {string} baseUrl - Base URL for zarr data
    * @param {string} channelName - Channel name
@@ -1038,34 +1413,62 @@ class ArtifactZarrLoader {
    */
   async getChannelIndex(baseUrl, channelName) {
     try {
-      // 🚀 SIMPLE CACHE: Check if we already have zattrs for this dataset
+      // 🚀 IMPROVED CACHE: Use the existing getActiveChannelsFromZattrs method to avoid duplicate parsing
+      const channelMetadata = await this.getActiveChannelsFromZattrs(baseUrl);
+      if (!channelMetadata) {
+        return null;
+      }
+      
+      // Check squid_canvas channel mapping first
+      if (channelMetadata.channelMapping && channelMetadata.channelMapping[channelName] !== undefined) {
+        return channelMetadata.channelMapping[channelName];
+      }
+      
+      // Check active channels by label
+      const channel = channelMetadata.activeChannels.find(ch => ch.label === channelName);
+      if (channel) {
+        return channel.index;
+      }
+      
+      // Fallback to check all channels (not just active ones)
       const zattrsUrl = `${baseUrl}.zattrs`;
       const zattrsCacheKey = zattrsUrl;
       
       let zattrs;
       if (this.datasetZattrsCache.has(zattrsCacheKey)) {
-        console.log(`📋 Using cached zattrs for ${zattrsUrl}`);
+        console.log(`📋 Using cached zattrs for channel index lookup: ${zattrsUrl}`);
         zattrs = this.datasetZattrsCache.get(zattrsCacheKey);
       } else {
-        console.log(`📥 Fetching zattrs for ${zattrsUrl}`);
-        const response = await this.managedFetch(zattrsUrl);
-        if (!response.ok) {
-          return null;
+        // This should rarely happen since getActiveChannelsFromZattrs should have cached it
+        console.log(`📥 Fetching zattrs for channel index lookup: ${zattrsUrl}`);
+        
+        // Create a unique cache key for the JSON parsing promise to prevent concurrent parsing
+        const jsonCacheKey = `${zattrsCacheKey}_json_promise`;
+        if (this.requestPromises.has(jsonCacheKey)) {
+          console.log(`⏳ Waiting for concurrent zattrs parsing: ${zattrsUrl}`);
+          zattrs = await this.requestPromises.get(jsonCacheKey);
+        } else {
+          const jsonPromise = (async () => {
+            const response = await this.managedFetch(zattrsUrl);
+            if (!response.ok) {
+              throw new Error(`Failed to fetch zattrs: ${response.status}`);
+            }
+            const parsedZattrs = await response.json();
+            this.datasetZattrsCache.set(zattrsCacheKey, parsedZattrs);
+            console.log(`✅ Cached zattrs from fallback: ${zattrsUrl}`);
+            return parsedZattrs;
+          })();
+          
+          this.requestPromises.set(jsonCacheKey, jsonPromise);
+          try {
+            zattrs = await jsonPromise;
+          } finally {
+            this.requestPromises.delete(jsonCacheKey);
+          }
         }
-        zattrs = await response.json();
-        this.datasetZattrsCache.set(zattrsCacheKey, zattrs);
-        console.log(`✅ Cached zattrs for ${zattrsUrl}`);
       }
       
-      // Check squid_canvas channel mapping first
-      if (zattrs.squid_canvas && zattrs.squid_canvas.channel_mapping) {
-        const channelIndex = zattrs.squid_canvas.channel_mapping[channelName];
-        if (channelIndex !== undefined) {
-          return channelIndex;
-        }
-      }
-      
-      // Fallback to omero channels
+      // Final fallback: check all channels in the cached zattrs
       if (zattrs.omero && zattrs.omero.channels) {
         const channelIndex = zattrs.omero.channels.findIndex(
           ch => ch.label === channelName
@@ -1075,9 +1478,7 @@ class ArtifactZarrLoader {
         }
       }
       
-      // 🚫 IMPROVED: Handle common channel name variations
-      // Map common microscope channel names to standard indices
-      // Based on actual channel mapping from MapDisplay.jsx
+      // 🚫 IMPROVED: Handle common channel name variations as last resort
       const channelNameMap = {
         'BF_LED_matrix_full': 0,
         'Fluorescence_405_nm_Ex': 11,
