@@ -38,15 +38,23 @@ const SampleSelector = ({
   // Notify parent when sample load status changes
   useEffect(() => {
     if (onSampleLoadStatusChange) {
+      // Find the sample name for the loaded sample (only for real microscopes)
+      let loadedSampleName = null;
+      if (loadedSampleOnMicroscope) {
+        const loadedSlot = incubatorSlots.find(slot => slot.id === loadedSampleOnMicroscope);
+        loadedSampleName = loadedSlot?.name || null;
+      }
+      
       onSampleLoadStatusChange({
         isSampleLoaded,
         loadedSampleOnMicroscope,
+        loadedSampleName,
         selectedSampleId,
         isRealMicroscope: isRealMicroscopeSelected,
         isSimulatedMicroscope: isSimulatedMicroscopeSelected
       });
     }
-  }, [isSampleLoaded, loadedSampleOnMicroscope, selectedSampleId, isRealMicroscopeSelected, isSimulatedMicroscopeSelected, onSampleLoadStatusChange]);
+  }, [isSampleLoaded, loadedSampleOnMicroscope, selectedSampleId, isRealMicroscopeSelected, isSimulatedMicroscopeSelected, onSampleLoadStatusChange, incubatorSlots]);
 
   // Helper function to add workflow messages
   const addWorkflowMessage = (message) => {

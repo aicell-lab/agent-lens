@@ -51,6 +51,7 @@ const MicroscopeMapDisplay = ({
   toggleWebRtcStream,
   onFreePanAutoCollapse,
   onFitToViewUncollapse,
+  sampleLoadStatus,
 }) => {
   const mapContainerRef = useRef(null);
   const canvasRef = useRef(null);
@@ -576,6 +577,42 @@ const MicroscopeMapDisplay = ({
       if (appendLog) appendLog(`Error getting experiment info: ${error.message}`);
     }
   }, [microscopeControlService, showNotification, appendLog]);
+
+  // Auto-create experiment when sample is loaded
+  const autoCreateExperiment = useCallback(async (sampleId, sampleName) => {
+    if (!microscopeControlService || !sampleId || isSimulatedMicroscope || !sampleName) return;
+    
+    // Use the actual sample name
+    const experimentName = sampleName;
+    
+    try {
+      // Check if experiment already exists
+      const result = await microscopeControlService.list_experiments();
+      if (result.success !== false) {
+        const existingExperiment = result.experiments?.find(exp => exp.name === experimentName);
+        if (existingExperiment) {
+          // If experiment exists, just activate it
+          await setActiveExperimentHandler(experimentName);
+          if (appendLog) appendLog(`Activated existing experiment: ${experimentName}`);
+          return;
+        }
+      }
+      
+      // Create new experiment with sample ID as name
+      const createResult = await microscopeControlService.create_experiment(experimentName);
+      if (createResult.success !== false) {
+        if (showNotification) showNotification(`Auto-created experiment: ${experimentName}`, 'success');
+        if (appendLog) appendLog(`Auto-created experiment: ${experimentName} for sample: ${sampleId}`);
+        await loadExperiments(); // Refresh the list
+      } else {
+        if (showNotification) showNotification(`Failed to auto-create experiment: ${createResult.message}`, 'error');
+        if (appendLog) appendLog(`Failed to auto-create experiment: ${createResult.message}`);
+      }
+    } catch (error) {
+      if (showNotification) showNotification(`Error auto-creating experiment: ${error.message}`, 'error');
+      if (appendLog) appendLog(`Error auto-creating experiment: ${error.message}`);
+    }
+  }, [microscopeControlService, isSimulatedMicroscope, showNotification, appendLog, setActiveExperimentHandler, loadExperiments]);
 
   // Calculate stage dimensions from configuration (moved early to avoid dependency issues)
   const stageDimensions = useMemo(() => {
@@ -2160,6 +2197,15 @@ const MicroscopeMapDisplay = ({
       }
     }
   }, [isLayerDropdownOpen, isSimulatedMicroscope, loadExperiments, activeExperiment, getExperimentInfo]);
+
+  // Auto-create experiment when sample is loaded
+  useEffect(() => {
+    if (sampleLoadStatus?.isSampleLoaded && sampleLoadStatus?.isRealMicroscope && sampleLoadStatus?.loadedSampleOnMicroscope) {
+      const sampleId = sampleLoadStatus.loadedSampleOnMicroscope;
+      const sampleName = sampleLoadStatus.loadedSampleName;
+      autoCreateExperiment(sampleId, sampleName);
+    }
+  }, [sampleLoadStatus?.isSampleLoaded, sampleLoadStatus?.isRealMicroscope, sampleLoadStatus?.loadedSampleOnMicroscope, sampleLoadStatus?.loadedSampleName, autoCreateExperiment]);
 
   // Cleanup timeouts on unmount
   useEffect(() => {
@@ -5154,6 +5200,7 @@ MicroscopeMapDisplay.propTypes = {
   toggleWebRtcStream: PropTypes.func,
   onFreePanAutoCollapse: PropTypes.func,
   onFitToViewUncollapse: PropTypes.func,
+  sampleLoadStatus: PropTypes.object,
 };
 
 export default MicroscopeMapDisplay; 
