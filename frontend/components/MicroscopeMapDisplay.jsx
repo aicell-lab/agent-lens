@@ -3693,6 +3693,9 @@ const MicroscopeMapDisplay = ({
                       experiments={experiments}
                       setActiveExperimentHandler={setActiveExperimentHandler}
                       setShowCreateExperimentDialog={setShowCreateExperimentDialog}
+                      removeExperiment={removeExperiment}
+                      setExperimentToReset={setExperimentToReset}
+                      setShowClearCanvasConfirmation={setShowClearCanvasConfirmation}
                       
                       // Multi-Channel props
                       shouldUseMultiChannelLoading={shouldUseMultiChannelLoading}

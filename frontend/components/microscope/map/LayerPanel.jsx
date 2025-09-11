@@ -14,6 +14,9 @@ const LayerPanel = ({
   experiments,
   setActiveExperimentHandler,
   setShowCreateExperimentDialog,
+  removeExperiment,
+  setExperimentToReset,
+  setShowClearCanvasConfirmation,
   
   // Multi-Channel props
   shouldUseMultiChannelLoading,
@@ -82,28 +85,50 @@ const LayerPanel = ({
               <div className="loading-text">Loading experiments...</div>
             ) : (
               <>
-                <div className="experiment-info">
-                  <div className="experiment-info__label">Active Experiment:</div>
-                  <div className="experiment-info__value">
-                    {activeExperiment || <span className="no-experiment">None</span>}
-                  </div>
-                </div>
-                
                 {experiments.length > 0 && (
                   <div className="experiment-list">
-                    <div className="experiment-list__label">Available Experiments:</div>
+                    <div className="experiment-list__label">Experiments:</div>
                     <div className="experiment-list__items">
                       {experiments.map((exp) => (
                         <div 
                           key={exp.name} 
                           className={`experiment-item ${exp.name === activeExperiment ? 'experiment-item--active' : ''}`}
-                          onClick={() => setActiveExperimentHandler(exp.name)}
-                          title={`Click to activate experiment: ${exp.name}`}
                         >
-                          <span className={exp.name === activeExperiment ? 'experiment-item__name--active' : 'experiment-item__name'}>
-                            {exp.name}
-                          </span>
-                          {exp.name === activeExperiment && <i className="fas fa-check experiment-item__check"></i>}
+                          <div 
+                            className="experiment-item__content"
+                            onClick={() => setActiveExperimentHandler(exp.name)}
+                            title={`Click to activate experiment: ${exp.name}`}
+                          >
+                            <span className={exp.name === activeExperiment ? 'experiment-item__name--active' : 'experiment-item__name'}>
+                              {exp.name}
+                            </span>
+                            {exp.name === activeExperiment && <i className="fas fa-check experiment-item__check"></i>}
+                          </div>
+                          <div className="experiment-item__actions">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setExperimentToReset(exp.name);
+                                setShowClearCanvasConfirmation(true);
+                              }}
+                              className="experiment-action-btn experiment-action-btn--reset"
+                              title="Reset experiment data"
+                            >
+                              <i className="fas fa-undo"></i>
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (window.confirm(`Are you sure you want to delete experiment "${exp.name}"? This action cannot be undone.`)) {
+                                  removeExperiment(exp.name);
+                                }
+                              }}
+                              className="experiment-action-btn experiment-action-btn--delete"
+                              title="Delete experiment"
+                            >
+                              <i className="fas fa-trash"></i>
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
