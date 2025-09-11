@@ -1,0 +1,392 @@
+/* QuickScanConfig Component Styles */
+.quick-scan-config-panel {
+  position: absolute;
+  top: 3rem;
+  right: 0.5rem;
+  background: #1f2937;
+  border: 1px solid #4b5563;
+  border-radius: 0.5rem;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+  width: 20rem;
+  z-index: 50;
+  color: white;
+  display: flex;
+  flex-direction: column;
+  max-height: 80vh;
+  overflow: hidden;
+}
+
+/* Header */
+.quick-scan-config-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem;
+  border-bottom: 1px solid #4b5563;
+  flex-shrink: 0;
+}
+
+.quick-scan-config-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #e5e7eb;
+  margin: 0;
+  display: flex;
+  align-items: center;
+}
+
+.quick-scan-config-close {
+  color: #9ca3af;
+  background: none;
+  border: none;
+  padding: 0.25rem;
+  cursor: pointer;
+  border-radius: 0.25rem;
+  transition: all 0.2s ease;
+}
+
+.quick-scan-config-close:hover {
+  color: white;
+  background: #374151;
+}
+
+/* Content */
+.quick-scan-config-content {
+  padding: 0.75rem;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.quick-scan-config-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/* Section */
+.quick-scan-config-section {
+  background: #374151;
+  border-radius: 0.375rem;
+  padding: 0.75rem;
+}
+
+.quick-scan-config-section--highlighted {
+  background: #374151;
+  border: 1px solid #4b5563;
+}
+
+.quick-scan-config-section--info {
+  background: #1f2937;
+  border: 1px solid #4b5563;
+}
+
+.quick-scan-config-section-header {
+  font-weight: 500;
+  font-size: 0.75rem;
+  margin-bottom: 0.5rem;
+  display: flex;
+  align-items: center;
+  color: #60a5fa;
+}
+
+.quick-scan-config-section--highlighted .quick-scan-config-section-header {
+  color: #34d399;
+}
+
+.quick-scan-config-section--info .quick-scan-config-section-header {
+  color: #fbbf24;
+}
+
+/* Labels */
+.quick-scan-config-label {
+  display: block;
+  color: #d1d5db;
+  font-weight: 500;
+  font-size: 0.75rem;
+  margin-bottom: 0.25rem;
+}
+
+/* Input Groups */
+.quick-scan-config-input-group {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.quick-scan-config-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.quick-scan-config-row:last-child {
+  margin-bottom: 0;
+}
+
+/* Inputs */
+.quick-scan-config-input {
+  width: 100%;
+  padding: 0.25rem 0.5rem;
+  background: #4b5563;
+  border: 1px solid #6b7280;
+  border-radius: 0.25rem;
+  color: white;
+  font-size: 0.75rem;
+  transition: all 0.2s ease;
+}
+
+.quick-scan-config-input:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.quick-scan-config-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: #374151;
+}
+
+.quick-scan-config-select {
+  width: 100%;
+  padding: 0.25rem 0.5rem;
+  background: #4b5563;
+  border: 1px solid #6b7280;
+  border-radius: 0.25rem;
+  color: white;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.quick-scan-config-select:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.quick-scan-config-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: #374151;
+}
+
+/* Autofocus Section */
+.quick-scan-config-autofocus {
+  margin-top: 0.5rem;
+}
+
+.quick-scan-config-radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.quick-scan-config-radio {
+  display: flex;
+  align-items: center;
+  font-size: 0.75rem;
+  color: #d1d5db;
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.quick-scan-config-radio:hover {
+  color: white;
+}
+
+.quick-scan-config-radio input[type="radio"] {
+  margin-right: 0.5rem;
+  cursor: pointer;
+}
+
+.quick-scan-config-radio:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.quick-scan-config-hint {
+  font-size: 0.625rem;
+  color: #9ca3af;
+  margin-top: 0.25rem;
+  font-style: italic;
+}
+
+/* Checkbox */
+.quick-scan-config-checkbox {
+  display: flex;
+  align-items: center;
+  font-size: 0.75rem;
+  color: #d1d5db;
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.quick-scan-config-checkbox:hover {
+  color: white;
+}
+
+.quick-scan-config-checkbox input[type="checkbox"] {
+  margin-right: 0.5rem;
+  cursor: pointer;
+}
+
+.quick-scan-config-checkbox:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.quick-scan-config-help {
+  margin-left: 0.25rem;
+  color: #9ca3af;
+  cursor: help;
+}
+
+/* Info Section */
+.quick-scan-config-info-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: #d1d5db;
+  line-height: 1.4;
+}
+
+.quick-scan-config-info-list > div {
+  padding: 0.125rem 0;
+}
+
+/* Actions */
+.quick-scan-config-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #4b5563;
+}
+
+.quick-scan-config-button {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border: none;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 8rem;
+}
+
+.quick-scan-config-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.quick-scan-config-button--start {
+  background: #059669;
+  color: white;
+}
+
+.quick-scan-config-button--start:hover:not(:disabled) {
+  background: #047857;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(5, 150, 105, 0.3);
+}
+
+.quick-scan-config-button--stop {
+  background: #dc2626;
+  color: white;
+}
+
+.quick-scan-config-button--stop:hover:not(:disabled) {
+  background: #b91c1c;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(220, 38, 38, 0.3);
+}
+
+/* Scrollbar Styling */
+.quick-scan-config-content::-webkit-scrollbar {
+  width: 4px;
+}
+
+.quick-scan-config-content::-webkit-scrollbar-track {
+  background: #374151;
+  border-radius: 2px;
+}
+
+.quick-scan-config-content::-webkit-scrollbar-thumb {
+  background: #6b7280;
+  border-radius: 2px;
+}
+
+.quick-scan-config-content::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .quick-scan-config-panel {
+    width: 18rem;
+    right: 0.25rem;
+  }
+  
+  .quick-scan-config-row {
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+  
+  .quick-scan-config-button {
+    min-width: 6rem;
+    padding: 0.375rem 0.5rem;
+  }
+}
+
+/* Input Validation States */
+.quick-scan-config-input.border-yellow-400 {
+  background-color: #4b5563 !important;
+  border-color: #fbbf24 !important;
+  color: white !important;
+}
+
+.quick-scan-config-input.border-red-400 {
+  background-color: #4b5563 !important;
+  border-color: #f87171 !important;
+  color: white !important;
+}
+
+.quick-scan-config-input.border-gray-300,
+.quick-scan-config-input.border-gray-600 {
+  background-color: #4b5563 !important;
+  border-color: #6b7280 !important;
+  color: white !important;
+}
+
+.quick-scan-config-input:focus {
+  background-color: #4b5563 !important;
+  color: white !important;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
+}
+
+.quick-scan-config-input::placeholder {
+  color: #9ca3af !important;
+}
+
+/* Animation for panel appearance */
+.quick-scan-config-panel {
+  animation: slideInFromRight 0.3s ease-out;
+}
+
+@keyframes slideInFromRight {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
