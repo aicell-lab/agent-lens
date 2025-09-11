@@ -1,0 +1,316 @@
+import React from 'react';
+import './LayerPanel.css';
+
+const LayerPanel = ({
+  // Map Layers props
+  visibleLayers,
+  setVisibleLayers,
+  
+  // Experiments props
+  isHistoricalDataMode,
+  isSimulatedMicroscope,
+  isLoadingExperiments,
+  activeExperiment,
+  experiments,
+  setActiveExperimentHandler,
+  setShowCreateExperimentDialog,
+  
+  // Multi-Channel props
+  shouldUseMultiChannelLoading,
+  mapViewMode,
+  availableZarrChannels,
+  zarrChannelConfigs,
+  updateZarrChannelConfig,
+  getEnabledZarrChannels,
+  realMicroscopeChannelConfigs,
+  updateRealMicroscopeChannelConfig,
+  
+  // Layout props
+  isFovFittedMode = false
+}) => {
+  // Helper function to check if this is the last selected channel
+  const isLastSelectedChannel = (channelName, isEnabled) => {
+    if (isHistoricalDataMode || mapViewMode === 'FOV_FITTED') {
+      // For zarr channels, check if this is the last enabled channel
+      const enabledChannels = availableZarrChannels.filter(ch => zarrChannelConfigs[ch.label]?.enabled);
+      return enabledChannels.length === 1 && enabledChannels[0].label === channelName && isEnabled;
+    } else {
+      // For real microscope channels, check if this is the last visible channel
+      const visibleChannels = Object.entries(visibleLayers.channels).filter(([_, isVisible]) => isVisible);
+      return visibleChannels.length === 1 && visibleChannels[0][0] === channelName && isEnabled;
+    }
+  };
+  return (
+    <div className={`layer-panel ${isFovFittedMode ? 'layer-panel--compact' : ''}`}>
+      {/* Map Layers Section */}
+      <div className="layer-section">
+        <div className="layer-section__header">
+          <i className="fas fa-layer-group"></i>
+          Map Layers
+        </div>
+        <div className="layer-section__content">
+          <div className="layer-options">
+            <label className="layer-option">
+              <input
+                type="checkbox"
+                checked={visibleLayers.wellPlate}
+                onChange={(e) => setVisibleLayers(prev => ({ ...prev, wellPlate: e.target.checked }))}
+              />
+              <span>96-Well Plate Grid</span>
+            </label>
+            <label className="layer-option">
+              <input
+                type="checkbox"
+                checked={visibleLayers.scanResults}
+                onChange={(e) => setVisibleLayers(prev => ({ ...prev, scanResults: e.target.checked }))}
+              />
+              <span>Scan Results</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      {/* Experiments Management for Real Microscope */}
+      {!isHistoricalDataMode && !isSimulatedMicroscope && (
+        <div className="layer-section layer-section--experiments">
+          <div className="layer-section__header">
+            <i className="fas fa-flask"></i>
+            Experiments
+          </div>
+          <div className="layer-section__content">
+            {isLoadingExperiments ? (
+              <div className="loading-text">Loading experiments...</div>
+            ) : (
+              <>
+                <div className="experiment-info">
+                  <div className="experiment-info__label">Active Experiment:</div>
+                  <div className="experiment-info__value">
+                    {activeExperiment || <span className="no-experiment">None</span>}
+                  </div>
+                </div>
+                
+                {experiments.length > 0 && (
+                  <div className="experiment-list">
+                    <div className="experiment-list__label">Available Experiments:</div>
+                    <div className="experiment-list__items">
+                      {experiments.map((exp) => (
+                        <div 
+                          key={exp.name} 
+                          className={`experiment-item ${exp.name === activeExperiment ? 'experiment-item--active' : ''}`}
+                          onClick={() => setActiveExperimentHandler(exp.name)}
+                          title={`Click to activate experiment: ${exp.name}`}
+                        >
+                          <span className={exp.name === activeExperiment ? 'experiment-item__name--active' : 'experiment-item__name'}>
+                            {exp.name}
+                          </span>
+                          {exp.name === activeExperiment && <i className="fas fa-check experiment-item__check"></i>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
+                <button
+                  onClick={() => setShowCreateExperimentDialog(true)}
+                  className="create-experiment-btn"
+                >
+                  <i className="fas fa-plus"></i>
+                  Create Experiment
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+      
+      {/* Multi-Channel Controls - Works for both Historical and Real Microscope */}
+      {shouldUseMultiChannelLoading() && (
+        <div className="layer-section layer-section--channels">
+          <div className="layer-section__header">
+            <i className="fas fa-palette"></i>
+            Multi-Channel Controls
+            <span className="channel-count">
+              {isHistoricalDataMode || mapViewMode === 'FOV_FITTED' ? 
+                `(${availableZarrChannels.length} channels)` : 
+                `(${Object.values(visibleLayers.channels).filter(v => v).length} selected)`
+              }
+            </span>
+          </div>
+          <div className="layer-section__content">
+            <div className="channel-controls">
+              {/* Historical Mode: Use zarr channels */}
+              {(isHistoricalDataMode || mapViewMode === 'FOV_FITTED') && availableZarrChannels.map((channel) => {
+                const config = zarrChannelConfigs[channel.label] || {};
+                const channelColor = `#${channel.color}`;
+                const isEnabled = config.enabled || false;
+                const isLastChannel = isLastSelectedChannel(channel.label, isEnabled);
+                
+                return (
+                  <div key={channel.label} className="channel-item">
+                    {/* Channel Header */}
+                    <div className="channel-header">
+                      <label className="channel-toggle">
+                        <input
+                          type="checkbox"
+                          checked={isEnabled}
+                          disabled={isLastChannel}
+                          onChange={(e) => updateZarrChannelConfig(channel.label, { enabled: e.target.checked })}
+                          title={isLastChannel ? "Cannot deselect the last remaining channel" : ""}
+                        />
+                        <div 
+                          className="channel-color-indicator"
+                          style={{ backgroundColor: channelColor }}
+                        ></div>
+                        <span className="channel-name">{channel.label}</span>
+                        {isLastChannel && <span className="last-channel-indicator" title="Last selected channel">🔒</span>}
+                      </label>
+                      <span className="channel-index">Ch {channel.index}</span>
+                    </div>
+                    
+                    {/* Contrast Controls */}
+                    {config.enabled && (
+                      <div className="contrast-controls">
+                        <div className="contrast-slider">
+                          <label className="contrast-label">Min:</label>
+                          <input
+                            type="range"
+                            min="0"
+                            max="255"
+                            value={config.min || 0}
+                            onChange={(e) => updateZarrChannelConfig(channel.label, { min: parseInt(e.target.value) })}
+                            className="contrast-range"
+                            style={{
+                              background: `linear-gradient(to right, black 0%, ${channelColor} 100%)`
+                            }}
+                          />
+                          <span className="contrast-value">{config.min || 0}</span>
+                        </div>
+                        
+                        <div className="contrast-slider">
+                          <label className="contrast-label">Max:</label>
+                          <input
+                            type="range"
+                            min="0"
+                            max="255"
+                            value={config.max || 255}
+                            onChange={(e) => updateZarrChannelConfig(channel.label, { max: parseInt(e.target.value) })}
+                            className="contrast-range"
+                            style={{
+                              background: `linear-gradient(to right, black 0%, ${channelColor} 100%)`
+                            }}
+                          />
+                          <span className="contrast-value">{config.max || 255}</span>
+                        </div>
+                        
+                        {/* Quick Reset */}
+                        <div className="contrast-reset">
+                          <button
+                            onClick={() => updateZarrChannelConfig(channel.label, { 
+                              min: channel.window.start, 
+                              max: channel.window.end 
+                            })}
+                            className="reset-btn"
+                          >
+                            Reset to defaults
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              {/* Real Microscope Mode: Use visibleLayers.channels */}
+              {!isHistoricalDataMode && !isSimulatedMicroscope && mapViewMode !== 'FOV_FITTED' && 
+               Object.entries(visibleLayers.channels).map(([channel, isVisible]) => {
+                const config = realMicroscopeChannelConfigs[channel] || {};
+                const isLastChannel = isLastSelectedChannel(channel, isVisible);
+                
+                return (
+                  <div key={channel} className="channel-item">
+                    {/* Channel Header */}
+                    <div className="channel-header">
+                      <label className="channel-toggle">
+                        <input
+                          type="checkbox"
+                          checked={isVisible}
+                          disabled={isLastChannel}
+                          onChange={(e) => setVisibleLayers(prev => ({
+                            ...prev,
+                            channels: {
+                              ...prev.channels,
+                              [channel]: !isVisible
+                            }
+                          }))}
+                          title={isLastChannel ? "Cannot deselect the last remaining channel" : ""}
+                        />
+                        <span className="channel-name">{channel}</span>
+                        {isLastChannel && <span className="last-channel-indicator" title="Last selected channel">🔒</span>}
+                      </label>
+                    </div>
+                    
+                    {/* Contrast Controls */}
+                    {isVisible && (
+                      <div className="contrast-controls">
+                        <div className="contrast-slider">
+                          <label className="contrast-label">Min:</label>
+                          <input
+                            type="range"
+                            min="0"
+                            max="255"
+                            value={config.min || 0}
+                            onChange={(e) => updateRealMicroscopeChannelConfig(channel, { min: parseInt(e.target.value) })}
+                            className="contrast-range"
+                          />
+                          <span className="contrast-value">{config.min || 0}</span>
+                        </div>
+                        
+                        <div className="contrast-slider">
+                          <label className="contrast-label">Max:</label>
+                          <input
+                            type="range"
+                            min="0"
+                            max="255"
+                            value={config.max || 255}
+                            onChange={(e) => updateRealMicroscopeChannelConfig(channel, { max: parseInt(e.target.value) })}
+                            className="contrast-range"
+                          />
+                          <span className="contrast-value">{config.max || 255}</span>
+                        </div>
+                        
+                        {/* Quick Reset */}
+                        <div className="contrast-reset">
+                          <button
+                            onClick={() => updateRealMicroscopeChannelConfig(channel, { min: 0, max: 255 })}
+                            className="reset-btn"
+                          >
+                            Reset to defaults
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            
+            {/* Multi-Channel Info */}
+            <div className="channel-info">
+              <span className="channel-count-info">
+                {(isHistoricalDataMode || mapViewMode === 'FOV_FITTED') ? 
+                  `${getEnabledZarrChannels().length} of ${availableZarrChannels.length} channels enabled` :
+                  `${Object.values(visibleLayers.channels).filter(v => v).length} channels selected`
+                }
+              </span>
+              <span className="blending-mode">
+                🟢 Additive Blending Mode
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default LayerPanel;

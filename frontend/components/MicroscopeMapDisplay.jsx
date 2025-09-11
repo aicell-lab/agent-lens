@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import PropTypes from 'prop-types';
 import { useValidatedNumberInput, getInputValidationClasses } from '../utils'; // Import validation utilities
 import ArtifactZarrLoader from '../services/artifactZarrLoader.js';
+import LayerPanel from './microscope/map/LayerPanel';
 import './MicroscopeMapDisplay.css';
 
 const MicroscopeMapDisplay = ({
@@ -3631,260 +3632,34 @@ const MicroscopeMapDisplay = ({
                 </button>
                 
                 {isLayerDropdownOpen && (
-                  <div className="absolute top-full right-0 mt-1 bg-gray-800 rounded shadow-lg p-4 min-w-[580px] z-20">
-                    {/* Map Layers Section */}
-                    <div className="mb-4">
-                      <div className="text-sm text-gray-300 font-semibold mb-2">Map Layers</div>
-                      <div className="flex flex-wrap gap-2">
-                        <label className="flex items-center text-white text-xs hover:bg-gray-700 p-2 rounded cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={visibleLayers.wellPlate}
-                            onChange={(e) => setVisibleLayers(prev => ({ ...prev, wellPlate: e.target.checked }))}
-                            className="mr-2"
-                          />
-                          96-Well Plate Grid
-                        </label>
-                        <label className="flex items-center text-white text-xs hover:bg-gray-700 p-2 rounded cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={visibleLayers.scanResults}
-                            onChange={(e) => setVisibleLayers(prev => ({ ...prev, scanResults: e.target.checked }))}
-                            className="mr-2"
-                          />
-                          Scan Results
-                        </label>
-                      </div>
-                    </div>
-
-
-                    {/* Experiments Management for Real Microscope */}
-                    {!isHistoricalDataMode && !isSimulatedMicroscope && (
-                      <div className="mb-4 border-t border-gray-600 pt-4">
-                        <div className="text-sm text-gray-300 font-semibold mb-3 flex items-center">
-                          <i className="fas fa-flask mr-2"></i>
-                          Experiments
-                        </div>
-                        
-                        {isLoadingExperiments ? (
-                          <div className="text-xs text-gray-400">Loading experiments...</div>
-                        ) : (
-                          <>
-                            <div className="bg-gray-700 rounded p-2 mb-3">
-                              <div className="text-xs text-gray-300 mb-2">Active Experiment:</div>
-                              <div className="text-sm text-white font-medium">
-                                {activeExperiment || <span className="text-gray-400 italic">None</span>}
-                                      </div>
-                                    </div>
-                            
-                            {experiments.length > 0 && (
-                              <div className="bg-gray-700 rounded p-2 mb-3 max-h-32 overflow-y-auto">
-                                <div className="text-xs text-gray-300 mb-2">Available Experiments:</div>
-                                {experiments.map((exp) => (
-                                  <div 
-                                    key={exp.name} 
-                                    className={`flex items-center justify-between text-xs text-white mb-1 p-1 hover:bg-gray-600 rounded cursor-pointer ${
-                                      exp.name === activeExperiment ? 'bg-gray-600' : ''
-                                    }`}
-                                    onClick={() => setActiveExperimentHandler(exp.name)}
-                                    title={`Click to activate experiment: ${exp.name}`}
-                                  >
-                                    <span className={exp.name === activeExperiment ? 'font-bold text-green-400' : ''}>{exp.name}</span>
-                                    {exp.name === activeExperiment && <i className="fas fa-check text-green-400"></i>}
-                                  </div>
-                                ))}
-                                </div>
-                              )}
-                            
-                                <button
-                                  onClick={() => setShowCreateExperimentDialog(true)}
-                              className="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs py-1 px-2 rounded flex items-center justify-center"
-                                >
-                                  <i className="fas fa-plus mr-1"></i>
-                              Create Experiment
-                                </button>
-                          </>
-                        )}
-                      </div>
-                    )}
-                    
-                    {/* Multi-Channel Controls - Works for both Historical and Real Microscope */}
-                    {shouldUseMultiChannelLoading() && (
-                      <div className="mb-4 border-t border-gray-600 pt-4">
-                        <div className="text-sm text-gray-300 font-semibold mb-3 flex items-center">
-                          <i className="fas fa-palette mr-2"></i>
-                          Multi-Channel Controls
-                          {isHistoricalDataMode || mapViewMode === 'FOV_FITTED' ? 
-                            ` (${availableZarrChannels.length} channels)` : 
-                            ` (${Object.values(visibleLayers.channels).filter(v => v).length} selected)`
-                          }
-                        </div>
-                        
-                        <div className="space-y-3">
-                          {/* Historical Mode: Use zarr channels */}
-                          {(isHistoricalDataMode || mapViewMode === 'FOV_FITTED') && availableZarrChannels.map((channel) => {
-                            const config = zarrChannelConfigs[channel.label] || {};
-                            const channelColor = `#${channel.color}`;
-                            
-                            return (
-                              <div key={channel.label} className="bg-gray-700 rounded p-3">
-                                {/* Channel Header */}
-                                <div className="flex items-center justify-between mb-2">
-                                  <label className="flex items-center text-white text-xs cursor-pointer">
-                                    <input
-                                      type="checkbox"
-                                      checked={config.enabled || false}
-                                      onChange={(e) => updateZarrChannelConfig(channel.label, { enabled: e.target.checked })}
-                                      className="mr-2"
-                                    />
-                                    <div 
-                                      className="w-4 h-4 rounded mr-2 border border-gray-500"
-                                      style={{ backgroundColor: channelColor }}
-                                    ></div>
-                                    <span className="font-medium">{channel.label}</span>
-                                  </label>
-                                  <span className="text-xs text-gray-400">Ch {channel.index}</span>
-                                </div>
-                                
-                                {/* Contrast Controls */}
-                                {config.enabled && (
-                                  <div className="space-y-2">
-                                    <div className="flex items-center space-x-3">
-                                      <label className="text-xs text-gray-300 w-8">Min:</label>
-                                      <input
-                                        type="range"
-                                        min="0"
-                                        max="255"
-                                        value={config.min || 0}
-                                        onChange={(e) => updateZarrChannelConfig(channel.label, { min: parseInt(e.target.value) })}
-                                        className="flex-1 h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer"
-                                        style={{
-                                          background: `linear-gradient(to right, black 0%, ${channelColor} 100%)`
-                                        }}
-                                      />
-                                      <span className="text-xs text-gray-300 w-8">{config.min || 0}</span>
-                                    </div>
-                                    
-                                    <div className="flex items-center space-x-3">
-                                      <label className="text-xs text-gray-300 w-8">Max:</label>
-                                      <input
-                                        type="range"
-                                        min="0"
-                                        max="255"
-                                        value={config.max || 255}
-                                        onChange={(e) => updateZarrChannelConfig(channel.label, { max: parseInt(e.target.value) })}
-                                        className="flex-1 h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer"
-                                        style={{
-                                          background: `linear-gradient(to right, black 0%, ${channelColor} 100%)`
-                                        }}
-                                      />
-                                      <span className="text-xs text-gray-300 w-8">{config.max || 255}</span>
-                                    </div>
-                                    
-                                    {/* Quick Reset */}
-                                    <div className="flex justify-end">
-                                <button
-                                        onClick={() => updateZarrChannelConfig(channel.label, { 
-                                          min: channel.window.start, 
-                                          max: channel.window.end 
-                                        })}
-                                        className="text-xs text-blue-400 hover:text-blue-300 cursor-pointer"
-                                      >
-                                        Reset to defaults
-                                </button>
-                              </div>
-                          </div>
-                        )}
-                      </div>
-                            );
-                          })}
-
-                          {/* Real Microscope Mode: Use visibleLayers.channels */}
-                          {!isHistoricalDataMode && !isSimulatedMicroscope && mapViewMode !== 'FOV_FITTED' && 
-                           Object.entries(visibleLayers.channels).map(([channel, isVisible]) => {
-                            const config = realMicroscopeChannelConfigs[channel] || {};
-                            
-                            return (
-                              <div key={channel} className="bg-gray-700 rounded p-3">
-                                {/* Channel Header */}
-                                <div className="flex items-center justify-between mb-2">
-                                  <label className="flex items-center text-white text-xs cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  checked={isVisible}
-                                      onChange={(e) => setVisibleLayers(prev => ({
-                                    ...prev,
-                                    channels: {
-                                      ...prev.channels,
-                                      [channel]: !isVisible
-                                    }
-                                  }))}
-                                  className="mr-2"
-                                />
-                                    <span className="font-medium">{channel}</span>
-                              </label>
-                          </div>
-                          
-                                {/* Contrast Controls */}
-                                {isVisible && (
-                                  <div className="space-y-2">
-                                    <div className="flex items-center space-x-3">
-                                      <label className="text-xs text-gray-300 w-8">Min:</label>
-                                      <input
-                                        type="range"
-                                        min="0"
-                                        max="255"
-                                        value={config.min || 0}
-                                        onChange={(e) => updateRealMicroscopeChannelConfig(channel, { min: parseInt(e.target.value) })}
-                                        className="flex-1 h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer"
-                                      />
-                                      <span className="text-xs text-gray-300 w-8">{config.min || 0}</span>
-                          </div>
-                          
-                                    <div className="flex items-center space-x-3">
-                                      <label className="text-xs text-gray-300 w-8">Max:</label>
-                                      <input
-                                        type="range"
-                                        min="0"
-                                        max="255"
-                                        value={config.max || 255}
-                                        onChange={(e) => updateRealMicroscopeChannelConfig(channel, { max: parseInt(e.target.value) })}
-                                        className="flex-1 h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer"
-                                      />
-                                      <span className="text-xs text-gray-300 w-8">{config.max || 255}</span>
-                                    </div>
-                                    
-                                    {/* Quick Reset */}
-                                    <div className="flex justify-end">
-                                      <button
-                                        onClick={() => updateRealMicroscopeChannelConfig(channel, { min: 0, max: 255 })}
-                                        className="text-xs text-blue-400 hover:text-blue-300 underline"
-                                      >
-                                        Reset to defaults
-                                      </button>
-                          </div>
-                        </div>
-                      )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                        
-                        {/* Multi-Channel Info */}
-                        <div className="mt-3 text-xs text-gray-400 flex items-center justify-between">
-                          <span>
-                            {(isHistoricalDataMode || mapViewMode === 'FOV_FITTED') ? 
-                              `${getEnabledZarrChannels().length} of ${availableZarrChannels.length} channels enabled` :
-                              `${Object.values(visibleLayers.channels).filter(v => v).length} channels selected`
-                            }
-                          </span>
-                          <span className="text-green-400">
-                            🟢 Additive Blending Mode
-                          </span>
-                    </div>
-                      </div>
-                    )}
-                    
+                  <div className="absolute top-full right-0 mt-1 z-20">
+                    <LayerPanel
+                      // Map Layers props
+                      visibleLayers={visibleLayers}
+                      setVisibleLayers={setVisibleLayers}
+                      
+                      // Experiments props
+                      isHistoricalDataMode={isHistoricalDataMode}
+                      isSimulatedMicroscope={isSimulatedMicroscope}
+                      isLoadingExperiments={isLoadingExperiments}
+                      activeExperiment={activeExperiment}
+                      experiments={experiments}
+                      setActiveExperimentHandler={setActiveExperimentHandler}
+                      setShowCreateExperimentDialog={setShowCreateExperimentDialog}
+                      
+                      // Multi-Channel props
+                      shouldUseMultiChannelLoading={shouldUseMultiChannelLoading}
+                      mapViewMode={mapViewMode}
+                      availableZarrChannels={availableZarrChannels}
+                      zarrChannelConfigs={zarrChannelConfigs}
+                      updateZarrChannelConfig={updateZarrChannelConfig}
+                      getEnabledZarrChannels={getEnabledZarrChannels}
+                      realMicroscopeChannelConfigs={realMicroscopeChannelConfigs}
+                      updateRealMicroscopeChannelConfig={updateRealMicroscopeChannelConfig}
+                      
+                      // Layout props
+                      isFovFittedMode={mapViewMode === 'FOV_FITTED'}
+                    />
                   </div>
                 )}
               </div>
