@@ -3,6 +3,7 @@ import PropTypes from 'prop-types';
 import { useValidatedNumberInput, getInputValidationClasses } from '../utils'; // Import validation utilities
 import ArtifactZarrLoader from '../services/artifactZarrLoader.js';
 import LayerPanel from './microscope/map/LayerPanel';
+import useExperimentZarrManager from './microscope/map/ExperimentZarrManager';
 import QuickScanConfig from './microscope/controls/QuickScanConfig';
 import './MicroscopeMapDisplay.css';
 
@@ -213,17 +214,30 @@ const MicroscopeMapDisplay = ({
     }
   }, [visibleLayers.scanResults, appendLog, isSimulatedMicroscope]);
 
-  // Clear canvas confirmation dialog state
-  const [showClearCanvasConfirmation, setShowClearCanvasConfirmation] = useState(false);
-  const [experimentToReset, setExperimentToReset] = useState(null);
-
-  // Experiment management state (replacing fileset management)
-  const [experiments, setExperiments] = useState([]);
-  const [activeExperiment, setActiveExperiment] = useState(null);
-  const [isLoadingExperiments, setIsLoadingExperiments] = useState(false);
-  const [showCreateExperimentDialog, setShowCreateExperimentDialog] = useState(false);
-  const [newExperimentName, setNewExperimentName] = useState('');
-  const [experimentInfo, setExperimentInfo] = useState(null);
+  // Initialize experiment zarr manager hook
+  const experimentManager = useExperimentZarrManager({
+    microscopeControlService,
+    isSimulatedMicroscope,
+    showNotification,
+    appendLog,
+    onExperimentChange: (data) => {
+      // Handle experiment changes if needed
+      if (data.activeExperiment && visibleLayers.scanResults) {
+        setTimeout(() => {
+          refreshScanResults();
+        }, 100);
+      }
+      // Refresh canvas view to show new experiment data
+      setTimeout(() => {
+        refreshCanvasView();
+      }, 200);
+    },
+    onExperimentReset: (experimentName) => {
+      // Handle experiment reset - clear stitched tiles and active requests
+      setStitchedTiles([]);
+      activeTileRequestsRef.current.clear();
+    }
+  });
 
   // Well selection state for scanning
   const [selectedWells, setSelectedWells] = useState([]); // Start with no wells selected
@@ -468,151 +482,34 @@ const MicroscopeMapDisplay = ({
     };
   }, []);
 
-  // Experiment management functions (replacing fileset functions)
-  const loadExperiments = useCallback(async () => {
-    if (!microscopeControlService || isSimulatedMicroscope) return;
-    
-    setIsLoadingExperiments(true);
-    try {
-      const result = await microscopeControlService.list_experiments();
-      if (result.success !== false) {
-        setExperiments(result.experiments || []);
-        setActiveExperiment(result.active_experiment || null);
-        if (appendLog) {
-          appendLog(`Loaded ${result.total_count} experiments, active: ${result.active_experiment || 'none'}`);
-        }
-      }
-    } catch (error) {
-      console.error('Failed to load experiments:', error);
-      if (appendLog) appendLog(`Failed to load experiments: ${error.message}`);
-    } finally {
-      setIsLoadingExperiments(false);
-    }
-  }, [microscopeControlService, isSimulatedMicroscope, appendLog]);
-
-  const createExperiment = useCallback(async (name) => {
-    if (!microscopeControlService || !name.trim()) return;
-    
-    try {
-      const result = await microscopeControlService.create_experiment(name.trim());
-      if (result.success !== false) {
-        if (showNotification) showNotification(`Created experiment: ${name}`, 'success');
-        if (appendLog) appendLog(`Created experiment: ${name}`);
-        await loadExperiments(); // Refresh the list
-      } else {
-        if (showNotification) showNotification(`Failed to create experiment: ${result.message}`, 'error');
-        if (appendLog) appendLog(`Failed to create experiment: ${result.message}`);
-      }
-    } catch (error) {
-      if (showNotification) showNotification(`Error creating experiment: ${error.message}`, 'error');
-      if (appendLog) appendLog(`Error creating experiment: ${error.message}`);
-    }
-  }, [microscopeControlService, showNotification, appendLog, loadExperiments]);
-
-  const setActiveExperimentHandler = useCallback(async (experimentName) => {
-    if (!microscopeControlService || !experimentName) return;
-    
-    try {
-      const result = await microscopeControlService.set_active_experiment(experimentName);
-      if (result.success !== false) {
-        if (showNotification) showNotification(`Activated experiment: ${experimentName}`, 'success');
-        if (appendLog) appendLog(`Set active experiment: ${experimentName}`);
-        await loadExperiments(); // Refresh the list
-        // Refresh scan results if visible
-        if (visibleLayers.scanResults) {
-          setTimeout(() => {
-            refreshScanResults();
-          }, 100);
-        }
-        
-        // Refresh canvas view to show new experiment data
-        setTimeout(() => {
-          refreshCanvasView();
-        }, 200);
-      } else {
-        if (showNotification) showNotification(`Failed to activate experiment: ${result.message}`, 'error');
-        if (appendLog) appendLog(`Failed to activate experiment: ${result.message}`);
-      }
-    } catch (error) {
-      if (showNotification) showNotification(`Error activating experiment: ${error.message}`, 'error');
-      if (appendLog) appendLog(`Error activating experiment: ${error.message}`);
-    }
-  }, [microscopeControlService, showNotification, appendLog, loadExperiments, visibleLayers.scanResults, refreshScanResults]);
-
-  const removeExperiment = useCallback(async (experimentName) => {
-    if (!microscopeControlService || !experimentName) return;
-    
-    try {
-      const result = await microscopeControlService.remove_experiment(experimentName);
-      if (result.success !== false) {
-        if (showNotification) showNotification(`Removed experiment: ${experimentName}`, 'success');
-        if (appendLog) appendLog(`Removed experiment: ${experimentName}`);
-        await loadExperiments(); // Refresh the list
-      } else {
-        if (showNotification) showNotification(`Failed to remove experiment: ${result.message}`, 'error');
-        if (appendLog) appendLog(`Failed to remove experiment: ${result.message}`);
-      }
-    } catch (error) {
-      if (showNotification) showNotification(`Error removing experiment: ${error.message}`, 'error');
-      if (appendLog) appendLog(`Error removing experiment: ${error.message}`);
-    }
-  }, [microscopeControlService, showNotification, appendLog, loadExperiments]);
-
-
-
-  const getExperimentInfo = useCallback(async (experimentName) => {
-    if (!microscopeControlService || !experimentName) return;
-    
-    try {
-      const result = await microscopeControlService.get_experiment_info(experimentName);
-      if (result.success !== false) {
-        setExperimentInfo(result);
-        if (appendLog) appendLog(`Loaded experiment info for: ${experimentName}`);
-      } else {
-        if (showNotification) showNotification(`Failed to get experiment info: ${result.message}`, 'error');
-        if (appendLog) appendLog(`Failed to get experiment info: ${result.message}`);
-      }
-    } catch (error) {
-      if (showNotification) showNotification(`Error getting experiment info: ${error.message}`, 'error');
-      if (appendLog) appendLog(`Error getting experiment info: ${error.message}`);
-    }
-  }, [microscopeControlService, showNotification, appendLog]);
-
-  // Auto-create experiment when sample is loaded
-  const autoCreateExperiment = useCallback(async (sampleId, sampleName) => {
-    if (!microscopeControlService || !sampleId || isSimulatedMicroscope || !sampleName) return;
-    
-    // Use the actual sample name
-    const experimentName = sampleName;
-    
-    try {
-      // Check if experiment already exists
-      const result = await microscopeControlService.list_experiments();
-      if (result.success !== false) {
-        const existingExperiment = result.experiments?.find(exp => exp.name === experimentName);
-        if (existingExperiment) {
-          // If experiment exists, just activate it
-          await setActiveExperimentHandler(experimentName);
-          if (appendLog) appendLog(`Activated existing experiment: ${experimentName}`);
-          return;
-        }
-      }
-      
-      // Create new experiment with sample ID as name
-      const createResult = await microscopeControlService.create_experiment(experimentName);
-      if (createResult.success !== false) {
-        if (showNotification) showNotification(`Auto-created experiment: ${experimentName}`, 'success');
-        if (appendLog) appendLog(`Auto-created experiment: ${experimentName} for sample: ${sampleId}`);
-        await loadExperiments(); // Refresh the list
-      } else {
-        if (showNotification) showNotification(`Failed to auto-create experiment: ${createResult.message}`, 'error');
-        if (appendLog) appendLog(`Failed to auto-create experiment: ${createResult.message}`);
-      }
-    } catch (error) {
-      if (showNotification) showNotification(`Error auto-creating experiment: ${error.message}`, 'error');
-      if (appendLog) appendLog(`Error auto-creating experiment: ${error.message}`);
-    }
-  }, [microscopeControlService, isSimulatedMicroscope, showNotification, appendLog, setActiveExperimentHandler, loadExperiments]);
+  // Extract functions from experiment manager
+  const {
+    experiments,
+    activeExperiment,
+    isLoadingExperiments,
+    showCreateExperimentDialog,
+    setShowCreateExperimentDialog,
+    newExperimentName,
+    setNewExperimentName,
+    experimentInfo,
+    showClearCanvasConfirmation,
+    setShowClearCanvasConfirmation,
+    experimentToReset,
+    setExperimentToReset,
+    showDeleteConfirmation,
+    setShowDeleteConfirmation,
+    experimentToDelete,
+    setExperimentToDelete,
+    loadExperiments,
+    createExperiment,
+    setActiveExperimentHandler,
+    removeExperiment,
+    getExperimentInfo,
+    autoCreateExperiment,
+    handleResetExperiment,
+    handleDeleteExperiment,
+    renderDialogs,
+  } = experimentManager;
 
   // Calculate stage dimensions from configuration (moved early to avoid dependency issues)
   const stageDimensions = useMemo(() => {
@@ -2047,31 +1944,6 @@ const MicroscopeMapDisplay = ({
   
 
 
-  // Function to reset experiment after confirmation
-  const handleResetExperiment = useCallback(async () => {
-    if (!microscopeControlService || !experimentToReset) return;
-    
-    try {
-      const result = await microscopeControlService.reset_experiment(experimentToReset);
-      if (result.success !== false) {
-        setStitchedTiles([]);
-        activeTileRequestsRef.current.clear();
-        if (showNotification) showNotification(`Experiment '${experimentToReset}' reset successfully`, 'success');
-        if (appendLog) appendLog(`Experiment '${experimentToReset}' reset successfully`);
-        // Refresh experiments list
-        await loadExperiments();
-      } else {
-        if (showNotification) showNotification(`Failed to reset experiment: ${result.message}`, 'error');
-        if (appendLog) appendLog(`Failed to reset experiment: ${result.message}`);
-      }
-    } catch (error) {
-      if (showNotification) showNotification(`Failed to reset experiment: ${error.message}`, 'error');
-      if (appendLog) appendLog(`Failed to reset experiment: ${error.message}`);
-    } finally {
-      setShowClearCanvasConfirmation(false);
-      setExperimentToReset(null);
-    }
-  }, [microscopeControlService, experimentToReset, showNotification, appendLog, loadExperiments]);
   
   // Rectangle selection handlers
   const handleRectangleSelectionStart = useCallback((e) => {
@@ -2196,7 +2068,7 @@ const MicroscopeMapDisplay = ({
         getExperimentInfo(activeExperiment);
       }
     }
-  }, [isLayerDropdownOpen, isSimulatedMicroscope, loadExperiments, activeExperiment, getExperimentInfo]);
+  }, [isLayerDropdownOpen, isSimulatedMicroscope]); // Removed function dependencies to prevent infinite loops
 
   // Auto-create experiment when sample is loaded
   useEffect(() => {
@@ -3696,6 +3568,8 @@ const MicroscopeMapDisplay = ({
                       removeExperiment={removeExperiment}
                       setExperimentToReset={setExperimentToReset}
                       setShowClearCanvasConfirmation={setShowClearCanvasConfirmation}
+                      setExperimentToDelete={setExperimentToDelete}
+                      setShowDeleteConfirmation={setShowDeleteConfirmation}
                       
                       // Multi-Channel props
                       shouldUseMultiChannelLoading={shouldUseMultiChannelLoading}
@@ -4248,153 +4122,8 @@ const MicroscopeMapDisplay = ({
         </div>
       )}
 
-      {/* Reset Experiment Confirmation Dialog */}
-      {showClearCanvasConfirmation && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-gray-800 border border-gray-600 rounded-lg shadow-xl max-w-md w-full text-white">
-            {/* Modal Header */}
-            <div className="flex justify-between items-center p-4 border-b border-gray-600">
-              <h3 className="text-lg font-semibold text-gray-200 flex items-center">
-                <i className="fas fa-exclamation-triangle text-red-400 mr-2"></i>
-                Reset Experiment
-              </h3>
-              <button
-                onClick={() => setShowClearCanvasConfirmation(false)}
-                className="text-gray-400 hover:text-white text-xl font-bold w-6 h-6 flex items-center justify-center"
-                title="Close"
-              >
-                ×
-              </button>
-            </div>
-
-            {/* Modal Body */}
-            <div className="p-4">
-              <p className="text-gray-300 mb-4">
-                Are you sure you want to reset experiment "{experimentToReset}"? This will permanently delete all experiment data and cannot be undone.
-              </p>
-              <div className="bg-yellow-900 bg-opacity-30 border border-yellow-500 rounded-lg p-3 mb-4">
-                <div className="flex items-start">
-                  <i className="fas fa-info-circle text-yellow-400 mr-2 mt-0.5"></i>
-                  <div className="text-sm text-yellow-200">
-                    <p className="font-medium mb-1">This action will:</p>
-                    <ul className="list-disc list-inside space-y-1">
-                      <li>Remove all scan result images from all wells</li>
-                      <li>Clear all experiment data from storage</li>
-                      <li>Reset the experiment to empty state</li>
-                      <li>Keep the experiment structure for future use</li>
-                    </ul>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Modal Footer */}
-            <div className="flex justify-end space-x-3 p-4 border-t border-gray-600">
-              <button
-                onClick={() => {
-                  setShowClearCanvasConfirmation(false);
-                  setExperimentToReset(null);
-                }}
-                className="px-4 py-2 text-sm bg-gray-600 hover:bg-gray-500 text-white rounded focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
-              >
-                <i className="fas fa-times mr-1"></i>
-                Cancel
-              </button>
-              <button
-                onClick={handleResetExperiment}
-                className="px-4 py-2 text-sm bg-red-600 hover:bg-red-500 text-white rounded focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
-              >
-                <i className="fas fa-undo mr-1"></i>
-                Reset Experiment
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Create Experiment Dialog */}
-      {showCreateExperimentDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-gray-800 border border-gray-600 rounded-lg shadow-xl max-w-md w-full text-white">
-            <div className="flex justify-between items-center p-4 border-b border-gray-600">
-              <h3 className="text-lg font-semibold text-gray-200 flex items-center">
-                <i className="fas fa-plus text-green-400 mr-2"></i>
-                Create New Experiment
-              </h3>
-              <button
-                onClick={() => {
-                  setShowCreateExperimentDialog(false);
-                  setNewExperimentName('');
-                }}
-                className="text-gray-400 hover:text-white text-xl font-bold w-6 h-6 flex items-center justify-center"
-                title="Close"
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="p-4">
-              <div className="mb-4">
-                <label className="block text-gray-300 font-medium mb-2">Experiment Name</label>
-                <input
-                  type="text"
-                  value={newExperimentName}
-                  onChange={(e) => setNewExperimentName(e.target.value)}
-                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Enter experiment name"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && newExperimentName.trim()) {
-                      createExperiment(newExperimentName);
-                      setShowCreateExperimentDialog(false);
-                      setNewExperimentName('');
-                    }
-                  }}
-                />
-              </div>
-              <div className="bg-blue-900 bg-opacity-30 border border-blue-500 rounded-lg p-3 mb-4">
-                <div className="flex items-start">
-                  <i className="fas fa-info-circle text-blue-400 mr-2 mt-0.5"></i>
-                  <div className="text-sm text-blue-200">
-                    <p className="font-medium mb-1">About Experiments:</p>
-                    <ul className="list-disc list-inside space-y-1">
-                      <li>Experiments organize well-separated microscopy data</li>
-                      <li>Each well has its own canvas within the experiment</li>
-                      <li>Only one experiment can be active at a time</li>
-                      <li>Better scalability and data organization</li>
-                    </ul>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex justify-end space-x-3 p-4 border-t border-gray-600">
-              <button
-                onClick={() => {
-                  setShowCreateExperimentDialog(false);
-                  setNewExperimentName('');
-                }}
-                className="px-4 py-2 text-sm bg-gray-600 hover:bg-gray-500 text-white rounded focus:outline-none focus:ring-2 focus:ring-gray-500"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  if (newExperimentName.trim()) {
-                    createExperiment(newExperimentName);
-                    setShowCreateExperimentDialog(false);
-                    setNewExperimentName('');
-                  }
-                }}
-                className="px-4 py-2 text-sm bg-green-600 hover:bg-green-500 text-white rounded focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50"
-                disabled={!newExperimentName.trim()}
-              >
-                <i className="fas fa-plus mr-1"></i>
-                Create Experiment
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Experiment Management Dialogs */}
+      {renderDialogs()}
 
       {/* Quick Scan Configuration Side Panel */}
       <QuickScanConfig

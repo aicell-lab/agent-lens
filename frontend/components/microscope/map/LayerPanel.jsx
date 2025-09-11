@@ -17,6 +17,8 @@ const LayerPanel = ({
   removeExperiment,
   setExperimentToReset,
   setShowClearCanvasConfirmation,
+  setExperimentToDelete,
+  setShowDeleteConfirmation,
   
   // Multi-Channel props
   shouldUseMultiChannelLoading,
@@ -119,12 +121,20 @@ const LayerPanel = ({
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                if (window.confirm(`Are you sure you want to delete experiment "${exp.name}"? This action cannot be undone.`)) {
-                                  removeExperiment(exp.name);
+                                // Prevent action if this is the active experiment
+                                if (exp.name === activeExperiment) {
+                                  console.log(`[LayerPanel] Delete button clicked for active experiment: ${exp.name} - action blocked`);
+                                  return;
                                 }
+                                console.log(`[LayerPanel] Delete button clicked for experiment: ${exp.name}`);
+                                console.log(`[LayerPanel] setExperimentToDelete function:`, typeof setExperimentToDelete);
+                                console.log(`[LayerPanel] setShowDeleteConfirmation function:`, typeof setShowDeleteConfirmation);
+                                setExperimentToDelete(exp.name);
+                                setShowDeleteConfirmation(true);
                               }}
-                              className="experiment-action-btn experiment-action-btn--delete"
-                              title="Delete experiment"
+                              className={`experiment-action-btn experiment-action-btn--delete ${exp.name === activeExperiment ? 'experiment-action-btn--disabled' : ''}`}
+                              title={exp.name === activeExperiment ? "Cannot delete active experiment" : "Delete experiment"}
+                              disabled={exp.name === activeExperiment}
                             >
                               <i className="fas fa-trash"></i>
                             </button>

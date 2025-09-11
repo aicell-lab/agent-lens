@@ -227,6 +227,18 @@
   background-color: #dc2626;
 }
 
+.experiment-action-btn--disabled {
+  background-color: #6b7280 !important;
+  color: #9ca3af !important;
+  cursor: not-allowed !important;
+  opacity: 0.5;
+}
+
+.experiment-action-btn--disabled:hover {
+  background-color: #6b7280 !important;
+  color: #9ca3af !important;
+}
+
 .create-experiment-btn {
   width: 100%;
   background: #2563eb;
