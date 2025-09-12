@@ -4,6 +4,7 @@ import { useValidatedNumberInput, getInputValidationClasses } from '../utils'; /
 import ArtifactZarrLoader from '../services/artifactZarrLoader.js';
 import LayerPanel from './microscope/map/LayerPanel';
 import useExperimentZarrManager from './microscope/map/ExperimentZarrManager';
+import TileProcessingManager from './microscope/map/TileProcessingManager';
 import QuickScanConfig from './microscope/controls/QuickScanConfig';
 import NormalScanConfig from './microscope/controls/NormalScanConfig';
 import './MicroscopeMapDisplay.css';
@@ -3067,63 +3068,55 @@ const MicroscopeMapDisplay = ({
       const centerX = clampedTopLeft.x + (width_mm / 2);
       const centerY = clampedTopLeft.y + (height_mm / 2);
       
-      const result = await microscopeControlService.get_stitched_region(
+      // 🎨 SIMPLIFIED TILE PROCESSING: Use TileProcessingManager for FREE_PAN mode
+      console.log(`🎨 FREE_PAN: Using TileProcessingManager for channels: "${getChannelString()}"`);
+      
+      // Get enabled channels for FREE_PAN mode
+      const enabledChannels = getSelectedChannels().map(channelName => ({
+        label: channelName,
+        channelName: channelName
+      }));
+      
+      // Prepare tile request for TileProcessingManager
+      const tileRequest = {
         centerX,
         centerY,
         width_mm,
         height_mm,
-        wellPlateType, // wellplate_type parameter
+        wellPlateType,
         scaleLevel,
-        getChannelString(), // Use comma-separated channel string for merged display
-        0, // timepoint index
-        wellPaddingMm, // well_padding_mm parameter
-        'base64'
+        timepoint: 0,
+        wellPaddingMm,
+        bounds
+      };
+      
+      // Prepare services for TileProcessingManager
+      const services = {
+        microscopeControlService,
+        artifactZarrLoader: null // Not needed for FREE_PAN mode
+      };
+      
+      // Process tiles using TileProcessingManager
+      const processedTile = await TileProcessingManager.processTileChannels(
+        enabledChannels,
+        tileRequest,
+        'FREE_PAN',
+        realMicroscopeChannelConfigs,
+        services
       );
       
-      if (result.success) {
-        // DIAGNOSTIC: Log coordinate transformation for comparison with historical mode
-        console.log(`📍 FREE_PAN: center(${centerX.toFixed(2)}, ${centerY.toFixed(2)}) → bounds(${bounds.topLeft.x.toFixed(1)}, ${bounds.topLeft.y.toFixed(1)}) ${width_mm.toFixed(1)}×${height_mm.toFixed(1)}mm`);
-        console.log(`🎨 FREE_PAN: Successfully loaded data for channels: "${getChannelString()}"`);
-        
-        // DIAGNOSTIC: Check the response data format
-        if (result.channels_used) {
-          console.log(`🔍 FREE_PAN: Backend returned channels_used:`, result.channels_used);
-        }
-        
-        // Apply contrast adjustments if any channels have non-default min/max values
-        const channelsUsed = getSelectedChannels();
-        console.log(`🔍 FREE_PAN: Checking contrast adjustments for channels:`, channelsUsed);
-        console.log(`🔍 FREE_PAN: Current realMicroscopeChannelConfigs:`, realMicroscopeChannelConfigs);
-        
-        const hasContrastAdjustments = channelsUsed.some(channel => {
-          const config = realMicroscopeChannelConfigs[channel];
-          const hasAdjustment = config && (config.min !== 0 || config.max !== 255);
-          console.log(`🔍 FREE_PAN: Channel ${channel} config:`, config, `hasAdjustment: ${hasAdjustment}`);
-          return hasAdjustment;
-        });
-        
-        let processedData = `data:image/png;base64,${result.data}`;
-        
-        if (hasContrastAdjustments && window.realMicroscopeContrastAdjustments) {
-          console.log(`🎨 FREE_PAN: Applying contrast adjustments for channels:`, channelsUsed);
-          try {
-            processedData = await window.realMicroscopeContrastAdjustments(processedData, channelsUsed);
-          } catch (error) {
-            console.warn('Failed to apply contrast adjustments:', error);
-            // Continue with original data if contrast adjustment fails
-          }
-        }
-        
+      if (processedTile && processedTile.data) {
+        console.log(`🎨 FREE_PAN: Successfully processed tile with ${processedTile.channelsUsed?.length || 0} channels`);
         const newTile = {
-          data: processedData,
-          bounds,
-          width_mm,
-          height_mm,
-          scale: scaleLevel,
-          channel: getChannelString(), // Store the channel string used for this tile
+          data: processedTile.data,
+          bounds: processedTile.bounds,
+          width_mm: processedTile.width_mm,
+          height_mm: processedTile.height_mm,
+          scale: processedTile.scale,
+          channel: processedTile.channel,
           timestamp: Date.now(),
-          isMerged: getSelectedChannels().length > 1, // Flag to indicate if this is a merged tile
-          channelsUsed: getSelectedChannels() // Store which channels were used
+          isMerged: processedTile.isMerged,
+          channelsUsed: processedTile.channelsUsed
         };
         
         addOrUpdateTile(newTile);
@@ -3135,10 +3128,9 @@ const MicroscopeMapDisplay = ({
           appendLog(`Loaded tile for scale ${scaleLevel}, region (${clampedTopLeft.x.toFixed(1)}, ${clampedTopLeft.y.toFixed(1)}) to (${clampedBottomRight.x.toFixed(1)}, ${clampedBottomRight.y.toFixed(1)})`);
         }
       } else {
-        // Log API call failure details
-        console.error(`❌ FREE_PAN API Call Failed for channels "${getChannelString()}":`, result);
+        console.warn(`🎨 FREE_PAN: TileProcessingManager returned empty tile for channels: "${getChannelString()}"`);
         if (appendLog) {
-          appendLog(`Failed to load scan tile for channels "${getChannelString()}": ${result.message || 'Unknown error'}`);
+          appendLog(`Failed to process tile: No data returned`);
         }
       }
     } catch (error) {

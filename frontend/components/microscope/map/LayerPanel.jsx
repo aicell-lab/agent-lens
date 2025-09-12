@@ -46,72 +46,10 @@ const LayerPanel = ({
     }
   };
 
-  // Apply contrast adjustments to real microscope image data
-  const applyRealMicroscopeContrastAdjustments = (imageDataUrl, channelsUsed) => {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        canvas.width = img.width;
-        canvas.height = img.height;
-        
-        // Draw the original image
-        ctx.drawImage(img, 0, 0);
-        
-        // Get image data
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const data = imageData.data;
-        
-        // Apply contrast adjustments for each channel
-        for (let i = 0; i < data.length; i += 4) {
-          // For each pixel, check if any of the visible channels need adjustment
-          let hasAdjustment = false;
-          let adjustedR = data[i];
-          let adjustedG = data[i + 1];
-          let adjustedB = data[i + 2];
-          
-          // Apply adjustments for each visible channel
-          for (const channel of channelsUsed) {
-            const config = realMicroscopeChannelConfigs[channel];
-            if (config && (config.min !== 0 || config.max !== 255)) {
-              hasAdjustment = true;
-              
-              // Apply min/max contrast adjustment
-              const min = config.min || 0;
-              const max = config.max || 255;
-              const range = max - min;
-              
-              // Apply to each color channel
-              adjustedR = range > 0 ? Math.max(0, Math.min(255, (adjustedR - min) * 255 / range)) : 0;
-              adjustedG = range > 0 ? Math.max(0, Math.min(255, (adjustedG - min) * 255 / range)) : 0;
-              adjustedB = range > 0 ? Math.max(0, Math.min(255, (adjustedB - min) * 255 / range)) : 0;
-            }
-          }
-          
-          if (hasAdjustment) {
-            data[i] = adjustedR;
-            data[i + 1] = adjustedG;
-            data[i + 2] = adjustedB;
-          }
-        }
-        
-        // Put the adjusted image data back
-        ctx.putImageData(imageData, 0, 0);
-        
-        // Convert back to data URL
-        const adjustedDataUrl = canvas.toDataURL('image/png');
-        resolve(adjustedDataUrl);
-      };
-      img.onerror = () => {
-        // If image loading fails, return original data URL
-        resolve(imageDataUrl);
-      };
-      img.src = imageDataUrl;
-    });
-  };
+  // Note: Contrast adjustments are now handled by TileProcessingManager
+  // This function is kept for backward compatibility but is no longer used
 
-  // Enhanced update function that triggers canvas refresh for FREE_PAN mode
+  // Simplified update function - TileProcessingManager handles contrast adjustments automatically
   const updateRealMicroscopeChannelConfigWithRefresh = (channelName, updates) => {
     console.log(`🎨 LayerPanel: Updating contrast settings for ${channelName}:`, updates);
     
@@ -121,10 +59,6 @@ const LayerPanel = ({
     // For FREE_PAN mode, trigger a canvas refresh to apply the new contrast settings
     if (!isHistoricalDataMode && !isSimulatedMicroscope && mapViewMode === 'FREE_PAN') {
       console.log(`🎨 LayerPanel: Contrast settings changed for ${channelName}, triggering canvas refresh`);
-      console.log(`🎨 LayerPanel: Current conditions - isHistoricalDataMode: ${isHistoricalDataMode}, isSimulatedMicroscope: ${isSimulatedMicroscope}, mapViewMode: ${mapViewMode}`);
-      
-      // Store the contrast adjustment function globally for use in tile loading
-      window.realMicroscopeContrastAdjustments = applyRealMicroscopeContrastAdjustments;
       
       // Trigger a canvas refresh by dispatching a custom event
       const event = new CustomEvent('contrastSettingsChanged', {
