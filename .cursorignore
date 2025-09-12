@@ -11,3 +11,4 @@
 /frontend/venv/
 /frontend/env/
 /frontend/logs/
+scripts/node_modules/
