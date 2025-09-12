@@ -304,13 +304,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Acknowledgments
 
-- **Hypha Team**: For the RPC framework and platform
-- **Zarrita Team**: For the efficient data storage and access library
-- **SAM Team**: For the Segment Anything model
-- **Research Community**: For feedback and use cases
-
----
-
-<p align="center">
-  <strong>Built with ❤️ for the microscopy research community</strong>
-</p>
+TBD

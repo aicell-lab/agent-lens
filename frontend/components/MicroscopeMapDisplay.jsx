@@ -1395,8 +1395,8 @@ const MicroscopeMapDisplay = ({
           mapVideoRef.current.srcObject = null;
         }
       } else {
-        // In FREE_PAN mode, use map video ref for scales 0-1
-        if (scaleLevel <= 1) {
+        // In FREE_PAN mode, use map video ref for scales 0-3
+        if (scaleLevel <= 3) {
           if (mapVideoRef.current && mapVideoRef.current.srcObject !== remoteStream) {
             console.log('Setting video source for map video element (FREE_PAN mode)');
             mapVideoRef.current.srcObject = remoteStream;
@@ -3917,7 +3917,7 @@ const MicroscopeMapDisplay = ({
               </div>
             ) : (
               // FREE_PAN mode: Show video in map frame when at high zoom, or snapped image
-              scaleLevel <= 1 && (
+              scaleLevel <= 3 && (
                 isWebRtcActive && remoteStream ? (
                   <video
                     ref={mapVideoRef}
