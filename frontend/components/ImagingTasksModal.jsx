@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import ReactDOM from 'react-dom'; // Import ReactDOM for createPortal
 import PropTypes from 'prop-types';
-import { useValidatedNumberInput, getInputValidationClasses } from '../utils'; // Import validation utilities
+import { useValidatedNumberInput, useValidatedStringInput, getInputValidationClasses, validateStringInput } from '../utils'; // Import validation utilities
 import './ImagingTasksModal.css'; // We will create this CSS file
 
 const ROW_LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
@@ -156,6 +156,20 @@ const ImagingTasksModal = ({
       max: 1440, // Max 24 hours in minutes
       allowFloat: false,
       defaultValue: 30
+    },
+    showNotification
+  );
+
+  // Validated string input for task name to prevent filesystem issues
+  const taskNameInput = useValidatedStringInput(
+    taskName,
+    (value) => setTaskName(value),
+    {
+      minLength: 1,
+      maxLength: 50,
+      allowEmpty: false,
+      forbiddenChars: ['/', '\\', ':', '*', '?', '"', '<', '>', '|'],
+      trim: true
     },
     showNotification
   );
@@ -456,6 +470,13 @@ const ImagingTasksModal = ({
 
   const handleCreateTask = async () => {
     console.log('[ImagingTasksModal] handleCreateTask started.'); // DIAGNOSTIC LOG
+    
+    // Validate task name using the validated input
+    if (!taskNameInput.validateAndUpdate()) {
+      showNotification('Please fix the task name validation errors before creating the task.', 'warning');
+      return;
+    }
+    
     if (!taskName.trim()) {
       showNotification('Task Name is required.', 'warning');
       return;
@@ -665,15 +686,38 @@ const ImagingTasksModal = ({
                     Task Name
                     <TutorialTooltip text="Enter a descriptive name for your imaging task. This will help you identify it later." />
                   </label>
-                  <input
-                    id="taskName"
-                    type="text"
-                    className="modal-input"
-                    value={taskName}
-                    onChange={(e) => setTaskName(e.target.value)}
-                    required
-                    disabled={slotsLoading || illuminationLoading}
-                  />
+                  <div className="input-container">
+                    <input
+                      id="taskName"
+                      type="text"
+                      className={`modal-input ${getInputValidationClasses(
+                        taskNameInput.isValid,
+                        taskNameInput.hasUnsavedChanges,
+                        ''
+                      )}`}
+                      value={taskNameInput.inputValue}
+                      onChange={taskNameInput.handleInputChange}
+                      onKeyDown={taskNameInput.handleKeyDown}
+                      onBlur={taskNameInput.handleBlur}
+                      required
+                      disabled={slotsLoading || illuminationLoading}
+                      placeholder="Enter task name (no special characters)"
+                    />
+                  </div>
+                  {!taskNameInput.isValid && taskNameInput.hasUnsavedChanges && (
+                    <p className="text-xs text-red-500 mt-1">
+                      {(() => {
+                        const validation = validateStringInput(taskNameInput.inputValue, {
+                          minLength: 1,
+                          maxLength: 50,
+                          allowEmpty: false,
+                          forbiddenChars: ['/', '\\', ':', '*', '?', '"', '<', '>', '|'],
+                          trim: true
+                        });
+                        return validation.error || 'Invalid task name';
+                      })()}
+                    </p>
+                  )}
                 </div>
 
                 <div className="form-group">

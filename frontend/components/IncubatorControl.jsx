@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
-import { tryGetService } from '../utils';
+import { tryGetService, useValidatedStringInput, getInputValidationClasses, validateStringInput } from '../utils';
 
 const IncubatorControl = ({ 
   incubatorControlService, 
@@ -37,6 +37,25 @@ const IncubatorControl = ({
   
   // State for workflow messages (currentOperation is now a prop)
   const [workflowMessages, setWorkflowMessages] = useState([]);
+  
+  // Notification function for validation errors
+  const showValidationError = (message) => {
+    setWarningMessage(message);
+  };
+
+  // Validated string input for sample name to prevent filesystem issues
+  const sampleNameInput = useValidatedStringInput(
+    sampleForm.name,
+    (value) => handleFormChange('name', value),
+    {
+      minLength: 1,
+      maxLength: 50,
+      allowEmpty: false,
+      forbiddenChars: ['/', '\\', ':', '*', '?', '"', '<', '>', '|'],
+      trim: true
+    },
+    showValidationError
+  );
   
   // Helper functions for workflow messages
   const addWorkflowMessage = (message) => {
@@ -155,8 +174,10 @@ const IncubatorControl = ({
       ...prev,
       [field]: value
     }));
-    // Clear warning when user starts typing
-    if (warningMessage) {
+    // Clear warning when user starts typing (but not for validation errors)
+    if (warningMessage && !warningMessage.includes('Cannot contain these characters') && 
+        !warningMessage.includes('Sample name is required') && 
+        !warningMessage.includes('Sample name must be')) {
       setWarningMessage('');
     }
   };
@@ -349,6 +370,12 @@ const IncubatorControl = ({
   };
 
   const handleAddSample = async () => {
+    // Validate sample name using the validated input
+    if (!sampleNameInput.validateAndUpdate()) {
+      setWarningMessage('Please fix the sample name validation errors before adding the sample.');
+      return;
+    }
+    
     // Validate required fields
     const missingFields = [];
     if (!sampleForm.name.trim()) missingFields.push('Sample Name');
@@ -466,6 +493,12 @@ const IncubatorControl = ({
   };
 
   const handleEditSample = async () => {
+    // Validate sample name using the validated input
+    if (!sampleNameInput.validateAndUpdate()) {
+      setWarningMessage('Please fix the sample name validation errors before saving changes.');
+      return;
+    }
+    
     // Validate required fields first
     const missingFields = [];
     if (!sampleForm.name.trim()) missingFields.push('Sample Name');
@@ -669,13 +702,35 @@ const IncubatorControl = ({
               <div className="space-y-3">
                 <div>
                   <label className="block text-sm font-medium mb-1">Sample Name: <span className="text-red-500">*</span></label>
-                  <input
-                    type="text"
-                    className="w-full border border-gray-300 rounded p-2"
-                    value={sampleForm.name}
-                    onChange={(e) => handleFormChange('name', e.target.value)}
-                    placeholder="Enter sample name"
-                  />
+                  <div className="input-container">
+                    <input
+                      type="text"
+                      className={`w-full border rounded p-2 ${getInputValidationClasses(
+                        sampleNameInput.isValid,
+                        sampleNameInput.hasUnsavedChanges,
+                        'border-gray-300'
+                      )}`}
+                      value={sampleNameInput.inputValue}
+                      onChange={sampleNameInput.handleInputChange}
+                      onKeyDown={sampleNameInput.handleKeyDown}
+                      onBlur={sampleNameInput.handleBlur}
+                      placeholder="Enter sample name (no special characters)"
+                    />
+                  </div>
+                  {!sampleNameInput.isValid && sampleNameInput.hasUnsavedChanges && (
+                    <p className="text-xs text-red-500 mt-1">
+                      {(() => {
+                        const validation = validateStringInput(sampleNameInput.inputValue, {
+                          minLength: 1,
+                          maxLength: 50,
+                          allowEmpty: false,
+                          forbiddenChars: ['/', '\\', ':', '*', '?', '"', '<', '>', '|'],
+                          trim: true
+                        });
+                        return validation.error || 'Invalid sample name';
+                      })()}
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1">Status/Position: <span className="text-red-500">*</span></label>
@@ -716,10 +771,10 @@ const IncubatorControl = ({
                 </div>
                 <button
                   onClick={handleAddSample}
-                  className={`w-full p-2 rounded text-white ${
+                  className={`save-changes-button ${
                     currentOperation 
-                      ? 'bg-gray-400 cursor-not-allowed' 
-                      : 'bg-green-500 hover:bg-green-600'
+                      ? 'cursor-not-allowed' 
+                      : ''
                   }`}
                   disabled={currentOperation !== null}
                 >
@@ -788,12 +843,35 @@ const IncubatorControl = ({
                   <div className="space-y-3">
                     <div>
                       <label className="block text-sm font-medium mb-1">Sample Name:</label>
-                      <input
-                        type="text"
-                        className="w-full border border-gray-300 rounded p-2"
-                        value={sampleForm.name}
-                        onChange={(e) => handleFormChange('name', e.target.value)}
-                      />
+                      <div className="input-container">
+                        <input
+                          type="text"
+                          className={`w-full border rounded p-2 ${getInputValidationClasses(
+                            sampleNameInput.isValid,
+                            sampleNameInput.hasUnsavedChanges,
+                            'border-gray-300'
+                          )}`}
+                          value={sampleNameInput.inputValue}
+                          onChange={sampleNameInput.handleInputChange}
+                          onKeyDown={sampleNameInput.handleKeyDown}
+                          onBlur={sampleNameInput.handleBlur}
+                          placeholder="Enter sample name (no special characters)"
+                        />
+                      </div>
+                      {!sampleNameInput.isValid && sampleNameInput.hasUnsavedChanges && (
+                        <p className="text-xs text-red-500 mt-1">
+                          {(() => {
+                            const validation = validateStringInput(sampleNameInput.inputValue, {
+                              minLength: 1,
+                              maxLength: 50,
+                              allowEmpty: false,
+                              forbiddenChars: ['/', '\\', ':', '*', '?', '"', '<', '>', '|'],
+                              trim: true
+                            });
+                            return validation.error || 'Invalid sample name';
+                          })()}
+                        </p>
+                      )}
                     </div>
                     <div>
                       <label className="block text-sm font-medium mb-1">Status/Position:</label>
@@ -836,12 +914,12 @@ const IncubatorControl = ({
                     <div className="space-y-2">
                       <button
                         onClick={handleEditSample}
-                        className={`w-full p-2 rounded text-white ${
+                        className={`save-changes-button ${
                           currentOperation 
-                            ? 'bg-gray-400 cursor-not-allowed' 
+                            ? 'cursor-not-allowed' 
                             : (!sampleForm.name.trim() || !sampleForm.status.trim() || !sampleForm.well_plate_type.trim())
-                              ? 'bg-gray-400 cursor-not-allowed opacity-70'
-                              : 'bg-orange-500 hover:bg-orange-600'
+                              ? 'cursor-not-allowed'
+                              : ''
                         }`}
                         disabled={currentOperation !== null || !sampleForm.name.trim() || !sampleForm.status.trim() || !sampleForm.well_plate_type.trim()}
                       >
