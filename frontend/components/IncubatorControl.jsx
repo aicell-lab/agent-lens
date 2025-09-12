@@ -544,22 +544,6 @@ const IncubatorControl = ({
 
   return (
     <div className="control-view flex relative">
-      <style jsx>{`
-        .save-changes-button {
-          min-height: 40px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          transition: all 0.2s ease;
-        }
-        .save-changes-button:disabled {
-          opacity: 0.6;
-        }
-        .save-changes-button:not(:disabled):hover {
-          transform: translateY(-1px);
-          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        }
-      `}</style>
       {/* Loading overlay to prevent interactions during operations */}
       {currentOperation && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" style={{ cursor: 'not-allowed' }}>
@@ -787,10 +771,10 @@ const IncubatorControl = ({
                 </div>
                 <button
                   onClick={handleAddSample}
-                  className={`save-changes-button w-full p-2 rounded text-white font-medium ${
+                  className={`save-changes-button ${
                     currentOperation 
-                      ? 'bg-gray-400 cursor-not-allowed' 
-                      : 'bg-green-500 hover:bg-green-600'
+                      ? 'cursor-not-allowed' 
+                      : ''
                   }`}
                   disabled={currentOperation !== null}
                 >
@@ -930,12 +914,12 @@ const IncubatorControl = ({
                     <div className="space-y-2">
                       <button
                         onClick={handleEditSample}
-                        className={`save-changes-button w-full p-2 rounded text-white font-medium ${
+                        className={`save-changes-button ${
                           currentOperation 
-                            ? 'bg-gray-400 cursor-not-allowed' 
+                            ? 'cursor-not-allowed' 
                             : (!sampleForm.name.trim() || !sampleForm.status.trim() || !sampleForm.well_plate_type.trim())
-                              ? 'bg-gray-500 cursor-not-allowed'
-                              : 'bg-orange-500 hover:bg-orange-600'
+                              ? 'cursor-not-allowed'
+                              : ''
                         }`}
                         disabled={currentOperation !== null || !sampleForm.name.trim() || !sampleForm.status.trim() || !sampleForm.well_plate_type.trim()}
                       >
