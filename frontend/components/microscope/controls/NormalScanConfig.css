@@ -1,0 +1,565 @@
+/* NormalScanConfig Component Styles */
+.normal-scan-config-panel {
+  position: absolute;
+  top: 3rem;
+  right: 0.5rem;
+  background: #1f2937;
+  border: 1px solid #4b5563;
+  border-radius: 0.5rem;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+  width: 20rem;
+  z-index: 50;
+  color: white;
+  display: flex;
+  flex-direction: column;
+  max-height: 80vh;
+  overflow: hidden;
+}
+
+/* Header */
+.normal-scan-config-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem;
+  border-bottom: 1px solid #4b5563;
+  flex-shrink: 0;
+}
+
+.normal-scan-config-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #e5e7eb;
+  margin: 0;
+  display: flex;
+  align-items: center;
+}
+
+.normal-scan-config-close {
+  color: #9ca3af;
+  background: none;
+  border: none;
+  padding: 0.25rem;
+  cursor: pointer;
+  border-radius: 0.25rem;
+  transition: all 0.2s ease;
+}
+
+.normal-scan-config-close:hover {
+  color: white;
+  background: #374151;
+}
+
+/* Content */
+.normal-scan-config-content {
+  padding: 0.75rem;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.normal-scan-config-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/* Section */
+.normal-scan-config-section {
+  background: #374151;
+  border-radius: 0.375rem;
+  padding: 0.75rem;
+}
+
+.normal-scan-config-section--highlighted {
+  background: #374151;
+  border: 1px solid #4b5563;
+}
+
+.normal-scan-config-section--info {
+  background: #1f2937;
+  border: 1px solid #4b5563;
+}
+
+.normal-scan-config-section-header {
+  font-weight: 500;
+  font-size: 0.75rem;
+  margin-bottom: 0.5rem;
+  display: flex;
+  align-items: center;
+  color: #60a5fa;
+}
+
+.normal-scan-config-section--highlighted .normal-scan-config-section-header {
+  color: #34d399;
+}
+
+.normal-scan-config-section--info .normal-scan-config-section-header {
+  color: #fbbf24;
+}
+
+/* Labels */
+.normal-scan-config-label {
+  display: block;
+  color: #d1d5db;
+  font-weight: 500;
+  font-size: 0.75rem;
+  margin-bottom: 0.25rem;
+}
+
+/* Input Groups */
+.normal-scan-config-input-group {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.normal-scan-config-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.normal-scan-config-row:last-child {
+  margin-bottom: 0;
+}
+
+/* Inputs */
+.normal-scan-config-input {
+  width: 100%;
+  padding: 0.25rem 0.5rem;
+  background: #4b5563;
+  border: 1px solid #6b7280;
+  border-radius: 0.25rem;
+  color: white;
+  font-size: 0.75rem;
+  transition: all 0.2s ease;
+}
+
+.normal-scan-config-input:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.normal-scan-config-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: #374151;
+}
+
+.normal-scan-config-select {
+  width: 100%;
+  padding: 0.25rem 0.5rem;
+  background: #4b5563;
+  border: 1px solid #6b7280;
+  border-radius: 0.25rem;
+  color: white;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.normal-scan-config-select:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.normal-scan-config-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: #374151;
+}
+
+.normal-scan-config-select--warning {
+  border-color: #fbbf24;
+}
+
+/* Channel Controls */
+.normal-scan-config-channels-controls {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.normal-scan-config-channels-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 12rem;
+  overflow-y: auto;
+}
+
+.normal-scan-config-channel-item {
+  background: #4b5563;
+  border-radius: 0.375rem;
+  padding: 0.5rem;
+  border: 1px solid #6b7280;
+}
+
+.normal-scan-config-channel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.normal-scan-config-channel-label {
+  font-size: 0.75rem;
+  color: #d1d5db;
+  font-weight: 500;
+}
+
+.normal-scan-config-channel-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.normal-scan-config-channel-select-container {
+  position: relative;
+}
+
+.normal-scan-config-warning-icon {
+  position: absolute;
+  top: -0.25rem;
+  right: -0.25rem;
+  color: #fbbf24;
+  font-size: 0.75rem;
+}
+
+/* Checkbox Group */
+.normal-scan-config-checkbox-group {
+  display: flex;
+  gap: 1rem;
+}
+
+.normal-scan-config-checkbox {
+  display: flex;
+  align-items: center;
+  font-size: 0.75rem;
+  color: #d1d5db;
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.normal-scan-config-checkbox:hover {
+  color: white;
+}
+
+.normal-scan-config-checkbox input[type="checkbox"] {
+  margin-right: 0.5rem;
+  cursor: pointer;
+}
+
+.normal-scan-config-checkbox:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.normal-scan-config-help {
+  margin-left: 0.25rem;
+  color: #9ca3af;
+  cursor: help;
+}
+
+/* Info Box */
+.normal-scan-config-info-box {
+  background: #1e40af;
+  background-opacity: 0.3;
+  border: 1px solid #3b82f6;
+  border-radius: 0.375rem;
+  padding: 0.5rem;
+  font-size: 0.75rem;
+  color: #dbeafe;
+  margin-top: 0.5rem;
+}
+
+.normal-scan-config-info-box--highlight {
+  background: #1e40af;
+  background-opacity: 0.3;
+  border: 1px solid #3b82f6;
+}
+
+.normal-scan-config-info-header {
+  font-weight: 500;
+  margin-bottom: 0.25rem;
+  display: flex;
+  align-items: center;
+  color: #60a5fa;
+}
+
+.normal-scan-config-info-content {
+  color: #dbeafe;
+  margin-bottom: 0.25rem;
+}
+
+.normal-scan-config-warning {
+  color: #fbbf24;
+  display: flex;
+  align-items: center;
+  font-size: 0.7rem;
+}
+
+/* Info List */
+.normal-scan-config-info-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: #d1d5db;
+  line-height: 1.4;
+}
+
+.normal-scan-config-info-list > div {
+  padding: 0.125rem 0;
+}
+
+/* Actions */
+.normal-scan-config-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #4b5563;
+}
+
+.normal-scan-config-button {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border: none;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 6rem;
+}
+
+.normal-scan-config-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.normal-scan-config-button--start {
+  background: #059669;
+  color: white;
+}
+
+.normal-scan-config-button--start:hover:not(:disabled) {
+  background: #047857;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(5, 150, 105, 0.3);
+}
+
+.normal-scan-config-button--stop {
+  background: #dc2626;
+  color: white;
+}
+
+.normal-scan-config-button--stop:hover:not(:disabled) {
+  background: #b91c1c;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(220, 38, 38, 0.3);
+}
+
+.normal-scan-config-button--secondary {
+  background: #4b5563;
+  color: white;
+}
+
+.normal-scan-config-button--secondary:hover:not(:disabled) {
+  background: #6b7280;
+  transform: translateY(-1px);
+}
+
+.normal-scan-config-button--active {
+  background: #3b82f6;
+  color: white;
+}
+
+.normal-scan-config-button--active:hover:not(:disabled) {
+  background: #2563eb;
+  transform: translateY(-1px);
+}
+
+.normal-scan-config-button--danger {
+  background: #dc2626;
+  color: white;
+  padding: 0.25rem 0.5rem;
+  min-width: auto;
+}
+
+.normal-scan-config-button--danger:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+/* Scrollbar Styling */
+.normal-scan-config-content::-webkit-scrollbar {
+  width: 4px;
+}
+
+.normal-scan-config-content::-webkit-scrollbar-track {
+  background: #374151;
+  border-radius: 2px;
+}
+
+.normal-scan-config-content::-webkit-scrollbar-thumb {
+  background: #6b7280;
+  border-radius: 2px;
+}
+
+.normal-scan-config-content::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .normal-scan-config-panel {
+    width: 18rem;
+    right: 0.25rem;
+  }
+  
+  .normal-scan-config-row {
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+  
+  .normal-scan-config-button {
+    min-width: 5rem;
+    padding: 0.375rem 0.5rem;
+  }
+  
+  .normal-scan-config-checkbox-group {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+}
+
+/* Input Validation States */
+.normal-scan-config-input.border-yellow-400 {
+  background-color: #4b5563 !important;
+  border-color: #fbbf24 !important;
+  color: white !important;
+}
+
+.normal-scan-config-input.border-red-400 {
+  background-color: #4b5563 !important;
+  border-color: #f87171 !important;
+  color: white !important;
+}
+
+.normal-scan-config-input.border-gray-300,
+.normal-scan-config-input.border-gray-600 {
+  background-color: #4b5563 !important;
+  border-color: #6b7280 !important;
+  color: white !important;
+}
+
+.normal-scan-config-input:focus {
+  background-color: #4b5563 !important;
+  color: white !important;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
+}
+
+.normal-scan-config-input::placeholder {
+  color: #9ca3af !important;
+}
+
+/* Animation for panel appearance */
+.normal-scan-config-panel {
+  animation: slideInFromRight 0.3s ease-out;
+}
+
+@keyframes slideInFromRight {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Well plate grid styles (inherited from MicroscopeMapDisplay.css) */
+.scan-well-plate-grid-container {
+  margin-top: 0.125rem;
+  margin-bottom: 0.375rem;
+  user-select: none;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.scan-well-plate-grid {
+  display: grid;
+  grid-template-columns: auto repeat(12, 1fr);
+  gap: 0.25px;
+  border: 1px solid #374151;
+  padding: 0.5px;
+  background-color: #23272f;
+  width: 100%;
+  max-width: 240px;
+  border-radius: 0.375rem;
+}
+
+.scan-grid-row {
+  display: contents;
+}
+
+.scan-grid-col-labels {
+  display: contents;
+}
+
+.scan-grid-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5px;
+  font-size: 0.55rem;
+  font-weight: bold;
+  background-color: #374151;
+  color: #cbd5e1;
+  min-width: 10px;
+  text-align: center;
+  border-radius: 0.125rem;
+}
+
+.scan-grid-cell {
+  width: 10px;
+  height: 10px;
+  background-color: #4b5563;
+  border: 0.5px solid #6b7280;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border-radius: 0.125rem;
+}
+
+.scan-grid-cell:hover {
+  background-color: #6b7280;
+  border-color: #9ca3af;
+}
+
+.scan-grid-cell.selected {
+  background-color: #3b82f6;
+  border-color: #60a5fa;
+  box-shadow: 0 0 3px rgba(59, 130, 246, 0.5);
+}
+
+.scan-grid-cell:disabled {
+  background-color: #374151;
+  border-color: #4b5563;
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Ensure the first cell (row label) is properly aligned */
+.scan-well-plate-grid > .scan-grid-col-labels > div:first-child {
+  width: 10px;
+  height: 10px;
+}
