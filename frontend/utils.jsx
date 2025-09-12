@@ -477,3 +477,152 @@ export const getInputValidationClasses = (isValid, hasUnsavedChanges, baseClasse
   
   return classes;
 };
+
+// String validation utilities for names and IDs
+export const validateStringInput = (value, options = {}) => {
+  const {
+    minLength = 1,
+    maxLength = 100,
+    allowEmpty = false,
+    forbiddenChars = ['/', '\\', ':', '*', '?', '"', '<', '>', '|'],
+    trim = true
+  } = options;
+
+  let processedValue = value;
+  if (trim) {
+    processedValue = value?.toString().trim() || '';
+  }
+
+  if (!processedValue) {
+    if (allowEmpty) {
+      return { isValid: true, value: processedValue, error: null };
+    } else {
+      return { isValid: false, value: processedValue, error: 'This field is required' };
+    }
+  }
+
+  if (processedValue.length < minLength) {
+    return { isValid: false, value: processedValue, error: `Must be at least ${minLength} characters long` };
+  }
+
+  if (processedValue.length > maxLength) {
+    return { isValid: false, value: processedValue, error: `Must be no more than ${maxLength} characters long` };
+  }
+
+  // Check for forbidden characters
+  const foundForbiddenChars = forbiddenChars.filter(char => processedValue.includes(char));
+  if (foundForbiddenChars.length > 0) {
+    return { 
+      isValid: false, 
+      value: processedValue, 
+      error: `Cannot contain these characters: ${foundForbiddenChars.join(', ')}` 
+    };
+  }
+
+  return { isValid: true, value: processedValue, error: null };
+};
+
+// Sanitize string by removing/replacing forbidden characters
+export const sanitizeString = (value, options = {}) => {
+  const {
+    replacement = '_',
+    forbiddenChars = ['/', '\\', ':', '*', '?', '"', '<', '>', '|'],
+    trim = true
+  } = options;
+
+  let sanitized = value?.toString() || '';
+  if (trim) {
+    sanitized = sanitized.trim();
+  }
+
+  // Replace forbidden characters with replacement
+  forbiddenChars.forEach(char => {
+    sanitized = sanitized.replace(new RegExp(`\\${char}`, 'g'), replacement);
+  });
+
+  // Remove multiple consecutive replacements
+  sanitized = sanitized.replace(new RegExp(`\\${replacement}+`, 'g'), replacement);
+
+  // Remove leading/trailing replacements
+  sanitized = sanitized.replace(new RegExp(`^\\${replacement}+|\\${replacement}+$`, 'g'), '');
+
+  return sanitized;
+};
+
+// Hook for managing validated string inputs with "Enter to confirm" behavior
+export const useValidatedStringInput = (
+  initialValue,
+  onValidatedChange,
+  validationOptions = {},
+  showNotification = null
+) => {
+  const [inputValue, setInputValue] = useState(initialValue?.toString() || '');
+  const [isValid, setIsValid] = useState(true);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+
+  // Update input value when initialValue changes externally
+  useEffect(() => {
+    if (initialValue !== undefined && initialValue !== null) {
+      const newInputValue = initialValue.toString();
+      if (inputValue !== newInputValue && !hasUnsavedChanges) {
+        setInputValue(newInputValue);
+      }
+    }
+  }, [initialValue, inputValue, hasUnsavedChanges]);
+
+  const validateAndUpdate = useCallback((value) => {
+    const validation = validateStringInput(value, validationOptions);
+    setIsValid(validation.isValid);
+
+    if (validation.isValid) {
+      if (onValidatedChange) {
+        onValidatedChange(validation.value);
+      }
+      setHasUnsavedChanges(false);
+      return true;
+    } else {
+      if (showNotification && validation.error) {
+        showNotification(validation.error, 'warning');
+      }
+      return false;
+    }
+  }, [onValidatedChange, validationOptions, showNotification]);
+
+  const handleInputChange = useCallback((e) => {
+    const newValue = e.target.value;
+    setInputValue(newValue);
+    
+    // Show validation status visually but don't update the actual value yet
+    const validation = validateStringInput(newValue, validationOptions);
+    setIsValid(validation.isValid);
+    setHasUnsavedChanges(true);
+  }, [validationOptions]);
+
+  const handleKeyDown = useCallback((e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      validateAndUpdate(inputValue);
+    } else if (e.key === 'Escape') {
+      // Reset to original value
+      setInputValue(initialValue?.toString() || '');
+      setIsValid(true);
+      setHasUnsavedChanges(false);
+    }
+  }, [inputValue, validateAndUpdate, initialValue]);
+
+  const handleBlur = useCallback(() => {
+    if (hasUnsavedChanges) {
+      validateAndUpdate(inputValue);
+    }
+  }, [hasUnsavedChanges, inputValue, validateAndUpdate]);
+
+  return {
+    inputValue,
+    isValid,
+    hasUnsavedChanges,
+    handleInputChange,
+    handleKeyDown,
+    handleBlur,
+    validateAndUpdate: () => validateAndUpdate(inputValue)
+  };
+};
