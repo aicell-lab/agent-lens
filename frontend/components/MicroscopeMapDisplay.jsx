@@ -309,15 +309,21 @@ const MicroscopeMapDisplay = ({
   }, []);
 
   const updateRealMicroscopeChannelConfig = useCallback((channelName, updates) => {
-    setRealMicroscopeChannelConfigs(prev => ({
-      ...prev,
-      [channelName]: {
-        min: 0,
-        max: 255,
-        ...prev[channelName],
-        ...updates
-      }
-    }));
+    console.log(`🎨 MicroscopeMapDisplay: updateRealMicroscopeChannelConfig called for ${channelName} with updates:`, updates);
+    setRealMicroscopeChannelConfigs(prev => {
+      const newConfig = {
+        ...prev,
+        [channelName]: {
+          min: 0,
+          max: 255,
+          ...prev[channelName],
+          ...updates
+        }
+      };
+      console.log(`🎨 MicroscopeMapDisplay: Updated config for ${channelName}:`, newConfig[channelName]);
+      console.log(`🎨 MicroscopeMapDisplay: Full new config:`, newConfig);
+      return newConfig;
+    });
   }, []);
 
   const initializeZarrChannelsFromMetadata = useCallback((channelMetadata) => {
@@ -1913,6 +1919,74 @@ const MicroscopeMapDisplay = ({
     }
   }, [visibleLayers.channels, mapViewMode, visibleLayers.scanResults, isSimulatedMicroscope, appendLog]);
 
+  // Effect to listen for contrast settings changes and refresh tiles
+  useEffect(() => {
+    const handleContrastSettingsChanged = (event) => {
+      console.log(`🎨 MicroscopeMapDisplay: Received contrast settings change event:`, event.detail);
+      console.log(`🎨 MicroscopeMapDisplay: Current conditions - mapViewMode: ${mapViewMode}, scanResults: ${visibleLayers.scanResults}, isSimulated: ${isSimulatedMicroscope}`);
+      
+      if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && !isSimulatedMicroscope) {
+        console.log(`🎨 MicroscopeMapDisplay: Processing contrast settings change event`);
+        
+        // Clear existing tiles to force reload with new contrast settings
+        setStitchedTiles([]);
+        activeTileRequestsRef.current.clear();
+        
+        // Schedule tile loading after a longer delay to ensure state is updated
+        const refreshTimer = setTimeout(() => {
+          console.log(`🎨 MicroscopeMapDisplay: Refreshing tiles after contrast change, current configs:`, realMicroscopeChannelConfigs);
+          if (appendLog) {
+            appendLog(`Contrast settings changed for ${event.detail.channelName} - refreshing tiles`);
+          }
+          setNeedsTileReload(true);
+        }, 500); // Increased delay to ensure state update
+        
+        return () => clearTimeout(refreshTimer);
+      } else {
+        console.log(`🎨 MicroscopeMapDisplay: Ignoring contrast settings change event - conditions not met`);
+      }
+    };
+
+    // Add event listener
+    window.addEventListener('contrastSettingsChanged', handleContrastSettingsChanged);
+    
+    // Cleanup
+    return () => {
+      window.removeEventListener('contrastSettingsChanged', handleContrastSettingsChanged);
+    };
+  }, [mapViewMode, visibleLayers.scanResults, isSimulatedMicroscope, appendLog]);
+
+  // Initialize real microscope channel configs for visible channels
+  useEffect(() => {
+    if (!isHistoricalDataMode && !isSimulatedMicroscope && mapViewMode === 'FREE_PAN') {
+      const visibleChannels = Object.entries(visibleLayers.channels)
+        .filter(([_, isVisible]) => isVisible)
+        .map(([channelName]) => channelName);
+      
+      // Initialize configs for visible channels that don't have configs yet
+      const newConfigs = {};
+      let hasNewConfigs = false;
+      
+      visibleChannels.forEach(channelName => {
+        if (!realMicroscopeChannelConfigs[channelName]) {
+          newConfigs[channelName] = {
+            min: 0,
+            max: 255
+          };
+          hasNewConfigs = true;
+        }
+      });
+      
+      if (hasNewConfigs) {
+        console.log(`🎨 Initializing channel configs for visible channels:`, Object.keys(newConfigs));
+        setRealMicroscopeChannelConfigs(prev => ({
+          ...prev,
+          ...newConfigs
+        }));
+      }
+    }
+  }, [visibleLayers.channels, isHistoricalDataMode, isSimulatedMicroscope, mapViewMode, realMicroscopeChannelConfigs]);
+
   // Helper function to check if a region is covered by existing tiles
   const isRegionCovered = useCallback((bounds, scale, channel, existingTiles) => {
     const tilesForScaleAndChannel = existingTiles.filter(tile => 
@@ -3016,8 +3090,32 @@ const MicroscopeMapDisplay = ({
           console.log(`🔍 FREE_PAN: Backend returned channels_used:`, result.channels_used);
         }
         
+        // Apply contrast adjustments if any channels have non-default min/max values
+        const channelsUsed = getSelectedChannels();
+        console.log(`🔍 FREE_PAN: Checking contrast adjustments for channels:`, channelsUsed);
+        console.log(`🔍 FREE_PAN: Current realMicroscopeChannelConfigs:`, realMicroscopeChannelConfigs);
+        
+        const hasContrastAdjustments = channelsUsed.some(channel => {
+          const config = realMicroscopeChannelConfigs[channel];
+          const hasAdjustment = config && (config.min !== 0 || config.max !== 255);
+          console.log(`🔍 FREE_PAN: Channel ${channel} config:`, config, `hasAdjustment: ${hasAdjustment}`);
+          return hasAdjustment;
+        });
+        
+        let processedData = `data:image/png;base64,${result.data}`;
+        
+        if (hasContrastAdjustments && window.realMicroscopeContrastAdjustments) {
+          console.log(`🎨 FREE_PAN: Applying contrast adjustments for channels:`, channelsUsed);
+          try {
+            processedData = await window.realMicroscopeContrastAdjustments(processedData, channelsUsed);
+          } catch (error) {
+            console.warn('Failed to apply contrast adjustments:', error);
+            // Continue with original data if contrast adjustment fails
+          }
+        }
+        
         const newTile = {
-          data: `data:image/png;base64,${result.data}`,
+          data: processedData,
           bounds,
           width_mm,
           height_mm,
@@ -3055,7 +3153,7 @@ const MicroscopeMapDisplay = ({
         setIsLoadingCanvas(false);
       }
     }
-  }, [isHistoricalDataMode, microscopeControlService, visibleLayers.scanResults, visibleLayers.channels, mapViewMode, scaleLevel, displayToStageCoords, stageDimensions, pixelsPerMm, isRegionCovered, getTileKey, addOrUpdateTile, appendLog, isSimulatedMicroscope, selectedHistoricalDataset, selectedGallery, getIntersectingWells, calculateWellRegion, wellPlateType]);
+  }, [isHistoricalDataMode, microscopeControlService, visibleLayers.scanResults, visibleLayers.channels, mapViewMode, scaleLevel, displayToStageCoords, stageDimensions, pixelsPerMm, isRegionCovered, getTileKey, addOrUpdateTile, appendLog, isSimulatedMicroscope, selectedHistoricalDataset, selectedGallery, getIntersectingWells, calculateWellRegion, wellPlateType, realMicroscopeChannelConfigs]);
 
   // Debounce tile loading - only load after user stops interacting for 1 second
   const scheduleTileUpdate = useCallback(() => {
