@@ -309,6 +309,21 @@ const MicroscopeMapDisplay = ({
     }));
   }, []);
 
+  // Effect to refresh tiles when zarr channel contrast settings change in HISTORICAL mode
+  useEffect(() => {
+    if (isHistoricalDataMode && mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
+      console.log('🎨 HISTORICAL: Zarr channel configs changed, triggering tile refresh');
+      // Clear existing tiles to force reload with new contrast settings
+      setStitchedTiles([]);
+      activeTileRequestsRef.current.clear();
+      
+      // Schedule tile loading after a short delay
+      setTimeout(() => {
+        loadStitchedTiles();
+      }, 100);
+    }
+  }, [zarrChannelConfigs, isHistoricalDataMode, mapViewMode, visibleLayers.scanResults]);
+
   const updateRealMicroscopeChannelConfig = useCallback((channelName, updates) => {
     console.log(`🎨 MicroscopeMapDisplay: updateRealMicroscopeChannelConfig called for ${channelName} with updates:`, updates);
     setRealMicroscopeChannelConfigs(prev => {
@@ -3145,7 +3160,7 @@ const MicroscopeMapDisplay = ({
         setIsLoadingCanvas(false);
       }
     }
-  }, [isHistoricalDataMode, microscopeControlService, visibleLayers.scanResults, visibleLayers.channels, mapViewMode, scaleLevel, displayToStageCoords, stageDimensions, pixelsPerMm, isRegionCovered, getTileKey, addOrUpdateTile, appendLog, isSimulatedMicroscope, selectedHistoricalDataset, selectedGallery, getIntersectingWells, calculateWellRegion, wellPlateType, realMicroscopeChannelConfigs]);
+  }, [isHistoricalDataMode, microscopeControlService, visibleLayers.scanResults, visibleLayers.channels, mapViewMode, scaleLevel, displayToStageCoords, stageDimensions, pixelsPerMm, isRegionCovered, getTileKey, addOrUpdateTile, appendLog, isSimulatedMicroscope, selectedHistoricalDataset, selectedGallery, getIntersectingWells, calculateWellRegion, wellPlateType, realMicroscopeChannelConfigs, zarrChannelConfigs, getEnabledZarrChannels, shouldUseMultiChannelLoading]);
 
   // Debounce tile loading - only load after user stops interacting for 1 second
   const scheduleTileUpdate = useCallback(() => {
