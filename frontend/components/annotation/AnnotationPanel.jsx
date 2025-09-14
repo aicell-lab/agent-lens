@@ -15,6 +15,8 @@ const AnnotationPanel = ({
   setStrokeWidth,
   fillColor,
   setFillColor,
+  description,
+  setDescription,
   annotations,
   onAnnotationDelete,
   onClearAllAnnotations,
@@ -236,6 +238,22 @@ const AnnotationPanel = ({
               </div>
             </div>
 
+            {/* Description */}
+            <div className="style-control">
+              <label>Description:</label>
+              <textarea
+                value={description || ''}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Enter annotation description..."
+                className="description-input"
+                rows="2"
+                maxLength="200"
+              />
+              <div className="description-counter">
+                {(description || '').length}/200 characters
+              </div>
+            </div>
+
             {/* Color Picker */}
             {showColorPicker && (
               <div className="color-picker-overlay">
@@ -407,6 +425,8 @@ AnnotationPanel.propTypes = {
   setStrokeWidth: PropTypes.func.isRequired,
   fillColor: PropTypes.string.isRequired,
   setFillColor: PropTypes.func.isRequired,
+  description: PropTypes.string,
+  setDescription: PropTypes.func.isRequired,
   annotations: PropTypes.array.isRequired,
   onAnnotationDelete: PropTypes.func.isRequired,
   onClearAllAnnotations: PropTypes.func.isRequired,

@@ -8,6 +8,7 @@ const AnnotationCanvas = ({
   strokeColor,
   strokeWidth,
   fillColor,
+  description,
   mapScale,
   mapPan,
   annotations,
@@ -223,6 +224,7 @@ const AnnotationCanvas = ({
         strokeColor,
         strokeWidth,
         fillColor,
+        description,
         timestamp: Date.now()
       };
       
@@ -269,6 +271,7 @@ const AnnotationCanvas = ({
           strokeColor,
           strokeWidth,
           fillColor,
+          description: description || '',
           timestamp: Date.now()
         };
         break;
@@ -281,6 +284,7 @@ const AnnotationCanvas = ({
             strokeColor,
             strokeWidth,
             fillColor,
+            description: description || '',
             timestamp: Date.now()
           };
         }
@@ -604,6 +608,7 @@ AnnotationCanvas.propTypes = {
   strokeColor: PropTypes.string.isRequired,
   strokeWidth: PropTypes.number.isRequired,
   fillColor: PropTypes.string,
+  description: PropTypes.string,
   mapScale: PropTypes.number.isRequired,
   mapPan: PropTypes.object.isRequired,
   annotations: PropTypes.array.isRequired,

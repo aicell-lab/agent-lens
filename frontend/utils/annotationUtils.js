@@ -111,6 +111,7 @@ export function generateAnnotationData(annotation, wellInfo) {
     obj_id: generateObjectId(),
     well: wellInfo.id,
     type: annotation.type,
+    description: annotation.description || '',
     timestamp: annotation.timestamp || Date.now(),
     created_at: new Date().toISOString()
   };
@@ -167,6 +168,7 @@ export function formatAnnotationForDisplay(annotationData) {
     id: annotationData.obj_id,
     well: annotationData.well,
     type: annotationData.type,
+    description: annotationData.description,
     created: new Date(annotationData.created_at).toLocaleString(),
     strokeColor: annotationData.strokeColor,
     fillColor: annotationData.fillColor,

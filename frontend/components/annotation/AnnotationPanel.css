@@ -225,6 +225,40 @@
   gap: 6px;
 }
 
+/* Description Input Styles */
+.description-input {
+  width: 100%;
+  background-color: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  color: white;
+  padding: 8px;
+  font-size: 12px;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 40px;
+  max-height: 80px;
+  transition: all 0.2s ease;
+}
+
+.description-input:focus {
+  outline: none;
+  border-color: #007bff;
+  background-color: rgba(255, 255, 255, 0.15);
+  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+}
+
+.description-input::placeholder {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.description-counter {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.6);
+  text-align: right;
+  margin-top: 2px;
+}
+
 .color-swatch {
   width: 24px;
   height: 24px;

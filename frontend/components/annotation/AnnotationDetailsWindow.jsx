@@ -125,6 +125,28 @@ const AnnotationDetailsWindow = ({
               <strong>Created:</strong>
               <div style={{ marginTop: '2px' }}>{displayData.created}</div>
             </div>
+            {displayData.description && (
+              <div style={{ gridColumn: '1 / -1' }}>
+                <strong>Description:</strong>
+                <div 
+                  style={{ 
+                    fontFamily: 'monospace', 
+                    backgroundColor: '#374151', 
+                    color: '#f3f4f6',
+                    padding: '8px', 
+                    borderRadius: '4px',
+                    marginTop: '4px',
+                    cursor: 'pointer',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word'
+                  }}
+                  onClick={() => handleCopyToClipboard(displayData.description)}
+                  title="Click to copy"
+                >
+                  {displayData.description}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -195,6 +217,7 @@ const AnnotationDetailsWindow = ({
                 obj_id: annotation.obj_id,
                 well: annotation.well,
                 type: annotation.type,
+                description: annotation.description,
                 timestamp: annotation.timestamp,
                 created_at: annotation.created_at,
                 bbox: annotation.bbox,
@@ -228,6 +251,7 @@ Object ID: ${displayData.id}
 Well: ${displayData.well}
 Type: ${displayData.type}
 Created: ${displayData.created}
+${displayData.description ? `Description: ${displayData.description}` : ''}
 ${displayData.boundingBox ? `Bounding Box: ${JSON.stringify(displayData.boundingBox)}` : ''}
 ${displayData.polygonWkt ? `WKT Polygon: ${displayData.polygonWkt}` : ''}`;
               handleCopyToClipboard(textData);
