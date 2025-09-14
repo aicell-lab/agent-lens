@@ -169,6 +169,13 @@ class ArtifactZarrLoader {
   ) {
     try {
       console.log(`🎨 Multi-channel well region request: well=${wellId}, channels=${channelConfigs.length}`);
+      console.log(`🎨 Channel configs:`, channelConfigs.map(c => ({ 
+        name: c.channelName, 
+        enabled: c.enabled, 
+        min: c.min, 
+        max: c.max, 
+        color: c.color 
+      })));
       
       // Filter to only enabled channels
       const enabledChannels = channelConfigs.filter(config => config.enabled);
@@ -176,6 +183,13 @@ class ArtifactZarrLoader {
         console.warn('No enabled channels for multi-channel request');
         return { success: false, message: 'No enabled channels' };
       }
+      
+      console.log(`🎨 Enabled channels:`, enabledChannels.map(c => ({ 
+        name: c.channelName, 
+        min: c.min, 
+        max: c.max, 
+        color: c.color 
+      })));
       
       // Load each channel separately in parallel
       const channelPromises = enabledChannels.map(async (config) => {
@@ -210,12 +224,30 @@ class ArtifactZarrLoader {
         }
       });
       
-      const channelResults = await Promise.all(channelPromises);
-      const validResults = channelResults.filter(result => result !== null);
+      // Use Promise.allSettled to handle partial channel failures gracefully
+      const channelResults = await Promise.allSettled(channelPromises);
+      const validResults = [];
+      const failedChannels = [];
+      
+      channelResults.forEach((result, index) => {
+        if (result.status === 'fulfilled' && result.value !== null) {
+          validResults.push(result.value);
+        } else {
+          const channelName = enabledChannels[index].channelName;
+          failedChannels.push(channelName);
+          console.warn(`Channel ${channelName} failed to load for well ${wellId}:`, 
+                      result.status === 'rejected' ? result.reason : 'No data available');
+        }
+      });
       
       if (validResults.length === 0) {
-        console.warn(`No valid channels loaded for well ${wellId}`);
+        console.warn(`No valid channels loaded for well ${wellId} (${failedChannels.length} failed)`);
         return { success: false, message: `No valid channels for well ${wellId}` };
+      }
+      
+      console.log(`✅ Multi-channel well ${wellId}: ${validResults.length}/${enabledChannels.length} channels loaded successfully`);
+      if (failedChannels.length > 0) {
+        console.log(`⚠️ Failed channels: ${failedChannels.join(', ')}`);
       }
       
       // Use the first valid result as the reference for dimensions

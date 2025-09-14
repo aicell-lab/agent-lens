@@ -313,16 +313,26 @@ const MicroscopeMapDisplay = ({
   useEffect(() => {
     if (isHistoricalDataMode && mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
       console.log('🎨 HISTORICAL: Zarr channel configs changed, triggering tile refresh');
-      // Clear existing tiles to force reload with new contrast settings
-      setStitchedTiles([]);
-      activeTileRequestsRef.current.clear();
       
-      // Schedule tile loading after a short delay
-      setTimeout(() => {
-        loadStitchedTiles();
-      }, 100);
+      // Don't clear tiles if real-time loading is in progress
+      const hasActiveRequests = activeTileRequestsRef.current.size > 0;
+      if (currentOperation === null && !hasActiveRequests) {
+        // Clear existing tiles to force reload with new contrast settings
+        setStitchedTiles([]);
+        activeTileRequestsRef.current.clear();
+        
+        // Schedule tile loading after a longer delay to ensure state is fully updated
+        setTimeout(() => {
+          console.log('🎨 HISTORICAL: Refreshing tiles with updated contrast settings');
+          console.log('🎨 HISTORICAL: Current zarrChannelConfigs:', zarrChannelConfigs);
+          console.log('🎨 HISTORICAL: Enabled channels:', getEnabledZarrChannels());
+          loadStitchedTiles();
+        }, 200); // Increased delay to ensure state update is complete
+      } else {
+        console.log('🎨 HISTORICAL: Skipping tile refresh - real-time loading in progress or operation active');
+      }
     }
-  }, [zarrChannelConfigs, isHistoricalDataMode, mapViewMode, visibleLayers.scanResults]);
+  }, [zarrChannelConfigs, isHistoricalDataMode, mapViewMode, visibleLayers.scanResults, currentOperation]);
 
   const updateRealMicroscopeChannelConfig = useCallback((channelName, updates) => {
     console.log(`🎨 MicroscopeMapDisplay: updateRealMicroscopeChannelConfig called for ${channelName} with updates:`, updates);
@@ -1300,12 +1310,12 @@ const MicroscopeMapDisplay = ({
       }))
     });
     
+    
     // Get tiles for current scale and channel selection
     const currentScaleTiles = stitchedTiles.filter(tile => {
-      // For historical mode multi-channel tiles
+      // For historical mode multi-channel tiles - show all tiles (no filtering needed)
       if (useMultiChannel && isHistoricalDataMode && tile.metadata?.isMultiChannel) {
-        return tile.scale === scaleLevel && 
-               JSON.stringify(tile.metadata.channelsUsed?.sort()) === JSON.stringify(getEnabledZarrChannels().map(ch => ch.channelName).sort());
+        return tile.scale === scaleLevel;
       }
       // For real microscope tiles (single or multi-channel), use channel string matching
       return tile.scale === scaleLevel && tile.channel === channelString;
@@ -2907,7 +2917,7 @@ const MicroscopeMapDisplay = ({
             height_mm: finalResult.metadata.height_mm,
             scale: scaleLevel,
             channel: useMultiChannel ? 
-              enabledChannels.map(ch => ch.channelName).sort().join(',') : 
+              finalResult.metadata.channelsUsed?.sort().join(',') || enabledChannels.map(ch => ch.channelName).sort().join(',') : 
               activeChannel,
             timestamp: Date.now(),
             isHistorical: true,
@@ -2917,7 +2927,7 @@ const MicroscopeMapDisplay = ({
             metadata: {
               ...finalResult.metadata,
               isMultiChannel: useMultiChannel,
-              channelsUsed: useMultiChannel ? enabledChannels.map(ch => ch.channelName) : [activeChannel]
+              channelsUsed: finalResult.metadata.channelsUsed || (useMultiChannel ? enabledChannels.map(ch => ch.channelName) : [activeChannel])
             }
           };
           
@@ -2959,8 +2969,9 @@ const MicroscopeMapDisplay = ({
           console.log(`✅ REAL-TIME: Completed loading ${successfulResults.length}/${wellRequests.length} well regions`);
           
           // Clean up old tiles for this scale/channel combination to prevent memory bloat
+          // For multi-channel, use the actual channels that were loaded (not all enabled channels)
           const channelKey = useMultiChannel ? 
-            enabledChannels.map(ch => ch.channelName).join(',') : 
+            (successfulResults[0]?.metadata?.channelsUsed?.sort().join(',') || enabledChannels.map(ch => ch.channelName).sort().join(',')) : 
             getChannelString();
           cleanupOldTiles(scaleLevel, channelKey);
           
