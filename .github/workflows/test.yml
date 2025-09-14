@@ -141,13 +141,12 @@ jobs:
     - name: Run JavaScript tests (Tile Loading & Contrast)
       run: |
         echo "🧪 Running JavaScript tests for tile loading and contrast functionality..."
-        cd /github/workspace
-        node tests/test_artifact_zarr_loader.js
+        cd tests
+        node test_artifact_zarr_loader.js
     
     - name: Run Frontend Component tests (TileProcessingManager & LayerPanel)
       run: |
         echo "🎨 Running Frontend Component tests for TileProcessingManager and LayerPanel..."
-        cd /github/workspace
         node tests/test-frontend-components/run_tests.js --verbose
     
     - name: Debug environment and check dependencies
