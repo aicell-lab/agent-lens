@@ -26,6 +26,8 @@ const AnnotationCanvas = ({
   const [selectedAnnotation, setSelectedAnnotation] = useState(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
+  const [isPolygonMode, setIsPolygonMode] = useState(false);
+  const [polygonPoints, setPolygonPoints] = useState([]);
 
   // Convert display coordinates to stage coordinates
   const displayToStageCoords = useCallback((displayX, displayY) => {
@@ -72,14 +74,6 @@ const AnnotationCanvas = ({
           return point.x >= minX && point.x <= maxX && point.y >= minY && point.y <= maxY;
         }
         break;
-      case 'circle':
-        if (displayPoints.length >= 2) {
-          const [center, edge] = displayPoints;
-          const radius = Math.sqrt(Math.pow(edge.x - center.x, 2) + Math.pow(edge.y - center.y, 2));
-          const distance = Math.sqrt(Math.pow(point.x - center.x, 2) + Math.pow(point.y - center.y, 2));
-          return distance <= radius;
-        }
-        break;
       case 'polygon':
       case 'freehand':
         // Use ray casting algorithm for point-in-polygon
@@ -94,52 +88,10 @@ const AnnotationCanvas = ({
           return inside;
         }
         break;
-      case 'line':
-        if (displayPoints.length >= 2) {
-          // Check if point is near the line (within 5 pixels)
-          const tolerance = 5;
-          for (let i = 0; i < displayPoints.length - 1; i++) {
-            const p1 = displayPoints[i];
-            const p2 = displayPoints[i + 1];
-            const distance = distanceToLineSegment(point, p1, p2);
-            if (distance <= tolerance) return true;
-          }
-        }
-        break;
     }
     return false;
   }, [stageToDisplayCoords]);
 
-  // Calculate distance from point to line segment
-  const distanceToLineSegment = (point, lineStart, lineEnd) => {
-    const A = point.x - lineStart.x;
-    const B = point.y - lineStart.y;
-    const C = lineEnd.x - lineStart.x;
-    const D = lineEnd.y - lineStart.y;
-
-    const dot = A * C + B * D;
-    const lenSq = C * C + D * D;
-    let param = -1;
-    if (lenSq !== 0) {
-      param = dot / lenSq;
-    }
-
-    let xx, yy;
-    if (param < 0) {
-      xx = lineStart.x;
-      yy = lineStart.y;
-    } else if (param > 1) {
-      xx = lineEnd.x;
-      yy = lineEnd.y;
-    } else {
-      xx = lineStart.x + param * C;
-      yy = lineStart.y + param * D;
-    }
-
-    const dx = point.x - xx;
-    const dy = point.y - yy;
-    return Math.sqrt(dx * dx + dy * dy);
-  };
 
   // Handle mouse down
   const handleMouseDown = useCallback((e) => {
@@ -176,14 +128,36 @@ const AnnotationCanvas = ({
       return;
     }
 
+    // Handle polygon mode
+    if (currentTool === 'polygon') {
+      if (!isPolygonMode) {
+        // Start new polygon
+        setIsPolygonMode(true);
+        setPolygonPoints([stagePos]);
+        setPreviewShape({
+          type: 'polygon',
+          points: [stagePos]
+        });
+      } else {
+        // Add point to existing polygon
+        const newPoints = [...polygonPoints, stagePos];
+        setPolygonPoints(newPoints);
+        setPreviewShape({
+          type: 'polygon',
+          points: newPoints
+        });
+      }
+      return;
+    }
+
     // Start drawing new annotation
     setIsDrawing(true);
     setStartPoint(stagePos);
     
-    if (currentTool === 'freehand' || currentTool === 'line') {
+    if (currentTool === 'freehand') {
       setCurrentPath([stagePos]);
     }
-  }, [isDrawingMode, currentTool, getMousePos, displayToStageCoords, annotations, isPointInAnnotation, stageToDisplayCoords, onAnnotationDelete]);
+  }, [isDrawingMode, currentTool, getMousePos, displayToStageCoords, annotations, isPointInAnnotation, stageToDisplayCoords, onAnnotationDelete, isPolygonMode, polygonPoints]);
 
   // Handle mouse move
   const handleMouseMove = useCallback((e) => {
@@ -228,15 +202,38 @@ const AnnotationCanvas = ({
         type: 'rectangle',
         points: [startPoint, stagePos]
       });
-    } else if (currentTool === 'circle') {
-      setPreviewShape({
-        type: 'circle',
-        points: [startPoint, stagePos]
-      });
-    } else if (currentTool === 'freehand' || currentTool === 'line') {
+    } else if (currentTool === 'freehand') {
       setCurrentPath(prev => [...prev, stagePos]);
     }
   }, [isDrawingMode, isDragging, selectedAnnotation, dragOffset, getMousePos, displayToStageCoords, isDrawing, startPoint, currentTool, onAnnotationUpdate]);
+
+  // Handle double click for polygon completion
+  const handleDoubleClick = useCallback((e) => {
+    if (!isDrawingMode || currentTool !== 'polygon' || !isPolygonMode) return;
+    
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Complete polygon if we have at least 3 points
+    if (polygonPoints.length >= 3) {
+      const newAnnotation = {
+        id: Date.now().toString(),
+        type: 'polygon',
+        points: polygonPoints,
+        strokeColor,
+        strokeWidth,
+        fillColor,
+        timestamp: Date.now()
+      };
+      
+      onAnnotationAdd(newAnnotation);
+    }
+    
+    // Reset polygon state
+    setIsPolygonMode(false);
+    setPolygonPoints([]);
+    setPreviewShape(null);
+  }, [isDrawingMode, currentTool, isPolygonMode, polygonPoints, strokeColor, strokeWidth, fillColor, onAnnotationAdd]);
 
   // Handle mouse up
   const handleMouseUp = useCallback((e) => {
@@ -247,6 +244,11 @@ const AnnotationCanvas = ({
 
     if (isDragging) {
       setIsDragging(false);
+      return;
+    }
+
+    if (currentTool === 'polygon') {
+      // Don't complete polygon on single click, wait for double-click
       return;
     }
 
@@ -270,17 +272,6 @@ const AnnotationCanvas = ({
           timestamp: Date.now()
         };
         break;
-      case 'circle':
-        newAnnotation = {
-          id: Date.now().toString(),
-          type: 'circle',
-          points: [startPoint, stagePos],
-          strokeColor,
-          strokeWidth,
-          fillColor,
-          timestamp: Date.now()
-        };
-        break;
       case 'freehand':
         if (currentPath.length > 1) {
           newAnnotation = {
@@ -294,30 +285,6 @@ const AnnotationCanvas = ({
           };
         }
         break;
-      case 'line':
-        if (currentPath.length > 1) {
-          newAnnotation = {
-            id: Date.now().toString(),
-            type: 'line',
-            points: currentPath,
-            strokeColor,
-            strokeWidth,
-            fillColor: 'transparent',
-            timestamp: Date.now()
-          };
-        }
-        break;
-      case 'point':
-        newAnnotation = {
-          id: Date.now().toString(),
-          type: 'point',
-          points: [stagePos],
-          strokeColor,
-          strokeWidth: strokeWidth + 2,
-          fillColor: strokeColor,
-          timestamp: Date.now()
-        };
-        break;
     }
 
     if (newAnnotation) {
@@ -329,7 +296,7 @@ const AnnotationCanvas = ({
     setStartPoint(null);
     setCurrentPath([]);
     setPreviewShape(null);
-  }, [isDrawingMode, isDragging, isDrawing, startPoint, getMousePos, displayToStageCoords, currentTool, currentPath, strokeColor, strokeWidth, fillColor, onAnnotationAdd]);
+  }, [isDrawingMode, isDragging, isDrawing, startPoint, getMousePos, displayToStageCoords, currentTool, currentPath, strokeColor, strokeWidth, fillColor, onAnnotationAdd, isPolygonMode]);
 
   // Draw annotation on canvas
   const drawAnnotation = useCallback((ctx, annotation, isPreview = false) => {
@@ -362,47 +329,25 @@ const AnnotationCanvas = ({
           ctx.stroke();
         }
         break;
-      case 'circle':
-        if (displayPoints.length >= 2) {
-          const [center, edge] = displayPoints;
-          const radius = Math.sqrt(Math.pow(edge.x - center.x, 2) + Math.pow(edge.y - center.y, 2));
-          ctx.arc(center.x, center.y, radius, 0, 2 * Math.PI);
+      case 'freehand':
+        if (displayPoints.length > 1) {
+          ctx.moveTo(displayPoints[0].x, displayPoints[0].y);
+          for (let i = 1; i < displayPoints.length; i++) {
+            ctx.lineTo(displayPoints[i].x, displayPoints[i].y);
+          }
+          ctx.stroke();
+        }
+        break;
+      case 'polygon':
+        if (displayPoints.length > 2) {
+          ctx.moveTo(displayPoints[0].x, displayPoints[0].y);
+          for (let i = 1; i < displayPoints.length; i++) {
+            ctx.lineTo(displayPoints[i].x, displayPoints[i].y);
+          }
+          ctx.closePath();
           if (annotation.fillColor && annotation.fillColor !== 'transparent') {
             ctx.fill();
           }
-          ctx.stroke();
-        }
-        break;
-      case 'freehand':
-      case 'polygon':
-        if (displayPoints.length > 1) {
-          ctx.moveTo(displayPoints[0].x, displayPoints[0].y);
-          for (let i = 1; i < displayPoints.length; i++) {
-            ctx.lineTo(displayPoints[i].x, displayPoints[i].y);
-          }
-          if (annotation.type === 'polygon') {
-            ctx.closePath();
-            if (annotation.fillColor && annotation.fillColor !== 'transparent') {
-              ctx.fill();
-            }
-          }
-          ctx.stroke();
-        }
-        break;
-      case 'line':
-        if (displayPoints.length > 1) {
-          ctx.moveTo(displayPoints[0].x, displayPoints[0].y);
-          for (let i = 1; i < displayPoints.length; i++) {
-            ctx.lineTo(displayPoints[i].x, displayPoints[i].y);
-          }
-          ctx.stroke();
-        }
-        break;
-      case 'point':
-        if (displayPoints.length > 0) {
-          const point = displayPoints[0];
-          ctx.arc(point.x, point.y, annotation.strokeWidth, 0, 2 * Math.PI);
-          ctx.fill();
           ctx.stroke();
         }
         break;
@@ -453,7 +398,7 @@ const AnnotationCanvas = ({
         drawAnnotation(ctx, { ...previewShape, strokeColor, strokeWidth, fillColor }, true);
       }
 
-      // Draw current path for freehand/line tools
+      // Draw current path for freehand tool
       if (currentPath.length > 1) {
         const displayPath = currentPath.map(p => stageToDisplayCoords(p.x, p.y));
         ctx.strokeStyle = strokeColor;
@@ -468,6 +413,34 @@ const AnnotationCanvas = ({
         ctx.stroke();
         ctx.globalAlpha = 1;
         ctx.setLineDash([]);
+      }
+
+      // Draw polygon preview
+      if (isPolygonMode && polygonPoints.length > 0) {
+        const displayPolygonPoints = polygonPoints.map(p => stageToDisplayCoords(p.x, p.y));
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth = strokeWidth;
+        ctx.globalAlpha = 0.7;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        ctx.moveTo(displayPolygonPoints[0].x, displayPolygonPoints[0].y);
+        for (let i = 1; i < displayPolygonPoints.length; i++) {
+          ctx.lineTo(displayPolygonPoints[i].x, displayPolygonPoints[i].y);
+        }
+        // Don't close the polygon yet, just show the line
+        ctx.stroke();
+        
+        // Draw points
+        ctx.fillStyle = strokeColor;
+        ctx.globalAlpha = 0.9;
+        ctx.setLineDash([]);
+        displayPolygonPoints.forEach(point => {
+          ctx.beginPath();
+          ctx.arc(point.x, point.y, 3, 0, 2 * Math.PI);
+          ctx.fill();
+        });
+        
+        ctx.globalAlpha = 1;
       }
     };
 
@@ -514,7 +487,7 @@ const AnnotationCanvas = ({
         drawAnnotation(ctx, { ...previewShape, strokeColor, strokeWidth, fillColor }, true);
       }
 
-      // Draw current path for freehand/line tools
+      // Draw current path for freehand tool
       if (currentPath.length > 1) {
         const displayPath = currentPath.map(p => stageToDisplayCoords(p.x, p.y));
         ctx.strokeStyle = strokeColor;
@@ -530,10 +503,38 @@ const AnnotationCanvas = ({
         ctx.globalAlpha = 1;
         ctx.setLineDash([]);
       }
+
+      // Draw polygon preview
+      if (isPolygonMode && polygonPoints.length > 0) {
+        const displayPolygonPoints = polygonPoints.map(p => stageToDisplayCoords(p.x, p.y));
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth = strokeWidth;
+        ctx.globalAlpha = 0.7;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        ctx.moveTo(displayPolygonPoints[0].x, displayPolygonPoints[0].y);
+        for (let i = 1; i < displayPolygonPoints.length; i++) {
+          ctx.lineTo(displayPolygonPoints[i].x, displayPolygonPoints[i].y);
+        }
+        // Don't close the polygon yet, just show the line
+        ctx.stroke();
+        
+        // Draw points
+        ctx.fillStyle = strokeColor;
+        ctx.globalAlpha = 0.9;
+        ctx.setLineDash([]);
+        displayPolygonPoints.forEach(point => {
+          ctx.beginPath();
+          ctx.arc(point.x, point.y, 3, 0, 2 * Math.PI);
+          ctx.fill();
+        });
+        
+        ctx.globalAlpha = 1;
+      }
     };
 
     renderAnnotations();
-  }, [annotations, selectedAnnotation, previewShape, currentPath, strokeColor, strokeWidth, fillColor, isDrawingMode, drawAnnotation, stageToDisplayCoords]);
+  }, [annotations, selectedAnnotation, previewShape, currentPath, strokeColor, strokeWidth, fillColor, isDrawingMode, drawAnnotation, stageToDisplayCoords, isPolygonMode, polygonPoints]);
 
   // Set up event listeners
   useEffect(() => {
@@ -564,14 +565,16 @@ const AnnotationCanvas = ({
     canvas.addEventListener('mousemove', handleMouseMove, options);
     canvas.addEventListener('mouseup', handleMouseUp, options);
     canvas.addEventListener('mouseleave', handleMouseUp, options);
+    canvas.addEventListener('dblclick', handleDoubleClick, options);
 
     return () => {
       canvas.removeEventListener('mousedown', handleMouseDown);
       canvas.removeEventListener('mousemove', handleMouseMove);
       canvas.removeEventListener('mouseup', handleMouseUp);
       canvas.removeEventListener('mouseleave', handleMouseUp);
+      canvas.removeEventListener('dblclick', handleDoubleClick);
     };
-  }, [isDrawingMode, handleMouseDown, handleMouseMove, handleMouseUp, containerRef]);
+  }, [isDrawingMode, handleMouseDown, handleMouseMove, handleMouseUp, handleDoubleClick, containerRef]);
 
   if (!isDrawingMode) return null;
 
@@ -613,3 +616,4 @@ AnnotationCanvas.propTypes = {
 };
 
 export default AnnotationCanvas;
+

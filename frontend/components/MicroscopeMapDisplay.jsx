@@ -405,39 +405,8 @@ const MicroscopeMapDisplay = ({
   const [currentCancellableRequest, setCurrentCancellableRequest] = useState(null);
   const [lastRequestKey, setLastRequestKey] = useState(null);
 
-  // Annotation handlers
-  const handleAnnotationAdd = useCallback((annotation) => {
-    setAnnotations(prev => [...prev, annotation]);
-    if (appendLog) {
-      appendLog(`Added ${annotation.type} annotation at (${annotation.points[0].x.toFixed(2)}, ${annotation.points[0].y.toFixed(2)}) mm`);
-    }
-  }, [appendLog]);
-
-  const handleAnnotationUpdate = useCallback((id, updates) => {
-    setAnnotations(prev => 
-      prev.map(ann => ann.id === id ? { ...ann, ...updates } : ann)
-    );
-  }, []);
-
-  const handleAnnotationDelete = useCallback((id) => {
-    setAnnotations(prev => prev.filter(ann => ann.id !== id));
-    if (appendLog) {
-      appendLog(`Deleted annotation`);
-    }
-  }, [appendLog]);
-
-  const handleClearAllAnnotations = useCallback(() => {
-    setAnnotations([]);
-    if (appendLog) {
-      appendLog(`Cleared all annotations (${annotations.length} removed)`);
-    }
-  }, [appendLog, annotations.length]);
-
-  const handleExportAnnotations = useCallback(() => {
-    if (appendLog) {
-      appendLog(`Exported ${annotations.length} annotations`);
-    }
-  }, [appendLog, annotations.length]);
+  // Well information mapping for annotations
+  const [annotationWellMap, setAnnotationWellMap] = useState({});
 
   const handleImportAnnotations = useCallback((importedAnnotations) => {
     setAnnotations(importedAnnotations);
@@ -532,6 +501,84 @@ const MicroscopeMapDisplay = ({
     
     return closestWell;
   }, [getWellPlateConfig, getWellPlateLayout, wellPaddingMm]);
+
+  // Detect well for annotation and update mapping
+  const detectWellForAnnotation = useCallback((annotation) => {
+    // Use the first point to determine which well the annotation belongs to
+    if (annotation.points && annotation.points.length > 0) {
+      const firstPoint = annotation.points[0];
+      const wellInfo = detectWellFromStageCoords(firstPoint.x, firstPoint.y);
+      
+      if (wellInfo) {
+        setAnnotationWellMap(prev => ({
+          ...prev,
+          [annotation.id]: wellInfo
+        }));
+        
+        if (appendLog) {
+          appendLog(`Annotation ${annotation.type} assigned to well ${wellInfo.id}`);
+        }
+      } else {
+        console.warn(`Could not detect well for annotation at (${firstPoint.x}, ${firstPoint.y})`);
+      }
+    }
+  }, [detectWellFromStageCoords, appendLog]);
+
+  // Annotation handlers
+  const handleAnnotationAdd = useCallback((annotation) => {
+    setAnnotations(prev => [...prev, annotation]);
+    
+    // Detect well for the new annotation
+    detectWellForAnnotation(annotation);
+    
+    if (appendLog) {
+      appendLog(`Added ${annotation.type} annotation at (${annotation.points[0].x.toFixed(2)}, ${annotation.points[0].y.toFixed(2)}) mm`);
+    }
+  }, [appendLog, detectWellForAnnotation]);
+
+  const handleAnnotationUpdate = useCallback((id, updates) => {
+    setAnnotations(prev => 
+      prev.map(ann => ann.id === id ? { ...ann, ...updates } : ann)
+    );
+    
+    // Re-detect well if annotation was moved
+    if (updates.points) {
+      const updatedAnnotation = annotations.find(ann => ann.id === id);
+      if (updatedAnnotation) {
+        const updatedWithNewPoints = { ...updatedAnnotation, ...updates };
+        detectWellForAnnotation(updatedWithNewPoints);
+      }
+    }
+  }, [annotations, detectWellForAnnotation]);
+
+  const handleAnnotationDelete = useCallback((id) => {
+    setAnnotations(prev => prev.filter(ann => ann.id !== id));
+    
+    // Remove from well mapping
+    setAnnotationWellMap(prev => {
+      const newMap = { ...prev };
+      delete newMap[id];
+      return newMap;
+    });
+    
+    if (appendLog) {
+      appendLog(`Deleted annotation`);
+    }
+  }, [appendLog]);
+
+  const handleClearAllAnnotations = useCallback(() => {
+    setAnnotations([]);
+    setAnnotationWellMap({});
+    if (appendLog) {
+      appendLog(`Cleared all annotations (${annotations.length} removed)`);
+    }
+  }, [appendLog, annotations.length]);
+
+  const handleExportAnnotations = useCallback(() => {
+    if (appendLog) {
+      appendLog(`Exported ${annotations.length} annotations`);
+    }
+  }, [appendLog, annotations.length]);
 
   // Helper function to get well boundaries in stage coordinates
   const getWellBoundaries = useCallback((wellInfo) => {
@@ -3744,6 +3791,7 @@ const MicroscopeMapDisplay = ({
                       onClearAllAnnotations={handleClearAllAnnotations}
                       onExportAnnotations={handleExportAnnotations}
                       onImportAnnotations={handleImportAnnotations}
+                      wellInfoMap={annotationWellMap}
                     />
                   </div>
                 )}
