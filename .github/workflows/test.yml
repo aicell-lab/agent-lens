@@ -138,6 +138,18 @@ jobs:
         echo "✅ Frontend build completed"
         ls -la dist/
     
+    - name: Run JavaScript tests (Tile Loading & Contrast)
+      run: |
+        echo "🧪 Running JavaScript tests for tile loading and contrast functionality..."
+        cd /github/workspace
+        node tests/test_artifact_zarr_loader.js
+    
+    - name: Run Frontend Component tests (TileProcessingManager & LayerPanel)
+      run: |
+        echo "🎨 Running Frontend Component tests for TileProcessingManager and LayerPanel..."
+        cd /github/workspace
+        node tests/test-frontend-components/run_tests.js --verbose
+    
     - name: Debug environment and check dependencies
       run: |
         echo "🔍 Environment debugging..."
@@ -239,6 +251,8 @@ jobs:
       run: |
         echo "📊 Test Execution Summary:"
         echo "=========================="
+        echo "✅ JavaScript tests (Tile Loading & Contrast): Completed"
+        echo "✅ Frontend Component tests (TileProcessingManager & LayerPanel): Completed"
         echo "✅ Backend unit tests: Completed with coverage"
         echo "✅ Backend fast tests: Completed with coverage"
         echo "✅ Frontend service tests: Completed with coverage"
