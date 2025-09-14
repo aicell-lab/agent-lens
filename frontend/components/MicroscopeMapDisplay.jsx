@@ -1378,6 +1378,16 @@ const MicroscopeMapDisplay = ({
         tile.scale === currentScale && tile.channel === activeChannel
       );
       
+      // For historical mode, be more conservative with cleanup to prevent map clearing during zoom
+      if (isHistoricalDataMode) {
+        // In historical mode, if there are no tiles for current scale, keep all existing tiles
+        // to prevent the map from clearing during zoom operations
+        if (currentTiles.length === 0) {
+          console.log('[cleanupOldTiles] Historical mode: No tiles for current scale, preserving all existing tiles');
+          return prevTiles; // Keep all existing tiles
+        }
+      }
+      
       // Smart cleanup: when zooming out (to higher scale numbers), aggressively clean high-res tiles
       // When zooming in (to lower scale numbers), keep lower-res tiles as background
       const otherTiles = prevTiles.filter(tile => 
@@ -1393,7 +1403,7 @@ const MicroscopeMapDisplay = ({
       
       return [...currentTiles, ...otherTiles];
     });
-  }, []);
+  }, [isHistoricalDataMode]);
 
   // Effect to clean up old tiles when channel changes  
   useEffect(() => {
@@ -3349,6 +3359,13 @@ const MicroscopeMapDisplay = ({
       console.log('[scaleLevel cleanup] Triggering cleanup and potential tile load');
       const activeChannel = getChannelString();
       
+      // For historical mode, be more conservative with cleanup during zoom operations
+      if (isHistoricalDataMode && isZooming) {
+        console.log('[scaleLevel cleanup] Historical mode + zooming - skipping aggressive cleanup');
+        // Don't cleanup during zoom in historical mode to prevent map clearing
+        return;
+      }
+      
       // Always cleanup immediately when scale changes to save memory
       cleanupOldTiles(scaleLevel, activeChannel);
       
@@ -3367,7 +3384,7 @@ const MicroscopeMapDisplay = ({
         console.log('[scaleLevel cleanup] User is zooming or no microscope service - skipping tile load');
       }
     }
-  }, [scaleLevel, mapViewMode, visibleLayers.scanResults, visibleLayers.channels, isZooming, scheduleTileUpdate, cleanupOldTiles, microscopeControlService, isSimulatedMicroscope]);
+  }, [scaleLevel, mapViewMode, visibleLayers.scanResults, visibleLayers.channels, isZooming, scheduleTileUpdate, cleanupOldTiles, microscopeControlService, isSimulatedMicroscope, isHistoricalDataMode]);
 
   // Effect to ensure tiles are loaded for current scale level
   // EXCLUDES historical mode - no automatic tile loading needed for historical data
