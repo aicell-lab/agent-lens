@@ -7,6 +7,8 @@ import useExperimentZarrManager from './microscope/map/ExperimentZarrManager';
 import TileProcessingManager from './microscope/map/TileProcessingManager';
 import QuickScanConfig from './microscope/controls/QuickScanConfig';
 import NormalScanConfig from './microscope/controls/NormalScanConfig';
+import AnnotationPanel from './annotation/AnnotationPanel';
+import AnnotationCanvas from './annotation/AnnotationCanvas';
 import './MicroscopeMapDisplay.css';
 
 const MicroscopeMapDisplay = ({
@@ -158,6 +160,16 @@ const MicroscopeMapDisplay = ({
   // Layer dropdown state
   const [isLayerDropdownOpen, setIsLayerDropdownOpen] = useState(false);
   const layerDropdownRef = useRef(null);
+
+  // Annotation system state
+  const [isAnnotationDropdownOpen, setIsAnnotationDropdownOpen] = useState(false);
+  const [isDrawingMode, setIsDrawingMode] = useState(false);
+  const [currentAnnotationTool, setCurrentAnnotationTool] = useState('select');
+  const [annotationStrokeColor, setAnnotationStrokeColor] = useState('#ff0000');
+  const [annotationStrokeWidth, setAnnotationStrokeWidth] = useState(2);
+  const [annotationFillColor, setAnnotationFillColor] = useState('transparent');
+  const [annotations, setAnnotations] = useState([]);
+  const annotationDropdownRef = useRef(null);
 
   // Layer visibility management (moved early to avoid dependency issues)
   const [visibleLayers, setVisibleLayers] = useState({
@@ -392,6 +404,47 @@ const MicroscopeMapDisplay = ({
   // 🚀 REQUEST CANCELLATION: Track cancellable requests
   const [currentCancellableRequest, setCurrentCancellableRequest] = useState(null);
   const [lastRequestKey, setLastRequestKey] = useState(null);
+
+  // Annotation handlers
+  const handleAnnotationAdd = useCallback((annotation) => {
+    setAnnotations(prev => [...prev, annotation]);
+    if (appendLog) {
+      appendLog(`Added ${annotation.type} annotation at (${annotation.points[0].x.toFixed(2)}, ${annotation.points[0].y.toFixed(2)}) mm`);
+    }
+  }, [appendLog]);
+
+  const handleAnnotationUpdate = useCallback((id, updates) => {
+    setAnnotations(prev => 
+      prev.map(ann => ann.id === id ? { ...ann, ...updates } : ann)
+    );
+  }, []);
+
+  const handleAnnotationDelete = useCallback((id) => {
+    setAnnotations(prev => prev.filter(ann => ann.id !== id));
+    if (appendLog) {
+      appendLog(`Deleted annotation`);
+    }
+  }, [appendLog]);
+
+  const handleClearAllAnnotations = useCallback(() => {
+    setAnnotations([]);
+    if (appendLog) {
+      appendLog(`Cleared all annotations (${annotations.length} removed)`);
+    }
+  }, [appendLog, annotations.length]);
+
+  const handleExportAnnotations = useCallback(() => {
+    if (appendLog) {
+      appendLog(`Exported ${annotations.length} annotations`);
+    }
+  }, [appendLog, annotations.length]);
+
+  const handleImportAnnotations = useCallback((importedAnnotations) => {
+    setAnnotations(importedAnnotations);
+    if (appendLog) {
+      appendLog(`Imported ${importedAnnotations.length} annotations`);
+    }
+  }, [appendLog]);
 
   // Helper function to render real-time loading progress
   const renderRealTimeProgress = useCallback(() => {
@@ -911,15 +964,15 @@ const MicroscopeMapDisplay = ({
   }, [containerDimensions, mapViewMode, currentStagePosition, stageDimensions, mapScale, effectivePan, fovSize, pixelsPerMm]);
 
   // Split interaction controls: hardware vs map browsing, exclude simulated microscope in historical mode
-  const isHardwareInteractionDisabled = (isHistoricalDataMode && !(isSimulatedMicroscope && isHistoricalDataMode)) || microscopeBusy || currentOperation !== null || isScanInProgress || isQuickScanInProgress;
-  const isMapBrowsingDisabled = false; // Allow map browsing during all operations for real-time scan result viewing
+  const isHardwareInteractionDisabled = (isHistoricalDataMode && !(isSimulatedMicroscope && isHistoricalDataMode)) || microscopeBusy || currentOperation !== null || isScanInProgress || isQuickScanInProgress || isDrawingMode;
+  const isMapBrowsingDisabled = false; // Allow map browsing - annotation canvas will handle its own interactions
   
   // Legacy compatibility - some UI elements still use the general disabled state
   const isInteractionDisabled = isHardwareInteractionDisabled;
 
   // Handle panning (only in FREE_PAN mode)
   const handleMapPanning = (e) => {
-    if (mapViewMode !== 'FREE_PAN' || isMapBrowsingDisabled) return;
+    if (mapViewMode !== 'FREE_PAN' || isDrawingMode) return;
     
     // During active scanning, disable rectangle selection to allow map browsing
     if (isRectangleSelection && !isScanInProgress && !isQuickScanInProgress) {
@@ -940,7 +993,7 @@ const MicroscopeMapDisplay = ({
       return;
     }
     
-    if (isPanning && mapViewMode === 'FREE_PAN' && !isMapBrowsingDisabled) {
+    if (isPanning && mapViewMode === 'FREE_PAN' && !isDrawingMode) {
       // Cancel any pending tile loads during active panning
       if (canvasUpdateTimerRef.current) {
         clearTimeout(canvasUpdateTimerRef.current);
@@ -960,7 +1013,7 @@ const MicroscopeMapDisplay = ({
       return;
     }
     
-    if (isMapBrowsingDisabled) {
+    if (isDrawingMode) {
       setIsPanning(false);
       return;
     }
@@ -1167,7 +1220,7 @@ const MicroscopeMapDisplay = ({
   const handleWheel = useCallback((e) => {
     e.preventDefault();
     
-    if (isMapBrowsingDisabled) return;
+    if (isDrawingMode) return;
     
     // Set zooming state to true and reset timeout
     setIsZooming(true);
@@ -2169,6 +2222,41 @@ const MicroscopeMapDisplay = ({
       };
     }
   }, [isLayerDropdownOpen]);
+
+  // Click outside handler for annotation dropdown
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (annotationDropdownRef.current && !annotationDropdownRef.current.contains(event.target)) {
+        // Don't close dropdown if we're in drawing mode - user needs to see the tools
+        if (!isDrawingMode) {
+          setIsAnnotationDropdownOpen(false);
+        }
+      }
+    };
+
+    if (isAnnotationDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside);
+      };
+    }
+  }, [isAnnotationDropdownOpen, isDrawingMode]);
+
+  // Disable conflicting interactions when entering drawing mode (but keep dropdown open)
+  useEffect(() => {
+    if (isDrawingMode) {
+      // Disable rectangle selection when entering drawing mode to prevent conflicts
+      setIsRectangleSelection(false);
+      setRectangleStart(null);
+      setRectangleEnd(null);
+      setDragSelectedWell(null);
+      if (appendLog) {
+        appendLog('Entered annotation drawing mode - map interactions disabled');
+      }
+    } else if (!isDrawingMode && appendLog) {
+      appendLog('Exited annotation drawing mode - map interactions enabled');
+    }
+  }, [isDrawingMode, appendLog]);
 
   // Load experiments when layer dropdown is opened
   useEffect(() => {
@@ -3624,6 +3712,43 @@ const MicroscopeMapDisplay = ({
                 </button>
               </div>
               
+              {/* Annotation dropdown */}
+              <div className="relative" ref={annotationDropdownRef}>
+                <button
+                  onClick={() => setIsAnnotationDropdownOpen(!isAnnotationDropdownOpen)}
+                  className={`px-3 py-1 text-xs text-white rounded flex items-center ${
+                    isDrawingMode ? 'bg-orange-600 hover:bg-orange-500' : 'bg-gray-700 hover:bg-gray-600'
+                  }`}
+                  title="Annotation tools"
+                >
+                  <i className="fas fa-draw-polygon mr-1"></i>
+                  Annotations
+                  <i className={`fas ml-1 transition-transform ${isAnnotationDropdownOpen ? 'fa-caret-up' : 'fa-caret-down'}`}></i>
+                </button>
+                
+                {isAnnotationDropdownOpen && (
+                  <div className="absolute top-full right-0 mt-1 z-20">
+                    <AnnotationPanel
+                      isDrawingMode={isDrawingMode}
+                      setIsDrawingMode={setIsDrawingMode}
+                      currentTool={currentAnnotationTool}
+                      setCurrentTool={setCurrentAnnotationTool}
+                      strokeColor={annotationStrokeColor}
+                      setStrokeColor={setAnnotationStrokeColor}
+                      strokeWidth={annotationStrokeWidth}
+                      setStrokeWidth={setAnnotationStrokeWidth}
+                      fillColor={annotationFillColor}
+                      setFillColor={setAnnotationFillColor}
+                      annotations={annotations}
+                      onAnnotationDelete={handleAnnotationDelete}
+                      onClearAllAnnotations={handleClearAllAnnotations}
+                      onExportAnnotations={handleExportAnnotations}
+                      onImportAnnotations={handleImportAnnotations}
+                    />
+                  </div>
+                )}
+              </div>
+              
               {/* Layer selector dropdown */}
               <div className="relative" ref={layerDropdownRef}>
                 <button
@@ -3706,23 +3831,23 @@ const MicroscopeMapDisplay = ({
       <div
         ref={mapContainerRef}
         className={`absolute inset-0 top-12 overflow-hidden ${
-          isMapBrowsingDisabled 
-            ? 'cursor-not-allowed microscope-map-disabled' 
+          isDrawingMode 
+            ? 'cursor-crosshair' 
             : mapViewMode === 'FOV_FITTED' 
               ? (isHardwareInteractionDisabled ? 'cursor-not-allowed' : 'cursor-grab')
               : (isRectangleSelection && !isScanInProgress && !isQuickScanInProgress)
                 ? (isHardwareInteractionDisabled ? 'cursor-not-allowed' : 'cursor-crosshair')
                 : 'cursor-move'
         } ${isDragging || isPanning ? 'cursor-grabbing' : ''}`}
-        onMouseDown={isMapBrowsingDisabled ? undefined : (mapViewMode === 'FOV_FITTED' ? (isHardwareInteractionDisabled ? undefined : onMouseDown) : handleMapPanning)}
-        onMouseMove={isMapBrowsingDisabled ? undefined : (mapViewMode === 'FOV_FITTED' ? (isHardwareInteractionDisabled ? undefined : onMouseMove) : handleMapPanMove)}
-        onMouseUp={isMapBrowsingDisabled ? undefined : (mapViewMode === 'FOV_FITTED' ? (isHardwareInteractionDisabled ? undefined : onMouseUp) : handleMapPanEnd)}
-        onMouseLeave={isMapBrowsingDisabled ? undefined : (mapViewMode === 'FOV_FITTED' ? (isHardwareInteractionDisabled ? undefined : onMouseLeave) : handleMapPanEnd)}
+        onMouseDown={isDrawingMode ? undefined : (mapViewMode === 'FOV_FITTED' ? (isHardwareInteractionDisabled ? undefined : onMouseDown) : handleMapPanning)}
+        onMouseMove={isDrawingMode ? undefined : (mapViewMode === 'FOV_FITTED' ? (isHardwareInteractionDisabled ? undefined : onMouseMove) : handleMapPanMove)}
+        onMouseUp={isDrawingMode ? undefined : (mapViewMode === 'FOV_FITTED' ? (isHardwareInteractionDisabled ? undefined : onMouseUp) : handleMapPanEnd)}
+        onMouseLeave={isDrawingMode ? undefined : (mapViewMode === 'FOV_FITTED' ? (isHardwareInteractionDisabled ? undefined : onMouseLeave) : handleMapPanEnd)}
         onDoubleClick={isHardwareInteractionDisabled ? undefined : (mapViewMode === 'FREE_PAN' && !isRectangleSelection ? handleDoubleClick : undefined)}
                   style={{
             userSelect: 'none',
             transition: isDragging || isPanning ? 'none' : 'transform 0.3s ease-out',
-            opacity: isMapBrowsingDisabled ? 0.75 : 1,
+            opacity: isDrawingMode ? 0.9 : 1,
             cursor: (isRectangleSelection && !isScanInProgress && !isQuickScanInProgress) && mapViewMode === 'FREE_PAN' && !isHardwareInteractionDisabled ? 'crosshair' : undefined
           }}
       >
@@ -3780,6 +3905,24 @@ const MicroscopeMapDisplay = ({
         
         {/* Well plate overlay for FREE_PAN mode */}
         {mapViewMode === 'FREE_PAN' && render96WellPlate()}
+        
+        {/* Annotation Canvas Overlay */}
+        <AnnotationCanvas
+          containerRef={mapContainerRef}
+          isDrawingMode={isDrawingMode}
+          currentTool={currentAnnotationTool}
+          strokeColor={annotationStrokeColor}
+          strokeWidth={annotationStrokeWidth}
+          fillColor={annotationFillColor}
+          mapScale={mapScale}
+          mapPan={effectivePan}
+          annotations={annotations}
+          onAnnotationAdd={handleAnnotationAdd}
+          onAnnotationUpdate={handleAnnotationUpdate}
+          onAnnotationDelete={handleAnnotationDelete}
+          stageDimensions={stageDimensions}
+          pixelsPerMm={pixelsPerMm}
+        />
         
         {/* Rectangle selection active indicator */}
         {mapViewMode === 'FREE_PAN' && isRectangleSelection && !rectangleStart && !isScanInProgress && !isQuickScanInProgress && (

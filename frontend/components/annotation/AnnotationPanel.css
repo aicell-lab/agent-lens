@@ -1,0 +1,479 @@
+/* Annotation Panel Styles */
+.annotation-panel {
+  background: rgba(0, 0, 0, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  color: white;
+  width: 300px;
+  max-height: 600px;
+  overflow-y: auto;
+  font-size: 14px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+/* Header */
+.annotation-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.annotation-toggle-btn {
+  background: rgba(59, 130, 246, 0.2);
+  border: 1px solid rgba(59, 130, 246, 0.5);
+  color: white;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.annotation-toggle-btn:hover {
+  background: rgba(59, 130, 246, 0.4);
+}
+
+.annotation-toggle-btn.active {
+  background: rgba(59, 130, 246, 0.8);
+  border-color: rgba(59, 130, 246, 1);
+}
+
+.annotation-toggle-btn.active.exit-mode {
+  background: rgba(239, 68, 68, 0.8);
+  border-color: rgba(239, 68, 68, 1);
+  color: white;
+}
+
+.annotation-toggle-btn.active.exit-mode:hover {
+  background: rgba(239, 68, 68, 1);
+  border-color: rgba(239, 68, 68, 1);
+}
+
+.annotation-close-btn {
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  color: white;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 12px;
+}
+
+.annotation-close-btn:hover {
+  background: rgba(239, 68, 68, 0.4);
+  border-color: rgba(239, 68, 68, 0.8);
+}
+
+/* Sections */
+.annotation-section {
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.annotation-section:last-child {
+  border-bottom: none;
+}
+
+.annotation-section-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Tools Grid */
+.annotation-tools-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+
+.annotation-tool-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: white;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 11px;
+}
+
+.annotation-tool-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.annotation-tool-btn.active {
+  background: rgba(59, 130, 246, 0.3);
+  border-color: rgba(59, 130, 246, 0.6);
+  color: #3b82f6;
+}
+
+.annotation-tool-btn i {
+  font-size: 16px;
+  margin-bottom: 4px;
+}
+
+.tool-name {
+  font-size: 10px;
+  line-height: 1;
+}
+
+/* Style Controls */
+.style-control {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.style-control label {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.color-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.color-swatch {
+  width: 24px;
+  height: 24px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: border-color 0.2s ease;
+}
+
+.color-swatch:hover {
+  border-color: rgba(255, 255, 255, 0.6);
+}
+
+.color-value {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.7);
+  font-family: monospace;
+}
+
+/* Stroke Width Control */
+.stroke-width-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stroke-width-slider {
+  flex: 1;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.stroke-width-slider::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+  background: #3b82f6;
+  border-radius: 50%;
+  cursor: pointer;
+  -webkit-appearance: none;
+}
+
+.stroke-width-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  background: #3b82f6;
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+}
+
+.stroke-width-value {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.7);
+  min-width: 30px;
+  text-align: right;
+}
+
+/* Color Picker */
+.color-picker-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.color-picker {
+  background: rgba(30, 30, 30, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  padding: 16px;
+  min-width: 250px;
+  backdrop-filter: blur(10px);
+}
+
+.color-picker-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  font-weight: 600;
+}
+
+.color-picker-close {
+  background: none;
+  border: none;
+  color: white;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 2px;
+  transition: background 0.2s ease;
+}
+
+.color-picker-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.preset-colors {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.preset-color {
+  width: 24px;
+  height: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+
+.preset-color:hover {
+  transform: scale(1.1);
+}
+
+.transparent-color {
+  background: linear-gradient(45deg, #ccc 25%, transparent 25%), 
+              linear-gradient(-45deg, #ccc 25%, transparent 25%), 
+              linear-gradient(45deg, transparent 75%, #ccc 75%), 
+              linear-gradient(-45deg, transparent 75%, #ccc 75%);
+  background-size: 6px 6px;
+  background-position: 0 0, 0 3px, 3px -3px, -3px 0px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #666;
+}
+
+.custom-color {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.custom-color label {
+  font-size: 12px;
+}
+
+.color-input {
+  width: 40px;
+  height: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 3px;
+  background: none;
+  cursor: pointer;
+}
+
+/* Annotation List */
+.no-annotations {
+  color: rgba(255, 255, 255, 0.5);
+  font-style: italic;
+  text-align: center;
+  padding: 20px 0;
+  font-size: 12px;
+}
+
+.annotation-list {
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.annotation-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  margin-bottom: 4px;
+  transition: background 0.2s ease;
+}
+
+.annotation-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.annotation-item-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+}
+
+.annotation-type {
+  font-size: 11px;
+  text-transform: capitalize;
+}
+
+.annotation-index {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.annotation-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.annotation-color-indicator {
+  width: 12px;
+  height: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 2px;
+}
+
+.annotation-delete-btn {
+  background: none;
+  border: none;
+  color: rgba(239, 68, 68, 0.8);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 2px;
+  transition: all 0.2s ease;
+  font-size: 10px;
+}
+
+.annotation-delete-btn:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+/* Actions */
+.annotation-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.annotation-action-btn {
+  background: rgba(59, 130, 246, 0.2);
+  border: 1px solid rgba(59, 130, 246, 0.5);
+  color: white;
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  position: relative;
+  overflow: hidden;
+}
+
+.annotation-action-btn:hover:not(:disabled) {
+  background: rgba(59, 130, 246, 0.4);
+}
+
+.annotation-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.annotation-action-btn.danger {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.5);
+}
+
+.annotation-action-btn.danger:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.4);
+}
+
+.annotation-action-btn input[type="file"] {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.hidden {
+  display: none;
+}
+
+/* Scrollbar Styling */
+.annotation-panel::-webkit-scrollbar,
+.annotation-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.annotation-panel::-webkit-scrollbar-track,
+.annotation-list::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.annotation-panel::-webkit-scrollbar-thumb,
+.annotation-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+}
+
+.annotation-panel::-webkit-scrollbar-thumb:hover,
+.annotation-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .annotation-panel {
+    width: 280px;
+    max-height: 500px;
+  }
+  
+  .annotation-tools-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  
+  .annotation-actions {
+    flex-direction: column;
+  }
+  
+  .annotation-action-btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
