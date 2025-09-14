@@ -7,7 +7,7 @@
  * Usage: node tests/test_artifact_zarr_loader.js
  */
 
-import ArtifactZarrLoader from '../frontend/services/artifactZarrLoader.js';
+import ArtifactZarrLoader from '../frontend/utils/artifactZarrLoader.js';
 
 // Test configuration
 const TEST_CONFIG = {

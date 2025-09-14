@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import PropTypes from 'prop-types';
 import { useValidatedNumberInput, getInputValidationClasses } from '../utils'; // Import validation utilities
-import ArtifactZarrLoader from '../services/artifactZarrLoader.js';
+import ArtifactZarrLoader from '../utils/artifactZarrLoader.js';
 import LayerPanel from './microscope/map/LayerPanel';
 import useExperimentZarrManager from './microscope/map/ExperimentZarrManager';
 import TileProcessingManager from './microscope/map/TileProcessingManager';
