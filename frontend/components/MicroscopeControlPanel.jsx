@@ -1364,6 +1364,7 @@ const MicroscopeControlPanel = ({
             toggleWebRtcStream={toggleWebRtcStream}
             onFreePanAutoCollapse={handleCombinedAutoCollapse}
             onFitToViewUncollapse={handleCombinedUncollapse}
+            sampleLoadStatus={sampleLoadStatus}
           />
         </div>
 

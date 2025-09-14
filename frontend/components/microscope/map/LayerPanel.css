@@ -1,0 +1,478 @@
+/* LayerPanel Component Styles */
+.layer-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1rem;
+  background: #1f2937;
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  min-width: 580px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+/* Compact mode for FOV_FITTED */
+.layer-panel--compact {
+  min-width: 400px;
+  max-height: 60vh;
+  padding: 0.75rem;
+  gap: 0.75rem;
+}
+
+/* Layer Section */
+.layer-section {
+  border-bottom: 1px solid #4b5563;
+  padding-bottom: 1rem;
+}
+
+.layer-section:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.layer-section--experiments {
+  /* Additional spacing for experiments section */
+}
+
+.layer-section--channels {
+  /* Additional spacing for channels section */
+}
+
+/* Section Headers */
+.layer-section__header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #d1d5db;
+  margin-bottom: 0.75rem;
+}
+
+.layer-section__header i {
+  font-size: 0.75rem;
+}
+
+.channel-count {
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: #9ca3af;
+  margin-left: auto;
+}
+
+/* Section Content */
+.layer-section__content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/* Map Layers */
+.layer-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.layer-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  background: #374151;
+  border-radius: 0.375rem;
+  color: white;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.layer-option:hover {
+  background: #4b5563;
+}
+
+.layer-option input[type="checkbox"] {
+  margin: 0;
+}
+
+/* Experiments */
+.experiment-info {
+  background: #374151;
+  border-radius: 0.375rem;
+  padding: 0.75rem;
+}
+
+.experiment-info__label {
+  font-size: 0.75rem;
+  color: #d1d5db;
+  margin-bottom: 0.25rem;
+}
+
+.experiment-info__value {
+  font-size: 0.875rem;
+  color: white;
+  font-weight: 500;
+}
+
+.no-experiment {
+  color: #9ca3af;
+  font-style: italic;
+}
+
+.experiment-list {
+  background: #374151;
+  border-radius: 0.375rem;
+  padding: 0.75rem;
+  max-height: 8rem;
+  overflow-y: auto;
+}
+
+.experiment-list__label {
+  font-size: 0.75rem;
+  color: #d1d5db;
+  margin-bottom: 0.5rem;
+}
+
+.experiment-list__items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.experiment-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.25rem;
+  border-radius: 0.25rem;
+  transition: background-color 0.2s;
+  border: 1px solid transparent;
+  margin-bottom: 0.125rem;
+}
+
+.experiment-item:hover {
+  background: #4b5563;
+}
+
+.experiment-item--active {
+  background: #1e40af;
+  border-color: #3b82f6;
+}
+
+.experiment-item__content {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  cursor: pointer;
+  padding: 0.125rem;
+  border-radius: 0.125rem;
+  transition: background-color 0.2s;
+}
+
+.experiment-item__content:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.experiment-item__name {
+  font-size: 0.625rem;
+  color: white;
+}
+
+.experiment-item__name--active {
+  font-weight: bold;
+  color: #10b981;
+}
+
+.experiment-item__check {
+  color: #10b981;
+  font-size: 0.625rem;
+  margin-left: 0.25rem;
+}
+
+.experiment-item__actions {
+  display: flex;
+  gap: 0.125rem;
+  margin-left: 0.25rem;
+}
+
+.experiment-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 0.125rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 0.625rem;
+}
+
+.experiment-action-btn--reset {
+  background-color: #f59e0b;
+  color: #ffffff;
+}
+
+.experiment-action-btn--reset:hover {
+  background-color: #d97706;
+}
+
+.experiment-action-btn--delete {
+  background-color: #ef4444;
+  color: #ffffff;
+}
+
+.experiment-action-btn--delete:hover {
+  background-color: #dc2626;
+}
+
+.experiment-action-btn--disabled {
+  background-color: #6b7280 !important;
+  color: #9ca3af !important;
+  cursor: not-allowed !important;
+  opacity: 0.5;
+}
+
+.experiment-action-btn--disabled:hover {
+  background-color: #6b7280 !important;
+  color: #9ca3af !important;
+}
+
+.create-experiment-btn {
+  width: 100%;
+  background: #2563eb;
+  color: white;
+  border: none;
+  border-radius: 0.375rem;
+  padding: 0.5rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+}
+
+.create-experiment-btn:hover {
+  background: #1d4ed8;
+}
+
+.create-experiment-btn i {
+  font-size: 0.625rem;
+}
+
+.loading-text {
+  font-size: 0.75rem;
+  color: #9ca3af;
+  text-align: center;
+  padding: 1rem;
+}
+
+/* Multi-Channel Controls */
+.channel-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.channel-item {
+  background: #374151;
+  border-radius: 0.375rem;
+  padding: 0.75rem;
+}
+
+.channel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.channel-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  font-size: 0.75rem;
+  color: white;
+}
+
+.channel-toggle input[type="checkbox"] {
+  margin: 0;
+}
+
+.channel-toggle input[type="checkbox"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.last-channel-indicator {
+  font-size: 0.75rem;
+  margin-left: 0.25rem;
+  opacity: 0.7;
+}
+
+.channel-color-indicator {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 0.25rem;
+  border: 1px solid #6b7280;
+}
+
+.channel-name {
+  font-weight: 500;
+}
+
+.channel-index {
+  font-size: 0.75rem;
+  color: #9ca3af;
+}
+
+/* Contrast Controls */
+.contrast-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.contrast-slider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.contrast-label {
+  font-size: 0.75rem;
+  color: #d1d5db;
+  width: 2rem;
+  text-align: right;
+}
+
+.contrast-range {
+  flex: 1;
+  height: 0.5rem;
+  background: #4b5563;
+  border-radius: 0.5rem;
+  appearance: none;
+  cursor: pointer;
+  outline: none;
+}
+
+.contrast-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 1rem;
+  height: 1rem;
+  background: #3b82f6;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.contrast-range::-moz-range-thumb {
+  width: 1rem;
+  height: 1rem;
+  background: #3b82f6;
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+}
+
+.contrast-value {
+  font-size: 0.75rem;
+  color: #d1d5db;
+  width: 2rem;
+  text-align: left;
+}
+
+.contrast-reset {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.reset-btn {
+  font-size: 0.75rem;
+  color: #60a5fa;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+  transition: color 0.2s;
+}
+
+.reset-btn:hover {
+  color: #93c5fd;
+}
+
+/* Channel Info */
+.channel-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 0.75rem;
+  font-size: 0.75rem;
+  color: #9ca3af;
+}
+
+.channel-count-info {
+  /* Additional styling if needed */
+}
+
+.blending-mode {
+  color: #10b981;
+  font-weight: 500;
+}
+
+/* Responsive adjustments for compact mode */
+.layer-panel--compact .layer-section {
+  padding-bottom: 0.75rem;
+}
+
+.layer-panel--compact .layer-section__content {
+  gap: 0.5rem;
+}
+
+.layer-panel--compact .channel-controls {
+  gap: 0.5rem;
+}
+
+.layer-panel--compact .channel-item {
+  padding: 0.5rem;
+}
+
+.layer-panel--compact .contrast-controls {
+  gap: 0.375rem;
+}
+
+/* Scrollbar styling */
+.layer-panel::-webkit-scrollbar {
+  width: 6px;
+}
+
+.layer-panel::-webkit-scrollbar-track {
+  background: #374151;
+  border-radius: 3px;
+}
+
+.layer-panel::-webkit-scrollbar-thumb {
+  background: #6b7280;
+  border-radius: 3px;
+}
+
+.layer-panel::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+.experiment-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.experiment-list::-webkit-scrollbar-track {
+  background: #4b5563;
+  border-radius: 2px;
+}
+
+.experiment-list::-webkit-scrollbar-thumb {
+  background: #6b7280;
+  border-radius: 2px;
+}

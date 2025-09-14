@@ -29,8 +29,9 @@ echo "📁 Running JavaScript tests..."
 echo "🚀 Making real HTTP requests to artifact manager..."
 echo ""
 
-# Run the test with Node.js
-node tests/test_artifact_zarr_loader.js
+# Run the test with Node.js from the tests directory
+cd tests
+node test_artifact_zarr_loader.js
 
 # Capture exit code
 EXIT_CODE=$?

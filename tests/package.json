@@ -1,0 +1,6 @@
+{
+  "type": "module",
+  "name": "agent-lens-tests",
+  "version": "0.0.1",
+  "description": "Test package for Agent-Lens JavaScript tests"
+}
