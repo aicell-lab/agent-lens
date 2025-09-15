@@ -1,9 +1,51 @@
 import pytest
+import pytest_asyncio
 import os
 import dotenv
+import uuid
 from hypha_rpc import connect_to_server
+from agent_lens.register_frontend_service import get_frontend_api
 
 dotenv.load_dotenv()
+
+@pytest_asyncio.fixture
+async def test_frontend_service(hypha_server):
+    """Create a real frontend service for testing similarity search endpoints."""
+    print(f"🔗 Using Hypha server connection for similarity search tests...")
+    
+    server = hypha_server
+    service = None
+    
+    try:
+        print("✅ Connected to server")
+        
+        # Create unique service ID for this test
+        test_id = f"test-similarity-frontend-{uuid.uuid4().hex[:8]}"
+        print(f"Creating test frontend service with ID: {test_id}")
+        
+        # Register the frontend service
+        print("📝 Registering frontend service...")
+        from agent_lens.register_frontend_service import setup_service
+        await setup_service(server, test_id)
+        
+        # Get the registered service
+        service = await server.get_service(test_id)
+        print("✅ Frontend service ready for similarity search testing")
+        
+        # Get the service URL for HTTP testing
+        service_url = f"https://hypha.aicell.io/agent-lens/apps/{test_id}"
+        print(f"🌐 Service URL: {service_url}")
+        
+        yield service, service_url
+        
+    except Exception as e:
+        print(f"❌ Failed to create test frontend service: {e}")
+        pytest.fail(f"Failed to create test frontend service: {e}")
+    finally:
+        # Cleanup
+        if service:
+            print("🧹 Cleaning up frontend service...")
+            # Service cleanup is handled by the server disconnect in conftest.py
 
 class TestWeaviateSimilarityService:
 
@@ -326,3 +368,113 @@ class TestWeaviateSimilarityService:
                 await weaviate_service.collections.delete(collection_name)
             except Exception as e:
                 print(f"Error cleaning up {collection_name}: {e}")
+
+    #########################################################################################
+    # FastAPI Endpoint Tests
+    #########################################################################################
+
+    @pytest.mark.integration
+    async def test_similarity_endpoints_lifecycle(self, test_frontend_service):
+        """Test complete similarity search endpoints lifecycle using real frontend service."""
+        service, service_url = test_frontend_service
+        collection_name = self._generate_test_collection_name()
+        application_id = f"test_app_{collection_name.split('_')[-1]}"
+        
+        import aiohttp
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                # 1. Create collection
+                print("🧪 Creating similarity collection...")
+                create_url = f"{service_url}/similarity/collections"
+                create_data = {
+                    "collection_name": collection_name,
+                    "description": "Test collection for FastAPI",
+                    "application_id": application_id
+                }
+                
+                async with session.post(create_url, params=create_data) as response:
+                    assert response.status == 200
+                    result = await response.json()
+                    assert result["success"] is True
+                    print("✅ Collection created successfully")
+                
+                # 2. Check collection exists
+                print("🧪 Checking collection exists...")
+                exists_url = f"{service_url}/similarity/collections/{collection_name}/exists"
+                async with session.get(exists_url) as response:
+                    assert response.status == 200
+                    result = await response.json()
+                    assert result["exists"] is True
+                    print("✅ Collection exists verified")
+                
+                # 3. Insert test image
+                print("🧪 Inserting test image...")
+                insert_url = f"{service_url}/similarity/insert"
+                insert_data = {
+                    "collection_name": collection_name,
+                    "application_id": application_id,
+                    "image_id": "test_img_001",
+                    "description": "Test microscopy image",
+                    "metadata": '{"channel": "BF_LED_matrix_full"}'
+                }
+                
+                async with session.post(insert_url, params=insert_data) as response:
+                    assert response.status == 200
+                    result = await response.json()
+                    assert result["success"] is True
+                    print("✅ Image inserted successfully")
+                
+                # 4. Search by text
+                print("🧪 Testing text search...")
+                search_url = f"{service_url}/similarity/search/text"
+                search_data = {
+                    "collection_name": collection_name,
+                    "application_id": application_id,
+                    "query_text": "microscopy",
+                    "limit": 5
+                }
+                
+                async with session.post(search_url, params=search_data) as response:
+                    assert response.status == 200
+                    result = await response.json()
+                    assert result["success"] is True
+                    assert "results" in result
+                    print("✅ Text search completed successfully")
+                
+                # 5. Search by vector
+                print("🧪 Testing vector search...")
+                vector_url = f"{service_url}/similarity/search/vector"
+                test_vector = self._generate_clip_vector("test microscopy image")
+                vector_data = {
+                    "collection_name": collection_name,
+                    "application_id": application_id,
+                    "limit": 5
+                }
+                
+                async with session.post(vector_url, params=vector_data, json=test_vector) as response:
+                    assert response.status == 200
+                    result = await response.json()
+                    assert result["success"] is True
+                    print("✅ Vector search completed successfully")
+                
+        finally:
+            # 6. Cleanup
+            print("🧹 Cleaning up test collection...")
+            try:
+                async with aiohttp.ClientSession() as session:
+                    cleanup_url = f"{service_url}/similarity/collections/{collection_name}"
+                    async with session.delete(cleanup_url) as response:
+                        print(f"Cleanup response: {response.status}")
+            except Exception as e:
+                print(f"Error cleaning up {collection_name}: {e}")
+
+    @pytest.mark.unit
+    def test_fastapi_imports(self):
+        """Test that FastAPI imports work correctly."""
+        from agent_lens.register_frontend_service import get_frontend_api
+        from agent_lens.utils.weaviate_search import similarity_service
+        
+        app = get_frontend_api()
+        assert app is not None
+        assert similarity_service is not None
