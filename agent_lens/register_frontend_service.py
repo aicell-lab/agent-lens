@@ -20,7 +20,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 import uuid
 import traceback
 # Import similarity search utilities
-from agent_lens.utils.weaviate_search import similarity_service, generate_text_embedding
+from agent_lens.utils.weaviate_search import similarity_service
 
 # Configure logging
 from .log import setup_logging
@@ -88,7 +88,7 @@ def get_frontend_api():
     async def root():
         return FileResponse(os.path.join(dist_dir, "index.html"))
 
-    @app.post("/embedding")
+    @app.post("/embedding/image")
     async def generate_image_embedding(image: UploadFile = File(...)):
         """Generate a CLIP image embedding from an uploaded image.
 
@@ -102,11 +102,40 @@ def get_frontend_api():
                 raise HTTPException(status_code=400, detail="Empty image upload")
             from agent_lens.utils.weaviate_search import generate_image_embedding
             embedding = await generate_image_embedding(image_bytes)
-            return {"model": "ViT-B/32", "embedding": embedding.tolist()}
+            return {"model": "ViT-B/32", "embedding": embedding, "dimension": len(embedding)}
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"Error generating embedding: {e}")
+            logger.error(f"Error generating image embedding: {e}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.post("/embedding/text")
+    async def generate_text_embedding_endpoint(text: str):
+        """Generate a CLIP text embedding from a text input.
+
+        Args:
+            text (str): Text input to generate embedding for
+            
+        Returns:
+            dict: JSON object with embedding vector and metadata
+        """
+        try:
+            if not text or not text.strip():
+                raise HTTPException(status_code=400, detail="Text input cannot be empty")
+            
+            from agent_lens.utils.weaviate_search import generate_text_embedding
+            embedding = await generate_text_embedding(text.strip())
+            return {
+                "model": "ViT-B/32", 
+                "embedding": embedding, 
+                "dimension": len(embedding),
+                "text": text.strip()
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error generating text embedding: {e}")
             logger.error(traceback.format_exc())
             raise HTTPException(status_code=500, detail=str(e))
 
@@ -484,6 +513,8 @@ def get_frontend_api():
             dict: Result of insertion
         """
         try:
+            from agent_lens.utils.weaviate_search import generate_text_embedding
+            
             if not await similarity_service.ensure_connected():
                 raise HTTPException(status_code=500, detail="Failed to connect to similarity search service")
             

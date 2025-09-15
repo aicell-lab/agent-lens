@@ -4,14 +4,13 @@ import os
 import dotenv
 import uuid
 from hypha_rpc import connect_to_server
-from agent_lens.register_frontend_service import get_frontend_api
 
 dotenv.load_dotenv()
 
 @pytest_asyncio.fixture
 async def test_frontend_service(hypha_server):
     """Create a real frontend service for testing similarity search endpoints."""
-    print(f"🔗 Using Hypha server connection for similarity search tests...")
+    print("🔗 Using Hypha server connection for similarity search tests...")
     
     server = hypha_server
     service = None
@@ -468,6 +467,73 @@ class TestWeaviateSimilarityService:
                         print(f"Cleanup response: {response.status}")
             except Exception as e:
                 print(f"Error cleaning up {collection_name}: {e}")
+
+    @pytest.mark.integration
+    async def test_embedding_endpoints(self, test_frontend_service):
+        """Test the basic embedding generation endpoints."""
+        service, service_url = test_frontend_service
+        import aiohttp
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                # Test text embedding endpoint
+                print("🧪 Testing text embedding endpoint...")
+                text_url = f"{service_url}/embedding/text"
+                text_data = {"text": "microscopy image of cells"}
+                
+                async with session.post(text_url, params=text_data) as response:
+                    assert response.status == 200
+                    result = await response.json()
+                    assert result["model"] == "ViT-B/32"
+                    assert "embedding" in result
+                    assert result["dimension"] == 512
+                    assert result["text"] == "microscopy image of cells"
+                    assert len(result["embedding"]) == 512
+                    print("✅ Text embedding generated successfully")
+                
+                # Test image embedding endpoint
+                print("🧪 Testing image embedding endpoint...")
+                image_url = f"{service_url}/embedding/image"
+                
+                # Create a simple test image (1x1 pixel PNG)
+                import io
+                from PIL import Image
+                test_image = Image.new('RGB', (1, 1), color='red')
+                img_buffer = io.BytesIO()
+                test_image.save(img_buffer, format='PNG')
+                img_buffer.seek(0)
+                
+                # Test image upload
+                from aiohttp import FormData
+                data = FormData()
+                data.add_field('image', img_buffer, filename='test.png', content_type='image/png')
+                async with session.post(image_url, data=data) as response:
+                    assert response.status == 200
+                    result = await response.json()
+                    assert result["model"] == "ViT-B/32"
+                    assert "embedding" in result
+                    assert result["dimension"] == 512
+                    assert len(result["embedding"]) == 512
+                    print("✅ Image embedding generated successfully")
+                
+                # Test error cases
+                print("🧪 Testing error cases...")
+                
+                # Empty text
+                async with session.post(text_url, params={"text": ""}) as response:
+                    assert response.status == 400
+                    print("✅ Empty text validation works")
+                
+                # Invalid image file
+                data = FormData()
+                data.add_field('image', io.BytesIO(b'not an image'), filename='test.txt', content_type='text/plain')
+                async with session.post(image_url, data=data) as response:
+                    assert response.status == 400
+                    print("✅ Invalid image file validation works")
+                
+        except Exception as e:
+            print(f"❌ Error in embedding endpoint tests: {e}")
+            raise
 
     @pytest.mark.unit
     def test_fastapi_imports(self):
