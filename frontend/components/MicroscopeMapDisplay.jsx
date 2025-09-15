@@ -3636,9 +3636,6 @@ const MicroscopeMapDisplay = ({
       {/* Header controls */}
       <div className="absolute top-0 left-0 right-0 bg-black bg-opacity-80 p-2 flex justify-between items-center z-10">
         <div className="flex items-center space-x-4">
-          <h3 className="text-white text-lg font-medium">
-            {mapViewMode === 'FOV_FITTED' ? 'Video View' : 'Stage Map'}
-          </h3>
           
           {mapViewMode === 'FREE_PAN' && (
             <>
