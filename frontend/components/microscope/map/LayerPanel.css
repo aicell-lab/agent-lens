@@ -318,6 +318,15 @@
   font-weight: 500;
 }
 
+.channel-color-indicator {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid #4b5563;
+  margin-left: 0.5rem;
+  flex-shrink: 0;
+}
+
 .channel-index {
   font-size: 0.75rem;
   color: #9ca3af;

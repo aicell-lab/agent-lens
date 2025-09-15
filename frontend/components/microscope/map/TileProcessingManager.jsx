@@ -13,12 +13,12 @@ import React from 'react';
 class TileProcessingManager {
   constructor() {
     this.defaultColors = {
-      'BF_LED_matrix_full': '#FFFFFF',
-      'Fluorescence_405_nm_Ex': '#8A2BE2', // Blue Violet
-      'Fluorescence_488_nm_Ex': '#00FF00', // Green
-      'Fluorescence_561_nm_Ex': '#FFFF00', // Yellow
-      'Fluorescence_638_nm_Ex': '#FF0000', // Red
-      'Fluorescence_730_nm_Ex': '#FF69B4', // Hot Pink
+      'BF LED matrix full': '#FFFFFF',
+      'Fluorescence 405 nm Ex': '#8A2BE2', // Blue Violet
+      'Fluorescence 488 nm Ex': '#00FF00', // Green
+      'Fluorescence 561 nm Ex': '#FFFF00', // Yellow
+      'Fluorescence 638 nm Ex': '#FF0000', // Red
+      'Fluorescence 730 nm Ex': '#FF69B4', // Hot Pink
     };
   }
 
@@ -206,10 +206,8 @@ class TileProcessingManager {
    * @returns {Promise<string>} - Processed data URL
    */
   async applyContrastAdjustment(dataUrl, config, color) {
-    // If no contrast adjustment needed, return original data
-    if (config.min === 0 && config.max === 255) {
-      return dataUrl;
-    }
+    // Always apply color tinting, even if no contrast adjustment is needed
+    // This ensures channels have their proper colors in multi-channel mode
 
     return new Promise((resolve) => {
       const img = new Image();
@@ -236,11 +234,11 @@ class TileProcessingManager {
         
         for (let i = 0; i < data.length; i += 4) {
           // Apply min/max contrast adjustment
-          const adjustedR = range > 0 ? Math.max(0, Math.min(255, (data[i] - min) * 255 / range)) : 0;
-          const adjustedG = range > 0 ? Math.max(0, Math.min(255, (data[i + 1] - min) * 255 / range)) : 0;
-          const adjustedB = range > 0 ? Math.max(0, Math.min(255, (data[i + 2] - min) * 255 / range)) : 0;
+          const adjustedR = range > 0 ? Math.max(0, Math.min(255, (data[i] - min) * 255 / range)) : data[i];
+          const adjustedG = range > 0 ? Math.max(0, Math.min(255, (data[i + 1] - min) * 255 / range)) : data[i + 1];
+          const adjustedB = range > 0 ? Math.max(0, Math.min(255, (data[i + 2] - min) * 255 / range)) : data[i + 2];
           
-          // Apply color tinting
+          // Apply color tinting (always apply, even if no contrast adjustment)
           data[i] = Math.min(255, adjustedR * colorRgb.r / 255);
           data[i + 1] = Math.min(255, adjustedG * colorRgb.g / 255);
           data[i + 2] = Math.min(255, adjustedB * colorRgb.b / 255);
@@ -296,6 +294,10 @@ class TileProcessingManager {
         canvas.width = img.width;
         canvas.height = img.height;
         
+        // Clear to black (important for additive blending)
+        ctx.fillStyle = 'black';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
         // Start with first channel
         ctx.drawImage(img, 0, 0);
         
@@ -305,12 +307,15 @@ class TileProcessingManager {
           const channelImg = new Image();
           
           channelImg.onload = () => {
-            // Use additive blending mode
-            ctx.globalCompositeOperation = 'screen';
+            // Use additive blending mode (lighter = additive)
+            ctx.globalCompositeOperation = 'lighter';
             ctx.drawImage(channelImg, 0, 0);
             
             // Check if this is the last channel to process
             if (i === channelDataArray.length - 1) {
+              // Reset composite operation
+              ctx.globalCompositeOperation = 'source-over';
+              
               // All channels processed, create final tile
               const mergedDataUrl = canvas.toDataURL('image/png');
               
@@ -331,6 +336,9 @@ class TileProcessingManager {
             console.warn(`Failed to load channel image for ${channelData.channelName}`);
             // Continue with next channel
             if (i === channelDataArray.length - 1) {
+              // Reset composite operation
+              ctx.globalCompositeOperation = 'source-over';
+              
               const mergedDataUrl = canvas.toDataURL('image/png');
               resolve({
                 data: mergedDataUrl,

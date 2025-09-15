@@ -282,6 +282,17 @@ const LayerPanel = ({
                 const config = realMicroscopeChannelConfigs[channel] || {};
                 const isLastChannel = isLastSelectedChannel(channel, isVisible);
                 
+                // Get default color for this channel (matching actual channel names with spaces)
+                const defaultColors = {
+                  'BF LED matrix full': '#FFFFFF',
+                  'Fluorescence 405 nm Ex': '#8A2BE2', // Blue Violet
+                  'Fluorescence 488 nm Ex': '#00FF00', // Green
+                  'Fluorescence 561 nm Ex': '#FFFF00', // Yellow
+                  'Fluorescence 638 nm Ex': '#FF0000', // Red
+                  'Fluorescence 730 nm Ex': '#FF69B4', // Hot Pink
+                };
+                const channelColor = defaultColors[channel] || '#FFFFFF';
+                
                 return (
                   <div key={channel} className="channel-item">
                     {/* Channel Header */}
@@ -301,6 +312,11 @@ const LayerPanel = ({
                           title={isLastChannel ? "Cannot deselect the last remaining channel" : ""}
                         />
                         <span className="channel-name">{channel}</span>
+                        <span 
+                          className="channel-color-indicator" 
+                          style={{ backgroundColor: channelColor }}
+                          title={`Channel color: ${channelColor}`}
+                        ></span>
                         {isLastChannel && <span className="last-channel-indicator" title="Last selected channel">🔒</span>}
                       </label>
                     </div>
