@@ -23,6 +23,7 @@ const AnnotationPanel = ({
   onExportAnnotations,
   onImportAnnotations,
   wellInfoMap = {}, // Map of annotation IDs to well information
+  embeddingStatus = {}, // Map of annotation IDs to embedding status
 }) => {
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [activeColorType, setActiveColorType] = useState('stroke'); // 'stroke' or 'fill'
@@ -317,6 +318,7 @@ const AnnotationPanel = ({
                 {annotations.map((annotation, index) => {
                   const wellInfo = wellInfoMap[annotation.id];
                   const wellId = wellInfo ? wellInfo.id : 'Unknown';
+                  const status = embeddingStatus[annotation.id];
                   
                   return (
                     <div key={annotation.id} className="annotation-item">
@@ -340,6 +342,26 @@ const AnnotationPanel = ({
                             marginLeft: '4px' 
                           }}>
                             Well: {wellId}
+                          </span>
+                        )}
+                        {/* Embedding Status Indicator */}
+                        {status && (annotation.type === 'rectangle' || annotation.type === 'polygon') && (
+                          <span 
+                            className="embedding-status" 
+                            style={{ 
+                              fontSize: '10px', 
+                              marginLeft: '8px',
+                              color: status.status === 'completed' ? '#28a745' : 
+                                     status.status === 'generating' ? '#ffc107' : 
+                                     status.status === 'error' ? '#dc3545' : '#666'
+                            }}
+                            title={status.status === 'generating' ? 'Generating embeddings...' : 
+                                   status.status === 'completed' ? 'Embeddings ready' : 
+                                   status.status === 'error' ? `Error: ${status.error}` : ''}
+                          >
+                            {status.status === 'generating' && <i className="fas fa-spinner fa-spin"></i>}
+                            {status.status === 'completed' && <i className="fas fa-check-circle"></i>}
+                            {status.status === 'error' && <i className="fas fa-exclamation-circle"></i>}
                           </span>
                         )}
                       </div>
@@ -433,6 +455,7 @@ AnnotationPanel.propTypes = {
   onExportAnnotations: PropTypes.func.isRequired,
   onImportAnnotations: PropTypes.func.isRequired,
   wellInfoMap: PropTypes.object, // Map of annotation IDs to well information
+  embeddingStatus: PropTypes.object, // Map of annotation IDs to embedding status
 };
 
 export default AnnotationPanel;

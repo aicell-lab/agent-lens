@@ -223,6 +223,15 @@ const AnnotationDetailsWindow = ({
                 bbox: annotation.bbox,
                 polygon_wkt: annotation.polygon_wkt
               };
+              
+              // Include embeddings if available
+              if (annotation.embeddings) {
+                exportData.embeddings = {
+                  imageEmbedding: annotation.embeddings.imageEmbedding,
+                  textEmbedding: annotation.embeddings.textEmbedding,
+                  generatedAt: annotation.embeddings.generatedAt
+                };
+              }
               const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
               const url = URL.createObjectURL(blob);
               const a = document.createElement('a');

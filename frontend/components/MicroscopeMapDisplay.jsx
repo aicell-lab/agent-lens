@@ -9,6 +9,7 @@ import QuickScanConfig from './microscope/controls/QuickScanConfig';
 import NormalScanConfig from './microscope/controls/NormalScanConfig';
 import AnnotationPanel from './annotation/AnnotationPanel';
 import AnnotationCanvas from './annotation/AnnotationCanvas';
+import { generateAnnotationEmbeddings } from '../utils/annotationEmbeddingService';
 import './MicroscopeMapDisplay.css';
 
 const MicroscopeMapDisplay = ({
@@ -408,6 +409,9 @@ const MicroscopeMapDisplay = ({
 
   // Well information mapping for annotations
   const [annotationWellMap, setAnnotationWellMap] = useState({});
+  
+  // Embedding status tracking
+  const [embeddingStatus, setEmbeddingStatus] = useState({}); // Track embedding status per annotation
 
   const handleImportAnnotations = useCallback((importedAnnotations) => {
     setAnnotations(importedAnnotations);
@@ -526,7 +530,7 @@ const MicroscopeMapDisplay = ({
   }, [detectWellFromStageCoords, appendLog]);
 
   // Annotation handlers
-  const handleAnnotationAdd = useCallback((annotation) => {
+  const handleAnnotationAdd = useCallback(async (annotation) => {
     setAnnotations(prev => [...prev, annotation]);
     
     // Detect well for the new annotation
@@ -535,7 +539,73 @@ const MicroscopeMapDisplay = ({
     if (appendLog) {
       appendLog(`Added ${annotation.type} annotation at (${annotation.points[0].x.toFixed(2)}, ${annotation.points[0].y.toFixed(2)}) mm`);
     }
-  }, [appendLog, detectWellForAnnotation]);
+
+    // Automatically generate embeddings for rectangle and polygon annotations
+    if (annotation.type === 'rectangle' || annotation.type === 'polygon') {
+      try {
+        // Set embedding status to generating
+        setEmbeddingStatus(prev => ({
+          ...prev,
+          [annotation.id]: { status: 'generating', error: null }
+        }));
+
+        if (appendLog) {
+          appendLog(`Generating embeddings for ${annotation.type} annotation...`);
+        }
+
+        // Get the microscope view canvas (the main canvas showing the map)
+        const canvas = canvasRef.current;
+        if (!canvas) {
+          throw new Error('Microscope view canvas not found');
+        }
+
+        // Calculate mapScale inside the function to avoid hoisting issues
+        const currentMapScale = mapViewMode === 'FOV_FITTED' ? autoFittedScale : calculatedMapScale;
+
+        // Generate embeddings
+        const embeddings = await generateAnnotationEmbeddings(
+          canvas,
+          annotation,
+          currentMapScale,
+          mapPan,
+          stageDimensions,
+          pixelsPerMm
+        );
+
+        // Update annotation with embeddings
+        setAnnotations(prev => 
+          prev.map(ann => 
+            ann.id === annotation.id 
+              ? { ...ann, embeddings }
+              : ann
+          )
+        );
+
+        // Set embedding status to completed
+        setEmbeddingStatus(prev => ({
+          ...prev,
+          [annotation.id]: { status: 'completed', error: null }
+        }));
+
+        if (appendLog) {
+          appendLog(`Embeddings generated successfully for ${annotation.type} annotation`);
+        }
+
+      } catch (error) {
+        console.error('Error generating embeddings:', error);
+        
+        // Set embedding status to error
+        setEmbeddingStatus(prev => ({
+          ...prev,
+          [annotation.id]: { status: 'error', error: error.message }
+        }));
+
+        if (appendLog) {
+          appendLog(`Failed to generate embeddings: ${error.message}`);
+        }
+      }
+    }
+  }, [appendLog, detectWellForAnnotation, mapPan, canvasRef]);
 
   const handleAnnotationUpdate = useCallback((id, updates) => {
     setAnnotations(prev => 
@@ -3795,6 +3865,7 @@ const MicroscopeMapDisplay = ({
                       onExportAnnotations={handleExportAnnotations}
                       onImportAnnotations={handleImportAnnotations}
                       wellInfoMap={annotationWellMap}
+                      embeddingStatus={embeddingStatus}
                     />
                   </div>
                 )}

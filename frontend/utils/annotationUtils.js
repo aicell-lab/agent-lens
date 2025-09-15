@@ -108,7 +108,7 @@ export function generateAnnotationData(annotation, wellInfo) {
   );
   
   const annotationData = {
-    obj_id: generateObjectId(),
+    obj_id: `obj_${annotation.timestamp || annotation.id}_${Math.random().toString(36).substr(2, 9)}`,
     well: wellInfo.id,
     type: annotation.type,
     description: annotation.description || '',
@@ -127,6 +127,15 @@ export function generateAnnotationData(annotation, wellInfo) {
     const polygonWkt = generateWktPolygon(wellRelativePoints);
     annotationData.polygon_wkt = polygonWkt;
     annotationData.bbox = null;
+  }
+  
+  // Include embedding data if available
+  if (annotation.embeddings) {
+    annotationData.embeddings = {
+      imageEmbedding: annotation.embeddings.imageEmbedding,
+      textEmbedding: annotation.embeddings.textEmbedding,
+      generatedAt: annotation.embeddings.generatedAt
+    };
   }
   
   return annotationData;
