@@ -3866,6 +3866,10 @@ const MicroscopeMapDisplay = ({
                       onImportAnnotations={handleImportAnnotations}
                       wellInfoMap={annotationWellMap}
                       embeddingStatus={embeddingStatus}
+                      mapScale={mapScale}
+                      mapPan={mapPan}
+                      stageDimensions={stageDimensions}
+                      pixelsPerMm={pixelsPerMm}
                     />
                   </div>
                 )}

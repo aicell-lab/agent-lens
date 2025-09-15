@@ -1,8 +1,154 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
 import './AnnotationPanel.css';
 import AnnotationDetailsWindow from './AnnotationDetailsWindow';
 import { generateAnnotationData, exportAnnotationsToJson } from '../../utils/annotationUtils';
+import { extractAnnotationImageRegion } from '../../utils/annotationEmbeddingService';
+
+// Component for displaying annotation image previews
+const AnnotationImagePreview = ({ 
+  annotation, 
+  wellInfo, 
+  mapScale, 
+  mapPan, 
+  stageDimensions, 
+  pixelsPerMm 
+}) => {
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    const generatePreview = async () => {
+      if (!annotation || !wellInfo || !mapScale || !mapPan || !stageDimensions || !pixelsPerMm) {
+        return;
+      }
+
+      setIsLoading(true);
+      try {
+        // Find the main microscope view container
+        const microscopeContainer = document.querySelector('.relative.w-full.h-full.bg-black');
+        if (!microscopeContainer) {
+          console.warn('Microscope container not found for image preview');
+          return;
+        }
+
+        // Create a temporary canvas that captures the current view
+        const tempCanvas = document.createElement('canvas');
+        const containerRect = microscopeContainer.getBoundingClientRect();
+        tempCanvas.width = containerRect.width;
+        tempCanvas.height = containerRect.height;
+        tempCanvas.setAttribute('willReadFrequently', 'true');
+        const tempCtx = tempCanvas.getContext('2d');
+
+        // Fill with black background
+        tempCtx.fillStyle = '#000000';
+        tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+
+        // Draw all visible tile images to the temporary canvas
+        const tileImages = document.querySelectorAll('.scan-results-container img');
+        for (const img of tileImages) {
+          if (img.complete && img.naturalWidth > 0) {
+            const container = img.parentElement;
+            const containerRect = {
+              left: parseFloat(container.style.left) || 0,
+              top: parseFloat(container.style.top) || 0,
+              width: parseFloat(container.style.width) || 0,
+              height: parseFloat(container.style.height) || 0
+            };
+
+            // Draw the tile image
+            tempCtx.drawImage(
+              img,
+              containerRect.left,
+              containerRect.top,
+              containerRect.width,
+              containerRect.height
+            );
+          }
+        }
+
+        // Now use the temporary canvas for annotation extraction
+        const imageBlob = await extractAnnotationImageRegion(
+          tempCanvas, 
+          annotation, 
+          mapScale, 
+          mapPan, 
+          stageDimensions, 
+          pixelsPerMm
+        );
+
+        const url = URL.createObjectURL(imageBlob);
+        setPreviewUrl(url);
+      } catch (error) {
+        console.error('Error generating annotation preview:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    generatePreview();
+
+    // Cleanup object URL on unmount
+    return () => {
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+      }
+    };
+  }, [annotation, wellInfo, mapScale, mapPan, stageDimensions, pixelsPerMm]);
+
+  if (isLoading) {
+    return (
+      <div className="annotation-preview" style={{
+        width: '40px',
+        height: '30px',
+        backgroundColor: '#f0f0f0',
+        border: '1px solid #ddd',
+        borderRadius: '4px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginLeft: '8px'
+      }}>
+        <i className="fas fa-spinner fa-spin" style={{ fontSize: '10px', color: '#666' }}></i>
+      </div>
+    );
+  }
+
+  if (!previewUrl) {
+    return null;
+  }
+
+  return (
+    <div className="annotation-preview" style={{
+      width: '40px',
+      height: '30px',
+      border: '1px solid #ddd',
+      borderRadius: '4px',
+      marginLeft: '8px',
+      overflow: 'hidden',
+      backgroundColor: '#f0f0f0'
+    }}>
+      <img 
+        src={previewUrl} 
+        alt={`${annotation.type} annotation preview`}
+        style={{
+          width: '100%',
+          height: '100%',
+          objectFit: 'cover'
+        }}
+      />
+    </div>
+  );
+};
+
+AnnotationImagePreview.propTypes = {
+  annotation: PropTypes.object.isRequired,
+  wellInfo: PropTypes.object,
+  mapScale: PropTypes.object,
+  mapPan: PropTypes.object,
+  stageDimensions: PropTypes.object,
+  pixelsPerMm: PropTypes.number
+};
 
 const AnnotationPanel = ({
   isDrawingMode,
@@ -24,6 +170,10 @@ const AnnotationPanel = ({
   onImportAnnotations,
   wellInfoMap = {}, // Map of annotation IDs to well information
   embeddingStatus = {}, // Map of annotation IDs to embedding status
+  mapScale = null, // Current map scale for image extraction
+  mapPan = null, // Current map pan offset for image extraction
+  stageDimensions = null, // Stage dimensions in mm for image extraction
+  pixelsPerMm = null // Pixels per millimeter conversion for image extraction
 }) => {
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [activeColorType, setActiveColorType] = useState('stroke'); // 'stroke' or 'fill'
@@ -334,6 +484,16 @@ const AnnotationPanel = ({
                         }`}></i>
                         <span className="annotation-type">{annotation.type}</span>
                         <span className="annotation-index">#{index + 1}</span>
+                        
+                        {/* Image Preview */}
+                        <AnnotationImagePreview 
+                          annotation={annotation}
+                          wellInfo={wellInfo}
+                          mapScale={mapScale}
+                          mapPan={mapPan}
+                          stageDimensions={stageDimensions}
+                          pixelsPerMm={pixelsPerMm}
+                        />
                         {wellInfo && (
                           <span className="annotation-well" style={{ 
                             fontSize: '10px', 
@@ -365,11 +525,6 @@ const AnnotationPanel = ({
                         )}
                       </div>
                       <div className="annotation-item-actions">
-                        <div 
-                          className="annotation-color-indicator"
-                          style={{ backgroundColor: annotation.strokeColor }}
-                          title={`Stroke: ${annotation.strokeColor}, Fill: ${annotation.fillColor}`}
-                        />
                         <button
                           onClick={() => onAnnotationDelete(annotation.id)}
                           className="annotation-delete-btn"
@@ -455,6 +610,10 @@ AnnotationPanel.propTypes = {
   onImportAnnotations: PropTypes.func.isRequired,
   wellInfoMap: PropTypes.object, // Map of annotation IDs to well information
   embeddingStatus: PropTypes.object, // Map of annotation IDs to embedding status
+  mapScale: PropTypes.object, // Current map scale for image extraction
+  mapPan: PropTypes.object, // Current map pan offset for image extraction
+  stageDimensions: PropTypes.object, // Stage dimensions in mm for image extraction
+  pixelsPerMm: PropTypes.number // Pixels per millimeter conversion for image extraction
 };
 
 export default AnnotationPanel;

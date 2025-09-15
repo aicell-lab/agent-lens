@@ -314,13 +314,6 @@
   opacity: 0.7;
 }
 
-.channel-color-indicator {
-  width: 1rem;
-  height: 1rem;
-  border-radius: 0.25rem;
-  border: 1px solid #6b7280;
-}
-
 .channel-name {
   font-weight: 500;
 }

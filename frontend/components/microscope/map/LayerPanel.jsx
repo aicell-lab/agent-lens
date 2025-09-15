@@ -217,10 +217,6 @@ const LayerPanel = ({
                           onChange={(e) => updateZarrChannelConfig(channel.label, { enabled: e.target.checked })}
                           title={isLastChannel ? "Cannot deselect the last remaining channel" : ""}
                         />
-                        <div 
-                          className="channel-color-indicator"
-                          style={{ backgroundColor: channelColor }}
-                        ></div>
                         <span className="channel-name">{channel.label}</span>
                         {isLastChannel && <span className="last-channel-indicator" title="Last selected channel">🔒</span>}
                       </label>
