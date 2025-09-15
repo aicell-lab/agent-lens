@@ -3,7 +3,7 @@ import PropTypes from 'prop-types';
 import './AnnotationPanel.css';
 import AnnotationDetailsWindow from './AnnotationDetailsWindow';
 import { generateAnnotationData, exportAnnotationsToJson } from '../../utils/annotationUtils';
-import { extractAnnotationImageRegion } from '../../utils/annotationEmbeddingService';
+import { extractAnnotationImageRegion, extractAnnotationImageRegionAdvanced } from '../../utils/annotationEmbeddingService';
 
 // Component for displaying annotation image previews
 const AnnotationImagePreview = ({ 
@@ -12,75 +12,144 @@ const AnnotationImagePreview = ({
   mapScale, 
   mapPan, 
   stageDimensions, 
-  pixelsPerMm 
+  pixelsPerMm,
+  // New props for advanced extraction
+  isHistoricalDataMode,
+  microscopeControlService,
+  artifactZarrLoader,
+  zarrChannelConfigs,
+  realMicroscopeChannelConfigs,
+  enabledZarrChannels,
+  visibleChannelsConfig,
+  selectedHistoricalDataset,
+  wellPlateType,
+  timepoint
 }) => {
   const [previewUrl, setPreviewUrl] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     const generatePreview = async () => {
-      if (!annotation || !wellInfo || !mapScale || !mapPan || !stageDimensions || !pixelsPerMm) {
+      if (!annotation || !wellInfo) {
         return;
       }
 
+      // Check if we have the required services and data for advanced extraction
+      const canUseAdvancedExtraction = 
+        (isHistoricalDataMode && artifactZarrLoader && enabledZarrChannels.length > 0) ||
+        (!isHistoricalDataMode && microscopeControlService && Object.values(visibleChannelsConfig).some(v => v));
+
       setIsLoading(true);
       try {
-        // Find the main microscope view container
-        const microscopeContainer = document.querySelector('.relative.w-full.h-full.bg-black');
-        if (!microscopeContainer) {
-          console.warn('Microscope container not found for image preview');
-          return;
-        }
+        let imageBlob;
 
-        // Create a temporary canvas that captures the current view
-        const tempCanvas = document.createElement('canvas');
-        const containerRect = microscopeContainer.getBoundingClientRect();
-        tempCanvas.width = containerRect.width;
-        tempCanvas.height = containerRect.height;
-        tempCanvas.setAttribute('willReadFrequently', 'true');
-        const tempCtx = tempCanvas.getContext('2d');
+        if (canUseAdvancedExtraction) {
+          console.log('🎨 Using advanced extraction for annotation preview');
+          
+          // Determine mode and prepare services
+          const mode = isHistoricalDataMode ? 'HISTORICAL' : 'FREE_PAN';
+          const services = {
+            microscopeControlService,
+            artifactZarrLoader
+          };
 
-        // Fill with black background
-        tempCtx.fillStyle = '#000000';
-        tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
-
-        // Draw all visible tile images to the temporary canvas
-        const tileImages = document.querySelectorAll('.scan-results-container img');
-        for (const img of tileImages) {
-          if (img.complete && img.naturalWidth > 0) {
-            const container = img.parentElement;
-            const containerRect = {
-              left: parseFloat(container.style.left) || 0,
-              top: parseFloat(container.style.top) || 0,
-              width: parseFloat(container.style.width) || 0,
-              height: parseFloat(container.style.height) || 0
-            };
-
-            // Draw the tile image
-            tempCtx.drawImage(
-              img,
-              containerRect.left,
-              containerRect.top,
-              containerRect.width,
-              containerRect.height
-            );
+          // Prepare channel configurations based on mode
+          let channelConfigs, enabledChannels;
+          if (isHistoricalDataMode) {
+            channelConfigs = zarrChannelConfigs;
+            enabledChannels = enabledZarrChannels;
+          } else {
+            channelConfigs = realMicroscopeChannelConfigs;
+            // Convert visible channels to enabled channels format
+            enabledChannels = Object.entries(visibleChannelsConfig)
+              .filter(([, isVisible]) => isVisible)
+              .map(([channelName]) => ({ channelName, label: channelName }));
           }
-        }
 
-        // Now use the temporary canvas for annotation extraction
-        const imageBlob = await extractAnnotationImageRegion(
-          tempCanvas, 
-          annotation, 
-          mapScale, 
-          mapPan, 
-          stageDimensions, 
-          pixelsPerMm
-        );
+          // Prepare metadata
+          const metadata = {
+            datasetId: selectedHistoricalDataset?.id,
+            wellPlateType,
+            timepoint
+          };
+
+          // Use advanced extraction
+          imageBlob = await extractAnnotationImageRegionAdvanced(
+            annotation,
+            wellInfo,
+            mode,
+            services,
+            channelConfigs,
+            enabledChannels,
+            metadata
+          );
+        } else {
+          console.log('🎨 Using legacy extraction for annotation preview (missing requirements for advanced)');
+          
+          // Fall back to legacy method if advanced requirements not met
+          if (!mapScale || !mapPan || !stageDimensions || !pixelsPerMm) {
+            console.warn('Missing requirements for legacy extraction as well');
+            return;
+          }
+
+          // Find the main microscope view container
+          const microscopeContainer = document.querySelector('.relative.w-full.h-full.bg-black');
+          if (!microscopeContainer) {
+            console.warn('Microscope container not found for image preview');
+            return;
+          }
+
+          // Create a temporary canvas that captures the current view
+          const tempCanvas = document.createElement('canvas');
+          const containerRect = microscopeContainer.getBoundingClientRect();
+          tempCanvas.width = containerRect.width;
+          tempCanvas.height = containerRect.height;
+          tempCanvas.setAttribute('willReadFrequently', 'true');
+          const tempCtx = tempCanvas.getContext('2d');
+
+          // Fill with black background
+          tempCtx.fillStyle = '#000000';
+          tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+
+          // Draw all visible tile images to the temporary canvas
+          const tileImages = document.querySelectorAll('.scan-results-container img');
+          for (const img of tileImages) {
+            if (img.complete && img.naturalWidth > 0) {
+              const container = img.parentElement;
+              const containerRect = {
+                left: parseFloat(container.style.left) || 0,
+                top: parseFloat(container.style.top) || 0,
+                width: parseFloat(container.style.width) || 0,
+                height: parseFloat(container.style.height) || 0
+              };
+
+              // Draw the tile image
+              tempCtx.drawImage(
+                img,
+                containerRect.left,
+                containerRect.top,
+                containerRect.width,
+                containerRect.height
+              );
+            }
+          }
+
+          // Use legacy extraction
+          imageBlob = await extractAnnotationImageRegion(
+            tempCanvas, 
+            annotation, 
+            mapScale, 
+            mapPan, 
+            stageDimensions, 
+            pixelsPerMm
+          );
+        }
 
         const url = URL.createObjectURL(imageBlob);
         setPreviewUrl(url);
       } catch (error) {
         console.error('Error generating annotation preview:', error);
+        // TODO: Could add a fallback to show an error icon instead of spinner
       } finally {
         setIsLoading(false);
       }
@@ -94,7 +163,22 @@ const AnnotationImagePreview = ({
         URL.revokeObjectURL(previewUrl);
       }
     };
-  }, [annotation, wellInfo, mapScale, mapPan, stageDimensions, pixelsPerMm]);
+  }, [
+    annotation, 
+    wellInfo, 
+    mapScale, 
+    mapPan, 
+    stageDimensions, 
+    pixelsPerMm,
+    isHistoricalDataMode,
+    zarrChannelConfigs,
+    realMicroscopeChannelConfigs,
+    enabledZarrChannels,
+    visibleChannelsConfig,
+    selectedHistoricalDataset,
+    wellPlateType,
+    timepoint
+  ]);
 
   if (isLoading) {
     return (
@@ -147,7 +231,18 @@ AnnotationImagePreview.propTypes = {
   mapScale: PropTypes.object,
   mapPan: PropTypes.object,
   stageDimensions: PropTypes.object,
-  pixelsPerMm: PropTypes.number
+  pixelsPerMm: PropTypes.number,
+  // New props for advanced extraction
+  isHistoricalDataMode: PropTypes.bool,
+  microscopeControlService: PropTypes.object,
+  artifactZarrLoader: PropTypes.object,
+  zarrChannelConfigs: PropTypes.object,
+  realMicroscopeChannelConfigs: PropTypes.object,
+  enabledZarrChannels: PropTypes.array,
+  visibleChannelsConfig: PropTypes.object,
+  selectedHistoricalDataset: PropTypes.object,
+  wellPlateType: PropTypes.string,
+  timepoint: PropTypes.number
 };
 
 const AnnotationPanel = ({
@@ -173,7 +268,18 @@ const AnnotationPanel = ({
   mapScale = null, // Current map scale for image extraction
   mapPan = null, // Current map pan offset for image extraction
   stageDimensions = null, // Stage dimensions in mm for image extraction
-  pixelsPerMm = null // Pixels per millimeter conversion for image extraction
+  pixelsPerMm = null, // Pixels per millimeter conversion for image extraction
+  // New props for advanced extraction
+  isHistoricalDataMode = false,
+  microscopeControlService = null,
+  artifactZarrLoader = null,
+  zarrChannelConfigs = {},
+  realMicroscopeChannelConfigs = {},
+  enabledZarrChannels = [],
+  visibleChannelsConfig = {},
+  selectedHistoricalDataset = null,
+  wellPlateType = '96',
+  timepoint = 0
 }) => {
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [activeColorType, setActiveColorType] = useState('stroke'); // 'stroke' or 'fill'
@@ -493,6 +599,16 @@ const AnnotationPanel = ({
                           mapPan={mapPan}
                           stageDimensions={stageDimensions}
                           pixelsPerMm={pixelsPerMm}
+                          isHistoricalDataMode={isHistoricalDataMode}
+                          microscopeControlService={microscopeControlService}
+                          artifactZarrLoader={artifactZarrLoader}
+                          zarrChannelConfigs={zarrChannelConfigs}
+                          realMicroscopeChannelConfigs={realMicroscopeChannelConfigs}
+                          enabledZarrChannels={enabledZarrChannels}
+                          visibleChannelsConfig={visibleChannelsConfig}
+                          selectedHistoricalDataset={selectedHistoricalDataset}
+                          wellPlateType={wellPlateType}
+                          timepoint={timepoint}
                         />
                         {wellInfo && (
                           <span className="annotation-well" style={{ 
@@ -613,7 +729,18 @@ AnnotationPanel.propTypes = {
   mapScale: PropTypes.object, // Current map scale for image extraction
   mapPan: PropTypes.object, // Current map pan offset for image extraction
   stageDimensions: PropTypes.object, // Stage dimensions in mm for image extraction
-  pixelsPerMm: PropTypes.number // Pixels per millimeter conversion for image extraction
+  pixelsPerMm: PropTypes.number, // Pixels per millimeter conversion for image extraction
+  // New props for advanced extraction
+  isHistoricalDataMode: PropTypes.bool,
+  microscopeControlService: PropTypes.object,
+  artifactZarrLoader: PropTypes.object,
+  zarrChannelConfigs: PropTypes.object,
+  realMicroscopeChannelConfigs: PropTypes.object,
+  enabledZarrChannels: PropTypes.array,
+  visibleChannelsConfig: PropTypes.object,
+  selectedHistoricalDataset: PropTypes.object,
+  wellPlateType: PropTypes.string,
+  timepoint: PropTypes.number
 };
 
 export default AnnotationPanel;

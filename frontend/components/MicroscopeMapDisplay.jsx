@@ -3870,6 +3870,17 @@ const MicroscopeMapDisplay = ({
                       mapPan={mapPan}
                       stageDimensions={stageDimensions}
                       pixelsPerMm={pixelsPerMm}
+                      // New props for advanced extraction
+                      isHistoricalDataMode={isHistoricalDataMode}
+                      microscopeControlService={microscopeControlService}
+                      artifactZarrLoader={artifactZarrLoaderRef.current}
+                      zarrChannelConfigs={zarrChannelConfigs}
+                      realMicroscopeChannelConfigs={realMicroscopeChannelConfigs}
+                      enabledZarrChannels={getEnabledZarrChannels()}
+                      visibleChannelsConfig={visibleLayers.channels}
+                      selectedHistoricalDataset={selectedHistoricalDataset}
+                      wellPlateType={wellPlateType}
+                      timepoint={0}
                     />
                   </div>
                 )}
