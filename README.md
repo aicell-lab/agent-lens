@@ -185,8 +185,11 @@ The application requires several backend services:
 ```
 agent-lens/
 ├── 📁 agent_lens/              # Python backend package
+│   ├── 📁 utils/               # Utility modules
+│   │   ├── 📄 artifact_manager.py  # Data storage management
+│   │   ├── 📄 register_sam_service.py  # SAM segmentation service
+│   │   └── 📄 weaviate_search.py     # Similarity search utilities
 │   ├── 📁 tests/               # Test suite
-│   ├── 📄 artifact_manager.py  # Data storage management
 │   ├── 📄 register_*.py        # Service registration modules
 │   └── 📄 __main__.py          # CLI entry point
 ├── 📁 frontend/                # React application

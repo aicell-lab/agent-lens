@@ -157,7 +157,10 @@ const chunkUrl = `${baseUrl}${channel}/scale${scale}/${y}.zip?path=${x}`;
 ```
 agent_lens/                 # Main Python package
 ├── __main__.py            # Entry point with CLI argument parsing
-├── artifact_manager.py    # Data storage and Zarr tile management
+├── utils/                 # Utility modules
+│   ├── artifact_manager.py    # Data storage and Zarr tile management
+│   ├── register_sam_service.py  # SAM segmentation service registration
+│   └── weaviate_search.py     # Similarity search utilities
 ├── register_*_service.py  # Service registration modules
 
 tests/                     # Pytest test files (project root level)

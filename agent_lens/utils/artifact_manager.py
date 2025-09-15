@@ -19,7 +19,7 @@ from asyncio import Lock
 import json
 import uuid
 # Configure logging
-from .log import setup_logging
+from ..log import setup_logging
 
 logger = setup_logging("artifact_manager.log")
 

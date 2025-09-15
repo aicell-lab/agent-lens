@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi import UploadFile, File, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
-from agent_lens.artifact_manager import AgentLensArtifactManager
+from agent_lens.utils.artifact_manager import AgentLensArtifactManager
 from hypha_rpc import connect_to_server
 import base64
 import io
