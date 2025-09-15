@@ -32,7 +32,6 @@ const AnnotationPanel = ({
   const [detailsWindowPosition, setDetailsWindowPosition] = useState({ x: 100, y: 100 });
 
   const tools = [
-    { id: 'select', name: 'Select', icon: 'fa-mouse-pointer', tooltip: 'Select and move annotations' },
     { id: 'rectangle', name: 'Rectangle', icon: 'fa-square', tooltip: 'Draw rectangles' },
     { id: 'polygon', name: 'Polygon', icon: 'fa-draw-polygon', tooltip: 'Draw polygons (click to add points, double-click to finish)' },
     { id: 'freehand', name: 'Freehand', icon: 'fa-pencil', tooltip: 'Draw freehand shapes' },
@@ -345,7 +344,7 @@ const AnnotationPanel = ({
                           </span>
                         )}
                         {/* Embedding Status Indicator */}
-                        {status && (annotation.type === 'rectangle' || annotation.type === 'polygon') && (
+                        {status && (annotation.type === 'rectangle' || annotation.type === 'polygon' || annotation.type === 'freehand') && (
                           <span 
                             className="embedding-status" 
                             style={{ 

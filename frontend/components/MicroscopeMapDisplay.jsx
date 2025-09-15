@@ -540,8 +540,8 @@ const MicroscopeMapDisplay = ({
       appendLog(`Added ${annotation.type} annotation at (${annotation.points[0].x.toFixed(2)}, ${annotation.points[0].y.toFixed(2)}) mm`);
     }
 
-    // Automatically generate embeddings for rectangle and polygon annotations
-    if (annotation.type === 'rectangle' || annotation.type === 'polygon') {
+    // Automatically generate embeddings for rectangle, polygon, and freehand annotations
+    if (annotation.type === 'rectangle' || annotation.type === 'polygon' || annotation.type === 'freehand') {
       try {
         // Set embedding status to generating
         setEmbeddingStatus(prev => ({
