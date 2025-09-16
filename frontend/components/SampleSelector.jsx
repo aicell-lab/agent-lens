@@ -26,7 +26,8 @@ const SampleSelector = ({
 
   // Define the mapping of sample IDs to their data aliases
   const sampleDataAliases = {
-    'simulated-sample-1': 'agent-lens/20250824-example-data-20250824-221822'
+    'simulated-sample-1': 'agent-lens/20250824-example-data-20250824-221822',
+    'hpa-sample': 'agent-lens/hpa-example-sample-20250114-150051'
   };
   
   const isRealMicroscopeSelected = selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ||

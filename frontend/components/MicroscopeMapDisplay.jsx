@@ -2583,6 +2583,45 @@ const MicroscopeMapDisplay = ({
       });
     }
   }, [isSimulatedMicroscope, mapViewMode, isHistoricalDataMode, selectedMicroscopeId, setStitchedTiles, setSelectedGallery]);
+
+  // Handle simulated sample switching - update dataset when sample changes
+  useEffect(() => {
+    if (isSimulatedMicroscope && sampleLoadStatus?.isSampleLoaded && sampleLoadStatus?.selectedSampleId) {
+      // Map sample IDs to their data aliases (same as in SampleSelector)
+      const sampleDataAliases = {
+        'simulated-sample-1': 'agent-lens/20250824-example-data-20250824-221822',
+        'hpa-sample': 'agent-lens/hpa-example-sample-20250114-150051'
+      };
+      
+      const dataAlias = sampleDataAliases[sampleLoadStatus.selectedSampleId];
+      if (dataAlias) {
+        console.log('[Simulated Microscope] Sample switched, updating dataset to:', dataAlias);
+        
+        // Clear existing tiles to force reload with new data
+        setStitchedTiles([]);
+        activeTileRequestsRef.current.clear();
+        
+        // Create new mock dataset with the selected sample's data alias
+        const mockDataset = {
+          id: dataAlias,
+          name: `Simulated Sample Data (${sampleLoadStatus.selectedSampleId})`,
+          created_at: new Date().toISOString(),
+          metadata: {
+            microscope_service_id: selectedMicroscopeId,
+            sample_id: sampleLoadStatus.selectedSampleId
+          }
+        };
+        
+        // Update the dataset and gallery
+        setSelectedHistoricalDataset(mockDataset);
+        setSelectedGallery({
+          id: `agent-lens/1-${sampleLoadStatus.selectedSampleId}`,
+          name: `Simulated Microscope Gallery (${sampleLoadStatus.selectedSampleId})`,
+          microscope_service_id: selectedMicroscopeId
+        });
+      }
+    }
+  }, [isSimulatedMicroscope, sampleLoadStatus?.isSampleLoaded, sampleLoadStatus?.selectedSampleId, selectedMicroscopeId, setStitchedTiles, setSelectedGallery]);
   
   // Auto-select first dataset when datasets are loaded in historical mode
   useEffect(() => {
@@ -2894,13 +2933,30 @@ const MicroscopeMapDisplay = ({
             return null;
           }
           
-          // Convert channel name to index (needed for chunk check)
-          const channelIndex = 0; // Single channel for now
-          
           // Use artifactZarrLoader's proper coordinate conversion instead of simple conversion
           // First, get the metadata to understand the image dimensions and pixel size
           const correctDatasetId = artifactZarrLoaderRef.current.extractDatasetId(selectedHistoricalDataset.id);
           const baseUrl = `${artifactZarrLoaderRef.current.baseUrl}/${correctDatasetId}/zip-files/well_${wellInfo.id}_96.zip/~/data.zarr/`;
+          
+          // Convert channel name to index (needed for chunk check)
+          // For historical data, we need to determine the correct channel index
+          // First, try to get available chunks to see what channels are available
+          const tempAvailableChunks = await artifactZarrLoaderRef.current.getAvailableChunks(baseUrl, scaleLevel);
+          let channelIndex = 0; // Default fallback
+          
+          if (tempAvailableChunks && tempAvailableChunks.length > 0) {
+            // Extract unique channel indices from available chunks
+            const channelIndices = [...new Set(tempAvailableChunks.map(chunk => {
+              const parts = chunk.split('.');
+              return parseInt(parts[1], 10); // Second part is channel index
+            }))].sort((a, b) => a - b);
+            
+            console.log(`🔍 Available channel indices for well ${wellInfo.id}: ${channelIndices.join(', ')}`);
+            
+            // Use the first available channel (usually the most common one)
+            channelIndex = channelIndices[0];
+            console.log(`🔍 Using channel index ${channelIndex} for well ${wellInfo.id}`);
+          }
           const metadata = await artifactZarrLoaderRef.current.fetchZarrMetadata(baseUrl, scaleLevel);
           
           if (!metadata) {
