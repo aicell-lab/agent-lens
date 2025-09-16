@@ -1365,33 +1365,18 @@ const MicroscopeControlPanel = ({
             onFreePanAutoCollapse={handleCombinedAutoCollapse}
             onFitToViewUncollapse={handleCombinedUncollapse}
             sampleLoadStatus={sampleLoadStatus}
+            // Panel control props
+            isSamplePanelOpen={isSamplePanelOpen}
+            setIsSamplePanelOpen={setIsSamplePanelOpen}
+            isControlPanelOpen={isControlPanelOpen}
+            setIsControlPanelOpen={setIsControlPanelOpen}
+            // Sample selector props
+            incubatorControlService={incubatorControlService}
+            orchestratorManagerService={orchestratorManagerService}
+            onSampleLoadStatusChange={handleSampleLoadStatusChange}
           />
         </div>
 
-        {/* Floating Panel Toggle Buttons */}
-        <div className="floating-panel-toggles">
-          {/* Sample Selection Panel Toggle */}
-          <button 
-            onClick={() => setIsSamplePanelOpen(!isSamplePanelOpen)}
-            className="floating-panel-toggle sample-toggle"
-            title={isSamplePanelOpen ? "Close Sample Panel" : "Open Sample Panel"}
-          >
-            <i className="fas fa-flask mr-1"></i>
-            Samples
-          </button>
-
-          {/* Control Panel Toggle */}
-          <button 
-            onClick={() => setIsControlPanelOpen(!isControlPanelOpen)}
-            className="floating-panel-toggle control-toggle"
-            title={isControlPanelOpen ? "Close Control Panel" : "Open Control Panel"}
-          >
-            <i className="fas fa-cogs mr-1"></i>
-            Controls
-          </button>
-
-
-        </div>
       </div>
 
       {/* Floating Sample Selection Panel */}

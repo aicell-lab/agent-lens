@@ -1016,58 +1016,6 @@
 }
 
 /* Floating Panel System for MicroscopeControlPanel */
-.floating-panel-toggles {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  z-index: 100;
-}
-
-.floating-panel-toggle {
-  display: flex;
-  align-items: center;
-  padding: 8px 12px;
-  background-color: rgba(0, 0, 0, 0.8);
-  color: white;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 500;
-  transition: all 0.2s ease;
-  backdrop-filter: blur(4px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  min-width: 100px;
-  justify-content: center;
-}
-
-.floating-panel-toggle:hover {
-  background-color: rgba(0, 0, 0, 0.9);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-}
-
-.floating-panel-toggle.sample-toggle {
-  background-color: rgba(34, 197, 94, 0.9);
-}
-
-.floating-panel-toggle.sample-toggle:hover {
-  background-color: rgba(34, 197, 94, 1);
-}
-
-.floating-panel-toggle.control-toggle {
-  background-color: rgba(59, 130, 246, 0.9);
-}
-
-.floating-panel-toggle.control-toggle:hover {
-  background-color: rgba(59, 130, 246, 1);
-}
-
-
-
 .floating-panel {
   position: absolute;
   background-color: #1f2937;

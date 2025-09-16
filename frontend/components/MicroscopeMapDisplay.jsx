@@ -58,6 +58,15 @@ const MicroscopeMapDisplay = ({
   onFreePanAutoCollapse,
   onFitToViewUncollapse,
   sampleLoadStatus,
+  // Panel control props
+  isSamplePanelOpen,
+  setIsSamplePanelOpen,
+  isControlPanelOpen,
+  setIsControlPanelOpen,
+  // Sample selector props
+  incubatorControlService,
+  orchestratorManagerService,
+  onSampleLoadStatusChange,
 }) => {
   const mapContainerRef = useRef(null);
   const canvasRef = useRef(null);
@@ -2577,7 +2586,7 @@ const MicroscopeMapDisplay = ({
       // Set the dataset and gallery for immediate use
       setSelectedHistoricalDataset(mockDataset);
       setSelectedGallery({
-        id: 'agent-lens/1-20250824-example-data',
+        id: defaultDatasetId, // Use the actual dataset ID as gallery ID
         name: 'Simulated Microscope Gallery',
         microscope_service_id: selectedMicroscopeId
       });
@@ -2615,7 +2624,7 @@ const MicroscopeMapDisplay = ({
         // Update the dataset and gallery
         setSelectedHistoricalDataset(mockDataset);
         setSelectedGallery({
-          id: `agent-lens/1-${sampleLoadStatus.selectedSampleId}`,
+          id: dataAlias, // Use the actual dataset ID as gallery ID
           name: `Simulated Microscope Gallery (${sampleLoadStatus.selectedSampleId})`,
           microscope_service_id: selectedMicroscopeId
         });
@@ -3692,6 +3701,32 @@ const MicroscopeMapDisplay = ({
       {/* Header controls */}
       <div className="absolute top-0 left-0 right-0 bg-black bg-opacity-80 p-2 flex justify-between items-center z-10">
         <div className="flex items-center space-x-4">
+          {/* Samples and Controls buttons */}
+          <div className="flex items-center space-x-2">
+            {/* Sample Selection Button */}
+            <button 
+              onClick={() => setIsSamplePanelOpen(!isSamplePanelOpen)}
+              className={`px-3 py-1 text-xs text-white rounded flex items-center ${
+                isSamplePanelOpen ? 'bg-green-600 hover:bg-green-500' : 'bg-green-700 hover:bg-green-600'
+              }`}
+              title={isSamplePanelOpen ? "Close Sample Panel" : "Open Sample Panel"}
+            >
+              <i className="fas fa-flask mr-1"></i>
+              Samples
+            </button>
+
+            {/* Control Panel Button */}
+            <button 
+              onClick={() => setIsControlPanelOpen(!isControlPanelOpen)}
+              className={`px-3 py-1 text-xs text-white rounded flex items-center ${
+                isControlPanelOpen ? 'bg-blue-600 hover:bg-blue-500' : 'bg-blue-700 hover:bg-blue-600'
+              }`}
+              title={isControlPanelOpen ? "Close Control Panel" : "Open Control Panel"}
+            >
+              <i className="fas fa-cogs mr-1"></i>
+              Controls
+            </button>
+          </div>
           
           {mapViewMode === 'FREE_PAN' && (
             <>
@@ -4809,6 +4844,15 @@ MicroscopeMapDisplay.propTypes = {
   onFreePanAutoCollapse: PropTypes.func,
   onFitToViewUncollapse: PropTypes.func,
   sampleLoadStatus: PropTypes.object,
+  // Panel control props
+  isSamplePanelOpen: PropTypes.bool,
+  setIsSamplePanelOpen: PropTypes.func,
+  isControlPanelOpen: PropTypes.bool,
+  setIsControlPanelOpen: PropTypes.func,
+  // Sample selector props
+  incubatorControlService: PropTypes.object,
+  orchestratorManagerService: PropTypes.object,
+  onSampleLoadStatusChange: PropTypes.func,
 };
 
 export default MicroscopeMapDisplay; 
