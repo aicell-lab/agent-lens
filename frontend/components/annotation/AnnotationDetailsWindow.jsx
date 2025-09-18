@@ -203,6 +203,59 @@ const AnnotationDetailsWindow = ({
 
         </div>
 
+        {/* Channel Information */}
+        {(displayData.channels || displayData.processSettings) && (
+          <div style={{ marginBottom: '16px' }}>
+            <h4 style={{ margin: '0 0 8px 0', color: '#e5e7eb', fontSize: '14px' }}>
+              Channel Information
+            </h4>
+            
+            {displayData.channels && displayData.channels.length > 0 && (
+              <div style={{ marginBottom: '12px' }}>
+                <strong>Channels:</strong>
+                <div 
+                  style={{ 
+                    fontFamily: 'monospace', 
+                    backgroundColor: '#374151', 
+                    color: '#f3f4f6',
+                    padding: '8px', 
+                    borderRadius: '4px',
+                    marginTop: '4px',
+                    cursor: 'pointer'
+                  }}
+                  onClick={() => handleCopyToClipboard(JSON.stringify(displayData.channels))}
+                  title="Click to copy"
+                >
+                  {displayData.channels.join(', ')}
+                </div>
+              </div>
+            )}
+
+            {displayData.processSettings && Object.keys(displayData.processSettings).length > 0 && (
+              <div style={{ marginBottom: '12px' }}>
+                <strong>Process Settings:</strong>
+                <div 
+                  style={{ 
+                    fontFamily: 'monospace', 
+                    backgroundColor: '#374151', 
+                    color: '#f3f4f6',
+                    padding: '8px', 
+                    borderRadius: '4px',
+                    marginTop: '4px',
+                    cursor: 'pointer',
+                    fontSize: '11px',
+                    wordBreak: 'break-all'
+                  }}
+                  onClick={() => handleCopyToClipboard(JSON.stringify(displayData.processSettings, null, 2))}
+                  title="Click to copy"
+                >
+                  {JSON.stringify(displayData.processSettings, null, 2)}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Actions */}
         <div style={{ 
           borderTop: '1px solid #374151', 
@@ -223,6 +276,15 @@ const AnnotationDetailsWindow = ({
                 bbox: annotation.bbox,
                 polygon_wkt: annotation.polygon_wkt
               };
+              
+              // Include channel information if available
+              if (annotation.channels) {
+                exportData.channels = annotation.channels;
+              }
+              
+              if (annotation.process_settings) {
+                exportData.process_settings = annotation.process_settings;
+              }
               
               // Include embeddings if available
               if (annotation.embeddings) {

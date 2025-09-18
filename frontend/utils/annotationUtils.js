@@ -95,9 +95,10 @@ export function generateBoundingBox(points) {
  * Generate annotation data object
  * @param {Object} annotation - Original annotation object
  * @param {Object} wellInfo - Well information object
+ * @param {Object} channelInfo - Channel information object (optional)
  * @returns {Object} Enhanced annotation data
  */
-export function generateAnnotationData(annotation, wellInfo) {
+export function generateAnnotationData(annotation, wellInfo, channelInfo = null) {
   if (!annotation || !wellInfo) {
     return null;
   }
@@ -115,6 +116,18 @@ export function generateAnnotationData(annotation, wellInfo) {
     timestamp: annotation.timestamp || Date.now(),
     created_at: new Date().toISOString()
   };
+  
+  // Add channel information if provided
+  if (channelInfo) {
+    annotationData.channels = channelInfo.channels || [];
+    annotationData.process_settings = channelInfo.process_settings || {};
+    
+    // Add dataset information if available
+    if (channelInfo.datasetId) {
+      annotationData.dataset_id = channelInfo.datasetId;
+      annotationData.dataset_name = channelInfo.datasetName || channelInfo.datasetId;
+    }
+  }
   
   // Generate type-specific data
   if (annotation.type === 'rectangle') {
@@ -145,12 +158,14 @@ export function generateAnnotationData(annotation, wellInfo) {
  * Export annotations to JSON format
  * @param {Array} annotations - Array of annotation objects
  * @param {Object} wellInfoMap - Map of annotation IDs to well information
+ * @param {Object} channelInfoMap - Map of annotation IDs to channel information (optional)
  * @returns {Object} Export data object
  */
-export function exportAnnotationsToJson(annotations, wellInfoMap) {
+export function exportAnnotationsToJson(annotations, wellInfoMap, channelInfoMap = {}) {
   const annotationData = annotations.map(annotation => {
     const wellInfo = wellInfoMap[annotation.id];
-    return generateAnnotationData(annotation, wellInfo);
+    const channelInfo = channelInfoMap[annotation.id];
+    return generateAnnotationData(annotation, wellInfo, channelInfo);
   }).filter(data => data !== null);
   
   return {
@@ -181,8 +196,22 @@ export function formatAnnotationForDisplay(annotationData) {
     created: new Date(annotationData.created_at).toLocaleString(),
     strokeColor: annotationData.strokeColor,
     fillColor: annotationData.fillColor,
-    strokeWidth: annotationData.strokeWidth
+    strokeWidth: annotationData.strokeWidth,
+    // Include dataset information if available
+    ...(annotationData.dataset_id && {
+      datasetId: annotationData.dataset_id,
+      datasetName: annotationData.dataset_name
+    })
   };
+  
+  // Add channel information if available
+  if (annotationData.channels) {
+    display.channels = annotationData.channels;
+  }
+  
+  if (annotationData.process_settings) {
+    display.processSettings = annotationData.process_settings;
+  }
   
   // Add type-specific information
   if (annotationData.bbox) {

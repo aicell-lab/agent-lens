@@ -322,6 +322,7 @@ const MicroscopeMapDisplay = ({
       .map(([channelName, config]) => ({ channelName, ...config }));
   }, [zarrChannelConfigs]);
 
+
   const updateZarrChannelConfig = useCallback((channelName, updates) => {
     setZarrChannelConfigs(prev => ({
       ...prev,
@@ -2561,6 +2562,45 @@ const MicroscopeMapDisplay = ({
   // Add state for selected dataset in historical mode
   const [selectedHistoricalDataset, setSelectedHistoricalDataset] = useState(null);
   
+  // Helper function to get current channel information for annotations
+  const getCurrentChannelInfo = useCallback(() => {
+    const channels = [];
+    const processSettings = {};
+    
+    if (isHistoricalDataMode) {
+      // For historical mode, use zarr channel configs
+      const enabledChannels = getEnabledZarrChannels();
+      enabledChannels.forEach(channel => {
+        channels.push(channel.channelName);
+        processSettings[channel.channelName] = {
+          min: channel.min,
+          max: channel.max
+        };
+      });
+    } else {
+      // For real microscope mode, use visible layers
+      const selectedChannels = getSelectedChannels();
+      selectedChannels.forEach(channelName => {
+        channels.push(channelName);
+        const config = realMicroscopeChannelConfigs[channelName];
+        processSettings[channelName] = {
+          min: config?.min || 0,
+          max: config?.max || 255
+        };
+      });
+    }
+    
+    return {
+      channels,
+      process_settings: processSettings,
+      // Add dataset information for historical mode
+      ...(isHistoricalDataMode && selectedHistoricalDataset && {
+        datasetId: selectedHistoricalDataset.id,
+        datasetName: selectedHistoricalDataset.name || selectedHistoricalDataset.id
+      })
+    };
+  }, [isHistoricalDataMode, getEnabledZarrChannels, getSelectedChannels, realMicroscopeChannelConfigs, selectedHistoricalDataset]);
+  
   // Auto-enable historical data mode for simulated microscope when switching to FREE_PAN mode
   useEffect(() => {
     if (isSimulatedMicroscope && mapViewMode === 'FREE_PAN' && !isHistoricalDataMode) {
@@ -4131,24 +4171,25 @@ const MicroscopeMapDisplay = ({
         {/* Well plate overlay for FREE_PAN mode */}
         {mapViewMode === 'FREE_PAN' && render96WellPlate()}
         
-        {/* Annotation Canvas Overlay */}
-        <AnnotationCanvas
-          containerRef={mapContainerRef}
-          isDrawingMode={isDrawingMode}
-          currentTool={currentAnnotationTool}
-          strokeColor={annotationStrokeColor}
-          strokeWidth={annotationStrokeWidth}
-          fillColor={annotationFillColor}
-          description={annotationDescription}
-          mapScale={mapScale}
-          mapPan={effectivePan}
-          annotations={annotations}
-          onAnnotationAdd={handleAnnotationAdd}
-          onAnnotationUpdate={handleAnnotationUpdate}
-          onAnnotationDelete={handleAnnotationDelete}
-          stageDimensions={stageDimensions}
-          pixelsPerMm={pixelsPerMm}
-        />
+         {/* Annotation Canvas Overlay */}
+         <AnnotationCanvas
+           containerRef={mapContainerRef}
+           isDrawingMode={isDrawingMode}
+           currentTool={currentAnnotationTool}
+           strokeColor={annotationStrokeColor}
+           strokeWidth={annotationStrokeWidth}
+           fillColor={annotationFillColor}
+           description={annotationDescription}
+           mapScale={mapScale}
+           mapPan={effectivePan}
+           annotations={annotations}
+           onAnnotationAdd={handleAnnotationAdd}
+           onAnnotationUpdate={handleAnnotationUpdate}
+           onAnnotationDelete={handleAnnotationDelete}
+           stageDimensions={stageDimensions}
+           pixelsPerMm={pixelsPerMm}
+           channelInfo={getCurrentChannelInfo()}
+         />
         
         {/* Rectangle selection active indicator */}
         {mapViewMode === 'FREE_PAN' && isRectangleSelection && !rectangleStart && !isScanInProgress && !isQuickScanInProgress && (

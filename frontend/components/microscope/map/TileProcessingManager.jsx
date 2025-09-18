@@ -67,7 +67,7 @@ class TileProcessingManager {
     }
 
     // Merge all successful channels
-    const mergedTile = this.mergeChannels(successfulChannels, tileRequest);
+    const mergedTile = await this.mergeChannels(successfulChannels, tileRequest);
     
     console.log(`🎨 TileProcessingManager: Successfully merged ${successfulChannels.length}/${enabledChannels.length} channels`);
     
@@ -86,7 +86,9 @@ class TileProcessingManager {
    */
   async processSingleChannel(channel, tileRequest, mode, channelConfigs, services, metadata) {
     try {
-      const channelName = typeof channel === 'string' ? channel : channel.label || channel.channelName;
+      console.log(`🔍 processSingleChannel received channel:`, typeof channel, channel);
+      
+      const channelName = typeof channel === 'string' ? channel : (channel.label || channel.channelName || channel.name);
       const channelConfig = channelConfigs[channelName] || { min: 0, max: 255 };
       
       console.log(`🎨 TileProcessingManager: Processing channel ${channelName} in ${mode} mode`);
@@ -165,8 +167,8 @@ class TileProcessingManager {
         'base64'
       );
       
-      if (result) {
-        return result;
+      if (result && result.success) {
+        return `data:image/png;base64,${result.data}`;
       } else {
         throw new Error(`Artifact loader failed for channel ${channelName}`);
       }
@@ -194,7 +196,7 @@ class TileProcessingManager {
     }
     
     // Use hardcoded colors for FREE_PAN mode or fallback
-    const channelName = typeof channel === 'string' ? channel : channel.label || channel.channelName;
+    const channelName = typeof channel === 'string' ? channel : (channel.label || channel.channelName || channel.name);
     return this.defaultColors[channelName] || '#FFFFFF';
   }
 
@@ -302,6 +304,9 @@ class TileProcessingManager {
         ctx.drawImage(img, 0, 0);
         
         // Add remaining channels using additive blending
+        let processedChannels = 1;
+        const totalChannels = channelDataArray.length;
+        
         for (let i = 1; i < channelDataArray.length; i++) {
           const channelData = channelDataArray[i];
           const channelImg = new Image();
@@ -311,8 +316,10 @@ class TileProcessingManager {
             ctx.globalCompositeOperation = 'lighter';
             ctx.drawImage(channelImg, 0, 0);
             
+            processedChannels++;
+            
             // Check if this is the last channel to process
-            if (i === channelDataArray.length - 1) {
+            if (processedChannels === totalChannels) {
               // Reset composite operation
               ctx.globalCompositeOperation = 'source-over';
               
@@ -334,8 +341,10 @@ class TileProcessingManager {
           
           channelImg.onerror = () => {
             console.warn(`Failed to load channel image for ${channelData.channelName}`);
-            // Continue with next channel
-            if (i === channelDataArray.length - 1) {
+            processedChannels++;
+            
+            // Check if this was the last channel to process
+            if (processedChannels === totalChannels) {
               // Reset composite operation
               ctx.globalCompositeOperation = 'source-over';
               

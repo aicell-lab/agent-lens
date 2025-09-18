@@ -310,8 +310,16 @@ const AnnotationPanel = ({
   };
 
   const handleExport = () => {
+    // Create channel info map from annotations
+    const channelInfoMap = {};
+    annotations.forEach(annotation => {
+      if (annotation.channelInfo) {
+        channelInfoMap[annotation.id] = annotation.channelInfo;
+      }
+    });
+    
     // Use the simplified export function from annotationUtils
-    const data = exportAnnotationsToJson(annotations, wellInfoMap);
+    const data = exportAnnotationsToJson(annotations, wellInfoMap, channelInfoMap);
     
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -348,7 +356,7 @@ const AnnotationPanel = ({
                 y: point.y + wellInfo.centerY
               }));
               
-              return {
+              const convertedAnnotation = {
                 id: annotationData.obj_id,
                 type: annotationData.type,
                 points: stagePoints,
@@ -357,12 +365,36 @@ const AnnotationPanel = ({
                 fillColor: annotationData.fillColor,
                 timestamp: annotationData.timestamp
               };
+              
+              // Include channel information if available
+              if (annotationData.channels || annotationData.process_settings) {
+                convertedAnnotation.channelInfo = {
+                  channels: annotationData.channels || [],
+                  process_settings: annotationData.process_settings || {}
+                };
+              }
+              
+              return convertedAnnotation;
             }).filter(annotation => annotation !== null);
             
             onImportAnnotations(convertedAnnotations);
           } else {
-            // Legacy format
-            onImportAnnotations(data.annotations);
+            // Legacy format - convert to include channel info if available
+            const legacyAnnotations = data.annotations.map(annotation => {
+              const convertedAnnotation = { ...annotation };
+              
+              // Include channel information if available in legacy format
+              if (annotation.channels || annotation.process_settings) {
+                convertedAnnotation.channelInfo = {
+                  channels: annotation.channels || [],
+                  process_settings: annotation.process_settings || {}
+                };
+              }
+              
+              return convertedAnnotation;
+            });
+            
+            onImportAnnotations(legacyAnnotations);
           }
         } else {
           alert('Invalid annotation file format');
@@ -382,7 +414,13 @@ const AnnotationPanel = ({
       return;
     }
     
-    const enhancedAnnotation = generateAnnotationData(annotation, wellInfo);
+    // Create channel info from annotation if available
+    const channelInfo = annotation.channelInfo ? {
+      channels: annotation.channelInfo.channels || [],
+      process_settings: annotation.channelInfo.process_settings || {}
+    } : null;
+    
+    const enhancedAnnotation = generateAnnotationData(annotation, wellInfo, channelInfo);
     setSelectedAnnotation(enhancedAnnotation);
     setShowDetailsWindow(true);
     

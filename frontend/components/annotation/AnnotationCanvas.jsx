@@ -17,7 +17,9 @@ const AnnotationCanvas = ({
   onAnnotationDelete,
   stageDimensions,
   pixelsPerMm,
-  className = ""
+  className = "",
+  // Channel information props
+  channelInfo = null
 }) => {
   const canvasRef = useRef(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -225,7 +227,9 @@ const AnnotationCanvas = ({
         strokeWidth,
         fillColor,
         description,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        // Include channel information if available
+        ...(channelInfo && { channelInfo })
       };
       
       onAnnotationAdd(newAnnotation);
@@ -272,7 +276,9 @@ const AnnotationCanvas = ({
           strokeWidth,
           fillColor,
           description: description || '',
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          // Include channel information if available
+          ...(channelInfo && { channelInfo })
         };
         break;
       case 'freehand':
@@ -285,7 +291,9 @@ const AnnotationCanvas = ({
             strokeWidth,
             fillColor,
             description: description || '',
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            // Include channel information if available
+            ...(channelInfo && { channelInfo })
           };
         }
         break;
@@ -618,6 +626,8 @@ AnnotationCanvas.propTypes = {
   stageDimensions: PropTypes.object.isRequired,
   pixelsPerMm: PropTypes.number.isRequired,
   className: PropTypes.string,
+  // Channel information prop
+  channelInfo: PropTypes.object,
 };
 
 export default AnnotationCanvas;
