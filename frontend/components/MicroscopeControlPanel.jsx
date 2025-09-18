@@ -1362,6 +1362,7 @@ const MicroscopeControlPanel = ({
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseLeave}
             toggleWebRtcStream={toggleWebRtcStream}
+            snapImage={snapImage}
             onFreePanAutoCollapse={handleCombinedAutoCollapse}
             onFitToViewUncollapse={handleCombinedUncollapse}
             sampleLoadStatus={sampleLoadStatus}

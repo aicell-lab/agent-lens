@@ -5,6 +5,13 @@
   background: #1a1a1a;
   position: relative;
   overflow: hidden;
+  transition: background-color 0.1s ease-in-out;
+}
+
+/* Ensure consistent background during zoom/pan operations */
+.microscope-map-container.zooming,
+.microscope-map-container.panning {
+  background: #1a1a1a !important;
 }
 
 /* Well plate overlay styles */
@@ -194,13 +201,26 @@ input[type="checkbox"]:disabled + span {
   image-rendering: -webkit-optimize-contrast;
   image-rendering: crisp-edges;
   image-rendering: pixelated;
+  transition: opacity 0.3s ease-in-out;
+  opacity: 1;
 }
 
 .scan-results-container img {
   image-rendering: inherit;
   max-width: none; /* Prevent responsive image behavior */
   max-height: none; /* Prevent responsive image behavior */
+  transition: opacity 0.2s ease-in-out;
 }
+
+/* Smooth fade-in for new tiles */
+.scan-results-container.tile-loading {
+  opacity: 0.7;
+}
+
+.scan-results-container.tile-loaded {
+  opacity: 1;
+}
+
 
 /* Dark theme input validation overrides for Scan Configuration panel */
 .input-validation-container input[type="number"] {
