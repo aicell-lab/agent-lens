@@ -232,6 +232,10 @@ const LayerPanel = ({
                   <i className={`${layerTypeConfig?.icon || 'fas fa-layer-group'} layer-type-icon`}></i>
                   <span>{layer.name}</span>
                   {layer.readonly && <span className="readonly-badge" title="Read-only layer">🔒</span>}
+                  {/* Channel count for server layers with multi-channel data */}
+                  {layer.type === 'load-server' && shouldUseMultiChannelLoading() && (isHistoricalDataMode || mapViewMode === 'FOV_FITTED') && (
+                    <span className="channel-count">({availableZarrChannels.length})</span>
+                  )}
                 </div>
 
                 <div className="layer-actions">
@@ -295,6 +299,91 @@ const LayerPanel = ({
                       <div className="server-controls">
                         <button className="load-btn">Browse & Load</button>
                       </div>
+                      
+                      {/* Multi-Channel Controls for Historical Data */}
+                      {shouldUseMultiChannelLoading() && (isHistoricalDataMode || mapViewMode === 'FOV_FITTED') && (
+                        <div className="server-channels">
+                          {availableZarrChannels.map((channel) => {
+                            const config = zarrChannelConfigs[channel.label] || {};
+                            const channelColor = `#${channel.color}`;
+                            const isEnabled = config.enabled || false;
+                            const isLastChannel = isLastSelectedChannel(channel.label, isEnabled);
+                            
+                            return (
+                              <div key={channel.label} className="channel-item">
+                                <div className="channel-header">
+                                  <label className="channel-toggle">
+                                    <input
+                                      type="checkbox"
+                                      checked={isEnabled}
+                                      disabled={isLastChannel}
+                                      onChange={(e) => updateZarrChannelConfig(channel.label, { enabled: e.target.checked })}
+                                      title={isLastChannel ? "Cannot deselect the last remaining channel" : ""}
+                                    />
+                                    <span className="channel-name">{channel.label}</span>
+                                    <span 
+                                      className="channel-color-indicator" 
+                                      style={{ backgroundColor: channelColor }}
+                                      title={`Channel color: ${channelColor}`}
+                                    ></span>
+                                    {isLastChannel && <span className="last-channel-indicator" title="Last selected channel">🔒</span>}
+                                  </label>
+                                  <span className="channel-index">Ch {channel.index}</span>
+                                </div>
+                                
+                                {/* Contrast Controls */}
+                                {config.enabled && (
+                                  <div className="contrast-controls">
+                                    <div className="contrast-slider">
+                                      <label className="contrast-label">Min:</label>
+                                      <input
+                                        type="range"
+                                        min="0"
+                                        max="255"
+                                        value={config.min || 0}
+                                        onChange={(e) => updateZarrChannelConfig(channel.label, { min: parseInt(e.target.value) })}
+                                        className="contrast-range"
+                                        style={{
+                                          background: `linear-gradient(to right, black 0%, ${channelColor} 100%)`
+                                        }}
+                                      />
+                                      <span className="contrast-value">{config.min || 0}</span>
+                                    </div>
+                                    
+                                    <div className="contrast-slider">
+                                      <label className="contrast-label">Max:</label>
+                                      <input
+                                        type="range"
+                                        min="0"
+                                        max="255"
+                                        value={config.max || 255}
+                                        onChange={(e) => updateZarrChannelConfig(channel.label, { max: parseInt(e.target.value) })}
+                                        className="contrast-range"
+                                        style={{
+                                          background: `linear-gradient(to right, black 0%, ${channelColor} 100%)`
+                                        }}
+                                      />
+                                      <span className="contrast-value">{config.max || 255}</span>
+                                    </div>
+                                    
+                                    <div className="contrast-reset">
+                                      <button
+                                        onClick={() => updateZarrChannelConfig(channel.label, { 
+                                          min: channel.window.start, 
+                                          max: channel.window.end 
+                                        })}
+                                        className="reset-btn"
+                                      >
+                                        Reset to defaults
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -329,6 +418,10 @@ const LayerPanel = ({
                       <span className={exp.name === activeExperiment ? 'layer-name--active' : ''}>
                         {exp.name}
                       </span>
+                      {/* Channel count for experiment layers with real microscope channels */}
+                      {shouldUseMultiChannelLoading() && !isHistoricalDataMode && !isSimulatedMicroscope && mapViewMode !== 'FOV_FITTED' && (
+                        <span className="channel-count">({Object.values(visibleLayers.channels).filter(v => v).length})</span>
+                      )}
                     </div>
 
                     <div className="layer-actions">
@@ -365,6 +458,95 @@ const LayerPanel = ({
                       <div className="channel-item channel-item--experiment">
                         <span className="channel-name">Experiment Data</span>
                       </div>
+                      
+                      {/* Real Microscope Channel Controls for this experiment */}
+                      {shouldUseMultiChannelLoading() && !isHistoricalDataMode && !isSimulatedMicroscope && mapViewMode !== 'FOV_FITTED' && (
+                        <div className="experiment-channels">
+                          {Object.entries(visibleLayers.channels).map(([channel, isVisible]) => {
+                            const config = realMicroscopeChannelConfigs[channel] || {};
+                            const isLastChannel = isLastSelectedChannel(channel, isVisible);
+                            
+                            const defaultColors = {
+                              'BF LED matrix full': '#FFFFFF',
+                              'Fluorescence 405 nm Ex': '#8A2BE2',
+                              'Fluorescence 488 nm Ex': '#00FF00',
+                              'Fluorescence 561 nm Ex': '#FFFF00',
+                              'Fluorescence 638 nm Ex': '#FF0000',
+                              'Fluorescence 730 nm Ex': '#FF69B4',
+                            };
+                            const channelColor = defaultColors[channel] || '#FFFFFF';
+                            
+                            return (
+                              <div key={channel} className="channel-item">
+                                <div className="channel-header">
+                                  <label className="channel-toggle">
+                                    <input
+                                      type="checkbox"
+                                      checked={isVisible}
+                                      disabled={isLastChannel}
+                                      onChange={(e) => setVisibleLayers(prev => ({
+                                        ...prev,
+                                        channels: {
+                                          ...prev.channels,
+                                          [channel]: !isVisible
+                                        }
+                                      }))}
+                                      title={isLastChannel ? "Cannot deselect the last remaining channel" : ""}
+                                    />
+                                    <span className="channel-name">{channel}</span>
+                                    <span 
+                                      className="channel-color-indicator" 
+                                      style={{ backgroundColor: channelColor }}
+                                      title={`Channel color: ${channelColor}`}
+                                    ></span>
+                                    {isLastChannel && <span className="last-channel-indicator" title="Last selected channel">🔒</span>}
+                                  </label>
+                                </div>
+                                
+                                {/* Contrast Controls */}
+                                {isVisible && (
+                                  <div className="contrast-controls">
+                                    <div className="contrast-slider">
+                                      <label className="contrast-label">Min:</label>
+                                      <input
+                                        type="range"
+                                        min="0"
+                                        max="255"
+                                        value={config.min || 0}
+                                        onChange={(e) => updateRealMicroscopeChannelConfigWithRefresh(channel, { min: parseInt(e.target.value) })}
+                                        className="contrast-range"
+                                      />
+                                      <span className="contrast-value">{config.min || 0}</span>
+                                    </div>
+                                    
+                                    <div className="contrast-slider">
+                                      <label className="contrast-label">Max:</label>
+                                      <input
+                                        type="range"
+                                        min="0"
+                                        max="255"
+                                        value={config.max || 255}
+                                        onChange={(e) => updateRealMicroscopeChannelConfigWithRefresh(channel, { max: parseInt(e.target.value) })}
+                                        className="contrast-range"
+                                      />
+                                      <span className="contrast-value">{config.max || 255}</span>
+                                    </div>
+                                    
+                                    <div className="contrast-reset">
+                                      <button
+                                        onClick={() => updateRealMicroscopeChannelConfigWithRefresh(channel, { min: 0, max: 255 })}
+                                        className="reset-btn"
+                                      >
+                                        Reset to defaults
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -373,229 +555,6 @@ const LayerPanel = ({
           </>
         )}
 
-        {/* Multi-Channel Layer (for Historical Data or FOV_FITTED mode) */}
-        {shouldUseMultiChannelLoading() && (isHistoricalDataMode || mapViewMode === 'FOV_FITTED') && (
-          <div className="layer-item layer-item--channels">
-            <div className="layer-item__header">
-              <button
-                className="layer-visibility-btn"
-                onClick={() => toggleLayerExpansion('multi-channel')}
-                title="Toggle multi-channel visibility"
-              >
-                <i className="fas fa-eye"></i>
-              </button>
-              
-              <div 
-                className="layer-name"
-                onClick={() => toggleLayerExpansion('multi-channel')}
-                title="Click to expand/collapse channels"
-              >
-                <i className={`fas fa-chevron-${expandedLayers['multi-channel'] ? 'down' : 'right'}`}></i>
-                <span>Multi-Channel Data</span>
-                <span className="channel-count">({availableZarrChannels.length})</span>
-              </div>
-            </div>
-
-            {/* Multi-Channel Controls */}
-            {expandedLayers['multi-channel'] && (
-              <div className="layer-channels">
-                {availableZarrChannels.map((channel) => {
-                  const config = zarrChannelConfigs[channel.label] || {};
-                  const channelColor = `#${channel.color}`;
-                  const isEnabled = config.enabled || false;
-                  const isLastChannel = isLastSelectedChannel(channel.label, isEnabled);
-                  
-                  return (
-                    <div key={channel.label} className="channel-item">
-                      <div className="channel-header">
-                        <label className="channel-toggle">
-                          <input
-                            type="checkbox"
-                            checked={isEnabled}
-                            disabled={isLastChannel}
-                            onChange={(e) => updateZarrChannelConfig(channel.label, { enabled: e.target.checked })}
-                            title={isLastChannel ? "Cannot deselect the last remaining channel" : ""}
-                          />
-                          <span className="channel-name">{channel.label}</span>
-                          <span 
-                            className="channel-color-indicator" 
-                            style={{ backgroundColor: channelColor }}
-                            title={`Channel color: ${channelColor}`}
-                          ></span>
-                          {isLastChannel && <span className="last-channel-indicator" title="Last selected channel">🔒</span>}
-                        </label>
-                        <span className="channel-index">Ch {channel.index}</span>
-                      </div>
-                      
-                      {/* Contrast Controls */}
-                      {config.enabled && (
-                        <div className="contrast-controls">
-                          <div className="contrast-slider">
-                            <label className="contrast-label">Min:</label>
-                            <input
-                              type="range"
-                              min="0"
-                              max="255"
-                              value={config.min || 0}
-                              onChange={(e) => updateZarrChannelConfig(channel.label, { min: parseInt(e.target.value) })}
-                              className="contrast-range"
-                              style={{
-                                background: `linear-gradient(to right, black 0%, ${channelColor} 100%)`
-                              }}
-                            />
-                            <span className="contrast-value">{config.min || 0}</span>
-                          </div>
-                          
-                          <div className="contrast-slider">
-                            <label className="contrast-label">Max:</label>
-                            <input
-                              type="range"
-                              min="0"
-                              max="255"
-                              value={config.max || 255}
-                              onChange={(e) => updateZarrChannelConfig(channel.label, { max: parseInt(e.target.value) })}
-                              className="contrast-range"
-                              style={{
-                                background: `linear-gradient(to right, black 0%, ${channelColor} 100%)`
-                              }}
-                            />
-                            <span className="contrast-value">{config.max || 255}</span>
-                          </div>
-                          
-                          <div className="contrast-reset">
-                            <button
-                              onClick={() => updateZarrChannelConfig(channel.label, { 
-                                min: channel.window.start, 
-                                max: channel.window.end 
-                              })}
-                              className="reset-btn"
-                            >
-                              Reset to defaults
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Real Microscope Channels Layer */}
-        {shouldUseMultiChannelLoading() && !isHistoricalDataMode && !isSimulatedMicroscope && mapViewMode !== 'FOV_FITTED' && (
-          <div className="layer-item layer-item--channels">
-            <div className="layer-item__header">
-              <button
-                className="layer-visibility-btn"
-                onClick={() => toggleLayerExpansion('real-microscope-channels')}
-                title="Toggle channels visibility"
-              >
-                <i className="fas fa-eye"></i>
-              </button>
-              
-              <div 
-                className="layer-name"
-                onClick={() => toggleLayerExpansion('real-microscope-channels')}
-                title="Click to expand/collapse channels"
-              >
-                <i className={`fas fa-chevron-${expandedLayers['real-microscope-channels'] ? 'down' : 'right'}`}></i>
-                <span>Microscope Channels</span>
-                <span className="channel-count">({Object.values(visibleLayers.channels).filter(v => v).length})</span>
-              </div>
-            </div>
-
-            {/* Real Microscope Channel Controls */}
-            {expandedLayers['real-microscope-channels'] && (
-              <div className="layer-channels">
-                {Object.entries(visibleLayers.channels).map(([channel, isVisible]) => {
-                  const config = realMicroscopeChannelConfigs[channel] || {};
-                  const isLastChannel = isLastSelectedChannel(channel, isVisible);
-                  
-                  const defaultColors = {
-                    'BF LED matrix full': '#FFFFFF',
-                    'Fluorescence 405 nm Ex': '#8A2BE2',
-                    'Fluorescence 488 nm Ex': '#00FF00',
-                    'Fluorescence 561 nm Ex': '#FFFF00',
-                    'Fluorescence 638 nm Ex': '#FF0000',
-                    'Fluorescence 730 nm Ex': '#FF69B4',
-                  };
-                  const channelColor = defaultColors[channel] || '#FFFFFF';
-                  
-                  return (
-                    <div key={channel} className="channel-item">
-                      <div className="channel-header">
-                        <label className="channel-toggle">
-                          <input
-                            type="checkbox"
-                            checked={isVisible}
-                            disabled={isLastChannel}
-                            onChange={(e) => setVisibleLayers(prev => ({
-                              ...prev,
-                              channels: {
-                                ...prev.channels,
-                                [channel]: !isVisible
-                              }
-                            }))}
-                            title={isLastChannel ? "Cannot deselect the last remaining channel" : ""}
-                          />
-                          <span className="channel-name">{channel}</span>
-                          <span 
-                            className="channel-color-indicator" 
-                            style={{ backgroundColor: channelColor }}
-                            title={`Channel color: ${channelColor}`}
-                          ></span>
-                          {isLastChannel && <span className="last-channel-indicator" title="Last selected channel">🔒</span>}
-                        </label>
-                      </div>
-                      
-                      {/* Contrast Controls */}
-                      {isVisible && (
-                        <div className="contrast-controls">
-                          <div className="contrast-slider">
-                            <label className="contrast-label">Min:</label>
-                            <input
-                              type="range"
-                              min="0"
-                              max="255"
-                              value={config.min || 0}
-                              onChange={(e) => updateRealMicroscopeChannelConfigWithRefresh(channel, { min: parseInt(e.target.value) })}
-                              className="contrast-range"
-                            />
-                            <span className="contrast-value">{config.min || 0}</span>
-                          </div>
-                          
-                          <div className="contrast-slider">
-                            <label className="contrast-label">Max:</label>
-                            <input
-                              type="range"
-                              min="0"
-                              max="255"
-                              value={config.max || 255}
-                              onChange={(e) => updateRealMicroscopeChannelConfigWithRefresh(channel, { max: parseInt(e.target.value) })}
-                              className="contrast-range"
-                            />
-                            <span className="contrast-value">{config.max || 255}</span>
-                          </div>
-                          
-                          <div className="contrast-reset">
-                            <button
-                              onClick={() => updateRealMicroscopeChannelConfigWithRefresh(channel, { min: 0, max: 255 })}
-                              className="reset-btn"
-                            >
-                              Reset to defaults
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
       {/* Layer Info Footer */}
