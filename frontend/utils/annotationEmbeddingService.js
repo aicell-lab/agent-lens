@@ -73,16 +73,14 @@ export async function extractAnnotationImageRegion(canvas, annotation, mapScale,
   const regionCtx = regionCanvas.getContext('2d');
   regionCtx.putImageData(imageData, 0, 0);
 
-  // Convert to blob
-  return new Promise((resolve, reject) => {
-    regionCanvas.toBlob((blob) => {
-      if (blob) {
-        resolve(blob);
-      } else {
-        reject(new Error('Failed to create image blob'));
-      }
-    }, 'image/png');
-  });
+  // Apply shape-based masking for polygon and freehand annotations
+  if (annotation.type === 'polygon' || annotation.type === 'freehand') {
+    const maskedCanvas = applyShapeMaskToCanvas(regionCanvas, displayPoints, x, y, padding);
+    return canvasToBlob(maskedCanvas);
+  }
+
+  // Convert to blob (for rectangle annotations or when no masking needed)
+  return canvasToBlob(regionCanvas);
 }
 
 /**
@@ -174,7 +172,12 @@ export async function extractAnnotationImageRegionAdvanced(
     console.log(`✅ AdvancedAnnotationExtraction: Successfully processed ${enabledChannels.length} channels`);
 
     // Convert data URL to blob
-    const imageBlob = await dataUrlToBlob(processedTile.data);
+    let imageBlob = await dataUrlToBlob(processedTile.data);
+    
+    // Apply shape-based masking for polygon and freehand annotations
+    if (annotation.type === 'polygon' || annotation.type === 'freehand') {
+      imageBlob = await applyShapeMaskToImageBlob(imageBlob, annotation, annotationBounds, mode, wellInfo);
+    }
     
     return imageBlob;
 
@@ -443,4 +446,166 @@ export async function generateAnnotationEmbeddings(canvas, annotation, mapScale,
     console.error('Error generating annotation embeddings:', error);
     throw error;
   }
+}
+
+/**
+ * Apply shape-based masking to a canvas for polygon and freehand annotations
+ * @param {HTMLCanvasElement} sourceCanvas - Source canvas with the image
+ * @param {Array} displayPoints - Array of display coordinate points
+ * @param {number} offsetX - X offset of the bounding box
+ * @param {number} offsetY - Y offset of the bounding box  
+ * @param {number} padding - Padding around the annotation
+ * @returns {HTMLCanvasElement} New canvas with shape mask applied
+ */
+function applyShapeMaskToCanvas(sourceCanvas, displayPoints, offsetX, offsetY, padding) {
+  // Create a new canvas for the masked result
+  const maskedCanvas = document.createElement('canvas');
+  maskedCanvas.width = sourceCanvas.width;
+  maskedCanvas.height = sourceCanvas.height;
+  maskedCanvas.setAttribute('willReadFrequently', 'true');
+  
+  const maskedCtx = maskedCanvas.getContext('2d');
+  
+  // Convert display points to canvas-relative coordinates
+  const canvasPoints = displayPoints.map(point => ({
+    x: point.x - offsetX,
+    y: point.y - offsetY
+  }));
+  
+  // Create a clipping path based on the annotation shape
+  maskedCtx.save();
+  maskedCtx.beginPath();
+  
+  if (canvasPoints.length > 0) {
+    maskedCtx.moveTo(canvasPoints[0].x, canvasPoints[0].y);
+    for (let i = 1; i < canvasPoints.length; i++) {
+      maskedCtx.lineTo(canvasPoints[i].x, canvasPoints[i].y);
+    }
+    maskedCtx.closePath();
+  }
+  
+  // Use the path as a clipping region
+  maskedCtx.clip();
+  
+  // Draw the source image only within the clipped region
+  maskedCtx.drawImage(sourceCanvas, 0, 0);
+  
+  maskedCtx.restore();
+  
+  return maskedCanvas;
+}
+
+/**
+ * Apply shape-based masking to an image blob for polygon and freehand annotations
+ * @param {Blob} imageBlob - Source image blob
+ * @param {Object} annotation - Annotation object with points and type
+ * @param {Object} annotationBounds - Bounding box information
+ * @param {string} mode - 'HISTORICAL' or 'FREE_PAN'
+ * @param {Object} wellInfo - Well information (for HISTORICAL mode)
+ * @returns {Promise<Blob>} Masked image blob
+ */
+async function applyShapeMaskToImageBlob(imageBlob, annotation, annotationBounds, mode, wellInfo) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      // Create canvas from the source image
+      const sourceCanvas = document.createElement('canvas');
+      sourceCanvas.width = img.width;
+      sourceCanvas.height = img.height;
+      sourceCanvas.setAttribute('willReadFrequently', 'true');
+      const sourceCtx = sourceCanvas.getContext('2d');
+      sourceCtx.drawImage(img, 0, 0);
+      
+      // Calculate the scale factor between the image and the annotation bounds
+      const imageWidth = img.width;
+      const imageHeight = img.height;
+      const boundsWidth = annotationBounds.width;
+      const boundsHeight = annotationBounds.height;
+      
+      // Convert annotation points to image-relative coordinates
+      let imagePoints;
+      if (mode === 'HISTORICAL') {
+        // Convert stage coordinates to well-relative, then to image coordinates
+        imagePoints = annotation.points.map(point => {
+          const wellRelativeX = point.x - wellInfo.centerX;
+          const wellRelativeY = point.y - wellInfo.centerY;
+          // Convert from annotation space to image space
+          const imageX = ((wellRelativeX - annotationBounds.centerX) + (boundsWidth / 2)) * (imageWidth / boundsWidth);
+          const imageY = ((wellRelativeY - annotationBounds.centerY) + (boundsHeight / 2)) * (imageHeight / boundsHeight);
+          return { x: imageX, y: imageY };
+        });
+      } else {
+        // For FREE_PAN mode, convert stage coordinates directly to image coordinates
+        imagePoints = annotation.points.map(point => {
+          const imageX = ((point.x - annotationBounds.centerX) + (boundsWidth / 2)) * (imageWidth / boundsWidth);
+          const imageY = ((point.y - annotationBounds.centerY) + (boundsHeight / 2)) * (imageHeight / boundsHeight);
+          return { x: imageX, y: imageY };
+        });
+      }
+      
+      // Create masked canvas
+      const maskedCanvas = document.createElement('canvas');
+      maskedCanvas.width = imageWidth;
+      maskedCanvas.height = imageHeight;
+      maskedCanvas.setAttribute('willReadFrequently', 'true');
+      const maskedCtx = maskedCanvas.getContext('2d');
+      
+      // Create clipping path
+      maskedCtx.save();
+      maskedCtx.beginPath();
+      
+      if (imagePoints.length > 0) {
+        maskedCtx.moveTo(imagePoints[0].x, imagePoints[0].y);
+        for (let i = 1; i < imagePoints.length; i++) {
+          maskedCtx.lineTo(imagePoints[i].x, imagePoints[i].y);
+        }
+        maskedCtx.closePath();
+      }
+      
+      // Apply clipping and draw image
+      maskedCtx.clip();
+      maskedCtx.drawImage(sourceCanvas, 0, 0);
+      maskedCtx.restore();
+      
+      // Convert to blob
+      maskedCanvas.toBlob((blob) => {
+        if (blob) {
+          resolve(blob);
+        } else {
+          reject(new Error('Failed to create masked image blob'));
+        }
+      }, 'image/png');
+    };
+    
+    img.onerror = () => {
+      reject(new Error('Failed to load image for masking'));
+    };
+    
+    // Convert blob to data URL for image loading
+    const reader = new FileReader();
+    reader.onload = () => {
+      img.src = reader.result;
+    };
+    reader.onerror = () => {
+      reject(new Error('Failed to read image blob'));
+    };
+    reader.readAsDataURL(imageBlob);
+  });
+}
+
+/**
+ * Convert canvas to blob (helper function)
+ * @param {HTMLCanvasElement} canvas - Canvas element
+ * @returns {Promise<Blob>} Image blob
+ */
+function canvasToBlob(canvas) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob);
+      } else {
+        reject(new Error('Failed to create image blob from canvas'));
+      }
+    }, 'image/png');
+  });
 }
