@@ -30,9 +30,10 @@ class TileProcessingManager {
    * @param {Object} channelConfigs - Contrast settings for each channel
    * @param {Object} services - Service objects (microscopeControlService, artifactZarrLoader)
    * @param {Object} metadata - Additional metadata (zarrMetadata, etc.)
+   * @param {Object} experimentConfig - Experiment-specific configuration for multi-layer support
    * @returns {Promise<Object>} - Processed tile data with merged channels
    */
-  async processTileChannels(enabledChannels, tileRequest, mode, channelConfigs, services, metadata = {}) {
+  async processTileChannels(enabledChannels, tileRequest, mode, channelConfigs, services, metadata = {}, experimentConfig = {}) {
     console.log(`🎨 TileProcessingManager: Processing ${enabledChannels.length} channels in ${mode} mode`);
     
     if (enabledChannels.length === 0) {
@@ -40,9 +41,9 @@ class TileProcessingManager {
       return this.createEmptyTile(tileRequest);
     }
 
-    // Process each channel individually
+    // Process each channel individually with experiment-specific settings
     const channelPromises = enabledChannels.map(channel => 
-      this.processSingleChannel(channel, tileRequest, mode, channelConfigs, services, metadata)
+      this.processSingleChannel(channel, tileRequest, mode, channelConfigs, services, metadata, experimentConfig)
     );
 
     // Wait for all channels to complete (including failed ones)
@@ -66,8 +67,12 @@ class TileProcessingManager {
       return this.createEmptyTile(tileRequest);
     }
 
-    // Merge all successful channels
-    const mergedTile = await this.mergeChannels(successfulChannels, tileRequest);
+    // Merge all successful channels with experiment-specific options
+    const mergedTile = await this.mergeChannels(successfulChannels, tileRequest, {
+      experimentId: experimentConfig.experimentId,
+      layerId: experimentConfig.layerId,
+      enableAlphaMasking: true
+    });
     
     console.log(`🎨 TileProcessingManager: Successfully merged ${successfulChannels.length}/${enabledChannels.length} channels`);
     
@@ -82,9 +87,10 @@ class TileProcessingManager {
    * @param {Object} channelConfigs - Contrast settings
    * @param {Object} services - Service objects
    * @param {Object} metadata - Additional metadata
+   * @param {Object} experimentConfig - Experiment-specific configuration
    * @returns {Promise<Object|null>} - Processed channel data or null if failed
    */
-  async processSingleChannel(channel, tileRequest, mode, channelConfigs, services, metadata) {
+  async processSingleChannel(channel, tileRequest, mode, channelConfigs, services, metadata, experimentConfig = {}) {
     try {
       console.log(`🔍 processSingleChannel received channel:`, typeof channel, channel);
       
@@ -103,8 +109,14 @@ class TileProcessingManager {
       // Apply color mapping
       const color = this.getChannelColor(channel, mode, metadata);
       
-      // Apply contrast adjustment
-      const processedData = await this.applyContrastAdjustment(channelData, channelConfig, color);
+      // Apply contrast adjustment with alpha masking
+      const alphaThreshold = experimentConfig.alphaThreshold || 10; // Default threshold for empty/black areas
+      const processedData = await this.applyContrastAdjustment(channelData, channelConfig, color, {
+        alphaThreshold: alphaThreshold,
+        enableAlphaMasking: true,
+        experimentId: experimentConfig.experimentId,
+        layerId: experimentConfig.layerId
+      });
       
       return {
         channelName,
@@ -201,13 +213,14 @@ class TileProcessingManager {
   }
 
   /**
-   * Apply contrast adjustment to channel data
+   * Apply contrast adjustment to channel data with alpha masking for empty areas
    * @param {string} dataUrl - Base64 data URL
    * @param {Object} config - Contrast configuration {min, max}
    * @param {string} color - Channel color for tinting
-   * @returns {Promise<string>} - Processed data URL
+   * @param {Object} options - Additional options for processing
+   * @returns {Promise<string>} - Processed data URL with alpha masking
    */
-  async applyContrastAdjustment(dataUrl, config, color) {
+  async applyContrastAdjustment(dataUrl, config, color, options = {}) {
     // Always apply color tinting, even if no contrast adjustment is needed
     // This ensures channels have their proper colors in multi-channel mode
 
@@ -234,17 +247,36 @@ class TileProcessingManager {
         // Parse color for tinting
         const colorRgb = this.hexToRgb(color);
         
+        // Alpha masking threshold - pixels below this intensity will be made transparent
+        const alphaThreshold = options.alphaThreshold || 10; // Default threshold for empty/black areas
+        
         for (let i = 0; i < data.length; i += 4) {
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+          const currentAlpha = data[i + 3];
+          
+          // Calculate pixel intensity (average of RGB values)
+          const intensity = (r + g + b) / 3;
+          
           // Apply min/max contrast adjustment
-          const adjustedR = range > 0 ? Math.max(0, Math.min(255, (data[i] - min) * 255 / range)) : data[i];
-          const adjustedG = range > 0 ? Math.max(0, Math.min(255, (data[i + 1] - min) * 255 / range)) : data[i + 1];
-          const adjustedB = range > 0 ? Math.max(0, Math.min(255, (data[i + 2] - min) * 255 / range)) : data[i + 2];
+          const adjustedR = range > 0 ? Math.max(0, Math.min(255, (r - min) * 255 / range)) : r;
+          const adjustedG = range > 0 ? Math.max(0, Math.min(255, (g - min) * 255 / range)) : g;
+          const adjustedB = range > 0 ? Math.max(0, Math.min(255, (b - min) * 255 / range)) : b;
           
           // Apply color tinting (always apply, even if no contrast adjustment)
           data[i] = Math.min(255, adjustedR * colorRgb.r / 255);
           data[i + 1] = Math.min(255, adjustedG * colorRgb.g / 255);
           data[i + 2] = Math.min(255, adjustedB * colorRgb.b / 255);
-          // Alpha channel remains unchanged
+          
+          // Apply alpha masking for empty/black areas
+          if (intensity < alphaThreshold) {
+            // Make empty/black areas transparent
+            data[i + 3] = 0;
+          } else {
+            // Preserve original alpha for non-empty areas
+            data[i + 3] = currentAlpha;
+          }
         }
         
         // Put the adjusted image data back
@@ -265,12 +297,13 @@ class TileProcessingManager {
   }
 
   /**
-   * Merge multiple channels using additive blending
+   * Merge multiple channels using alpha-aware additive blending
    * @param {Array} channelDataArray - Array of processed channel data
    * @param {Object} tileRequest - Tile request parameters
+   * @param {Object} options - Additional options for merging
    * @returns {Object} - Merged tile object
    */
-  mergeChannels(channelDataArray, tileRequest) {
+  mergeChannels(channelDataArray, tileRequest, options = {}) {
     if (channelDataArray.length === 1) {
       // Single channel - no merging needed
       return {
@@ -281,11 +314,12 @@ class TileProcessingManager {
         scale: tileRequest.scaleLevel,
         channel: channelDataArray[0].channelName,
         channelsUsed: [channelDataArray[0].channelName],
-        isMerged: false
+        isMerged: false,
+        hasAlphaMasking: true
       };
     }
 
-    // Multiple channels - merge using additive blending
+    // Multiple channels - merge using alpha-aware additive blending
     return new Promise((resolve) => {
       const firstChannel = channelDataArray[0];
       const img = new Image();
@@ -296,14 +330,13 @@ class TileProcessingManager {
         canvas.width = img.width;
         canvas.height = img.height;
         
-        // Clear to black (important for additive blending)
-        ctx.fillStyle = 'black';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        // Clear to transparent (important for alpha-aware blending)
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
         
         // Start with first channel
         ctx.drawImage(img, 0, 0);
         
-        // Add remaining channels using additive blending
+        // Add remaining channels using alpha-aware additive blending
         let processedChannels = 1;
         const totalChannels = channelDataArray.length;
         
@@ -312,7 +345,7 @@ class TileProcessingManager {
           const channelImg = new Image();
           
           channelImg.onload = () => {
-            // Use additive blending mode (lighter = additive)
+            // Use additive blending mode (lighter = additive) with alpha awareness
             ctx.globalCompositeOperation = 'lighter';
             ctx.drawImage(channelImg, 0, 0);
             
@@ -334,7 +367,8 @@ class TileProcessingManager {
                 scale: tileRequest.scaleLevel,
                 channel: channelDataArray.map(ch => ch.channelName).sort().join(','),
                 channelsUsed: channelDataArray.map(ch => ch.channelName),
-                isMerged: true
+                isMerged: true,
+                hasAlphaMasking: true
               });
             }
           };
@@ -357,7 +391,8 @@ class TileProcessingManager {
                 scale: tileRequest.scaleLevel,
                 channel: channelDataArray.map(ch => ch.channelName).sort().join(','),
                 channelsUsed: channelDataArray.map(ch => ch.channelName),
-                isMerged: true
+                isMerged: true,
+                hasAlphaMasking: true
               });
             }
           };
@@ -389,8 +424,74 @@ class TileProcessingManager {
       scale: tileRequest.scaleLevel,
       channel: 'none',
       channelsUsed: [],
-      isMerged: false
+      isMerged: false,
+      hasAlphaMasking: true
     };
+  }
+
+  /**
+   * Process experiment-specific multi-layer data with alpha masking
+   * @param {Array} experiments - Array of experiment objects
+   * @param {Object} tileRequest - Tile request parameters
+   * @param {string} mode - 'FREE_PAN' or 'HISTORICAL'
+   * @param {Object} channelConfigs - Contrast settings for each channel
+   * @param {Object} services - Service objects
+   * @param {Object} metadata - Additional metadata
+   * @returns {Promise<Array>} - Array of processed experiment tiles
+   */
+  async processExperimentLayers(experiments, tileRequest, mode, channelConfigs, services, metadata = {}) {
+    console.log(`🎨 TileProcessingManager: Processing ${experiments.length} experiment layers`);
+    
+    const experimentPromises = experiments.map(async (experiment) => {
+      try {
+        const experimentConfig = {
+          experimentId: experiment.id || experiment.name,
+          layerId: experiment.layerId,
+          alphaThreshold: experiment.alphaThreshold || 10,
+          layerOpacity: experiment.opacity || 1.0,
+          blendMode: experiment.blendMode || 'normal'
+        };
+
+        // Process channels for this experiment
+        const enabledChannels = experiment.channels || [];
+        if (enabledChannels.length === 0) {
+          return null;
+        }
+
+        const processedTile = await this.processTileChannels(
+          enabledChannels,
+          tileRequest,
+          mode,
+          channelConfigs,
+          services,
+          metadata,
+          experimentConfig
+        );
+
+        return {
+          ...processedTile,
+          experimentId: experimentConfig.experimentId,
+          layerId: experimentConfig.layerId,
+          layerOpacity: experimentConfig.layerOpacity,
+          blendMode: experimentConfig.blendMode
+        };
+
+      } catch (error) {
+        console.error(`🎨 TileProcessingManager: Error processing experiment ${experiment.id || experiment.name}:`, error);
+        return null;
+      }
+    });
+
+    const results = await Promise.allSettled(experimentPromises);
+    
+    // Filter out failed experiments
+    const successfulExperiments = results
+      .filter(result => result.status === 'fulfilled' && result.value)
+      .map(result => result.value);
+
+    console.log(`🎨 TileProcessingManager: Successfully processed ${successfulExperiments.length}/${experiments.length} experiment layers`);
+    
+    return successfulExperiments;
   }
 
   /**
