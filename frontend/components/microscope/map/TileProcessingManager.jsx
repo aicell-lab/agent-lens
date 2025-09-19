@@ -155,7 +155,8 @@ class TileProcessingManager {
         channelName, // Single channel only
         tileRequest.timepoint || 0,
         tileRequest.wellPaddingMm || 0,
-        'base64'
+        'base64',
+        tileRequest.experimentName || null // Add experiment name parameter
       );
       
       if (result.success) {

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import PropTypes from 'prop-types';
 import './LayerPanel.css';
 
 const LayerPanel = ({
@@ -29,6 +30,10 @@ const LayerPanel = ({
   getEnabledZarrChannels,
   realMicroscopeChannelConfigs,
   updateRealMicroscopeChannelConfig,
+  
+  // Multi-Layer Experiments props
+  visibleExperiments = [],
+  setVisibleExperiments,
   
   // Layout props
   isFovFittedMode = false
@@ -398,15 +403,34 @@ const LayerPanel = ({
             {isLoadingExperiments ? (
               <div className="loading-text">Loading experiments...</div>
             ) : (
-              experiments.map((exp) => (
+              experiments.map((exp) => {
+                const isVisible = visibleExperiments.includes(exp.name);
+                const isActive = exp.name === activeExperiment;
+                return (
                 <div key={exp.name} className="layer-item layer-item--experiment">
                   <div className="layer-item__header">
                     <button
                       className="layer-visibility-btn"
-                      onClick={() => setActiveExperimentHandler(exp.name)}
-                      title={exp.name === activeExperiment ? "Active experiment" : "Activate experiment"}
+                      onClick={() => {
+                        if (isVisible) {
+                          // Hide experiment
+                          setVisibleExperiments(prev => prev.filter(name => name !== exp.name));
+                        } else {
+                          // Show experiment
+                          setVisibleExperiments(prev => [...prev, exp.name]);
+                        }
+                      }}
+                      title={isVisible ? "Hide experiment" : "Show experiment"}
                     >
-                      <i className={`fas fa-${exp.name === activeExperiment ? 'check' : 'circle'}`}></i>
+                      <i className={`fas fa-${isVisible ? 'eye' : 'eye-slash'}`}></i>
+                    </button>
+                    
+                    <button
+                      className="layer-active-btn"
+                      onClick={() => setActiveExperimentHandler(exp.name)}
+                      title={isActive ? "Currently active experiment" : "Set as active experiment"}
+                    >
+                      <i className={`fas fa-${isActive ? 'star' : 'star'} ${isActive ? 'active-indicator' : ''}`}></i>
                     </button>
                     
                     <div 
@@ -484,7 +508,7 @@ const LayerPanel = ({
                                       type="checkbox"
                                       checked={isVisible}
                                       disabled={isLastChannel}
-                                      onChange={(e) => setVisibleLayers(prev => ({
+                                      onChange={() => setVisibleLayers(prev => ({
                                         ...prev,
                                         channels: {
                                           ...prev.channels,
@@ -550,7 +574,8 @@ const LayerPanel = ({
                     </div>
                   )}
                 </div>
-              ))
+                );
+              })
             )}
           </>
         )}
@@ -565,6 +590,43 @@ const LayerPanel = ({
       </div>
     </div>
   );
+};
+
+LayerPanel.propTypes = {
+  // Map Layers props
+  visibleLayers: PropTypes.object.isRequired,
+  setVisibleLayers: PropTypes.func.isRequired,
+  
+  // Experiments props
+  isHistoricalDataMode: PropTypes.bool,
+  isSimulatedMicroscope: PropTypes.bool,
+  isLoadingExperiments: PropTypes.bool,
+  activeExperiment: PropTypes.string,
+  experiments: PropTypes.array,
+  setActiveExperimentHandler: PropTypes.func,
+  setShowCreateExperimentDialog: PropTypes.func,
+  removeExperiment: PropTypes.func,
+  setExperimentToReset: PropTypes.func,
+  setShowClearCanvasConfirmation: PropTypes.func,
+  setExperimentToDelete: PropTypes.func,
+  setShowDeleteConfirmation: PropTypes.func,
+  
+  // Multi-Channel props
+  shouldUseMultiChannelLoading: PropTypes.func,
+  mapViewMode: PropTypes.string,
+  availableZarrChannels: PropTypes.array,
+  zarrChannelConfigs: PropTypes.object,
+  updateZarrChannelConfig: PropTypes.func,
+  getEnabledZarrChannels: PropTypes.func,
+  realMicroscopeChannelConfigs: PropTypes.object,
+  updateRealMicroscopeChannelConfig: PropTypes.func,
+  
+  // Multi-Layer Experiments props
+  visibleExperiments: PropTypes.array,
+  setVisibleExperiments: PropTypes.func,
+  
+  // Layout props
+  isFovFittedMode: PropTypes.bool
 };
 
 export default LayerPanel;

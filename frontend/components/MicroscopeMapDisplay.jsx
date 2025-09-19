@@ -725,6 +725,16 @@ const MicroscopeMapDisplay = ({
     renderDialogs,
   } = experimentManager;
 
+  // Multi-layer experiment visibility state
+  const [visibleExperiments, setVisibleExperiments] = useState([]);
+
+  // Auto-show active experiment when it changes (backwards compatibility)
+  useEffect(() => {
+    if (activeExperiment && !visibleExperiments.includes(activeExperiment)) {
+      setVisibleExperiments(prev => [...prev, activeExperiment]);
+    }
+  }, [activeExperiment, visibleExperiments]);
+
   // Calculate stage dimensions from configuration (moved early to avoid dependency issues)
   const stageDimensions = useMemo(() => {
     if (!microscopeConfiguration?.limits?.software_pos_limit) {
@@ -1459,13 +1469,14 @@ const MicroscopeMapDisplay = ({
   }, [mapViewMode]);
 
   // Helper functions for tile management
-  const getTileKey = useCallback((bounds, scale, channel) => {
+  const getTileKey = useCallback((bounds, scale, channel, experimentName = null) => {
     // For merged channels, use the sorted channel string to ensure consistent keys
     const normalizedChannel = channel.includes(',') ? channel.split(',').sort().join(',') : channel;
-    return `${bounds.topLeft.x.toFixed(1)}_${bounds.topLeft.y.toFixed(1)}_${bounds.bottomRight.x.toFixed(1)}_${bounds.bottomRight.y.toFixed(1)}_${scale}_${normalizedChannel}`;
+    const expName = experimentName || 'default';
+    return `${bounds.topLeft.x.toFixed(1)}_${bounds.topLeft.y.toFixed(1)}_${bounds.bottomRight.x.toFixed(1)}_${bounds.bottomRight.y.toFixed(1)}_${scale}_${normalizedChannel}_${expName}`;
   }, []);
 
-  // Memoize visible tiles with smart cleanup strategy
+  // Memoize visible tiles with smart cleanup strategy  
   const visibleTiles = useMemo(() => {
     if (!visibleLayers.scanResults) return [];
     
@@ -1475,26 +1486,37 @@ const MicroscopeMapDisplay = ({
       getEnabledZarrChannels().map(ch => ch.channelName).sort().join(',') : 
       getChannelString();
     
-    console.log(`🔍 [visibleTiles] Filtering logic:`, {
+    console.log(`🔍 [visibleTiles] Multi-layer filtering logic:`, {
       useMultiChannel,
       isHistoricalDataMode,
       channelString,
       scaleLevel,
       totalTiles: stitchedTiles.length,
+      visibleExperiments: visibleExperiments,
+      activeExperiment: activeExperiment,
       tilesWithMatchingChannel: stitchedTiles.filter(tile => tile.channel === channelString).length,
       enabledZarrChannels: getEnabledZarrChannels().map(ch => ch.channelName),
       tilesData: stitchedTiles.map(tile => ({
         channel: tile.channel,
+        experimentName: tile.experimentName,
         isMultiChannel: tile.metadata?.isMultiChannel,
         channelsUsed: tile.metadata?.channelsUsed,
         scale: tile.scale
       }))
     });
     
-    
     // Get tiles for current scale and channel selection
     const currentScaleTiles = stitchedTiles.filter(tile => {
-      // For historical mode multi-channel tiles - show all tiles (no filtering needed)
+      // Multi-layer experiment filtering: only show tiles from visible experiments
+      // If no experiments are explicitly visible, show tiles from active experiment (backwards compatibility)
+      const experimentsToShow = visibleExperiments.length > 0 ? visibleExperiments : (activeExperiment ? [activeExperiment] : []);
+      const isExperimentVisible = !tile.experimentName || experimentsToShow.includes(tile.experimentName);
+      
+      if (!isExperimentVisible) {
+        return false;
+      }
+      
+      // For historical mode multi-channel tiles - show all tiles (no channel filtering needed)
       if (useMultiChannel && isHistoricalDataMode && tile.metadata?.isMultiChannel) {
         return tile.scale === scaleLevel;
       }
@@ -1517,6 +1539,14 @@ const MicroscopeMapDisplay = ({
     
     for (const scale of availableScales) {
       const scaleTiles = stitchedTiles.filter(tile => {
+        // Multi-layer experiment filtering: only show tiles from visible experiments (SAME AS ABOVE!)
+        const experimentsToShow = visibleExperiments.length > 0 ? visibleExperiments : (activeExperiment ? [activeExperiment] : []);
+        const isExperimentVisible = !tile.experimentName || experimentsToShow.includes(tile.experimentName);
+        
+        if (!isExperimentVisible) {
+          return false;
+        }
+        
         // For historical mode multi-channel tiles
         if (useMultiChannel && isHistoricalDataMode && tile.metadata?.isMultiChannel) {
           return tile.scale === scale && 
@@ -1531,13 +1561,13 @@ const MicroscopeMapDisplay = ({
     }
     
     return [];
-  }, [stitchedTiles, scaleLevel, visibleLayers.channels, visibleLayers.scanResults, shouldUseMultiChannelLoading, getEnabledZarrChannels, getSelectedChannels, getChannelString]);
+  }, [stitchedTiles, scaleLevel, visibleLayers.channels, visibleLayers.scanResults, shouldUseMultiChannelLoading, getEnabledZarrChannels, getSelectedChannels, getChannelString, visibleExperiments, activeExperiment]);
 
   const addOrUpdateTile = useCallback((newTile) => {
     setStitchedTiles(prevTiles => {
-      const tileKey = getTileKey(newTile.bounds, newTile.scale, newTile.channel);
+      const tileKey = getTileKey(newTile.bounds, newTile.scale, newTile.channel, newTile.experimentName);
       const existingIndex = prevTiles.findIndex(tile => 
-        getTileKey(tile.bounds, tile.scale, tile.channel) === tileKey
+        getTileKey(tile.bounds, tile.scale, tile.channel, tile.experimentName) === tileKey
       );
       
       if (existingIndex >= 0) {
@@ -2915,7 +2945,7 @@ const MicroscopeMapDisplay = ({
       const height_mm = clampedBottomRight.y - clampedTopLeft.y;
       
       // Create a unique request key to prevent duplicate requests
-      const requestKey = getTileKey(bounds, scaleLevel, activeChannel);
+      const requestKey = getTileKey(bounds, scaleLevel, activeChannel, selectedHistoricalDataset?.name || 'historical');
       
       // Check if we're already loading this tile
       if (activeTileRequestsRef.current.has(requestKey)) {
@@ -3257,7 +3287,7 @@ const MicroscopeMapDisplay = ({
         };
         
         // 🚀 REQUEST CANCELLATION: Check if we need to cancel previous request
-        const currentRequestKey = getTileKey(bounds, scaleLevel, activeChannel);
+        const currentRequestKey = getTileKey(bounds, scaleLevel, activeChannel, selectedHistoricalDataset?.name || 'historical');
         if (lastRequestKey && lastRequestKey !== currentRequestKey) {
           console.log(`🔄 User moved to new position, cancelling previous request: ${lastRequestKey} → ${currentRequestKey}`);
           if (currentCancellableRequest) {
@@ -3397,7 +3427,7 @@ const MicroscopeMapDisplay = ({
     const height_mm = clampedBottomRight.y - clampedTopLeft.y;
     
     // Create a unique request key to prevent duplicate requests
-    const requestKey = getTileKey(bounds, scaleLevel, activeChannel);
+    const requestKey = getTileKey(bounds, scaleLevel, activeChannel, 'all-experiments');
     
     // Check if we're already loading this tile
     if (activeTileRequestsRef.current.has(requestKey)) {
@@ -3415,8 +3445,19 @@ const MicroscopeMapDisplay = ({
       const centerX = clampedTopLeft.x + (width_mm / 2);
       const centerY = clampedTopLeft.y + (height_mm / 2);
       
-      // 🎨 SIMPLIFIED TILE PROCESSING: Use TileProcessingManager for FREE_PAN mode
-      console.log(`🎨 FREE_PAN: Using TileProcessingManager for channels: "${getChannelString()}"`);
+      // 🎨 MULTI-LAYER TILE PROCESSING: Load tiles for each visible experiment
+      console.log(`🎨 FREE_PAN: Loading tiles for visible experiments: ${visibleExperiments.join(', ')}`);
+      
+      // Get experiments to load tiles for
+      const experimentsToLoad = visibleExperiments.length > 0 ? visibleExperiments : (activeExperiment ? [activeExperiment] : []);
+      
+      if (experimentsToLoad.length === 0) {
+        console.warn('🎨 FREE_PAN: No experiments to load tiles for');
+        if (appendLog) {
+          appendLog('No experiments selected for tile loading');
+        }
+        return;
+      }
       
       // Get enabled channels for FREE_PAN mode
       const enabledChannels = getSelectedChannels().map(channelName => ({
@@ -3424,61 +3465,72 @@ const MicroscopeMapDisplay = ({
         channelName: channelName
       }));
       
-      // Prepare tile request for TileProcessingManager
-      const tileRequest = {
-        centerX,
-        centerY,
-        width_mm,
-        height_mm,
-        wellPlateType,
-        scaleLevel,
-        timepoint: 0,
-        wellPaddingMm,
-        bounds
-      };
-      
       // Prepare services for TileProcessingManager
       const services = {
         microscopeControlService,
         artifactZarrLoader: null // Not needed for FREE_PAN mode
       };
       
-      // Process tiles using TileProcessingManager
-      const processedTile = await TileProcessingManager.processTileChannels(
-        enabledChannels,
-        tileRequest,
-        'FREE_PAN',
-        realMicroscopeChannelConfigs,
-        services
-      );
+      // Load tiles for each experiment
+      for (const experimentName of experimentsToLoad) {
+        try {
+          console.log(`🎨 FREE_PAN: Loading tiles for experiment: ${experimentName}`);
+          
+          // Prepare tile request for this specific experiment
+          const tileRequest = {
+            centerX,
+            centerY,
+            width_mm,
+            height_mm,
+            wellPlateType,
+            scaleLevel,
+            timepoint: 0,
+            wellPaddingMm,
+            bounds,
+            experimentName: experimentName // Add experiment name for get_stitched_region API
+          };
+          
+          // Process tiles using TileProcessingManager
+          const processedTile = await TileProcessingManager.processTileChannels(
+            enabledChannels,
+            tileRequest,
+            'FREE_PAN',
+            realMicroscopeChannelConfigs,
+            services
+          );
+          
+          if (processedTile && processedTile.data) {
+            console.log(`🎨 FREE_PAN: Successfully processed tile for experiment ${experimentName} with ${processedTile.channelsUsed?.length || 0} channels`);
+            const newTile = {
+              data: processedTile.data,
+              bounds: processedTile.bounds,
+              width_mm: processedTile.width_mm,
+              height_mm: processedTile.height_mm,
+              scale: processedTile.scale,
+              channel: processedTile.channel,
+              timestamp: Date.now(),
+              isMerged: processedTile.isMerged,
+              channelsUsed: processedTile.channelsUsed,
+              experimentName: experimentName // Add experiment name to real microscope tiles
+            };
+            
+            addOrUpdateTile(newTile);
+          } else {
+            console.warn(`🎨 FREE_PAN: TileProcessingManager returned empty tile for experiment ${experimentName}, channels: "${getChannelString()}"`);
+          }
+        } catch (error) {
+          console.error(`🎨 FREE_PAN: Failed to load tile for experiment ${experimentName}:`, error);
+          if (appendLog) {
+            appendLog(`Failed to load tile for experiment ${experimentName}: ${error.message}`);
+          }
+        }
+      }
       
-      if (processedTile && processedTile.data) {
-        console.log(`🎨 FREE_PAN: Successfully processed tile with ${processedTile.channelsUsed?.length || 0} channels`);
-        const newTile = {
-          data: processedTile.data,
-          bounds: processedTile.bounds,
-          width_mm: processedTile.width_mm,
-          height_mm: processedTile.height_mm,
-          scale: processedTile.scale,
-          channel: processedTile.channel,
-          timestamp: Date.now(),
-          isMerged: processedTile.isMerged,
-          channelsUsed: processedTile.channelsUsed
-        };
-        
-        addOrUpdateTile(newTile);
-        
-        // Clean up old tiles for this scale/channel combination to prevent memory bloat
-        cleanupOldTiles(scaleLevel, getChannelString());
-        
-        if (appendLog) {
-          appendLog(`Loaded tile for scale ${scaleLevel}, region (${clampedTopLeft.x.toFixed(1)}, ${clampedTopLeft.y.toFixed(1)}) to (${clampedBottomRight.x.toFixed(1)}, ${clampedBottomRight.y.toFixed(1)})`);
-        }
-      } else {
-        console.warn(`🎨 FREE_PAN: TileProcessingManager returned empty tile for channels: "${getChannelString()}"`);
-        if (appendLog) {
-          appendLog(`Failed to process tile: No data returned`);
-        }
+      // Clean up old tiles for this scale/channel combination to prevent memory bloat
+      cleanupOldTiles(scaleLevel, getChannelString());
+      
+      if (appendLog) {
+        appendLog(`Loaded tiles for ${experimentsToLoad.length} experiments at scale ${scaleLevel}, region (${clampedTopLeft.x.toFixed(1)}, ${clampedTopLeft.y.toFixed(1)}) to (${clampedBottomRight.x.toFixed(1)}, ${clampedBottomRight.y.toFixed(1)})`);
       }
     } catch (error) {
       console.error('Failed to load stitched tile:', error);
@@ -4047,6 +4099,10 @@ const MicroscopeMapDisplay = ({
                       setExperimentToDelete={setExperimentToDelete}
                       setShowDeleteConfirmation={setShowDeleteConfirmation}
                       
+                      // Multi-Layer Experiments props
+                      visibleExperiments={visibleExperiments}
+                      setVisibleExperiments={setVisibleExperiments}
+                      
                       // Multi-Channel props
                       shouldUseMultiChannelLoading={shouldUseMultiChannelLoading}
                       mapViewMode={mapViewMode}
@@ -4123,16 +4179,23 @@ const MicroscopeMapDisplay = ({
         
         {/* Stitched scan results tiles layer (below other elements) */}
         {mapViewMode === 'FREE_PAN' && visibleTiles.map((tile, index) => {
+          // Calculate z-index for multi-layer experiments
+          // Experiments shown later have higher z-index (appear on top)
+          const experimentsToShow = visibleExperiments.length > 0 ? visibleExperiments : (activeExperiment ? [activeExperiment] : []);
+          const experimentIndex = tile.experimentName ? experimentsToShow.indexOf(tile.experimentName) : -1;
+          const baseZIndex = 1;
+          const experimentZIndex = experimentIndex >= 0 ? experimentIndex + baseZIndex : baseZIndex;
+          
           return (
             <div
-              key={`${getTileKey(tile.bounds, tile.scale, tile.channel)}_${index}`}
+              key={`${getTileKey(tile.bounds, tile.scale, tile.channel, tile.experimentName)}_${index}`}
               className="absolute pointer-events-none scan-results-container"
               style={{
                 left: `${stageToDisplayCoords(tile.bounds.topLeft.x, tile.bounds.topLeft.y).x}px`,
                 top: `${stageToDisplayCoords(tile.bounds.topLeft.x, tile.bounds.topLeft.y).y}px`,
                 width: `${tile.width_mm * pixelsPerMm * mapScale}px`,
                 height: `${tile.height_mm * pixelsPerMm * mapScale}px`,
-                zIndex: 1 // All scan result tiles at same level
+                zIndex: experimentZIndex // Multi-layer z-index based on experiment order
               }}
             >
               <img
@@ -4150,6 +4213,11 @@ const MicroscopeMapDisplay = ({
               {process.env.NODE_ENV === 'development' && (
                 <div className="absolute top-0 left-0 bg-black bg-opacity-50 text-white text-xs p-1">
                   S{tile.scale} {tile.isMerged ? 'MERGED' : tile.channel.substring(0, 3)}
+                  {tile.experimentName && (
+                    <div className="text-xs opacity-75">
+                      Exp: {tile.experimentName.substring(0, 8)}
+                    </div>
+                  )}
                   {tile.isMerged && tile.channelsUsed && (
                     <div className="text-xs opacity-75">
                       {tile.channelsUsed.map(ch => ch.substring(0, 3)).join('+')}

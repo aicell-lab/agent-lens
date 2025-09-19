@@ -179,6 +179,30 @@
   font-size: 0.75rem;
 }
 
+.layer-active-btn {
+  background: none;
+  border: none;
+  color: #d1d5db;
+  cursor: pointer;
+  padding: 0.25rem;
+  border-radius: 0.25rem;
+  transition: all 0.2s;
+  margin-right: 0.5rem;
+}
+
+.layer-active-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+}
+
+.layer-active-btn i {
+  font-size: 0.75rem;
+}
+
+.layer-active-btn .active-indicator {
+  color: #fbbf24;
+}
+
 .layer-name {
   display: flex;
   align-items: center;
