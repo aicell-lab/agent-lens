@@ -1510,7 +1510,7 @@ const MicroscopeMapDisplay = ({
       // Multi-layer experiment filtering: only show tiles from visible experiments
       // If no experiments are explicitly visible, show tiles from active experiment (backwards compatibility)
       const experimentsToShow = visibleExperiments.length > 0 ? visibleExperiments : (activeExperiment ? [activeExperiment] : []);
-      const isExperimentVisible = !tile.experimentName || experimentsToShow.includes(tile.experimentName);
+      const isExperimentVisible = !tile.experimentName || tile.experimentName === null || experimentsToShow.includes(tile.experimentName);
       
       if (!isExperimentVisible) {
         return false;
@@ -1541,7 +1541,7 @@ const MicroscopeMapDisplay = ({
       const scaleTiles = stitchedTiles.filter(tile => {
         // Multi-layer experiment filtering: only show tiles from visible experiments (SAME AS ABOVE!)
         const experimentsToShow = visibleExperiments.length > 0 ? visibleExperiments : (activeExperiment ? [activeExperiment] : []);
-        const isExperimentVisible = !tile.experimentName || experimentsToShow.includes(tile.experimentName);
+        const isExperimentVisible = !tile.experimentName || tile.experimentName === null || experimentsToShow.includes(tile.experimentName);
         
         if (!isExperimentVisible) {
           return false;
@@ -2142,29 +2142,46 @@ const MicroscopeMapDisplay = ({
     }
   }, [visibleLayers.channels, loadCurrentMicroscopeSettings, microscopeControlService, isSimulatedMicroscope]);
 
+  // Track previous channel selection to prevent unnecessary tile clearing
+  const previousChannelSelectionRef = useRef('');
+  
   // Effect to refresh tiles when channel selection changes
   useEffect(() => {
     if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && !isSimulatedMicroscope) {
-      // Clear existing tiles to force reload with new channel selection
-      setStitchedTiles([]);
-      activeTileRequestsRef.current.clear();
+      // Only clear tiles if we actually have a meaningful channel change
+      const selectedChannels = Object.entries(visibleLayers.channels)
+        .filter(([, isVisible]) => isVisible)
+        .map(([channelName]) => channelName);
+      const channelList = selectedChannels.length > 0 ? selectedChannels : ['BF LED matrix full'];
+      const currentChannelString = channelList.sort().join(',');
       
-      // Schedule tile loading after a short delay
-      const refreshTimer = setTimeout(() => {
-        if (appendLog) {
-          const selectedChannels = Object.entries(visibleLayers.channels)
-            .filter(([, isVisible]) => isVisible)
-            .map(([channelName]) => channelName);
-          const channelList = selectedChannels.length > 0 ? selectedChannels : ['BF LED matrix full'];
-          appendLog(`Channel selection changed to: ${channelList.join(', ')} - refreshing tiles`);
-        }
-        // We'll trigger the tile update through a state change rather than calling scheduleTileUpdate directly
-        setNeedsTileReload(true);
-      }, 500);
-      
-      return () => clearTimeout(refreshTimer);
+      // Check if this is a real channel change vs just LayerPanel opening/closing
+      if (currentChannelString !== previousChannelSelectionRef.current) {
+        console.log(`[Channel Change] Detected real channel change: ${previousChannelSelectionRef.current} → ${currentChannelString}`);
+        
+        // Update the ref to track current selection
+        previousChannelSelectionRef.current = currentChannelString;
+        
+        // Clear existing tiles to force reload with new channel selection
+        setStitchedTiles([]);
+        activeTileRequestsRef.current.clear();
+        
+        // Schedule tile loading after a short delay
+        const refreshTimer = setTimeout(() => {
+          if (appendLog) {
+            appendLog(`Channel selection changed to: ${channelList.join(', ')} - refreshing tiles`);
+          }
+          // We'll trigger the tile update through a state change rather than calling scheduleTileUpdate directly
+          setNeedsTileReload(true);
+        }, 500);
+        
+        return () => clearTimeout(refreshTimer);
+      } else {
+        console.log(`[Channel Change] No real channel change detected - LayerPanel UI update only`);
+      }
     }
   }, [visibleLayers.channels, mapViewMode, visibleLayers.scanResults, isSimulatedMicroscope, appendLog]);
+
 
   // Effect to listen for contrast settings changes and refresh tiles
   useEffect(() => {
@@ -2234,33 +2251,6 @@ const MicroscopeMapDisplay = ({
     }
   }, [visibleLayers.channels, isHistoricalDataMode, isSimulatedMicroscope, mapViewMode, realMicroscopeChannelConfigs]);
 
-  // Helper function to check if a region is covered by existing tiles
-  const isRegionCovered = useCallback((bounds, scale, channel, existingTiles) => {
-    const tilesForScaleAndChannel = existingTiles.filter(tile => 
-      tile.scale === scale && tile.channel === channel
-    );
-    
-    // Check if the requested region is fully covered by existing tiles
-    for (const tile of tilesForScaleAndChannel) {
-      if (tile.bounds.topLeft.x <= bounds.topLeft.x &&
-          tile.bounds.topLeft.y <= bounds.topLeft.y &&
-          tile.bounds.bottomRight.x >= bounds.bottomRight.x &&
-          tile.bounds.bottomRight.y >= bounds.bottomRight.y) {
-        
-        // Check if tile is potentially stale (older than 10 seconds)
-        const tileAge = Date.now() - (tile.timestamp || 0);
-        const maxTileAge = 10000; // 10 seconds
-        
-        if (tileAge > maxTileAge) {
-          // Tile is stale, don't consider region as covered
-          return false;
-        }
-        
-        return true;
-      }
-    }
-    return false;
-  }, []);
 
 
   
@@ -2935,11 +2925,6 @@ const MicroscopeMapDisplay = ({
       
       const bounds = { topLeft: clampedTopLeft, bottomRight: clampedBottomRight };
       
-      // Check if this region is already covered by existing tiles
-      if (isRegionCovered(bounds, scaleLevel, activeChannel, stitchedTiles)) {
-        // Region is already loaded, no need to fetch
-        return;
-      }
       
       const width_mm = clampedBottomRight.x - clampedTopLeft.x;
       const height_mm = clampedBottomRight.y - clampedTopLeft.y;
@@ -3417,11 +3402,6 @@ const MicroscopeMapDisplay = ({
     
     const bounds = { topLeft: clampedTopLeft, bottomRight: clampedBottomRight };
     
-    // Check if this region is already covered by existing tiles
-    if (isRegionCovered(bounds, scaleLevel, activeChannel, stitchedTiles)) {
-      console.log('[loadStitchedTiles] Region already covered by existing tiles - skipping');
-      return;
-    }
     
     const width_mm = clampedBottomRight.x - clampedTopLeft.x;
     const height_mm = clampedBottomRight.y - clampedTopLeft.y;
@@ -3447,9 +3427,11 @@ const MicroscopeMapDisplay = ({
       
       // 🎨 MULTI-LAYER TILE PROCESSING: Load tiles for each visible experiment
       console.log(`🎨 FREE_PAN: Loading tiles for visible experiments: ${visibleExperiments.join(', ')}`);
+      console.log(`🎨 FREE_PAN: Current state - visibleExperiments:`, visibleExperiments, 'activeExperiment:', activeExperiment);
       
       // Get experiments to load tiles for
-      const experimentsToLoad = visibleExperiments.length > 0 ? visibleExperiments : (activeExperiment ? [activeExperiment] : []);
+      // If no experiments are specified, load tiles without experiment filter (pass null to API)
+      const experimentsToLoad = visibleExperiments.length > 0 ? visibleExperiments : (activeExperiment ? [activeExperiment] : [null]);
       
       if (experimentsToLoad.length === 0) {
         console.warn('🎨 FREE_PAN: No experiments to load tiles for');
@@ -3511,7 +3493,7 @@ const MicroscopeMapDisplay = ({
               timestamp: Date.now(),
               isMerged: processedTile.isMerged,
               channelsUsed: processedTile.channelsUsed,
-              experimentName: experimentName // Add experiment name to real microscope tiles
+              experimentName: experimentName || null // Add experiment name to real microscope tiles (null if no experiment)
             };
             
             addOrUpdateTile(newTile);
@@ -3544,7 +3526,86 @@ const MicroscopeMapDisplay = ({
         setIsLoadingCanvas(false);
       }
     }
-  }, [isHistoricalDataMode, microscopeControlService, visibleLayers.scanResults, visibleLayers.channels, mapViewMode, scaleLevel, displayToStageCoords, stageDimensions, pixelsPerMm, isRegionCovered, getTileKey, addOrUpdateTile, appendLog, isSimulatedMicroscope, selectedHistoricalDataset, selectedGallery, getIntersectingWells, calculateWellRegion, wellPlateType, realMicroscopeChannelConfigs, zarrChannelConfigs, getEnabledZarrChannels, shouldUseMultiChannelLoading]);
+  }, [isHistoricalDataMode, microscopeControlService, visibleLayers.scanResults, visibleLayers.channels, mapViewMode, scaleLevel, displayToStageCoords, stageDimensions, pixelsPerMm, getTileKey, addOrUpdateTile, appendLog, isSimulatedMicroscope, selectedHistoricalDataset, selectedGallery, getIntersectingWells, calculateWellRegion, wellPlateType, realMicroscopeChannelConfigs, zarrChannelConfigs, getEnabledZarrChannels, shouldUseMultiChannelLoading, visibleExperiments, activeExperiment]);
+
+  // Add a ref to track previous experiment selection to avoid unnecessary reloads
+  const previousExperimentSelectionRef = useRef(null);
+
+  // Effect to load tiles when visible experiments change
+  useEffect(() => {
+    if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && !isHistoricalDataMode) {
+      const activeChannel = getChannelString();
+      
+      // Check if microscope service is available
+      if (!microscopeControlService || isSimulatedMicroscope) {
+        console.log('[Visible Experiments] Skipping - no microscope service or simulated mode');
+        return;
+      }
+      
+      // Don't load tiles while user is actively interacting
+      if (isPanning || isZooming) {
+        console.log('[Visible Experiments] Skipping - user is actively interacting (panning:', isPanning, 'zooming:', isZooming, ')');
+        return;
+      }
+      
+      // Get current experiment selection string for comparison
+      const currentExperimentString = visibleExperiments.sort().join(',');
+      
+      console.log(`[Experiment Change] Checking: previous='${previousExperimentSelectionRef.current}' current='${currentExperimentString}' visibleExperiments=[${visibleExperiments.join(', ')}]`);
+      
+      // Check if this is a real experiment change vs just UI update
+      // First time (when ref is null), initialize it without triggering reload
+      if (previousExperimentSelectionRef.current === null) {
+        console.log(`[Experiment Change] First initialization - setting tracking ref to: ${currentExperimentString}`);
+        previousExperimentSelectionRef.current = currentExperimentString;
+        return;
+      }
+      
+      if (currentExperimentString !== previousExperimentSelectionRef.current) {
+        console.log(`[Experiment Change] Detected real experiment change: '${previousExperimentSelectionRef.current}' → '${currentExperimentString}'`);
+        
+        // Update the ref to track current selection
+        previousExperimentSelectionRef.current = currentExperimentString;
+        
+        // Get experiments to check - same logic as tile loading
+        const experimentsToCheck = visibleExperiments.length > 0 ? visibleExperiments : (activeExperiment ? [activeExperiment] : [null]);
+        
+        // Check if we have tiles for all experiments at current scale/channel
+        const missingExperiments = experimentsToCheck.filter(expName => {
+          const hasTiles = stitchedTiles.some(tile => 
+            tile.scale === scaleLevel && 
+            tile.channel === activeChannel &&
+            (expName === null ? tile.experimentName === null : tile.experimentName === expName)
+          );
+          return !hasTiles;
+        });
+        
+        if (missingExperiments.length > 0) {
+          const experimentNames = missingExperiments.map(exp => exp === null ? 'no-experiment' : exp);
+          console.log(`[Visible Experiments] Missing tiles for experiments: ${experimentNames.join(', ')} - triggering tile load`);
+          
+          // Clear existing tiles to force reload with new experiment selection
+          setStitchedTiles([]);
+          activeTileRequestsRef.current.clear();
+          
+          // Schedule tile loading after a short delay
+          const refreshTimer = setTimeout(() => {
+            if (appendLog) {
+              appendLog(`Experiment visibility changed - refreshing tiles for: ${experimentNames.join(', ')}`);
+            }
+            // Use the same pattern as channel changes - set flag to trigger reload
+            setNeedsTileReload(true);
+          }, 500);
+          
+          return () => clearTimeout(refreshTimer);
+        } else {
+          console.log(`[Visible Experiments] All required experiments have tiles: ${experimentsToCheck.join(', ')}`);
+        }
+      } else {
+        console.log(`[Experiment Change] No real experiment change detected - UI update only`);
+      }
+    }
+  }, [visibleExperiments, activeExperiment, mapViewMode, visibleLayers.scanResults, isHistoricalDataMode, microscopeControlService, isSimulatedMicroscope, scaleLevel, stitchedTiles, getChannelString, isPanning, isZooming, appendLog, setNeedsTileReload]);
 
   // Debounce tile loading - only load after user stops interacting for 1 second
   const scheduleTileUpdate = useCallback(() => {
