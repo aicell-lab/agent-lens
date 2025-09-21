@@ -56,7 +56,10 @@ const LayerPanel = ({
   showScanConfig,
   setShowScanConfig,
   showQuickScanConfig,
-  setShowQuickScanConfig
+  setShowQuickScanConfig,
+  
+  // Browse data modal props
+  setShowBrowseDataModal
 }) => {
   // State for layer management
   const [layers, setLayers] = useState([
@@ -79,7 +82,7 @@ const LayerPanel = ({
     { id: 'quick-scan', name: 'Quick Scan', readonly: false, icon: 'fas fa-search' },
     { id: 'normal-scan', name: 'Normal Scan', readonly: false, icon: 'fas fa-search-plus' },
     { id: 'live-view', name: 'Live View / Snap', readonly: false, icon: 'fas fa-camera' },
-    { id: 'load-server', name: 'Load from Server', readonly: true, icon: 'fas fa-download' }
+    { id: 'load-server', name: 'Browse Data', readonly: true, icon: 'fas fa-database' }
   ];
 
   // Helper functions for layer management
@@ -189,8 +192,8 @@ const LayerPanel = ({
     setShowLayerTypeDropdown(false);
     setNewLayerType('plate-view');
     
-    // Auto-expand the layer if it's a scan type so user can see the "Start Scan" button
-    if (layerType === 'quick-scan' || layerType === 'normal-scan') {
+    // Auto-expand the layer if it's a scan type or browse data so user can see the action buttons
+    if (layerType === 'quick-scan' || layerType === 'normal-scan' || layerType === 'load-server') {
       setExpandedLayers(prev => ({
         ...prev,
         [newLayer.id]: true
@@ -405,9 +408,18 @@ const LayerPanel = ({
                   )}
                   {layer.type === 'load-server' && (
                     <div className="channel-item channel-item--server">
-                      <span className="channel-name">Server Data</span>
+                      <span className="channel-name">Browse Data</span>
                       <div className="server-controls">
-                        <button className="load-btn">Browse & Load</button>
+                        <button 
+                          className="load-btn"
+                          onClick={() => {
+                            if (setShowBrowseDataModal) {
+                              setShowBrowseDataModal(true);
+                            }
+                          }}
+                        >
+                          Browse Data
+                        </button>
                       </div>
                       
                       {/* Multi-Channel Controls for Historical Data */}
@@ -764,7 +776,10 @@ LayerPanel.propTypes = {
   showScanConfig: PropTypes.bool,
   setShowScanConfig: PropTypes.func,
   showQuickScanConfig: PropTypes.bool,
-  setShowQuickScanConfig: PropTypes.func
+  setShowQuickScanConfig: PropTypes.func,
+  
+  // Browse data modal props
+  setShowBrowseDataModal: PropTypes.func
 };
 
 export default LayerPanel;

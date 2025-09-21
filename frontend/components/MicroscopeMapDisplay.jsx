@@ -4100,6 +4100,9 @@ const MicroscopeMapDisplay = ({
                       setShowScanConfig={setShowScanConfig}
                       showQuickScanConfig={showQuickScanConfig}
                       setShowQuickScanConfig={setShowQuickScanConfig}
+                      
+                      // Browse data modal props
+                      setShowBrowseDataModal={setShowBrowseDataModal}
                     />
                   </div>
                 )}
