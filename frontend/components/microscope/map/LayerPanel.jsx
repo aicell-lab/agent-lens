@@ -706,12 +706,6 @@ const LayerPanel = ({
 
       </div>
 
-      {/* Layer Info Footer */}
-      <div className="layer-panel__footer">
-        <span className="blending-mode">
-          🟢 Additive Blending Mode
-        </span>
-      </div>
     </div>
   );
 };
