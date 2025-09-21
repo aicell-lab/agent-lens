@@ -31,6 +31,11 @@ const LayerPanel = ({
   realMicroscopeChannelConfigs,
   updateRealMicroscopeChannelConfig,
   
+  // Per-layer contrast settings
+  layerContrastSettings,
+  updateLayerContrastSettings,
+  getLayerContrastSettings,
+  
   // Multi-Layer Experiments props
   visibleExperiments = [],
   setVisibleExperiments,
@@ -530,40 +535,59 @@ const LayerPanel = ({
                                 {/* Contrast Controls */}
                                 {isVisible && (
                                   <div className="contrast-controls">
-                                    <div className="contrast-slider">
-                                      <label className="contrast-label">Min:</label>
-                                      <input
-                                        type="range"
-                                        min="0"
-                                        max="255"
-                                        value={config.min || 0}
-                                        onChange={(e) => updateRealMicroscopeChannelConfigWithRefresh(channel, { min: parseInt(e.target.value) })}
-                                        className="contrast-range"
-                                      />
-                                      <span className="contrast-value">{config.min || 0}</span>
-                                    </div>
-                                    
-                                    <div className="contrast-slider">
-                                      <label className="contrast-label">Max:</label>
-                                      <input
-                                        type="range"
-                                        min="0"
-                                        max="255"
-                                        value={config.max || 255}
-                                        onChange={(e) => updateRealMicroscopeChannelConfigWithRefresh(channel, { max: parseInt(e.target.value) })}
-                                        className="contrast-range"
-                                      />
-                                      <span className="contrast-value">{config.max || 255}</span>
-                                    </div>
-                                    
-                                    <div className="contrast-reset">
-                                      <button
-                                        onClick={() => updateRealMicroscopeChannelConfigWithRefresh(channel, { min: 0, max: 255 })}
-                                        className="reset-btn"
-                                      >
-                                        Reset to defaults
-                                      </button>
-                                    </div>
+                                    {(() => {
+                                      // Create unique layer ID for this experiment-channel combination
+                                      const layerId = `${exp.name}-${channel}`;
+                                      const layerContrast = getLayerContrastSettings(layerId);
+                                      
+                                      return (
+                                        <>
+                                          <div className="contrast-slider">
+                                            <label className="contrast-label">Min:</label>
+                                            <input
+                                              type="range"
+                                              min="0"
+                                              max="255"
+                                              value={layerContrast.min || 0}
+                                              onChange={(e) => {
+                                                updateLayerContrastSettings(layerId, { min: parseInt(e.target.value) });
+                                                updateRealMicroscopeChannelConfigWithRefresh(channel, { min: parseInt(e.target.value) });
+                                              }}
+                                              className="contrast-range"
+                                            />
+                                            <span className="contrast-value">{layerContrast.min || 0}</span>
+                                          </div>
+                                          
+                                          <div className="contrast-slider">
+                                            <label className="contrast-label">Max:</label>
+                                            <input
+                                              type="range"
+                                              min="0"
+                                              max="255"
+                                              value={layerContrast.max || 255}
+                                              onChange={(e) => {
+                                                updateLayerContrastSettings(layerId, { max: parseInt(e.target.value) });
+                                                updateRealMicroscopeChannelConfigWithRefresh(channel, { max: parseInt(e.target.value) });
+                                              }}
+                                              className="contrast-range"
+                                            />
+                                            <span className="contrast-value">{layerContrast.max || 255}</span>
+                                          </div>
+                                          
+                                          <div className="contrast-reset">
+                                            <button
+                                              onClick={() => {
+                                                updateLayerContrastSettings(layerId, { min: 0, max: 255 });
+                                                updateRealMicroscopeChannelConfigWithRefresh(channel, { min: 0, max: 255 });
+                                              }}
+                                              className="reset-btn"
+                                            >
+                                              Reset to defaults
+                                            </button>
+                                          </div>
+                                        </>
+                                      );
+                                    })()}
                                   </div>
                                 )}
                               </div>
@@ -620,6 +644,11 @@ LayerPanel.propTypes = {
   getEnabledZarrChannels: PropTypes.func,
   realMicroscopeChannelConfigs: PropTypes.object,
   updateRealMicroscopeChannelConfig: PropTypes.func,
+  
+  // Per-layer contrast settings
+  layerContrastSettings: PropTypes.object,
+  updateLayerContrastSettings: PropTypes.func,
+  getLayerContrastSettings: PropTypes.func,
   
   // Multi-Layer Experiments props
   visibleExperiments: PropTypes.array,

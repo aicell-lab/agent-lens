@@ -210,8 +210,11 @@ const MicroscopeMapDisplay = ({
   const [availableZarrChannels, setAvailableZarrChannels] = useState([]);
   const [isMultiChannelMode, setIsMultiChannelMode] = useState(false);
 
-  // Real microscope channel configs for min/max contrast
+  // Real microscope channel configs for min/max contrast - now per-layer
   const [realMicroscopeChannelConfigs, setRealMicroscopeChannelConfigs] = useState({});
+  
+  // Per-layer contrast settings - each layer maintains its own contrast independently
+  const [layerContrastSettings, setLayerContrastSettings] = useState({});
 
   // Add state for historical data mode
   const [isHistoricalDataMode, setIsHistoricalDataMode] = useState(false);
@@ -370,6 +373,22 @@ const MicroscopeMapDisplay = ({
       return newConfig;
     });
   }, []);
+
+  // Per-layer contrast management functions
+  const updateLayerContrastSettings = useCallback((layerId, updates) => {
+    console.log(`🎨 MicroscopeMapDisplay: updateLayerContrastSettings called for layer ${layerId} with updates:`, updates);
+    setLayerContrastSettings(prev => ({
+      ...prev,
+      [layerId]: {
+        ...prev[layerId],
+        ...updates
+      }
+    }));
+  }, []);
+
+  const getLayerContrastSettings = useCallback((layerId) => {
+    return layerContrastSettings[layerId] || { min: 0, max: 255 };
+  }, [layerContrastSettings]);
 
   const initializeZarrChannelsFromMetadata = useCallback((channelMetadata) => {
     if (!channelMetadata || !channelMetadata.activeChannels) return;
@@ -3483,12 +3502,20 @@ const MicroscopeMapDisplay = ({
             experimentName: experimentName // Add experiment name for get_stitched_region API
           };
           
-          // Process tiles using TileProcessingManager
+          // Process tiles using TileProcessingManager with per-layer contrast settings
+          // Create layer-specific contrast configs for this experiment
+          const layerContrastConfigs = {};
+          enabledChannels.forEach(channel => {
+            const layerId = `${experimentName}-${channel.channelName}`;
+            const layerContrast = getLayerContrastSettings(layerId);
+            layerContrastConfigs[channel.channelName] = layerContrast;
+          });
+          
           const processedTile = await TileProcessingManager.processTileChannels(
             enabledChannels,
             tileRequest,
             'FREE_PAN',
-            realMicroscopeChannelConfigs,
+            layerContrastConfigs,
             services
           );
           
@@ -3537,7 +3564,7 @@ const MicroscopeMapDisplay = ({
         setIsLoadingCanvas(false);
       }
     }
-  }, [isHistoricalDataMode, microscopeControlService, visibleLayers.scanResults, visibleLayers.channels, mapViewMode, scaleLevel, displayToStageCoords, stageDimensions, pixelsPerMm, getTileKey, addOrUpdateTile, appendLog, isSimulatedMicroscope, selectedHistoricalDataset, selectedGallery, getIntersectingWells, calculateWellRegion, wellPlateType, realMicroscopeChannelConfigs, zarrChannelConfigs, getEnabledZarrChannels, shouldUseMultiChannelLoading, visibleExperiments, activeExperiment]);
+  }, [isHistoricalDataMode, microscopeControlService, visibleLayers.scanResults, visibleLayers.channels, mapViewMode, scaleLevel, displayToStageCoords, stageDimensions, pixelsPerMm, getTileKey, addOrUpdateTile, appendLog, isSimulatedMicroscope, selectedHistoricalDataset, selectedGallery, getIntersectingWells, calculateWellRegion, wellPlateType, realMicroscopeChannelConfigs, zarrChannelConfigs, getEnabledZarrChannels, shouldUseMultiChannelLoading, visibleExperiments, activeExperiment, getLayerContrastSettings]);
 
   // Add a ref to track previous experiment selection to avoid unnecessary reloads
   const previousExperimentSelectionRef = useRef(null);
@@ -4179,6 +4206,11 @@ const MicroscopeMapDisplay = ({
                       getEnabledZarrChannels={getEnabledZarrChannels}
                       realMicroscopeChannelConfigs={realMicroscopeChannelConfigs}
                       updateRealMicroscopeChannelConfig={updateRealMicroscopeChannelConfig}
+                      
+                      // Per-layer contrast settings
+                      layerContrastSettings={layerContrastSettings}
+                      updateLayerContrastSettings={updateLayerContrastSettings}
+                      getLayerContrastSettings={getLayerContrastSettings}
                       
                       // Layout props
                       isFovFittedMode={mapViewMode === 'FOV_FITTED'}
