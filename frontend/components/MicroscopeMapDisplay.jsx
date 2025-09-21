@@ -1543,6 +1543,21 @@ const MicroscopeMapDisplay = ({
       return currentScaleTiles;
     }
     
+    // In historical mode, if no tiles for current scale, show ANY available tiles to prevent blackout
+    if (isHistoricalDataMode) {
+      console.log(`[visibleTiles] Historical mode: No tiles for scale ${scaleLevel}, showing fallback tiles to prevent blackout`);
+      const fallbackTiles = stitchedTiles.filter(tile => {
+        const experimentsToShow = visibleExperiments.length > 0 ? visibleExperiments : (activeExperiment ? [activeExperiment] : []);
+        const isExperimentVisible = !tile.experimentName || tile.experimentName === null || experimentsToShow.includes(tile.experimentName);
+        return isExperimentVisible;
+      });
+      
+      if (fallbackTiles.length > 0) {
+        console.log(`[visibleTiles] Showing ${fallbackTiles.length} fallback tiles to prevent blackout`);
+        return fallbackTiles;
+      }
+    }
+    
     // If no current scale tiles, show lower resolution (higher scale number) tiles as fallback
     // This prevents showing high-res tiles when zoomed out (which would be wasteful)
     const availableScales = [...new Set(stitchedTiles.map(tile => tile.scale))]
@@ -1606,8 +1621,15 @@ const MicroscopeMapDisplay = ({
         // In historical mode, if there are no tiles for current scale, keep all existing tiles
         // to prevent the map from clearing during zoom operations
         if (currentTiles.length === 0) {
-          console.log('[cleanupOldTiles] Historical mode: No tiles for current scale, preserving all existing tiles');
+          console.log('[cleanupOldTiles] Historical mode: No tiles for current scale, preserving all existing tiles to prevent blackout');
           return prevTiles; // Keep all existing tiles
+        }
+        
+        // Also preserve tiles if we're in the middle of a scale change (zoom in or out)
+        const isScaleChanging = scaleLevel !== lastTileRequestRef.current.scaleLevel;
+        if (isScaleChanging) {
+          console.log(`[cleanupOldTiles] Historical mode: Scale level changing from ${lastTileRequestRef.current.scaleLevel} to ${scaleLevel}, preserving all existing tiles to prevent blackout`);
+          return prevTiles; // Keep all existing tiles during scale changes
         }
       }
       
@@ -1626,7 +1648,7 @@ const MicroscopeMapDisplay = ({
       
       return [...currentTiles, ...otherTiles];
     });
-  }, [isHistoricalDataMode]);
+  }, [isHistoricalDataMode, scaleLevel]);
 
   // Effect to clean up old tiles when channel changes  
   useEffect(() => {
@@ -1750,8 +1772,29 @@ const MicroscopeMapDisplay = ({
     const hasExistingData = stitchedTiles.length > 0 || realTimeChunkProgress.size > 0;
     const isCurrentlyZooming = isZooming || currentOperation === 'zooming';
     
-    if (!hasExistingData && !isCurrentlyZooming) {
-      // Clear canvas only if no existing data
+    // In historical mode, preserve existing tiles during scale changes to prevent blackout
+    // Check if we're zooming (any direction) or if scale level has changed
+    const isScaleChanging = scaleLevel !== lastTileRequestRef.current.scaleLevel;
+    
+    // More aggressive preservation in historical mode:
+    // 1. Always preserve during zooming
+    // 2. Always preserve during scale changes
+    // 3. Always preserve if we have any tiles at all (even from different scales)
+    const hasAnyTiles = stitchedTiles.length > 0;
+    const shouldPreserveTiles = isHistoricalDataMode && (
+      isCurrentlyZooming || 
+      isScaleChanging || 
+      hasAnyTiles  // Preserve any existing tiles in historical mode
+    );
+    
+    // Debug logging for scale changes
+    if (isHistoricalDataMode && isScaleChanging) {
+      console.log(`[Canvas] Scale change detected: ${lastTileRequestRef.current.scaleLevel} → ${scaleLevel}, hasAnyTiles: ${hasAnyTiles}, shouldPreserve: ${shouldPreserveTiles}`);
+    }
+    
+    if (!hasExistingData && !isCurrentlyZooming && !shouldPreserveTiles) {
+      // Clear canvas only if no existing data and not preserving tiles
+      console.log(`[Canvas] Clearing canvas - hasExistingData: ${hasExistingData}, isCurrentlyZooming: ${isCurrentlyZooming}, shouldPreserveTiles: ${shouldPreserveTiles}`);
       ctx.fillStyle = '#000000';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       
@@ -3757,7 +3800,7 @@ const MicroscopeMapDisplay = ({
   }, [loadStitchedTiles, appendLog, isSimulatedMicroscope, currentCancellableRequest]);
 
   // Consolidated tile loading effect - replaces multiple overlapping effects
-  const lastTileRequestRef = useRef({ panX: 0, panY: 0, scale: 0, timestamp: 0 });
+  const lastTileRequestRef = useRef({ panX: 0, panY: 0, scale: 0, scaleLevel: 0, timestamp: 0 });
   
   useEffect(() => {
     if (mapViewMode !== 'FREE_PAN' || !visibleLayers.scanResults) {
@@ -3815,6 +3858,7 @@ const MicroscopeMapDisplay = ({
         panX: mapPan.x,
         panY: mapPan.y,
         scale: mapScale,
+        scaleLevel: scaleLevel,
         timestamp: Date.now()
       };
       
