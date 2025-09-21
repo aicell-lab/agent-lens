@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import PropTypes from 'prop-types';
-import { useValidatedNumberInput, getInputValidationClasses } from '../utils'; // Import validation utilities
+import { useValidatedNumberInput } from '../utils'; // Import validation utilities
 import ArtifactZarrLoader from '../utils/artifactZarrLoader.js';
 import LayerPanel from './microscope/map/LayerPanel';
 import useExperimentZarrManager from './microscope/map/ExperimentZarrManager';
@@ -733,7 +733,6 @@ const MicroscopeMapDisplay = ({
     setActiveExperimentHandler,
     removeExperiment,
     getExperimentInfo,
-    autoCreateExperiment,
     handleResetExperiment,
     handleDeleteExperiment,
     renderDialogs,
@@ -2445,15 +2444,6 @@ const MicroscopeMapDisplay = ({
       }
     }
   }, [isLayerDropdownOpen, isSimulatedMicroscope]); // Removed function dependencies to prevent infinite loops
-
-  // Auto-create experiment when sample is loaded
-  useEffect(() => {
-    if (sampleLoadStatus?.isSampleLoaded && sampleLoadStatus?.isRealMicroscope && sampleLoadStatus?.loadedSampleOnMicroscope) {
-      const sampleId = sampleLoadStatus.loadedSampleOnMicroscope;
-      const sampleName = sampleLoadStatus.loadedSampleName;
-      autoCreateExperiment(sampleId, sampleName);
-    }
-  }, [sampleLoadStatus?.isSampleLoaded, sampleLoadStatus?.isRealMicroscope, sampleLoadStatus?.loadedSampleOnMicroscope, sampleLoadStatus?.loadedSampleName, autoCreateExperiment]);
 
   // Cleanup timeouts on unmount
   useEffect(() => {
