@@ -40,6 +40,15 @@ const LayerPanel = ({
   visibleExperiments = [],
   setVisibleExperiments,
   
+  // Experiment creation props
+  microscopeControlService,
+  createExperiment,
+  showNotification,
+  appendLog,
+  
+  // Incubator service for fetching sample info
+  incubatorControlService,
+  
   // Layout props
   isFovFittedMode = false
 }) => {
@@ -93,13 +102,77 @@ const LayerPanel = ({
     setShowLayerTypeDropdown(true);
   };
 
-  const createLayer = (layerType) => {
+  const createLayer = async (layerType) => {
     const layerTypeConfig = layerTypes.find(lt => lt.id === layerType);
     if (!layerTypeConfig) return;
 
+    console.log(`[LayerPanel] Creating layer of type: ${layerType}`);
+
+    // Generate layer name based on type and sample ID
+    let layerName;
+    if (layerType === 'quick-scan' || layerType === 'normal-scan') {
+      // Fetch sample information from incubator service
+      let sampleId = null;
+      
+      if (incubatorControlService && !isSimulatedMicroscope) {
+        try {
+          const allSlotInfo = await incubatorControlService.get_slot_information();
+          const loadedSample = allSlotInfo?.find(slot => 
+            slot.location === 'microscope1' || slot.location === 'microscope2'
+          );
+          if (loadedSample?.name) {
+            sampleId = loadedSample.name;
+            console.log(`[LayerPanel] Found loaded sample: ${sampleId}`);
+          }
+        } catch (error) {
+          console.log(`[LayerPanel] Failed to fetch incubator info:`, error);
+        }
+      }
+      
+      if (sampleId) {
+        // Clean up the sample ID for better readability
+        const cleanSampleId = sampleId.replace(/[^a-zA-Z0-9]/g, '_');
+        // Add timestamp to make each layer unique (YYYYMMDD-HHMMSS format)
+        const now = new Date();
+        const timestamp = now.toISOString().replace(/[-:T.]/g, '').slice(0, 8) + '-' + 
+                         now.toISOString().replace(/[-:T.]/g, '').slice(9, 15);
+        layerName = `${cleanSampleId}_${layerType}_${timestamp}`;
+        console.log(`[LayerPanel] Using sample ID for ${layerType}: ${sampleId} -> ${layerName}`);
+      } else {
+        // Fallback to generic naming if no sample ID found (YYYYMMDD-HHMMSS format)
+        const now = new Date();
+        const timestamp = now.toISOString().replace(/[-:T.]/g, '').slice(0, 8) + '-' + 
+                         now.toISOString().replace(/[-:T.]/g, '').slice(9, 15);
+        layerName = `sample_${layerType}_${timestamp}`;
+        console.log(`[LayerPanel] No sample ID found for ${layerType}, using generic name: ${layerName}`);
+      }
+    } else {
+      // Use default naming for other layer types
+      layerName = `${layerTypeConfig.name} ${layers.length + 1}`;
+    }
+
+    // For scan layers, create an actual experiment in the backend
+    if ((layerType === 'quick-scan' || layerType === 'normal-scan') && !isSimulatedMicroscope && createExperiment) {
+      try {
+        await createExperiment(layerName);
+        if (appendLog) {
+          appendLog(`Created experiment for ${layerType}: ${layerName}`);
+        }
+      } catch (error) {
+        console.error(`Failed to create experiment for ${layerType}:`, error);
+        if (showNotification) {
+          showNotification(`Failed to create experiment: ${error.message}`, 'error');
+        }
+        if (appendLog) {
+          appendLog(`Failed to create experiment for ${layerType}: ${error.message}`);
+        }
+        return; // Don't create the layer if experiment creation failed
+      }
+    }
+
     const newLayer = {
       id: `layer-${Date.now()}`,
-      name: `${layerTypeConfig.name} ${layers.length + 1}`,
+      name: layerName,
       type: layerType,
       visible: true,
       channels: [],
@@ -643,6 +716,15 @@ LayerPanel.propTypes = {
   // Multi-Layer Experiments props
   visibleExperiments: PropTypes.array,
   setVisibleExperiments: PropTypes.func,
+  
+  // Experiment creation props
+  microscopeControlService: PropTypes.object,
+  createExperiment: PropTypes.func,
+  showNotification: PropTypes.func,
+  appendLog: PropTypes.func,
+  
+  // Incubator service for fetching sample info
+  incubatorControlService: PropTypes.object,
   
   // Layout props
   isFovFittedMode: PropTypes.bool

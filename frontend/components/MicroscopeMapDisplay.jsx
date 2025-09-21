@@ -4163,6 +4163,15 @@ const MicroscopeMapDisplay = ({
                       updateLayerContrastSettings={updateLayerContrastSettings}
                       getLayerContrastSettings={getLayerContrastSettings}
                       
+                      // Experiment creation props
+                      microscopeControlService={microscopeControlService}
+                      createExperiment={createExperiment}
+                      showNotification={showNotification}
+                      appendLog={appendLog}
+                      
+                      // Incubator service for fetching sample info
+                      incubatorControlService={incubatorControlService}
+                      
                       // Layout props
                       isFovFittedMode={mapViewMode === 'FOV_FITTED'}
                     />
