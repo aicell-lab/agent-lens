@@ -1500,24 +1500,20 @@ const MicroscopeMapDisplay = ({
       getEnabledZarrChannels().map(ch => ch.channelName).sort().join(',') : 
       getChannelString();
     
-    console.log(`🔍 [visibleTiles] Multi-layer filtering logic:`, {
-      useMultiChannel,
-      isHistoricalDataMode,
-      channelString,
-      scaleLevel,
-      totalTiles: stitchedTiles.length,
-      visibleExperiments: visibleExperiments,
-      activeExperiment: activeExperiment,
-      tilesWithMatchingChannel: stitchedTiles.filter(tile => tile.channel === channelString).length,
-      enabledZarrChannels: getEnabledZarrChannels().map(ch => ch.channelName),
-      tilesData: stitchedTiles.map(tile => ({
-        channel: tile.channel,
-        experimentName: tile.experimentName,
-        isMultiChannel: tile.metadata?.isMultiChannel,
-        channelsUsed: tile.metadata?.channelsUsed,
-        scale: tile.scale
-      }))
-    });
+    // 🚀 REDUCED LOGGING: Only log when NOT interacting and when tiles change significantly
+    const shouldLogDetails = (!isZooming && !isPanning) && (stitchedTiles.length % 5 === 0 || stitchedTiles.length <= 5); // Log every 5th tile change when not interacting
+    if (shouldLogDetails) {
+      console.log(`🔍 [visibleTiles] Multi-layer filtering logic:`, {
+        useMultiChannel,
+        isHistoricalDataMode,
+        channelString,
+        scaleLevel,
+        totalTiles: stitchedTiles.length,
+        visibleExperiments: visibleExperiments,
+        activeExperiment: activeExperiment,
+        tilesWithMatchingChannel: stitchedTiles.filter(tile => tile.channel === channelString).length
+      });
+    }
     
     // Get tiles for current scale and channel selection
     const currentScaleTiles = stitchedTiles.filter(tile => {
@@ -1538,7 +1534,10 @@ const MicroscopeMapDisplay = ({
       return tile.scale === scaleLevel && tile.channel === channelString;
     });
     
-    console.log(`🔍 [visibleTiles] Current scale tiles found:`, currentScaleTiles.length);
+    // 🚀 REDUCED LOGGING: Only log if detailed logging is enabled
+    if (shouldLogDetails) {
+      console.log(`🔍 [visibleTiles] Current scale tiles found:`, currentScaleTiles.length);
+    }
     
     if (currentScaleTiles.length > 0) {
       // If we have current scale tiles, only show current scale
@@ -1575,7 +1574,7 @@ const MicroscopeMapDisplay = ({
     }
     
     return [];
-  }, [stitchedTiles, scaleLevel, visibleLayers.channels, visibleLayers.scanResults, shouldUseMultiChannelLoading, getEnabledZarrChannels, getSelectedChannels, getChannelString, visibleExperiments, activeExperiment]);
+  }, [stitchedTiles, scaleLevel, visibleLayers.channels, visibleLayers.scanResults, shouldUseMultiChannelLoading, getEnabledZarrChannels, getSelectedChannels, getChannelString, visibleExperiments, activeExperiment, isZooming, isPanning, isHistoricalDataMode]); // Added interaction state dependencies for proper logging control
 
   const addOrUpdateTile = useCallback((newTile) => {
     setStitchedTiles(prevTiles => {
@@ -3641,18 +3640,29 @@ const MicroscopeMapDisplay = ({
   }, [visibleExperiments, activeExperiment, mapViewMode, isHistoricalDataMode, microscopeControlService, isSimulatedMicroscope, scaleLevel, stitchedTiles, getChannelString, isPanning, isZooming, appendLog, setNeedsTileReload]); // Removed visibleLayers.scanResults to prevent triggering on layer toggles
 
   // Debounce tile loading - only load after user stops interacting for 1 second
-  const scheduleTileUpdate = useCallback(() => {
-    console.log('[scheduleTileUpdate] Called - clearing existing timer and scheduling new one');
+  const scheduleTileUpdate = useCallback((source = 'unknown') => {
+    // 🚀 CRITICAL FIX: Prevent multiple effects from scheduling simultaneously
+    if (isLoadingCanvas || activeTileRequestsRef.current.size > 0) {
+      console.log(`[scheduleTileUpdate] Skipping (${source}) - tiles are currently loading (isLoadingCanvas: ${isLoadingCanvas}, activeRequests: ${activeTileRequestsRef.current.size})`);
+      return;
+    }
+    
+    console.log(`[scheduleTileUpdate] Called from ${source} - clearing existing timer and scheduling new one`);
     if (canvasUpdateTimerRef.current) {
       console.log('[scheduleTileUpdate] Clearing existing timer');
       clearTimeout(canvasUpdateTimerRef.current);
     }
     canvasUpdateTimerRef.current = setTimeout(() => {
-      console.log('[scheduleTileUpdate] Timer fired - calling loadStitchedTiles');
+      // Final check before loading to prevent cascading
+      if (isLoadingCanvas || activeTileRequestsRef.current.size > 0) {
+        console.log('[scheduleTileUpdate] Timer fired but tiles are loading - skipping to prevent cascade');
+        return;
+      }
+      console.log(`[scheduleTileUpdate] Timer fired from ${source} - calling loadStitchedTiles`);
       loadStitchedTiles();
     }, 300); // Wait 0.3 second after user stops
-    console.log('[scheduleTileUpdate] New timer scheduled for 300ms');
-  }, [loadStitchedTiles]);
+    console.log(`[scheduleTileUpdate] New timer scheduled for 300ms (source: ${source})`);
+  }, [loadStitchedTiles, isLoadingCanvas]);
 
   // Function to refresh canvas view (can be used by timepoint operations)
   const refreshCanvasView = useCallback(() => {
@@ -3743,7 +3753,7 @@ const MicroscopeMapDisplay = ({
       };
       
       // Schedule tile update
-      scheduleTileUpdate();
+      scheduleTileUpdate('tile-loading-effect');
     } else {
       console.log('[Tile Loading] Skipping - no significant change or too soon since last request');
     }
@@ -3776,18 +3786,31 @@ const MicroscopeMapDisplay = ({
     };
   }, [currentCancellableRequest, isHistoricalDataMode]);
 
-  // Initial tile loading when the map becomes visible
+  // 🚀 SIMPLIFIED: Initial tile loading - only when map first opens and user is not interacting
+  const hasInitialLoadedRef = useRef(false);
   useEffect(() => {
-    if (isOpen && mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
-      console.log('[Initial Tile Loading] Triggering initial tile loading');
-      // Trigger initial tile loading through debounced function
-      scheduleTileUpdate();
+    // Only trigger initial load when map first opens
+    if (isOpen && !hasInitialLoadedRef.current) {
+      hasInitialLoadedRef.current = true;
+      
+      // Use a longer delay to ensure map is fully initialized
+      setTimeout(() => {
+        if (mapViewMode === 'FREE_PAN' && !isZooming && !isPanning) {
+          console.log('[Initial Tile Loading] Triggering one-time initial tile loading');
+          scheduleTileUpdate('initial-loading');
+        }
+      }, 500); // Delay to ensure everything is ready
     }
-  }, [isOpen, mapViewMode, scheduleTileUpdate]); // Removed visibleLayers.scanResults to prevent triggering on layer toggles
+    
+    // Reset when map closes
+    if (!isOpen) {
+      hasInitialLoadedRef.current = false;
+    }
+  }, [isOpen, mapViewMode, isZooming, isPanning, scheduleTileUpdate]); // Added necessary dependencies
 
   // Effect to trigger tile loading when needsTileReload is set
   useEffect(() => {
-    if (needsTileReload && mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
+    if (needsTileReload && mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && !isZooming && !isPanning) {
       // Check if tiles are currently loading
       if (isLoadingCanvas || activeTileRequestsRef.current.size > 0) {
         console.log('[needsTileReload] Skipping - tiles are currently loading (isLoadingCanvas:', isLoadingCanvas, 'activeRequests:', activeTileRequestsRef.current.size, ')');
@@ -3801,80 +3824,22 @@ const MicroscopeMapDisplay = ({
       
       // Trigger tile loading after a short delay to ensure tiles are cleared
       setTimeout(() => {
-        scheduleTileUpdate();
+        scheduleTileUpdate('needs-reload');
       }, 100);
     }
-  }, [needsTileReload, mapViewMode, visibleLayers.scanResults, scheduleTileUpdate]);
+  }, [needsTileReload, mapViewMode, visibleLayers.scanResults, scheduleTileUpdate, isZooming, isPanning]);
 
-  // Effect to cleanup high-resolution tiles when zooming out (but don't immediately load during active zoom)
+  // 🚀 SIMPLIFIED: Only cleanup tiles when scale changes, don't trigger new tile loading
+  // This prevents the endless loop while still cleaning up memory
   useEffect(() => {
-    if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
-      console.log('[scaleLevel cleanup] Triggering cleanup and potential tile load');
+    if (mapViewMode === 'FREE_PAN' && !isHistoricalDataMode) {
       const activeChannel = getChannelString();
-      
-      // For historical mode, be more conservative with cleanup during zoom operations
-      if (isHistoricalDataMode && isZooming) {
-        console.log('[scaleLevel cleanup] Historical mode + zooming - skipping aggressive cleanup');
-        // Don't cleanup during zoom in historical mode to prevent map clearing
-        return;
-      }
-      
-      // Always cleanup immediately when scale changes to save memory
+      console.log('[scaleLevel cleanup] Cleaning up old tiles for memory management');
       cleanupOldTiles(scaleLevel, activeChannel);
-      
-      // 🚀 PERFORMANCE OPTIMIZATION: Only trigger tile load if microscope service is available
-      if (!isZooming && microscopeControlService && !isSimulatedMicroscope) {
-        // Check if tiles are currently loading
-        if (isLoadingCanvas || activeTileRequestsRef.current.size > 0) {
-          console.log('[scaleLevel cleanup] Skipping - tiles are currently loading');
-        } else {
-          console.log('[scaleLevel cleanup] User not zooming - scheduling tile load');
-          setTimeout(() => {
-            scheduleTileUpdate(); // Use scheduleTileUpdate instead of direct call
-          }, 800); // Increased delay to 800ms for less aggressive loading
-        }
-      } else {
-        console.log('[scaleLevel cleanup] User is zooming or no microscope service - skipping tile load');
-      }
+      // Tiles will be loaded only when user pans/zooms significantly
     }
-  }, [scaleLevel, mapViewMode, isZooming, scheduleTileUpdate, cleanupOldTiles, microscopeControlService, isSimulatedMicroscope, isHistoricalDataMode]); // Removed visibleLayers dependencies to prevent triggering on layer toggles
+  }, [scaleLevel, mapViewMode, isHistoricalDataMode, cleanupOldTiles, getChannelString]); // Simplified dependencies
 
-  // Effect to ensure tiles are loaded for current scale level
-  // EXCLUDES historical mode - no automatic tile loading needed for historical data
-  useEffect(() => {
-    if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && !isZooming && !isHistoricalDataMode) {
-      const activeChannel = getChannelString();
-      
-      // 🚀 PERFORMANCE OPTIMIZATION: Check if microscope service is available before attempting tile loading
-      if (!microscopeControlService || isSimulatedMicroscope) {
-        console.log('[Scale Level Check] Skipping - no microscope service or simulated mode');
-        return;
-      }
-      
-      // Check if we have tiles for the current scale level
-      const currentScaleTiles = stitchedTiles.filter(tile => 
-        tile.scale === scaleLevel && 
-        tile.channel === activeChannel
-      );
-      
-      // If no tiles exist for current scale level, trigger loading
-      if (currentScaleTiles.length === 0) {
-        console.log(`[Scale Level Check] No tiles found for scale ${scaleLevel}, channel ${activeChannel} - triggering tile load`);
-        
-        // Check if tiles are currently loading
-        if (isLoadingCanvas || activeTileRequestsRef.current.size > 0) {
-          console.log('[Scale Level Check] Skipping - tiles are currently loading');
-        } else {
-          console.log('[Scale Level Check] Triggering tile load for missing scale level');
-          setTimeout(() => {
-            scheduleTileUpdate();
-          }, 300); // Small delay to ensure other operations are complete
-        }
-      } else {
-        console.log(`[Scale Level Check] Found ${currentScaleTiles.length} tiles for scale ${scaleLevel}, channel ${activeChannel}`);
-      }
-    }
-  }, [scaleLevel, mapViewMode, isZooming, isLoadingCanvas, isHistoricalDataMode, scheduleTileUpdate, microscopeControlService, isSimulatedMicroscope]); // Removed stitchedTiles to prevent loop
 
   if (!isOpen) return null;
 
