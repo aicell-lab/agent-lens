@@ -3664,16 +3664,12 @@ const MicroscopeMapDisplay = ({
         setCurrentCancellableRequest(null);
       }
       
-      // Clear active requests
+      // Clear active requests to prevent conflicts
       activeTileRequestsRef.current.clear();
       
-      // Clear all existing tiles to force reload of fresh data
-      setStitchedTiles([]);
-      
-      // Force immediate tile loading after clearing tiles
-      setTimeout(() => {
-        loadStitchedTiles();
-      }, 100); // Small delay to ensure state is updated
+      // Directly load new tiles - they will replace old ones automatically
+      // This prevents blackout during refresh operations
+      loadStitchedTiles();
       
       if (appendLog) {
         appendLog('Refreshing canvas view');
