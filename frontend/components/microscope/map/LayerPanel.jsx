@@ -50,7 +50,13 @@ const LayerPanel = ({
   incubatorControlService,
   
   // Layout props
-  isFovFittedMode = false
+  isFovFittedMode = false,
+  
+  // Scan configuration props
+  showScanConfig,
+  setShowScanConfig,
+  showQuickScanConfig,
+  setShowQuickScanConfig
 }) => {
   // State for layer management
   const [layers, setLayers] = useState([
@@ -345,7 +351,19 @@ const LayerPanel = ({
                     <div className="channel-item channel-item--scan">
                       <span className="channel-name">Quick Scan Data</span>
                       <div className="scan-controls">
-                        <button className="scan-btn">Start Scan</button>
+                        <button 
+                          className="scan-btn"
+                          onClick={() => {
+                            if (isSimulatedMicroscope) return;
+                            // Close normal scan panel if open
+                            if (setShowScanConfig) setShowScanConfig(false);
+                            // Open quick scan panel
+                            if (setShowQuickScanConfig) setShowQuickScanConfig(true);
+                          }}
+                          disabled={isSimulatedMicroscope}
+                        >
+                          Start Scan
+                        </button>
                       </div>
                     </div>
                   )}
@@ -353,7 +371,19 @@ const LayerPanel = ({
                     <div className="channel-item channel-item--scan">
                       <span className="channel-name">Normal Scan Data</span>
                       <div className="scan-controls">
-                        <button className="scan-btn">Configure & Start</button>
+                        <button 
+                          className="scan-btn"
+                          onClick={() => {
+                            if (isSimulatedMicroscope) return;
+                            // Close quick scan panel if open
+                            if (setShowQuickScanConfig) setShowQuickScanConfig(false);
+                            // Open normal scan panel
+                            if (setShowScanConfig) setShowScanConfig(true);
+                          }}
+                          disabled={isSimulatedMicroscope}
+                        >
+                          Configure & Start
+                        </button>
                       </div>
                     </div>
                   )}
@@ -727,7 +757,13 @@ LayerPanel.propTypes = {
   incubatorControlService: PropTypes.object,
   
   // Layout props
-  isFovFittedMode: PropTypes.bool
+  isFovFittedMode: PropTypes.bool,
+  
+  // Scan configuration props
+  showScanConfig: PropTypes.bool,
+  setShowScanConfig: PropTypes.func,
+  showQuickScanConfig: PropTypes.bool,
+  setShowQuickScanConfig: PropTypes.func
 };
 
 export default LayerPanel;
