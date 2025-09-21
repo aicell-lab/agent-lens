@@ -52,14 +52,6 @@ const LayerPanel = ({
       visible: visibleLayers.wellPlate,
       channels: [],
       readonly: true
-    },
-    {
-      id: 'scan-results',
-      name: 'Scan Results',
-      type: 'plate-view', 
-      visible: visibleLayers.scanResults,
-      channels: [],
-      readonly: true
     }
   ]);
   
@@ -87,8 +79,6 @@ const LayerPanel = ({
     // Update the parent component's visibleLayers state
     if (layerId === 'well-plate') {
       setVisibleLayers(prev => ({ ...prev, wellPlate: !prev.wellPlate }));
-    } else if (layerId === 'scan-results') {
-      setVisibleLayers(prev => ({ ...prev, scanResults: !prev.scanResults }));
     }
   };
 
