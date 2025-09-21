@@ -8,7 +8,6 @@ const LayerPanel = ({
   setVisibleLayers,
   
   // Experiments props
-  isHistoricalDataMode,
   isSimulatedMicroscope,
   isLoadingExperiments,
   activeExperiment,
@@ -59,21 +58,21 @@ const LayerPanel = ({
   setShowQuickScanConfig,
   
   // Browse data modal props
-  setShowBrowseDataModal
-}) => {
-  // State for layer management
-  const [layers, setLayers] = useState([
-    {
-      id: 'well-plate',
-      name: '96-Well Plate Grid',
-      type: 'plate-view',
-      visible: visibleLayers.wellPlate,
-      channels: [],
-      readonly: true
-    }
-  ]);
+  setShowBrowseDataModal,
   
-  const [expandedLayers, setExpandedLayers] = useState({});
+  // Historical data mode props
+  isHistoricalDataMode,
+  setIsHistoricalDataMode,
+  
+  // Layer management props
+  layers,
+  setLayers,
+  expandedLayers,
+  setExpandedLayers,
+  
+  // Dropdown control props
+  setIsLayerDropdownOpen
+}) => {
   const [showLayerTypeDropdown, setShowLayerTypeDropdown] = useState(false);
   const [newLayerType, setNewLayerType] = useState('plate-view');
 
@@ -96,6 +95,24 @@ const LayerPanel = ({
     // Update the parent component's visibleLayers state
     if (layerId === 'well-plate') {
       setVisibleLayers(prev => ({ ...prev, wellPlate: !prev.wellPlate }));
+    }
+    
+    // Handle exiting historical data mode when Browse Data layer is disabled
+    if (layerId !== 'well-plate') {
+      const layer = layers.find(l => l.id === layerId);
+      if (layer && layer.type === 'load-server' && isHistoricalDataMode) {
+        // Check if we're disabling the layer (it was visible and now will be hidden)
+        if (layer.visible) {
+          // Layer is currently visible and we're disabling it, exit historical data mode
+          if (setIsHistoricalDataMode) {
+            setIsHistoricalDataMode(false);
+          }
+          // Keep the dropdown open so user can see their layers
+          if (setIsLayerDropdownOpen) {
+            setIsLayerDropdownOpen(true);
+          }
+        }
+      }
     }
   };
 
@@ -728,7 +745,6 @@ LayerPanel.propTypes = {
   setVisibleLayers: PropTypes.func.isRequired,
   
   // Experiments props
-  isHistoricalDataMode: PropTypes.bool,
   isSimulatedMicroscope: PropTypes.bool,
   isLoadingExperiments: PropTypes.bool,
   activeExperiment: PropTypes.string,
@@ -779,7 +795,20 @@ LayerPanel.propTypes = {
   setShowQuickScanConfig: PropTypes.func,
   
   // Browse data modal props
-  setShowBrowseDataModal: PropTypes.func
+  setShowBrowseDataModal: PropTypes.func,
+  
+  // Historical data mode props
+  isHistoricalDataMode: PropTypes.bool,
+  setIsHistoricalDataMode: PropTypes.func,
+  
+  // Layer management props
+  layers: PropTypes.array.isRequired,
+  setLayers: PropTypes.func.isRequired,
+  expandedLayers: PropTypes.object.isRequired,
+  setExpandedLayers: PropTypes.func.isRequired,
+  
+  // Dropdown control props
+  setIsLayerDropdownOpen: PropTypes.func
 };
 
 export default LayerPanel;

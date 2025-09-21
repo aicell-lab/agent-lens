@@ -2540,7 +2540,20 @@ const MicroscopeMapDisplay = ({
 
   // Add state for browse data modal
   const [showBrowseDataModal, setShowBrowseDataModal] = useState(false);
-
+  
+  // Add state for layer management
+  const [layers, setLayers] = useState([
+    {
+      id: 'well-plate',
+      name: '96-Well Plate Grid',
+      type: 'plate-view',
+      visible: visibleLayers.wellPlate,
+      channels: [],
+      readonly: true
+    }
+  ]);
+  const [expandedLayers, setExpandedLayers] = useState({});
+ 
   // Add state for gallery and dataset browsing
   const [galleries, setGalleries] = useState([]);
   const [galleriesLoading, setGalleriesLoading] = useState(false);
@@ -3952,27 +3965,6 @@ const MicroscopeMapDisplay = ({
                   Fit to View
                 </button>
                                 
-                {/* Browse Data Button */}
-                <button
-                  onClick={() => {
-                    if (isHistoricalDataMode) {
-                      setIsHistoricalDataMode(false); // Exit historical data mode
-                      setStitchedTiles([]); // Optionally clear tiles to force reload
-                    } else {
-                      setShowBrowseDataModal(true);
-                    }
-                  }}
-                  className={`px-2 py-1 text-xs rounded disabled:opacity-50 disabled:cursor-not-allowed ${
-                    isHistoricalDataMode
-                      ? 'bg-yellow-700 hover:bg-yellow-600 text-white border-2 border-yellow-400' // Style for exit mode
-                      : 'bg-blue-700 hover:bg-blue-600 text-white'
-                  }`}
-                  title={isHistoricalDataMode ? 'Exit historical data map mode' : 'Browse imaging data for this microscope'}
-                  disabled={!microscopeControlService || isSimulatedMicroscope || (!isHistoricalDataMode && isInteractionDisabled)}
-                >
-                  <i className={`fas ${isHistoricalDataMode ? 'fa-sign-out-alt' : 'fa-database'} mr-1`}></i>
-                  {isHistoricalDataMode ? 'Exit Data Map' : 'Browse Data'}
-                </button>
               </div>
               
               {/* Annotation dropdown */}
@@ -4051,7 +4043,6 @@ const MicroscopeMapDisplay = ({
                       setVisibleLayers={setVisibleLayers}
                       
                       // Experiments props
-                      isHistoricalDataMode={isHistoricalDataMode}
                       isSimulatedMicroscope={isSimulatedMicroscope}
                       isLoadingExperiments={isLoadingExperiments}
                       activeExperiment={activeExperiment}
@@ -4103,6 +4094,19 @@ const MicroscopeMapDisplay = ({
                       
                       // Browse data modal props
                       setShowBrowseDataModal={setShowBrowseDataModal}
+                      
+                      // Historical data mode props
+                      isHistoricalDataMode={isHistoricalDataMode}
+                      setIsHistoricalDataMode={setIsHistoricalDataMode}
+                      
+                      // Layer management props
+                      layers={layers}
+                      setLayers={setLayers}
+                      expandedLayers={expandedLayers}
+                      setExpandedLayers={setExpandedLayers}
+                      
+                      // Dropdown control props
+                      setIsLayerDropdownOpen={setIsLayerDropdownOpen}
                     />
                   </div>
                 )}
