@@ -31,6 +31,11 @@ class ArtifactZarrLoader {
     this.maxCacheSize = 2000; // Limit cache size to prevent memory bloat
     this.lastCleanup = Date.now();
     this.cleanupInterval = 30000; // Clean up every 30 seconds
+    
+    // 🚀 BATCH REQUEST MANAGEMENT: Control concurrent requests
+    this.maxConcurrentRequests = 10; // Limit concurrent chunk requests
+    this.requestQueue = []; // Queue for pending requests
+    this.activeRequestCount = 0; // Track active request count
   }
 
   /**
@@ -67,10 +72,20 @@ class ArtifactZarrLoader {
       controller.abort();
       cancelledCount++;
     }
+    
+    // Clear request queue to prevent queued requests from starting
+    const queuedCount = this.requestQueue.length;
+    this.requestQueue.length = 0; // Clear the queue
+    
+    // Reset active request count
+    this.activeRequestCount = 0;
+    
     this.requestControllers.clear();
     this.requestIds.clear();
-    console.log(`🚫 Cancelled all ${cancelledCount} active requests`);
-    return cancelledCount;
+    this.requestPromises.clear(); // Also clear promises to prevent duplicate requests
+    
+    console.log(`🚫 Cancelled all ${cancelledCount} active requests and ${queuedCount} queued requests`);
+    return cancelledCount + queuedCount;
   }
 
   /**
@@ -96,7 +111,7 @@ class ArtifactZarrLoader {
   }
 
   /**
-   * MAXIMUM SPEED fetch - no waiting, just fire all requests!
+   * 🚀 BATCHED FETCH: Controlled concurrent requests with queuing
    * @param {string} url - URL to fetch
    * @param {Object} options - Fetch options
    * @param {string} requestId - Optional request ID for cancellation
@@ -116,8 +131,22 @@ class ArtifactZarrLoader {
     this.requestControllers.set(reqId, controller);
     this.requestIds.set(url, reqId);
 
-    // Create the fetch promise - NO WAITING, just fire!
+    // Create the fetch promise with batching control
     const fetchPromise = (async () => {
+      // Wait for available slot if at max concurrency, but check for cancellation
+      while (this.activeRequestCount >= this.maxConcurrentRequests) {
+        // Check if request was cancelled while waiting
+        if (controller.signal.aborted) {
+          throw new DOMException('Request was cancelled while waiting in queue', 'AbortError');
+        }
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      
+      // Final check before proceeding
+      if (controller.signal.aborted) {
+        throw new DOMException('Request was cancelled before starting', 'AbortError');
+      }
+      
       this.activeRequestCount++;
       
       try {

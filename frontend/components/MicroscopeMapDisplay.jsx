@@ -2896,6 +2896,57 @@ const MicroscopeMapDisplay = ({
   // Intelligent tile-based loading function (moved here after all dependencies are defined)
   const loadStitchedTiles = useCallback(async () => {
     console.log('[loadStitchedTiles] Called - checking conditions');
+    
+    // 🚀 REQUEST CANCELLATION: Only cancel if we're starting a significantly different request
+    // Calculate bounds first to generate consistent request key
+    if (!canvasRef.current) {
+      console.log('[loadStitchedTiles] Canvas not ready, skipping');
+      return;
+    }
+    
+    const earlyScaleLevel = Math.max(0, Math.min(4, Math.round(Math.log2(mapScale / 0.25))));
+    const earlyActiveChannel = getSelectedChannels()[0] || 'BF LED matrix full';
+    const currentViewBounds = {
+      topLeft: { x: mapPan.x - canvasRef.current.width / (2 * mapScale), y: mapPan.y - canvasRef.current.height / (2 * mapScale) },
+      bottomRight: { x: mapPan.x + canvasRef.current.width / (2 * mapScale), y: mapPan.y + canvasRef.current.height / (2 * mapScale) }
+    };
+    const currentRequestKey = getTileKey(currentViewBounds, earlyScaleLevel, earlyActiveChannel, selectedHistoricalDataset?.name || 'historical');
+    const shouldCancelPrevious = lastRequestKey && lastRequestKey !== currentRequestKey;
+    
+    if (shouldCancelPrevious && currentCancellableRequest) {
+      const cancelledCount = currentCancellableRequest.cancel();
+      console.log(`🚫 loadStitchedTiles: Cancelled ${cancelledCount} pending requests (new area)`);
+      setCurrentCancellableRequest(null);
+      
+      // 🚀 CRITICAL FIX: Also cancel ALL active requests in the artifact loader when moving to new area
+      if (artifactZarrLoaderRef.current) {
+        const artifactCancelledCount = artifactZarrLoaderRef.current.cancelAllRequests();
+        console.log(`🚫 loadStitchedTiles: Cancelled ${artifactCancelledCount} active artifact requests (new area)`);
+      }
+    } else if (!shouldCancelPrevious && currentCancellableRequest) {
+      console.log(`🔄 loadStitchedTiles: Request for same area already in progress, checking if it should be cancelled anyway`);
+      // Cancel anyway if the request is very old (over 30 seconds)
+      if (currentCancellableRequest.startTime && (Date.now() - currentCancellableRequest.startTime > 30000)) {
+        console.log(`🚫 loadStitchedTiles: Cancelling old request (over 30s old)`);
+        const cancelledCount = currentCancellableRequest.cancel();
+        console.log(`🚫 loadStitchedTiles: Cancelled ${cancelledCount} old requests`);
+        setCurrentCancellableRequest(null);
+        
+        if (artifactZarrLoaderRef.current) {
+          const artifactCancelledCount = artifactZarrLoaderRef.current.cancelAllRequests();
+          console.log(`🚫 loadStitchedTiles: Cancelled ${artifactCancelledCount} old artifact requests`);
+        }
+      } else {
+        return; // Don't start duplicate requests for the same area
+      }
+    }
+    
+    // Update request tracking at the start to prevent duplicate requests
+    setLastRequestKey(currentRequestKey);
+    
+    // Clear active requests to prevent conflicts
+    activeTileRequestsRef.current.clear();
+    
     console.log(`🔍 [loadStitchedTiles] Channel analysis:`, {
       visibleChannels: visibleLayers.channels,
       selectedChannels: getSelectedChannels(),
@@ -3313,7 +3364,7 @@ const MicroscopeMapDisplay = ({
           }
         }
         
-        // Update request tracking
+        // Update request tracking  
         setLastRequestKey(currentRequestKey);
         
         // Start real-time loading with cancellation support
@@ -3327,7 +3378,11 @@ const MicroscopeMapDisplay = ({
           );
         
         // Store cancellation function for potential future cancellation
-        setCurrentCancellableRequest({ cancel: cancelWellRequests, requestKey: currentRequestKey });
+        setCurrentCancellableRequest({ 
+          cancel: cancelWellRequests, 
+          requestKey: currentRequestKey,
+          startTime: Date.now()
+        });
         
         const wellResults = await wellResultsPromise;
         
@@ -3644,11 +3699,21 @@ const MicroscopeMapDisplay = ({
 
   // Debounce tile loading - only load after user stops interacting for 1 second
   const scheduleTileUpdate = useCallback((source = 'unknown') => {
-    // 🚀 CRITICAL FIX: Prevent multiple effects from scheduling simultaneously
-    if (isLoadingCanvas || activeTileRequestsRef.current.size > 0) {
-      console.log(`[scheduleTileUpdate] Skipping (${source}) - tiles are currently loading (isLoadingCanvas: ${isLoadingCanvas}, activeRequests: ${activeTileRequestsRef.current.size})`);
-      return;
+    // 🚀 IMMEDIATE CANCELLATION: Cancel any ongoing requests when scheduling new ones
+    if (currentCancellableRequest) {
+      const cancelledCount = currentCancellableRequest.cancel();
+      console.log(`🚫 scheduleTileUpdate (${source}): Cancelled ${cancelledCount} pending requests`);
+      setCurrentCancellableRequest(null);
     }
+    
+    if (artifactZarrLoaderRef.current) {
+      const artifactCancelledCount = artifactZarrLoaderRef.current.cancelAllRequests();
+      console.log(`🚫 scheduleTileUpdate (${source}): Cancelled ${artifactCancelledCount} active artifact requests`);
+    }
+    
+    // Clear active requests
+    activeTileRequestsRef.current.clear();
+    setIsLoadingCanvas(false);
     
     console.log(`[scheduleTileUpdate] Called from ${source} - clearing existing timer and scheduling new one`);
     if (canvasUpdateTimerRef.current) {
@@ -3656,11 +3721,6 @@ const MicroscopeMapDisplay = ({
       clearTimeout(canvasUpdateTimerRef.current);
     }
     canvasUpdateTimerRef.current = setTimeout(() => {
-      // Final check before loading to prevent cascading
-      if (isLoadingCanvas || activeTileRequestsRef.current.size > 0) {
-        console.log('[scheduleTileUpdate] Timer fired but tiles are loading - skipping to prevent cascade');
-        return;
-      }
       console.log(`[scheduleTileUpdate] Timer fired from ${source} - calling loadStitchedTiles`);
       loadStitchedTiles();
     }, 300); // Wait 0.3 second after user stops
@@ -3675,6 +3735,12 @@ const MicroscopeMapDisplay = ({
         const cancelledCount = currentCancellableRequest.cancel();
         console.log(`🚫 Refresh: Cancelled ${cancelledCount} pending requests`);
         setCurrentCancellableRequest(null);
+      }
+      
+      // 🚀 CRITICAL FIX: Also cancel ALL active requests in the artifact loader
+      if (artifactZarrLoaderRef.current) {
+        const artifactCancelledCount = artifactZarrLoaderRef.current.cancelAllRequests();
+        console.log(`🚫 Refresh: Cancelled ${artifactCancelledCount} active artifact requests`);
       }
       
       // Clear active requests to prevent conflicts
@@ -3705,11 +3771,8 @@ const MicroscopeMapDisplay = ({
       return;
     }
 
-    // Don't trigger tile loading if tiles are currently loading
-    if (isLoadingCanvas || activeTileRequestsRef.current.size > 0) {
-      console.log('[Tile Loading] Skipping - tiles are currently loading (isLoadingCanvas:', isLoadingCanvas, 'activeRequests:', activeTileRequestsRef.current.size, ')');
-      return;
-    }
+    // REMOVED: Don't prevent cancellation when tiles are loading - this creates deadlock!
+    // The scheduleTileUpdate function now handles cancellation properly
 
     const container = mapContainerRef.current;
     if (!container) {
@@ -3771,23 +3834,23 @@ const MicroscopeMapDisplay = ({
     scheduleTileUpdate
   ]);
 
-  // 🚀 REQUEST CANCELLATION: Cleanup effect for cancellable requests
+  // 🚀 REQUEST CANCELLATION: Cleanup effect for cancellable requests (only on actual unmount)
   useEffect(() => {
     return () => {
-      // Cancel any pending cancellable requests when component unmounts
+      // Only cancel on actual component unmount, not on re-renders
+      console.log(`🚫 Component cleanup triggered`);
       if (currentCancellableRequest) {
         const cancelledCount = currentCancellableRequest.cancel();
         console.log(`🚫 Component unmount: Cancelled ${cancelledCount} pending requests`);
       }
       
-      // 🚫 IMPROVED: Only cancel artifact loader requests if we're not in historical mode
-      // This prevents aggressive cancellation during normal navigation
-      if (artifactZarrLoaderRef.current && !isHistoricalDataMode) {
-        const cancelledCount = artifactZarrLoaderRef.current.cancelAllRequests();
-        console.log(`🚫 Component unmount: Cancelled ${cancelledCount} artifact loader requests`);
+      // 🚀 CRITICAL FIX: Also cancel ALL active requests in the artifact loader
+      if (artifactZarrLoaderRef.current) {
+        const artifactCancelledCount = artifactZarrLoaderRef.current.cancelAllRequests();
+        console.log(`🚫 Component unmount: Cancelled ${artifactCancelledCount} active artifact requests`);
       }
     };
-  }, [currentCancellableRequest, isHistoricalDataMode]);
+  }, []); // Remove dependencies to only run on actual unmount
 
   // 🚀 SIMPLIFIED: Initial tile loading - only when map first opens and user is not interacting
   const hasInitialLoadedRef = useRef(false);
