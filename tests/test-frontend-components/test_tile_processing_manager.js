@@ -28,6 +28,7 @@ const mockBrowserAPIs = () => {
             }),
             putImageData: () => {},
             fillRect: () => {},
+            clearRect: () => {},
             fillStyle: 'black',
             globalCompositeOperation: 'source-over'
           }),
