@@ -224,20 +224,17 @@ const MicroscopeMapDisplay = ({
   // Function to refresh scan results (moved early to avoid dependency issues)
   const refreshScanResults = useCallback(() => {
     if (visibleLayers.scanResults && !isSimulatedMicroscope) {
-      // Clear active requests
+      // Clear active requests to prevent conflicts
       activeTileRequestsRef.current.clear();
       
-      // Clear all existing tiles to force reload of fresh data
-      setStitchedTiles([]);
-      
       if (appendLog) {
-        appendLog('Refreshing scan results display - cleared cache');
+        appendLog('Refreshing scan results display - direct replacement');
       }
       
-      // Set a flag to trigger tile loading after tiles are cleared
+      // Set flag to trigger tile loading - loadStitchedTiles will be called by the effect
       setNeedsTileReload(true);
     }
-  }, [visibleLayers.scanResults, appendLog, isSimulatedMicroscope]);
+  }, [appendLog, isSimulatedMicroscope]); // Removed visibleLayers.scanResults to prevent triggering on layer toggles
 
   // Initialize experiment zarr manager hook
   const experimentManager = useExperimentZarrManager({
@@ -341,17 +338,15 @@ const MicroscopeMapDisplay = ({
       // Don't clear tiles if real-time loading is in progress
       const hasActiveRequests = activeTileRequestsRef.current.size > 0;
       if (currentOperation === null && !hasActiveRequests) {
-        // Clear existing tiles to force reload with new contrast settings
-        setStitchedTiles([]);
+        // Clear active requests to prevent conflicts
         activeTileRequestsRef.current.clear();
         
-        // Schedule tile loading after a longer delay to ensure state is fully updated
-        setTimeout(() => {
-          console.log('🎨 HISTORICAL: Refreshing tiles with updated contrast settings');
-          console.log('🎨 HISTORICAL: Current zarrChannelConfigs:', zarrChannelConfigs);
-          console.log('🎨 HISTORICAL: Enabled channels:', getEnabledZarrChannels());
-          loadStitchedTiles();
-        }, 200); // Increased delay to ensure state update is complete
+        console.log('🎨 HISTORICAL: Refreshing tiles with updated contrast settings');
+        console.log('🎨 HISTORICAL: Current zarrChannelConfigs:', zarrChannelConfigs);
+        console.log('🎨 HISTORICAL: Enabled channels:', getEnabledZarrChannels());
+        
+        // Set flag to trigger tile loading - loadStitchedTiles will be called by the effect
+        setNeedsTileReload(true);
       } else {
         console.log('🎨 HISTORICAL: Skipping tile refresh - real-time loading in progress or operation active');
       }
@@ -1622,7 +1617,7 @@ const MicroscopeMapDisplay = ({
       // Trigger cleanup of old tiles after a delay to allow new ones to load
       const cleanupTimer = setTimeout(() => {
         cleanupOldTiles(scaleLevel, getChannelString());
-      }, 1000);
+      }, 300);
       
       return () => clearTimeout(cleanupTimer);
     }
@@ -1710,28 +1705,53 @@ const MicroscopeMapDisplay = ({
     // Set canvas size to match container
     const container = mapContainerRef.current;
     if (container) {
-      canvas.width = container.clientWidth;
-      canvas.height = container.clientHeight;
+      const newWidth = container.clientWidth;
+      const newHeight = container.clientHeight;
+      
+      // Only resize if dimensions actually changed to avoid unnecessary clearing
+      if (canvas.width !== newWidth || canvas.height !== newHeight) {
+        // Store current image data before resize
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        
+        // Resize canvas
+        canvas.width = newWidth;
+        canvas.height = newHeight;
+        
+        // Restore image data after resize
+        if (imageData.width > 0 && imageData.height > 0) {
+          ctx.putImageData(imageData, 0, 0);
+        } else {
+          // Only clear with black if no existing data
+          ctx.fillStyle = '#000000';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+      }
     }
     
-    // Clear canvas
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // Only redraw stage boundaries and grid if no existing image data
+    // This prevents clearing the map during zoom/pan operations
+    const hasExistingData = stitchedTiles.length > 0 || realTimeChunkProgress.size > 0;
+    const isCurrentlyZooming = isZooming || currentOperation === 'zooming';
     
-    // Draw stage boundaries and grid
-    ctx.save();
-    ctx.translate(effectivePan.x, effectivePan.y);
-    ctx.scale(mapScale, mapScale);
-    
-    // Calculate stage position in pixels (origin at upper-left)
-    const stagePixelX = 0;
-    const stagePixelY = 0;
-    const stagePixelWidth = stageDimensions.width * pixelsPerMm;
-    const stagePixelHeight = stageDimensions.height * pixelsPerMm;
-        
-    
-    ctx.restore();
-  }, [isOpen, stageDimensions, mapScale, effectivePan, visibleLayers.wellPlate, containerSize]);
+    if (!hasExistingData && !isCurrentlyZooming) {
+      // Clear canvas only if no existing data
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      // Draw stage boundaries and grid
+      ctx.save();
+      ctx.translate(effectivePan.x, effectivePan.y);
+      ctx.scale(mapScale, mapScale);
+      
+      // Calculate stage position in pixels (origin at upper-left)
+      const stagePixelX = 0;
+      const stagePixelY = 0;
+      const stagePixelWidth = stageDimensions.width * pixelsPerMm;
+      const stagePixelHeight = stageDimensions.height * pixelsPerMm;
+      
+      ctx.restore();
+    }
+  }, [isOpen, stageDimensions, mapScale, effectivePan, containerSize, stitchedTiles.length, realTimeChunkProgress.size, isZooming, currentOperation]); // Note: visibleLayers.wellPlate removed - well plate is rendered as SVG overlay, not on canvas
 
   // Handle well click for selection
   const handleWellClick = useCallback((wellId) => {
@@ -2162,25 +2182,20 @@ const MicroscopeMapDisplay = ({
         // Update the ref to track current selection
         previousChannelSelectionRef.current = currentChannelString;
         
-        // Clear existing tiles to force reload with new channel selection
-        setStitchedTiles([]);
+        // Clear active requests to prevent conflicts
         activeTileRequestsRef.current.clear();
         
-        // Schedule tile loading after a short delay
-        const refreshTimer = setTimeout(() => {
-          if (appendLog) {
-            appendLog(`Channel selection changed to: ${channelList.join(', ')} - refreshing tiles`);
-          }
-          // We'll trigger the tile update through a state change rather than calling scheduleTileUpdate directly
-          setNeedsTileReload(true);
-        }, 500);
+        if (appendLog) {
+          appendLog(`Channel selection changed to: ${channelList.join(', ')} - refreshing tiles`);
+        }
         
-        return () => clearTimeout(refreshTimer);
+        // Set flag to trigger tile loading - loadStitchedTiles will be called by the effect
+        setNeedsTileReload(true);
       } else {
         console.log(`[Channel Change] No real channel change detected - LayerPanel UI update only`);
       }
     }
-  }, [visibleLayers.channels, mapViewMode, visibleLayers.scanResults, isSimulatedMicroscope, appendLog]);
+  }, [visibleLayers.channels, mapViewMode, isSimulatedMicroscope, appendLog]); // Removed visibleLayers.scanResults to prevent triggering on layer toggles
 
 
   // Effect to listen for contrast settings changes and refresh tiles
@@ -2192,20 +2207,16 @@ const MicroscopeMapDisplay = ({
       if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && !isSimulatedMicroscope) {
         console.log(`🎨 MicroscopeMapDisplay: Processing contrast settings change event`);
         
-        // Clear existing tiles to force reload with new contrast settings
-        setStitchedTiles([]);
+        // Clear active requests to prevent conflicts
         activeTileRequestsRef.current.clear();
         
-        // Schedule tile loading after a longer delay to ensure state is updated
-        const refreshTimer = setTimeout(() => {
-          console.log(`🎨 MicroscopeMapDisplay: Refreshing tiles after contrast change, current configs:`, realMicroscopeChannelConfigs);
-          if (appendLog) {
-            appendLog(`Contrast settings changed for ${event.detail.channelName} - refreshing tiles`);
-          }
-          setNeedsTileReload(true);
-        }, 500); // Increased delay to ensure state update
+        console.log(`🎨 MicroscopeMapDisplay: Refreshing tiles after contrast change, current configs:`, realMicroscopeChannelConfigs);
+        if (appendLog) {
+          appendLog(`Contrast settings changed for ${event.detail.channelName} - refreshing tiles`);
+        }
         
-        return () => clearTimeout(refreshTimer);
+        // Set flag to trigger tile loading - loadStitchedTiles will be called by the effect
+        setNeedsTileReload(true);
       } else {
         console.log(`🎨 MicroscopeMapDisplay: Ignoring contrast settings change event - conditions not met`);
       }
@@ -2218,7 +2229,7 @@ const MicroscopeMapDisplay = ({
     return () => {
       window.removeEventListener('contrastSettingsChanged', handleContrastSettingsChanged);
     };
-  }, [mapViewMode, visibleLayers.scanResults, isSimulatedMicroscope, appendLog]);
+  }, [mapViewMode, isSimulatedMicroscope, appendLog]); // Removed visibleLayers.scanResults to prevent triggering on layer toggles
 
   // Initialize real microscope channel configs for visible channels
   useEffect(() => {
@@ -3584,20 +3595,15 @@ const MicroscopeMapDisplay = ({
           const experimentNames = missingExperiments.map(exp => exp === null ? 'no-experiment' : exp);
           console.log(`[Visible Experiments] Missing tiles for experiments: ${experimentNames.join(', ')} - triggering tile load`);
           
-          // Clear existing tiles to force reload with new experiment selection
-          setStitchedTiles([]);
-          activeTileRequestsRef.current.clear();
+          // Set flag to trigger tile loading - loadStitchedTiles will be called by the effect
+          // This prevents blackout while preserving visible data
           
-          // Schedule tile loading after a short delay
-          const refreshTimer = setTimeout(() => {
-            if (appendLog) {
-              appendLog(`Experiment visibility changed - refreshing tiles for: ${experimentNames.join(', ')}`);
-            }
-            // Use the same pattern as channel changes - set flag to trigger reload
-            setNeedsTileReload(true);
-          }, 500);
+          if (appendLog) {
+            appendLog(`Experiment visibility changed - loading tiles for: ${experimentNames.join(', ')}`);
+          }
           
-          return () => clearTimeout(refreshTimer);
+          // Set flag to trigger tile loading - no need for delays
+          setNeedsTileReload(true);
         } else {
           console.log(`[Visible Experiments] All required experiments have tiles: ${experimentsToCheck.join(', ')}`);
         }
@@ -3605,7 +3611,7 @@ const MicroscopeMapDisplay = ({
         console.log(`[Experiment Change] No real experiment change detected - UI update only`);
       }
     }
-  }, [visibleExperiments, activeExperiment, mapViewMode, visibleLayers.scanResults, isHistoricalDataMode, microscopeControlService, isSimulatedMicroscope, scaleLevel, stitchedTiles, getChannelString, isPanning, isZooming, appendLog, setNeedsTileReload]);
+  }, [visibleExperiments, activeExperiment, mapViewMode, isHistoricalDataMode, microscopeControlService, isSimulatedMicroscope, scaleLevel, stitchedTiles, getChannelString, isPanning, isZooming, appendLog, setNeedsTileReload]); // Removed visibleLayers.scanResults to prevent triggering on layer toggles
 
   // Debounce tile loading - only load after user stops interacting for 1 second
   const scheduleTileUpdate = useCallback(() => {
@@ -3617,8 +3623,8 @@ const MicroscopeMapDisplay = ({
     canvasUpdateTimerRef.current = setTimeout(() => {
       console.log('[scheduleTileUpdate] Timer fired - calling loadStitchedTiles');
       loadStitchedTiles();
-    }, 1000); // Wait 1 second after user stops
-    console.log('[scheduleTileUpdate] New timer scheduled for 1000ms');
+    }, 300); // Wait 0.3 second after user stops
+    console.log('[scheduleTileUpdate] New timer scheduled for 300ms');
   }, [loadStitchedTiles]);
 
   // Function to refresh canvas view (can be used by timepoint operations)
@@ -3754,7 +3760,7 @@ const MicroscopeMapDisplay = ({
       // Trigger initial tile loading through debounced function
       scheduleTileUpdate();
     }
-  }, [isOpen, mapViewMode, visibleLayers.scanResults, scheduleTileUpdate]);
+  }, [isOpen, mapViewMode, scheduleTileUpdate]); // Removed visibleLayers.scanResults to prevent triggering on layer toggles
 
   // Effect to trigger tile loading when needsTileReload is set
   useEffect(() => {
@@ -3808,7 +3814,7 @@ const MicroscopeMapDisplay = ({
         console.log('[scaleLevel cleanup] User is zooming or no microscope service - skipping tile load');
       }
     }
-  }, [scaleLevel, mapViewMode, visibleLayers.scanResults, visibleLayers.channels, isZooming, scheduleTileUpdate, cleanupOldTiles, microscopeControlService, isSimulatedMicroscope, isHistoricalDataMode]);
+  }, [scaleLevel, mapViewMode, isZooming, scheduleTileUpdate, cleanupOldTiles, microscopeControlService, isSimulatedMicroscope, isHistoricalDataMode]); // Removed visibleLayers dependencies to prevent triggering on layer toggles
 
   // Effect to ensure tiles are loaded for current scale level
   // EXCLUDES historical mode - no automatic tile loading needed for historical data
@@ -3845,7 +3851,7 @@ const MicroscopeMapDisplay = ({
         console.log(`[Scale Level Check] Found ${currentScaleTiles.length} tiles for scale ${scaleLevel}, channel ${activeChannel}`);
       }
     }
-  }, [scaleLevel, mapViewMode, visibleLayers.scanResults, visibleLayers.channels, stitchedTiles, isZooming, isLoadingCanvas, isHistoricalDataMode, scheduleTileUpdate, microscopeControlService, isSimulatedMicroscope]);
+  }, [scaleLevel, mapViewMode, isZooming, isLoadingCanvas, isHistoricalDataMode, scheduleTileUpdate, microscopeControlService, isSimulatedMicroscope]); // Removed stitchedTiles to prevent loop
 
   if (!isOpen) return null;
 
