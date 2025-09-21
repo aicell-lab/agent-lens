@@ -107,6 +107,8 @@ const LayerPanel = ({
           if (setIsHistoricalDataMode) {
             setIsHistoricalDataMode(false);
           }
+          // Remove the Browse Data layer when historical data mode is turned off
+          setLayers(prev => prev.filter(l => l.type !== 'load-server'));
           // Keep the dropdown open so user can see their layers
           if (setIsLayerDropdownOpen) {
             setIsLayerDropdownOpen(true);
@@ -338,6 +340,12 @@ const LayerPanel = ({
                   <i className={`${layerTypeConfig?.icon || 'fas fa-layer-group'} layer-type-icon`}></i>
                   <span>{layer.name}</span>
                   {layer.readonly && <span className="readonly-badge" title="Read-only layer">🔒</span>}
+                  {/* Data source status indicator */}
+                  {layer.visible && (
+                    <span className="data-source-status" title="Currently providing data">
+                      <i className="fas fa-circle" style={{color: '#10b981', fontSize: '8px'}}></i>
+                    </span>
+                  )}
                   {/* Channel count for server layers with multi-channel data */}
                   {layer.type === 'load-server' && shouldUseMultiChannelLoading() && (isHistoricalDataMode || mapViewMode === 'FOV_FITTED') && (
                     <span className="channel-count">({availableZarrChannels.length})</span>
@@ -532,7 +540,7 @@ const LayerPanel = ({
         })}
 
         {/* Experiments as Layers (for Real Microscope) */}
-        {!isHistoricalDataMode && !isSimulatedMicroscope && (
+        {!isSimulatedMicroscope && (
           <>
             {isLoadingExperiments ? (
               <div className="loading-text">Loading experiments...</div>
@@ -577,7 +585,7 @@ const LayerPanel = ({
                         {exp.name}
                       </span>
                       {/* Channel count for experiment layers with real microscope channels */}
-                      {shouldUseMultiChannelLoading() && !isHistoricalDataMode && !isSimulatedMicroscope && mapViewMode !== 'FOV_FITTED' && (
+                      {shouldUseMultiChannelLoading() && !isSimulatedMicroscope && mapViewMode !== 'FOV_FITTED' && (
                         <span className="channel-count">({Object.values(visibleLayers.channels).filter(v => v).length})</span>
                       )}
                     </div>
@@ -618,7 +626,7 @@ const LayerPanel = ({
                       </div>
                       
                       {/* Real Microscope Channel Controls for this experiment */}
-                      {shouldUseMultiChannelLoading() && !isHistoricalDataMode && !isSimulatedMicroscope && mapViewMode !== 'FOV_FITTED' && (
+                      {shouldUseMultiChannelLoading() && !isSimulatedMicroscope && mapViewMode !== 'FOV_FITTED' && (
                         <div className="experiment-channels">
                           {Object.entries(visibleLayers.channels).map(([channel, isVisible]) => {
                             const config = realMicroscopeChannelConfigs[channel] || {};

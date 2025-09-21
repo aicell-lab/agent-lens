@@ -196,6 +196,46 @@ const MicroscopeMapDisplay = ({
     }
   });
 
+  // Layer management state (moved early to avoid hoisting issues)
+  const [layers, setLayers] = useState([
+    {
+      id: 'well-plate',
+      name: '96-Well Plate Grid',
+      type: 'plate-view',
+      visible: true, // Will be synced with visibleLayers.wellPlate
+      channels: [],
+      readonly: true
+    }
+  ]);
+  const [expandedLayers, setExpandedLayers] = useState({});
+
+  // Helper functions for layer-driven data loading (moved early to avoid hoisting issues)
+  const getVisibleLayersByType = useCallback((type) => {
+    return layers.filter(layer => layer.type === type && layer.visible);
+  }, [layers]);
+
+  const isLayerTypeVisible = useCallback((type) => {
+    return layers.some(layer => layer.type === type && layer.visible);
+  }, [layers]);
+
+  const getBrowseDataLayer = useCallback(() => {
+    return layers.find(layer => layer.type === 'load-server' && layer.visible);
+  }, [layers]);
+
+  const getScanDataLayer = useCallback(() => {
+    return layers.find(layer => (layer.type === 'quick-scan' || layer.type === 'normal-scan') && layer.visible);
+  }, [layers]);
+
+  // Sync layers visibility with visibleLayers (moved early to avoid hoisting issues)
+  useEffect(() => {
+    setLayers(prev => prev.map(layer => 
+      layer.id === 'well-plate'
+        ? { ...layer, visible: visibleLayers.wellPlate }
+        : layer
+    ));
+  }, [visibleLayers.wellPlate]);
+
+
   // Tile-based canvas state (replacing single stitchedCanvasData)
   const [stitchedTiles, setStitchedTiles] = useState([]); // Array of tile objects
   const [isLoadingCanvas, setIsLoadingCanvas] = useState(false);
@@ -333,10 +373,11 @@ const MicroscopeMapDisplay = ({
     }));
   }, []);
 
-  // Effect to refresh tiles when zarr channel contrast settings change in HISTORICAL mode
+  // Effect to refresh tiles when zarr channel contrast settings change in browse data layer
   useEffect(() => {
-    if (isHistoricalDataMode && mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
-      console.log('🎨 HISTORICAL: Zarr channel configs changed, triggering tile refresh');
+    const browseDataLayer = getBrowseDataLayer();
+    if (browseDataLayer && mapViewMode === 'FREE_PAN') {
+      console.log('🎨 BROWSE DATA: Zarr channel configs changed, triggering tile refresh');
       
       // Don't clear tiles if real-time loading is in progress
       const hasActiveRequests = activeTileRequestsRef.current.size > 0;
@@ -344,17 +385,17 @@ const MicroscopeMapDisplay = ({
         // Clear active requests to prevent conflicts
         activeTileRequestsRef.current.clear();
         
-        console.log('🎨 HISTORICAL: Refreshing tiles with updated contrast settings');
-        console.log('🎨 HISTORICAL: Current zarrChannelConfigs:', zarrChannelConfigs);
-        console.log('🎨 HISTORICAL: Enabled channels:', getEnabledZarrChannels());
+        console.log('🎨 BROWSE DATA: Refreshing tiles with updated contrast settings');
+        console.log('🎨 BROWSE DATA: Current zarrChannelConfigs:', zarrChannelConfigs);
+        console.log('🎨 BROWSE DATA: Enabled channels:', getEnabledZarrChannels());
         
         // Set flag to trigger tile loading - loadStitchedTiles will be called by the effect
         setNeedsTileReload(true);
       } else {
-        console.log('🎨 HISTORICAL: Skipping tile refresh - real-time loading in progress or operation active');
+        console.log('🎨 BROWSE DATA: Skipping tile refresh - real-time loading in progress or operation active');
       }
     }
-  }, [zarrChannelConfigs, isHistoricalDataMode, mapViewMode, visibleLayers.scanResults, currentOperation]);
+  }, [zarrChannelConfigs, getBrowseDataLayer, mapViewMode, currentOperation]);
 
   const updateRealMicroscopeChannelConfig = useCallback((channelName, updates) => {
     console.log(`🎨 MicroscopeMapDisplay: updateRealMicroscopeChannelConfig called for ${channelName} with updates:`, updates);
@@ -413,16 +454,18 @@ const MicroscopeMapDisplay = ({
   }, []);
 
   const shouldUseMultiChannelLoading = useCallback(() => {
-    // For historical mode only: use zarr channels
-    if (isHistoricalDataMode) {
+    // For browse data layer: use zarr channels
+    const browseDataLayer = getBrowseDataLayer();
+    if (browseDataLayer) {
       return availableZarrChannels.length > 0 && 
              Object.values(zarrChannelConfigs).some(config => config.enabled);
     }
-    // For real microscope (including FOV_FITTED mode): use visibleLayers.channels
+    // For scan data layer: use visibleLayers.channels
     // Let the microscope service handle channel merging
-    return !isSimulatedMicroscope && 
+    const scanDataLayer = getScanDataLayer();
+    return scanDataLayer && !isSimulatedMicroscope && 
            Object.values(visibleLayers.channels).some(isVisible => isVisible);
-  }, [isHistoricalDataMode, availableZarrChannels.length, zarrChannelConfigs, isSimulatedMicroscope, visibleLayers.channels]);
+  }, [getBrowseDataLayer, getScanDataLayer, availableZarrChannels.length, zarrChannelConfigs, isSimulatedMicroscope, visibleLayers.channels]);
 
   // State to track the well being selected during drag operations
   const [dragSelectedWell, setDragSelectedWell] = useState(null);
@@ -747,6 +790,7 @@ const MicroscopeMapDisplay = ({
       setVisibleExperiments(prev => [...prev, activeExperiment]);
     }
   }, [activeExperiment, visibleExperiments]);
+
 
   // Calculate stage dimensions from configuration (moved early to avoid dependency issues)
   const stageDimensions = useMemo(() => {
@@ -1265,13 +1309,7 @@ const MicroscopeMapDisplay = ({
     setZoomLevel(1.0); // Reset to 100% zoom
     
     // For simulated microscope, quit historical mode when switching to FOV_FITTED
-    if (isSimulatedMicroscope && isHistoricalDataMode) {
-      console.log('[Simulated Microscope] Quitting historical data mode when switching to FOV_FITTED');
-      setIsHistoricalDataMode(false);
-      setSelectedHistoricalDataset(null);
-      setSelectedGallery(null);
-      setStitchedTiles([]); // Clear historical tiles
-    }
+    // Note: Data loading is now handled by layer visibility, not mode switching
     
     if (appendLog) {
       appendLog('Switched to fitted video view');
@@ -1491,13 +1529,19 @@ const MicroscopeMapDisplay = ({
 
   // Memoize visible tiles with smart cleanup strategy  
   const visibleTiles = useMemo(() => {
-    if (!visibleLayers.scanResults) return [];
+    const browseDataLayer = getBrowseDataLayer();
+    const scanDataLayer = getScanDataLayer();
+    
+    if (!browseDataLayer && !scanDataLayer) return [];
     
     // Determine current channel configuration
     const useMultiChannel = shouldUseMultiChannelLoading();
-    const channelString = useMultiChannel && isHistoricalDataMode ? 
+    
+    // For multi-layer support, we need different channel strings for different tile types
+    const browseChannelString = useMultiChannel && browseDataLayer ? 
       getEnabledZarrChannels().map(ch => ch.channelName).sort().join(',') : 
       getChannelString();
+    const scanChannelString = getChannelString(); // Always use microscope channels for scan data
     
     // 🚀 REDUCED LOGGING: Only log when NOT interacting and when tiles change significantly
     const shouldLogDetails = (!isZooming && !isPanning) && (stitchedTiles.length % 5 === 0 || stitchedTiles.length <= 5); // Log every 5th tile change when not interacting
@@ -1505,13 +1549,23 @@ const MicroscopeMapDisplay = ({
       console.log(`🔍 [visibleTiles] Multi-layer filtering logic:`, {
         useMultiChannel,
         isHistoricalDataMode,
-        channelString,
+        browseChannelString,
+        scanChannelString,
         scaleLevel,
         totalTiles: stitchedTiles.length,
         visibleExperiments: visibleExperiments,
         activeExperiment: activeExperiment,
-        tilesWithMatchingChannel: stitchedTiles.filter(tile => tile.channel === channelString).length
+        browseDataMatching: stitchedTiles.filter(tile => tile.channel === browseChannelString).length,
+        scanDataMatching: stitchedTiles.filter(tile => tile.channel === scanChannelString).length
       });
+      
+      // DEBUG: Show all tile channels and experiment names
+      console.log(`🔍 [visibleTiles] All tiles details:`, stitchedTiles.map(tile => ({
+        experiment: tile.experimentName,
+        channel: tile.channel,
+        scale: tile.scale,
+        isMultiChannel: tile.metadata?.isMultiChannel
+      })));
     }
     
     // Get tiles for current scale and channel selection
@@ -1522,15 +1576,80 @@ const MicroscopeMapDisplay = ({
       const isExperimentVisible = !tile.experimentName || tile.experimentName === null || experimentsToShow.includes(tile.experimentName);
       
       if (!isExperimentVisible) {
+        if (shouldLogDetails) {
+          console.log(`🔍 [visibleTiles] Filtering out tile - experiment not visible:`, {
+            tileExperiment: tile.experimentName,
+            experimentsToShow,
+            isExperimentVisible
+          });
+        }
         return false;
       }
       
-      // For historical mode multi-channel tiles - show all tiles (no channel filtering needed)
-      if (useMultiChannel && isHistoricalDataMode && tile.metadata?.isMultiChannel) {
-        return tile.scale === scaleLevel;
+      // Determine tile type and apply appropriate channel filtering
+      const isBrowseDataTile = tile.metadata?.isMultiChannel || tile.channel?.includes('historical');
+      const isScanDataTile = !isBrowseDataTile && tile.experimentName;
+      
+      const scaleMatch = tile.scale === scaleLevel;
+      
+      if (isBrowseDataTile) {
+        // Browse data tiles: use zarr channel matching for multi-channel, or simple channel matching
+        if (useMultiChannel && isHistoricalDataMode && tile.metadata?.isMultiChannel) {
+          // Multi-channel browse data: only check scale
+          if (shouldLogDetails) {
+            console.log(`🔍 [visibleTiles] Browse data multi-channel tile:`, {
+              scaleMatch,
+              tileScale: tile.scale,
+              targetScale: scaleLevel
+            });
+          }
+          return scaleMatch;
+        } else {
+          // Single channel browse data: check channel match using browse channel string
+          const channelMatch = tile.channel === browseChannelString;
+          const result = scaleMatch && channelMatch;
+          if (shouldLogDetails) {
+            console.log(`🔍 [visibleTiles] Browse data single-channel tile:`, {
+              tileChannel: tile.channel,
+              targetChannel: browseChannelString,
+              channelMatch,
+              scaleMatch,
+              result
+            });
+          }
+          return result;
+        }
+      } else if (isScanDataTile) {
+        // Scan data tiles: use microscope channel matching
+        const channelMatch = tile.channel === scanChannelString;
+        const result = scaleMatch && channelMatch;
+        if (shouldLogDetails) {
+          console.log(`🔍 [visibleTiles] Scan data tile:`, {
+            tileChannel: tile.channel,
+            targetChannel: scanChannelString,
+            channelMatch,
+            tileScale: tile.scale,
+            targetScale: scaleLevel,
+            scaleMatch,
+            result
+          });
+        }
+        return result;
+      } else {
+        // Fallback: use general channel matching (use scan channel string)
+        const channelMatch = tile.channel === scanChannelString;
+        const result = scaleMatch && channelMatch;
+        if (shouldLogDetails) {
+          console.log(`🔍 [visibleTiles] Fallback tile:`, {
+            tileChannel: tile.channel,
+            targetChannel: scanChannelString,
+            channelMatch,
+            scaleMatch,
+            result
+          });
+        }
+        return result;
       }
-      // For real microscope tiles (single or multi-channel), use channel string matching
-      return tile.scale === scaleLevel && tile.channel === channelString;
     });
     
     // 🚀 REDUCED LOGGING: Only log if detailed logging is enabled
@@ -1574,13 +1693,25 @@ const MicroscopeMapDisplay = ({
           return false;
         }
         
-        // For historical mode multi-channel tiles
-        if (useMultiChannel && isHistoricalDataMode && tile.metadata?.isMultiChannel) {
-          return tile.scale === scale && 
-                 JSON.stringify(tile.metadata.channelsUsed?.sort()) === JSON.stringify(getEnabledZarrChannels().map(ch => ch.channelName).sort());
+        // Determine tile type and apply appropriate channel filtering (same logic as above)
+        const isBrowseDataTile = tile.metadata?.isMultiChannel || tile.channel?.includes('historical');
+        const isScanDataTile = !isBrowseDataTile && tile.experimentName;
+        
+        if (isBrowseDataTile) {
+          // Browse data tiles: use zarr channel matching for multi-channel, or simple channel matching
+          if (useMultiChannel && isHistoricalDataMode && tile.metadata?.isMultiChannel) {
+            return tile.scale === scale && 
+                   JSON.stringify(tile.metadata.channelsUsed?.sort()) === JSON.stringify(getEnabledZarrChannels().map(ch => ch.channelName).sort());
+          } else {
+            return tile.scale === scale && tile.channel === browseChannelString;
+          }
+        } else if (isScanDataTile) {
+          // Scan data tiles: use microscope channel matching
+          return tile.scale === scale && tile.channel === scanChannelString;
+        } else {
+          // Fallback: use general channel matching (use scan channel string)
+          return tile.scale === scale && tile.channel === scanChannelString;
         }
-        // For real microscope tiles (single or multi-channel), use channel string matching
-        return tile.scale === scale && tile.channel === channelString;
       });
       if (scaleTiles.length > 0) {
         return scaleTiles;
@@ -1588,7 +1719,7 @@ const MicroscopeMapDisplay = ({
     }
     
     return [];
-  }, [stitchedTiles, scaleLevel, visibleLayers.channels, visibleLayers.scanResults, shouldUseMultiChannelLoading, getEnabledZarrChannels, getSelectedChannels, getChannelString, visibleExperiments, activeExperiment, isZooming, isPanning, isHistoricalDataMode]); // Added interaction state dependencies for proper logging control
+  }, [stitchedTiles, scaleLevel, visibleLayers.channels, shouldUseMultiChannelLoading, getEnabledZarrChannels, getSelectedChannels, getChannelString, visibleExperiments, activeExperiment, isZooming, isPanning, getBrowseDataLayer, getScanDataLayer]); // Added interaction state dependencies for proper logging control
 
   const addOrUpdateTile = useCallback((newTile) => {
     setStitchedTiles(prevTiles => {
@@ -2293,7 +2424,8 @@ const MicroscopeMapDisplay = ({
 
   // Initialize real microscope channel configs for visible channels
   useEffect(() => {
-    if (!isHistoricalDataMode && !isSimulatedMicroscope && mapViewMode === 'FREE_PAN') {
+    const scanDataLayer = getScanDataLayer();
+    if (scanDataLayer && !isSimulatedMicroscope && mapViewMode === 'FREE_PAN') {
       const visibleChannels = Object.entries(visibleLayers.channels)
         .filter(([_, isVisible]) => isVisible)
         .map(([channelName]) => channelName);
@@ -2320,7 +2452,7 @@ const MicroscopeMapDisplay = ({
         }));
       }
     }
-  }, [visibleLayers.channels, isHistoricalDataMode, isSimulatedMicroscope, mapViewMode, realMicroscopeChannelConfigs]);
+  }, [visibleLayers.channels, getScanDataLayer, isSimulatedMicroscope, mapViewMode, realMicroscopeChannelConfigs]);
 
 
 
@@ -2584,18 +2716,7 @@ const MicroscopeMapDisplay = ({
   // Add state for browse data modal
   const [showBrowseDataModal, setShowBrowseDataModal] = useState(false);
   
-  // Add state for layer management
-  const [layers, setLayers] = useState([
-    {
-      id: 'well-plate',
-      name: '96-Well Plate Grid',
-      type: 'plate-view',
-      visible: visibleLayers.wellPlate,
-      channels: [],
-      readonly: true
-    }
-  ]);
-  const [expandedLayers, setExpandedLayers] = useState({});
+  // Layer management state and helper functions already moved early to avoid hoisting issues
  
   // Add state for gallery and dataset browsing
   const [galleries, setGalleries] = useState([]);
@@ -2606,9 +2727,9 @@ const MicroscopeMapDisplay = ({
   const [datasetsLoading, setDatasetsLoading] = useState(false);
   const [datasetsError, setDatasetsError] = useState(null);
 
-  // Fetch galleries when modal opens or microscope changes
+  // Fetch galleries when modal opens (no microscope isolation - show all galleries)
   useEffect(() => {
-    if (!showBrowseDataModal || !selectedMicroscopeId) return;
+    if (!showBrowseDataModal) return;
     setGalleriesLoading(true);
     setGalleriesError(null);
     setGalleries([]);
@@ -2616,7 +2737,7 @@ const MicroscopeMapDisplay = ({
     setDatasets([]);
     setDatasetsError(null);
     const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
-    fetch(`/agent-lens/apps/${serviceId}/list-microscope-galleries?microscope_service_id=${encodeURIComponent(selectedMicroscopeId)}`)
+    fetch(`/agent-lens/apps/${serviceId}/list-microscope-galleries`)
       .then(res => res.json())
       .then(data => {
         if (data.success) {
@@ -2628,7 +2749,7 @@ const MicroscopeMapDisplay = ({
       })
       .catch(e => setGalleriesError(e.message))
       .finally(() => setGalleriesLoading(false));
-  }, [showBrowseDataModal, selectedMicroscopeId]);
+  }, [showBrowseDataModal]);
 
   // Fetch datasets when a gallery is selected
   useEffect(() => {
@@ -2702,6 +2823,23 @@ const MicroscopeMapDisplay = ({
       console.log('[Simulated Microscope] Auto-enabling historical data mode in FREE_PAN mode');
       setIsHistoricalDataMode(true);
       setStitchedTiles([]); // Clear existing tiles
+      
+      // Create a Browse Data layer if it doesn't exist
+      setLayers(prev => {
+        const existingBrowseLayer = prev.find(layer => layer.type === 'load-server');
+        if (!existingBrowseLayer) {
+          const browseDataLayer = {
+            id: `browse-data-${Date.now()}`,
+            name: 'Browse Data',
+            type: 'load-server',
+            visible: true,
+            channels: [],
+            readonly: true
+          };
+          return [...prev, browseDataLayer];
+        }
+        return prev;
+      });
       
       // Auto-load default dataset for simulated microscope
       const defaultDatasetId = 'agent-lens/20250824-example-data-20250824-221822';
@@ -3006,18 +3144,34 @@ const MicroscopeMapDisplay = ({
     }
     lastTileLoadAttemptRef.current = now;
     
-    if (!visibleLayers.scanResults || mapViewMode !== 'FREE_PAN') {
-      console.log('[loadStitchedTiles] Skipping - scan results not visible or not in FREE_PAN mode');
+    if (mapViewMode !== 'FREE_PAN') {
+      console.log('[loadStitchedTiles] Skipping - not in FREE_PAN mode');
+      return;
+    }
+
+    // Check for visible data layers
+    const browseDataLayer = getBrowseDataLayer();
+    const scanDataLayer = getScanDataLayer();
+    
+    console.log('[loadStitchedTiles] Layer check:', {
+      browseDataLayer: browseDataLayer ? browseDataLayer.name : 'none',
+      scanDataLayer: scanDataLayer ? scanDataLayer.name : 'none',
+      totalLayers: layers.length,
+      layerTypes: layers.map(l => `${l.name}(${l.type})`).join(', ')
+    });
+    
+    if (!browseDataLayer && !scanDataLayer) {
+      console.log('[loadStitchedTiles] Skipping - no visible data layers');
       return;
     }
     
-    // Handle historical data mode
-    if (isHistoricalDataMode) {
-      console.log('[loadStitchedTiles] Historical data mode - checking requirements');
+    // Handle browse data layer (previously historical data mode)
+    if (browseDataLayer) {
+      console.log('[loadStitchedTiles] Browse data layer - checking requirements');
       if (!artifactZarrLoaderRef.current || !selectedHistoricalDataset || !selectedGallery) {
-        console.log('[loadStitchedTiles] Skipping historical mode - missing requirements');
-        return;
-      }
+        console.log('[loadStitchedTiles] Skipping browse data - missing requirements');
+        // Don't return early - continue to check scan data layer
+      } else {
       
       const container = mapContainerRef.current;
       if (!container || !stageDimensions || !pixelsPerMm) return;
@@ -3475,18 +3629,17 @@ const MicroscopeMapDisplay = ({
           setIsLoadingCanvas(false);
         }
       }
-      return;
+    }
     }
     
-    // Handle live microscope mode
-    if (!microscopeControlService || (isSimulatedMicroscope && !isHistoricalDataMode)) {
-      console.log('[loadStitchedTiles] Skipping - no microscope service or simulated mode (not in historical data mode)');
-      // 🚀 PERFORMANCE OPTIMIZATION: Clear loading state when no service available
-      if (activeTileRequestsRef.current.size === 0) {
-        setIsLoadingCanvas(false);
-      }
-      return;
-    }
+    // Handle scan data layer (real microscope mode)
+    if (scanDataLayer) {
+      console.log('[loadStitchedTiles] Processing scan data layer:', scanDataLayer.name);
+      if (!microscopeControlService || isSimulatedMicroscope) {
+        console.log('[loadStitchedTiles] Skipping scan data - no microscope service or simulated mode');
+        // Don't return early - browse data might have been loaded
+      } else {
+        console.log('[loadStitchedTiles] Scan data layer conditions met, proceeding with scan data loading');
     
     // 🚀 PERFORMANCE OPTIMIZATION: Additional check for microscope service availability
     try {
@@ -3652,6 +3805,8 @@ const MicroscopeMapDisplay = ({
       if (appendLog) {
         appendLog(`Loaded tiles for ${experimentsToLoad.length} experiments at scale ${scaleLevel}, region (${clampedTopLeft.x.toFixed(1)}, ${clampedTopLeft.y.toFixed(1)}) to (${clampedBottomRight.x.toFixed(1)}, ${clampedBottomRight.y.toFixed(1)})`);
       }
+      
+      console.log('[loadStitchedTiles] ✅ Scan data loading completed successfully');
     } catch (error) {
       console.error('Failed to load stitched tile:', error);
       if (appendLog) appendLog(`Failed to load scan tile: ${error.message}`);
@@ -3664,14 +3819,17 @@ const MicroscopeMapDisplay = ({
         setIsLoadingCanvas(false);
       }
     }
-  }, [isHistoricalDataMode, microscopeControlService, visibleLayers.scanResults, visibleLayers.channels, mapViewMode, scaleLevel, displayToStageCoords, stageDimensions, pixelsPerMm, getTileKey, addOrUpdateTile, appendLog, isSimulatedMicroscope, selectedHistoricalDataset, selectedGallery, getIntersectingWells, calculateWellRegion, wellPlateType, realMicroscopeChannelConfigs, zarrChannelConfigs, getEnabledZarrChannels, shouldUseMultiChannelLoading, visibleExperiments, activeExperiment, getLayerContrastSettings]);
+    }
+    }
+  }, [getBrowseDataLayer, getScanDataLayer, microscopeControlService, visibleLayers.channels, mapViewMode, scaleLevel, displayToStageCoords, stageDimensions, pixelsPerMm, getTileKey, addOrUpdateTile, appendLog, isSimulatedMicroscope, selectedHistoricalDataset, selectedGallery, getIntersectingWells, calculateWellRegion, wellPlateType, realMicroscopeChannelConfigs, zarrChannelConfigs, getEnabledZarrChannels, shouldUseMultiChannelLoading, visibleExperiments, activeExperiment, getLayerContrastSettings]);
 
   // Add a ref to track previous experiment selection to avoid unnecessary reloads
   const previousExperimentSelectionRef = useRef(null);
 
   // Effect to load tiles when visible experiments change
   useEffect(() => {
-    if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && !isHistoricalDataMode) {
+    const scanDataLayer = getScanDataLayer();
+    if (mapViewMode === 'FREE_PAN' && scanDataLayer) {
       const activeChannel = getChannelString();
       
       // Check if microscope service is available
@@ -3738,7 +3896,7 @@ const MicroscopeMapDisplay = ({
         console.log(`[Experiment Change] No real experiment change detected - UI update only`);
       }
     }
-  }, [visibleExperiments, activeExperiment, mapViewMode, isHistoricalDataMode, microscopeControlService, isSimulatedMicroscope, scaleLevel, stitchedTiles, getChannelString, isPanning, isZooming, appendLog, setNeedsTileReload]); // Removed visibleLayers.scanResults to prevent triggering on layer toggles
+  }, [visibleExperiments, activeExperiment, mapViewMode, getScanDataLayer, microscopeControlService, isSimulatedMicroscope, scaleLevel, stitchedTiles, getChannelString, isPanning, isZooming, appendLog, setNeedsTileReload]); // Updated to use layer-based logic
 
   // Debounce tile loading - only load after user stops interacting for 1 second
   const scheduleTileUpdate = useCallback((source = 'unknown') => {
@@ -3920,7 +4078,9 @@ const MicroscopeMapDisplay = ({
 
   // Effect to trigger tile loading when needsTileReload is set
   useEffect(() => {
-    if (needsTileReload && mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && !isZooming && !isPanning) {
+    const browseDataLayer = getBrowseDataLayer();
+    const scanDataLayer = getScanDataLayer();
+    if (needsTileReload && mapViewMode === 'FREE_PAN' && (browseDataLayer || scanDataLayer) && !isZooming && !isPanning) {
       // Check if tiles are currently loading
       if (isLoadingCanvas || activeTileRequestsRef.current.size > 0) {
         console.log('[needsTileReload] Skipping - tiles are currently loading (isLoadingCanvas:', isLoadingCanvas, 'activeRequests:', activeTileRequestsRef.current.size, ')');
@@ -3937,18 +4097,19 @@ const MicroscopeMapDisplay = ({
         scheduleTileUpdate('needs-reload');
       }, 100);
     }
-  }, [needsTileReload, mapViewMode, visibleLayers.scanResults, scheduleTileUpdate, isZooming, isPanning]);
+  }, [needsTileReload, mapViewMode, getBrowseDataLayer, getScanDataLayer, scheduleTileUpdate, isZooming, isPanning]);
 
   // 🚀 SIMPLIFIED: Only cleanup tiles when scale changes, don't trigger new tile loading
   // This prevents the endless loop while still cleaning up memory
   useEffect(() => {
-    if (mapViewMode === 'FREE_PAN' && !isHistoricalDataMode) {
+    const scanDataLayer = getScanDataLayer();
+    if (mapViewMode === 'FREE_PAN' && scanDataLayer) {
       const activeChannel = getChannelString();
       console.log('[scaleLevel cleanup] Cleaning up old tiles for memory management');
       cleanupOldTiles(scaleLevel, activeChannel);
       // Tiles will be loaded only when user pans/zooms significantly
     }
-  }, [scaleLevel, mapViewMode, isHistoricalDataMode, cleanupOldTiles, getChannelString]); // Simplified dependencies
+  }, [scaleLevel, mapViewMode, getScanDataLayer, cleanupOldTiles, getChannelString]); // Updated to use layer-based logic
 
 
   if (!isOpen) return null;
@@ -4268,7 +4429,8 @@ const MicroscopeMapDisplay = ({
             userSelect: 'none',
             transition: isDragging || isPanning ? 'none' : 'transform 0.3s ease-out',
             opacity: isDrawingMode ? 0.9 : 1,
-            cursor: (isRectangleSelection && !isScanInProgress && !isQuickScanInProgress) && mapViewMode === 'FREE_PAN' && !isHardwareInteractionDisabled ? 'crosshair' : undefined
+            cursor: (isRectangleSelection && !isScanInProgress && !isQuickScanInProgress) && mapViewMode === 'FREE_PAN' && !isHardwareInteractionDisabled ? 'crosshair' : undefined,
+            zIndex: 1 // Ensure map container stays below other UI elements
           }}
       >
         {/* Map canvas for FREE_PAN mode */}
@@ -4898,11 +5060,11 @@ const MicroscopeMapDisplay = ({
             <div className="flex flex-row divide-x divide-gray-700" style={{ minHeight: '350px' }}>
               {/* Experiments/Galleries List (Left) */}
               <div className="flex-1 p-4 overflow-y-auto">
-                <div className="text-gray-300 font-medium mb-2">Experiment Galleries</div>
+                <div className="text-gray-300 font-medium mb-2">All Experiment Galleries</div>
                 {galleriesLoading && <div className="text-xs text-gray-400">Loading galleries...</div>}
                 {galleriesError && <div className="text-xs text-red-400">{galleriesError}</div>}
                 {!galleriesLoading && !galleriesError && galleries.length === 0 && (
-                  <div className="text-xs text-gray-400">No galleries found for this microscope.</div>
+                  <div className="text-xs text-gray-400">No galleries found.</div>
                 )}
                 <ul className="space-y-1">
                   {galleries.map(gal => (
@@ -4925,6 +5087,23 @@ const MicroscopeMapDisplay = ({
                       setShowBrowseDataModal(false);
                       setIsHistoricalDataMode(true);
                       setStitchedTiles([]); // Clear all loaded tiles
+                      
+                      // Create a Browse Data layer if it doesn't exist
+                      setLayers(prev => {
+                        const existingBrowseLayer = prev.find(layer => layer.type === 'load-server');
+                        if (!existingBrowseLayer) {
+                          const browseDataLayer = {
+                            id: `browse-data-${Date.now()}`,
+                            name: 'Browse Data',
+                            type: 'load-server',
+                            visible: true,
+                            channels: [],
+                            readonly: true
+                          };
+                          return [...prev, browseDataLayer];
+                        }
+                        return prev;
+                      });
                     }}
                   >
                     <i className="fas fa-map-marked-alt mr-1"></i>

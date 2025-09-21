@@ -355,10 +355,10 @@ def get_frontend_api():
     # These endpoints are used by new microscope map display
     #########################################################################################
     @app.get("/list-microscope-galleries")
-    async def list_microscope_galleries_endpoint(microscope_service_id: str):
+    async def list_microscope_galleries_endpoint(microscope_service_id: str = None):
         """
-        Endpoint to list all galleries (collections) for a given microscope's service ID.
-        Returns a list of gallery info dicts.
+        Endpoint to list all galleries (collections) from all microscopes.
+        Returns a list of gallery info dicts from all microscopes.
         """
         try:
             result = await artifact_manager_instance.list_microscope_galleries(microscope_service_id)
