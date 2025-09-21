@@ -41,7 +41,17 @@ const LayerPanel = ({
   setVisibleExperiments,
   
   // Layout props
-  isFovFittedMode = false
+  isFovFittedMode = false,
+  
+  // Quick Scan props
+  createExperiment,
+  setShowQuickScanConfig,
+  setQuickScanParameters,
+  quickScanParameters,
+  wellPaddingMm,
+  microscopeControlService,
+  appendLog,
+  showNotification
 }) => {
   // State for layer management
   const [layers, setLayers] = useState([
@@ -52,24 +62,15 @@ const LayerPanel = ({
       visible: visibleLayers.wellPlate,
       channels: [],
       readonly: true
-    },
-    {
-      id: 'scan-results',
-      name: 'Scan Results',
-      type: 'plate-view', 
-      visible: visibleLayers.scanResults,
-      channels: [],
-      readonly: true
     }
   ]);
   
   const [expandedLayers, setExpandedLayers] = useState({});
   const [showLayerTypeDropdown, setShowLayerTypeDropdown] = useState(false);
-  const [newLayerType, setNewLayerType] = useState('plate-view');
+  const [newLayerType, setNewLayerType] = useState('quick-scan');
 
   // Layer type definitions
   const layerTypes = [
-    { id: 'plate-view', name: 'Plate View (96-well etc.)', readonly: true, icon: 'fas fa-th' },
     { id: 'quick-scan', name: 'Quick Scan', readonly: false, icon: 'fas fa-search' },
     { id: 'normal-scan', name: 'Normal Scan', readonly: false, icon: 'fas fa-search-plus' },
     { id: 'live-view', name: 'Live View / Snap', readonly: false, icon: 'fas fa-camera' },
@@ -87,8 +88,6 @@ const LayerPanel = ({
     // Update the parent component's visibleLayers state
     if (layerId === 'well-plate') {
       setVisibleLayers(prev => ({ ...prev, wellPlate: !prev.wellPlate }));
-    } else if (layerId === 'scan-results') {
-      setVisibleLayers(prev => ({ ...prev, scanResults: !prev.scanResults }));
     }
   };
 
@@ -103,23 +102,89 @@ const LayerPanel = ({
     setShowLayerTypeDropdown(true);
   };
 
-  const createLayer = (layerType) => {
+  const createLayer = async (layerType) => {
+    console.log('Creating layer of type:', layerType);
     const layerTypeConfig = layerTypes.find(lt => lt.id === layerType);
-    if (!layerTypeConfig) return;
+    if (!layerTypeConfig) {
+      console.error('Layer type config not found for:', layerType);
+      return;
+    }
 
-    const newLayer = {
-      id: `layer-${Date.now()}`,
-      name: `${layerTypeConfig.name} ${layers.length + 1}`,
-      type: layerType,
-      visible: true,
-      channels: [],
-      readonly: layerTypeConfig.readonly,
-      createdAt: new Date().toISOString()
-    };
+    // Special handling for quick scan layers
+    if (layerType === 'quick-scan') {
+      console.log('Creating quick scan layer...');
+      try {
+        // Create a new experiment for the quick scan
+        const experimentName = `Quick Scan ${new Date().toLocaleString()}`;
+        console.log('Creating experiment:', experimentName);
+        
+        if (createExperiment) {
+          console.log('Calling createExperiment...');
+          await createExperiment(experimentName);
+          console.log('Experiment created successfully');
+          if (appendLog) appendLog(`Created experiment: ${experimentName}`);
+        } else {
+          console.warn('createExperiment function not available');
+        }
+        
+        // Set as active experiment
+        if (setActiveExperimentHandler) {
+          setActiveExperimentHandler(experimentName);
+        }
+        
+        // Open quick scan configuration
+        if (setShowQuickScanConfig) {
+          setShowQuickScanConfig(true);
+        }
+        
+        if (showNotification) {
+          showNotification('Quick scan layer created and configuration opened', 'success');
+        }
+        
+        // Create the layer
+        const newLayer = {
+          id: `layer-${Date.now()}`,
+          name: `${layerTypeConfig.name} - ${experimentName}`,
+          type: layerType,
+          visible: true,
+          channels: [],
+          readonly: layerTypeConfig.readonly,
+          createdAt: new Date().toISOString(),
+          experimentName: experimentName
+        };
 
-    setLayers(prev => [...prev, newLayer]);
-    setShowLayerTypeDropdown(false);
-    setNewLayerType('plate-view');
+        setLayers(prev => [...prev, newLayer]);
+        setShowLayerTypeDropdown(false);
+        setNewLayerType('quick-scan');
+        
+      } catch (error) {
+        console.error('Error creating quick scan layer:', error);
+        if (showNotification) {
+          showNotification('Failed to create quick scan layer', 'error');
+        }
+        if (appendLog) {
+          appendLog(`Error creating quick scan layer: ${error.message}`);
+        }
+      }
+    } else {
+      // Regular layer creation for other types
+      console.log('Creating regular layer:', layerType);
+      const newLayer = {
+        id: `layer-${Date.now()}`,
+        name: `${layerTypeConfig.name} ${layers.length + 1}`,
+        type: layerType,
+        visible: true,
+        channels: [],
+        readonly: layerTypeConfig.readonly,
+        createdAt: new Date().toISOString()
+      };
+
+      console.log('Adding layer to state:', newLayer);
+      setLayers(prev => [...prev, newLayer]);
+      setShowLayerTypeDropdown(false);
+      setNewLayerType('quick-scan');
+      console.log('Layer created successfully');
+    }
   };
 
   const snapImage = (layerId) => {
@@ -141,7 +206,7 @@ const LayerPanel = ({
       return enabledChannels.length === 1 && enabledChannels[0].label === channelName && isEnabled;
     } else {
       // For real microscope channels, check if this is the last visible channel
-      const visibleChannels = Object.entries(visibleLayers.channels).filter(([_, isVisible]) => isVisible);
+      const visibleChannels = Object.entries(visibleLayers.channels).filter(([, isVisible]) => isVisible);
       return visibleChannels.length === 1 && visibleChannels[0][0] === channelName && isEnabled;
     }
   };
@@ -192,7 +257,16 @@ const LayerPanel = ({
               </select>
               <button 
                 className="confirm-layer-btn"
-                onClick={() => createLayer(newLayerType)}
+                onClick={async () => {
+                  try {
+                    await createLayer(newLayerType);
+                  } catch (error) {
+                    console.error('Error creating layer:', error);
+                    if (showNotification) {
+                      showNotification('Failed to create layer', 'error');
+                    }
+                  }
+                }}
                 title="Create Layer"
               >
                 <i className="fas fa-check"></i>
@@ -282,7 +356,17 @@ const LayerPanel = ({
                     <div className="channel-item channel-item--scan">
                       <span className="channel-name">Quick Scan Data</span>
                       <div className="scan-controls">
-                        <button className="scan-btn">Start Scan</button>
+                        <button 
+                          className="scan-btn"
+                          onClick={() => {
+                            if (setShowQuickScanConfig) {
+                              setShowQuickScanConfig(true);
+                            }
+                          }}
+                          title="Open Quick Scan Configuration"
+                        >
+                          Configure
+                        </button>
                       </div>
                     </div>
                   )}
@@ -492,7 +576,6 @@ const LayerPanel = ({
                       {shouldUseMultiChannelLoading() && !isHistoricalDataMode && !isSimulatedMicroscope && mapViewMode !== 'FOV_FITTED' && (
                         <div className="experiment-channels">
                           {Object.entries(visibleLayers.channels).map(([channel, isVisible]) => {
-                            const config = realMicroscopeChannelConfigs[channel] || {};
                             const isLastChannel = isLastSelectedChannel(channel, isVisible);
                             
                             const defaultColors = {
@@ -655,7 +738,17 @@ LayerPanel.propTypes = {
   setVisibleExperiments: PropTypes.func,
   
   // Layout props
-  isFovFittedMode: PropTypes.bool
+  isFovFittedMode: PropTypes.bool,
+  
+  // Quick Scan props
+  createExperiment: PropTypes.func,
+  setShowQuickScanConfig: PropTypes.func,
+  setQuickScanParameters: PropTypes.func,
+  quickScanParameters: PropTypes.object,
+  wellPaddingMm: PropTypes.number,
+  microscopeControlService: PropTypes.object,
+  appendLog: PropTypes.func,
+  showNotification: PropTypes.func
 };
 
 export default LayerPanel;
