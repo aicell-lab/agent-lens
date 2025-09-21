@@ -35,12 +35,6 @@ const QuickScanConfig = ({
         <h3 className="quick-scan-config-title">
           <i className="fas fa-bolt mr-2"></i>
           Quick Scan Configuration
-          {activeExperiment && (
-            <span className="quick-scan-config-experiment">
-              <i className="fas fa-flask mr-1"></i>
-              {activeExperiment}
-            </span>
-          )}
         </h3>
         <button
           onClick={() => setShowQuickScanConfig(false)}
