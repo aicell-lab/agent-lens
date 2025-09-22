@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import PropTypes from 'prop-types';
 import './LayerPanel.css';
+import DualRangeSlider from '../../DualRangeSlider';
 
 const LayerPanel = ({
   // Map Layers props
@@ -585,37 +586,14 @@ const LayerPanel = ({
                                 {/* Contrast Controls */}
                                 {config.enabled && (
                                   <div className="contrast-controls">
-                                    <div className="contrast-slider">
-                                      <label className="contrast-label">Min:</label>
-                                      <input
-                                        type="range"
-                                        min="0"
-                                        max="255"
-                                        value={config.min || 0}
-                                        onChange={(e) => updateZarrChannelConfig(channel.label, { min: parseInt(e.target.value) })}
-                                        className="contrast-range"
-                                        style={{
-                                          background: `linear-gradient(to right, black 0%, ${channelColor} 100%)`
-                                        }}
-                                      />
-                                      <span className="contrast-value">{config.min || 0}</span>
-                                    </div>
-                                    
-                                    <div className="contrast-slider">
-                                      <label className="contrast-label">Max:</label>
-                                      <input
-                                        type="range"
-                                        min="0"
-                                        max="255"
-                                        value={config.max || 255}
-                                        onChange={(e) => updateZarrChannelConfig(channel.label, { max: parseInt(e.target.value) })}
-                                        className="contrast-range"
-                                        style={{
-                                          background: `linear-gradient(to right, black 0%, ${channelColor} 100%)`
-                                        }}
-                                      />
-                                      <span className="contrast-value">{config.max || 255}</span>
-                                    </div>
+                                    <DualRangeSlider
+                                      min={0}
+                                      max={255}
+                                      value={{ min: config.min || 0, max: config.max || 255 }}
+                                      onChange={(newValue) => updateZarrChannelConfig(channel.label, newValue)}
+                                      channelColor={channelColor}
+                                      className="zarr-contrast-slider"
+                                    />
                                     
                                     <div className="contrast-reset">
                                       <button
@@ -783,37 +761,17 @@ const LayerPanel = ({
                                       
                                       return (
                                         <>
-                                          <div className="contrast-slider">
-                                            <label className="contrast-label">Min:</label>
-                                            <input
-                                              type="range"
-                                              min="0"
-                                              max="255"
-                                              value={layerContrast.min || 0}
-                                              onChange={(e) => {
-                                                updateLayerContrastSettings(layerId, { min: parseInt(e.target.value) });
-                                                updateRealMicroscopeChannelConfigWithRefresh(channel, { min: parseInt(e.target.value) });
-                                              }}
-                                              className="contrast-range"
-                                            />
-                                            <span className="contrast-value">{layerContrast.min || 0}</span>
-                                          </div>
-                                          
-                                          <div className="contrast-slider">
-                                            <label className="contrast-label">Max:</label>
-                                            <input
-                                              type="range"
-                                              min="0"
-                                              max="255"
-                                              value={layerContrast.max || 255}
-                                              onChange={(e) => {
-                                                updateLayerContrastSettings(layerId, { max: parseInt(e.target.value) });
-                                                updateRealMicroscopeChannelConfigWithRefresh(channel, { max: parseInt(e.target.value) });
-                                              }}
-                                              className="contrast-range"
-                                            />
-                                            <span className="contrast-value">{layerContrast.max || 255}</span>
-                                          </div>
+                                          <DualRangeSlider
+                                            min={0}
+                                            max={255}
+                                            value={{ min: layerContrast.min || 0, max: layerContrast.max || 255 }}
+                                            onChange={(newValue) => {
+                                              updateLayerContrastSettings(layerId, newValue);
+                                              updateRealMicroscopeChannelConfigWithRefresh(channel, newValue);
+                                            }}
+                                            channelColor={channelColor}
+                                            className="real-microscope-contrast-slider"
+                                          />
                                           
                                           <div className="contrast-reset">
                                             <button
