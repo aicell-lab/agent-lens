@@ -74,7 +74,7 @@ const LayerPanel = ({
   setIsLayerDropdownOpen
 }) => {
   const [showLayerTypeDropdown, setShowLayerTypeDropdown] = useState(false);
-  const [newLayerType, setNewLayerType] = useState('plate-view');
+  const [newLayerType, setNewLayerType] = useState('quick-scan');
 
   // Layer type definitions
   const layerTypes = [
@@ -131,7 +131,10 @@ const LayerPanel = ({
 
   const createLayer = async (layerType) => {
     const layerTypeConfig = layerTypes.find(lt => lt.id === layerType);
-    if (!layerTypeConfig) return;
+    if (!layerTypeConfig) {
+      console.error(`[LayerPanel] Layer type not found: ${layerType}`);
+      return;
+    }
 
     console.log(`[LayerPanel] Creating layer of type: ${layerType}`);
 
@@ -207,12 +210,18 @@ const LayerPanel = ({
       createdAt: new Date().toISOString()
     };
 
-    setLayers(prev => [...prev, newLayer]);
+    setLayers(prev => {
+      const updatedLayers = [...prev, newLayer];
+      console.log(`[LayerPanel] Added layer:`, newLayer);
+      console.log(`[LayerPanel] Total layers now:`, updatedLayers.length);
+      return updatedLayers;
+    });
     setShowLayerTypeDropdown(false);
-    setNewLayerType('plate-view');
+    setNewLayerType('quick-scan');
     
     // Auto-expand the layer if it's a scan type or browse data so user can see the action buttons
     if (layerType === 'quick-scan' || layerType === 'normal-scan' || layerType === 'load-server') {
+      console.log(`[LayerPanel] Auto-expanding layer: ${newLayer.id}`);
       setExpandedLayers(prev => ({
         ...prev,
         [newLayer.id]: true
