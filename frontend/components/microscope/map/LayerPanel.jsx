@@ -92,7 +92,6 @@ const LayerPanel = ({
     { id: 'normal-scan', name: 'Normal Scan', readonly: false, icon: 'fas fa-search-plus' },
     { id: 'live-view', name: 'Live View / Snap', readonly: false, icon: 'fas fa-camera' },
     { id: 'load-server', name: 'Browse Data', readonly: true, icon: 'fas fa-database' },
-    { id: 'microscope-control', name: 'Microscope Control', readonly: true, icon: 'fas fa-cogs' }
   ];
 
   // Helper functions for layer management
