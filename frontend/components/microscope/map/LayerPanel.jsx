@@ -71,7 +71,17 @@ const LayerPanel = ({
   setExpandedLayers,
   
   // Dropdown control props
-  setIsLayerDropdownOpen
+  setIsLayerDropdownOpen,
+  
+  // Microscope control props
+  isControlPanelOpen,
+  setIsControlPanelOpen,
+  
+  // Live video props
+  isWebRtcActive,
+  toggleWebRtcStream,
+  currentOperation,
+  microscopeBusy
 }) => {
   const [showLayerTypeDropdown, setShowLayerTypeDropdown] = useState(false);
   const [newLayerType, setNewLayerType] = useState('quick-scan');
@@ -81,7 +91,8 @@ const LayerPanel = ({
     { id: 'quick-scan', name: 'Quick Scan', readonly: false, icon: 'fas fa-search' },
     { id: 'normal-scan', name: 'Normal Scan', readonly: false, icon: 'fas fa-search-plus' },
     { id: 'live-view', name: 'Live View / Snap', readonly: false, icon: 'fas fa-camera' },
-    { id: 'load-server', name: 'Browse Data', readonly: true, icon: 'fas fa-database' }
+    { id: 'load-server', name: 'Browse Data', readonly: true, icon: 'fas fa-database' },
+    { id: 'microscope-control', name: 'Microscope Control', readonly: true, icon: 'fas fa-cogs' }
   ];
 
   // Helper functions for layer management
@@ -97,8 +108,20 @@ const LayerPanel = ({
       setVisibleLayers(prev => ({ ...prev, wellPlate: !prev.wellPlate }));
     }
     
+    // Handle microscope control layer - stop live video when hidden
+    if (layerId === 'microscope-control') {
+      const layer = layers.find(l => l.id === layerId);
+      if (layer && layer.visible && isWebRtcActive) {
+        // Layer is currently visible and we're disabling it, stop live video
+        console.log('[LayerPanel] Microscope control layer hidden, stopping live video');
+        if (toggleWebRtcStream) {
+          toggleWebRtcStream();
+        }
+      }
+    }
+    
     // Handle exiting historical data mode when Browse Data layer is disabled
-    if (layerId !== 'well-plate') {
+    if (layerId !== 'well-plate' && layerId !== 'microscope-control') {
       const layer = layers.find(l => l.id === layerId);
       if (layer && layer.type === 'load-server' && isHistoricalDataMode) {
         // Check if we're disabling the layer (it was visible and now will be hidden)
@@ -389,6 +412,34 @@ const LayerPanel = ({
                   {layer.type === 'plate-view' && (
                     <div className="channel-item channel-item--overlay">
                       <span className="channel-name">Plate Overlay</span>
+                    </div>
+                  )}
+                  {layer.type === 'microscope-control' && (
+                    <div className="channel-item channel-item--microscope-control">
+                      <span className="channel-name">
+                        Hardware Control
+                        {!layer.visible && <span className="ml-2 text-red-400">🔒 Hardware Locked</span>}
+                      </span>
+                      <div className="microscope-controls">
+                        <button 
+                          className="control-btn"
+                          onClick={() => setIsControlPanelOpen(!isControlPanelOpen)}
+                          title={isControlPanelOpen ? "Close Microscope Controls" : "Open Microscope Controls"}
+                          disabled={!layer.visible}
+                        >
+                          <i className="fas fa-cogs mr-1"></i>
+                          {isControlPanelOpen ? "Close Controls" : "Open Controls"}
+                        </button>
+                        <button 
+                          className={`control-btn ${isWebRtcActive ? 'bg-red-500 hover:bg-red-600' : 'bg-purple-500 hover:bg-purple-600'}`}
+                          onClick={toggleWebRtcStream}
+                          title={isWebRtcActive ? "Stop Live Video" : "Start Live Video"}
+                          disabled={!layer.visible || !microscopeControlService || currentOperation !== null || microscopeBusy}
+                        >
+                          <i className="fas fa-video mr-1"></i>
+                          {isWebRtcActive ? "Stop Live" : "Start Live"}
+                        </button>
+                      </div>
                     </div>
                   )}
                   {layer.type === 'quick-scan' && (
@@ -825,7 +876,17 @@ LayerPanel.propTypes = {
   setExpandedLayers: PropTypes.func.isRequired,
   
   // Dropdown control props
-  setIsLayerDropdownOpen: PropTypes.func
+  setIsLayerDropdownOpen: PropTypes.func,
+  
+  // Microscope control props
+  isControlPanelOpen: PropTypes.bool,
+  setIsControlPanelOpen: PropTypes.func,
+  
+  // Live video props
+  isWebRtcActive: PropTypes.bool,
+  toggleWebRtcStream: PropTypes.func,
+  currentOperation: PropTypes.string,
+  microscopeBusy: PropTypes.bool
 };
 
 export default LayerPanel;

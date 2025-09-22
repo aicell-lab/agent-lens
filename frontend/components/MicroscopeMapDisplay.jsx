@@ -205,6 +205,14 @@ const MicroscopeMapDisplay = ({
       visible: true, // Will be synced with visibleLayers.wellPlate
       channels: [],
       readonly: true
+    },
+    {
+      id: 'microscope-control',
+      name: 'Microscope Control',
+      type: 'microscope-control',
+      visible: true, // Default activated
+      channels: [],
+      readonly: true
     }
   ]);
   const [expandedLayers, setExpandedLayers] = useState({});
@@ -235,6 +243,14 @@ const MicroscopeMapDisplay = ({
     ));
   }, [visibleLayers.wellPlate]);
 
+  // Update hardware locked state when microscope control layer visibility changes
+  useEffect(() => {
+    const microscopeControlLayer = layers.find(layer => layer.id === 'microscope-control');
+    if (microscopeControlLayer) {
+      setIsHardwareLocked(!microscopeControlLayer.visible);
+    }
+  }, [layers]);
+
 
   // Tile-based canvas state (replacing single stitchedCanvasData)
   const [stitchedTiles, setStitchedTiles] = useState([]); // Array of tile objects
@@ -263,6 +279,9 @@ const MicroscopeMapDisplay = ({
   const [realTimeChunkProgress, setRealTimeChunkProgress] = useState(new Map());
   const [realTimeWellProgress, setRealTimeWellProgress] = useState(new Map());
   const [isRealTimeLoading, setIsRealTimeLoading] = useState(false);
+
+  // Hardware locked state - when microscope control layer is deactivated
+  const [isHardwareLocked, setIsHardwareLocked] = useState(false);
 
   // Function to refresh scan results (moved early to avoid dependency issues)
   const refreshScanResults = useCallback(() => {
@@ -1159,7 +1178,7 @@ const MicroscopeMapDisplay = ({
   }, [containerDimensions, mapViewMode, currentStagePosition, stageDimensions, mapScale, effectivePan, fovSize, pixelsPerMm]);
 
   // Split interaction controls: hardware vs map browsing, exclude simulated microscope in historical mode
-  const isHardwareInteractionDisabled = (isHistoricalDataMode && !(isSimulatedMicroscope && isHistoricalDataMode)) || microscopeBusy || currentOperation !== null || isScanInProgress || isQuickScanInProgress || isDrawingMode;
+  const isHardwareInteractionDisabled = (isHistoricalDataMode && !(isSimulatedMicroscope && isHistoricalDataMode)) || microscopeBusy || currentOperation !== null || isScanInProgress || isQuickScanInProgress || isDrawingMode || isHardwareLocked;
   const isMapBrowsingDisabled = false; // Allow map browsing - annotation canvas will handle its own interactions
   
   // Legacy compatibility - some UI elements still use the general disabled state
@@ -4141,17 +4160,6 @@ const MicroscopeMapDisplay = ({
               Samples
             </button>
 
-            {/* Control Panel Button */}
-            <button 
-              onClick={() => setIsControlPanelOpen(!isControlPanelOpen)}
-              className={`px-3 py-1 text-xs text-white rounded flex items-center ${
-                isControlPanelOpen ? 'bg-blue-600 hover:bg-blue-500' : 'bg-blue-700 hover:bg-blue-600'
-              }`}
-              title={isControlPanelOpen ? "Close Control Panel" : "Open Control Panel"}
-            >
-              <i className="fas fa-cogs mr-1"></i>
-              Controls
-            </button>
           </div>
           
           {mapViewMode === 'FREE_PAN' && (
@@ -4383,26 +4391,19 @@ const MicroscopeMapDisplay = ({
                       
                       // Dropdown control props
                       setIsLayerDropdownOpen={setIsLayerDropdownOpen}
+                      
+                      // Microscope control props
+                      isControlPanelOpen={isControlPanelOpen}
+                      setIsControlPanelOpen={setIsControlPanelOpen}
+                      
+                      // Live video props
+                      isWebRtcActive={isWebRtcActive}
+                      toggleWebRtcStream={toggleWebRtcStream}
+                      currentOperation={currentOperation}
+                      microscopeBusy={microscopeBusy}
                     />
                   </div>
                 )}
-              </div>
-              
-              {/* Well Selection Controls */}
-              <div className="flex items-center space-x-2">
-                {/* Well Plate Type Selector */}
-                <div className="flex items-center space-x-1">
-                  <label className="text-white text-xs">Plate:</label>
-                  <select
-                    value={wellPlateType}
-                    onChange={(e) => setWellPlateType(e.target.value)}
-                    className="px-1 py-0.5 text-xs bg-gray-700 border border-gray-600 rounded text-white"
-                    disabled={isSimulatedMicroscope}
-                  >
-                    <option value="96">96-well</option>
-                    <option value="96">only 96-well for now</option>
-                  </select>
-                </div>
               </div>
             </>
           )}
@@ -4728,7 +4729,7 @@ const MicroscopeMapDisplay = ({
         })()}
         
         {/* Current video frame position indicator */}
-        {videoFramePosition && (!isHistoricalDataMode || (isSimulatedMicroscope && isHistoricalDataMode)) && (
+        {videoFramePosition && (!isHistoricalDataMode || (isSimulatedMicroscope && isHistoricalDataMode)) && !isHardwareLocked && (
           <div
             className="absolute border-2 border-yellow-400 pointer-events-none"
             style={{

@@ -151,6 +151,10 @@
   border-left: 3px solid #10b981;
 }
 
+.layer-item--microscope-control {
+  border-left: 3px solid #f59e0b;
+}
+
 .layer-item__header {
   display: flex;
   align-items: center;
@@ -366,14 +370,21 @@
   padding: 0.5rem;
 }
 
-.scan-controls, .live-controls, .server-controls {
+.channel-item--microscope-control {
+  background: #451a03;
+  color: #fed7aa;
+  font-size: 0.75rem;
+  padding: 0.5rem;
+}
+
+.scan-controls, .live-controls, .server-controls, .microscope-controls {
   display: flex;
   gap: 0.5rem;
   margin-top: 0.5rem;
   justify-content: center;
 }
 
-.scan-btn, .live-btn, .snap-btn, .load-btn {
+.scan-btn, .live-btn, .snap-btn, .load-btn, .control-btn {
   background: #374151;
   color: white;
   border: 1px solid #4b5563;
@@ -402,6 +413,23 @@
 .load-btn:hover {
   background: #10b981;
   border-color: #059669;
+}
+
+.control-btn:hover {
+  background: #f59e0b;
+  border-color: #d97706;
+}
+
+.control-btn:disabled {
+  background: #6b7280;
+  color: #9ca3af;
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.control-btn:disabled:hover {
+  background: #6b7280;
+  border-color: #4b5563;
 }
 
 /* Layer Panel Footer */
