@@ -2860,29 +2860,6 @@ const MicroscopeMapDisplay = ({
         }
         return prev;
       });
-      
-      // Auto-load default dataset for simulated microscope
-      const defaultDatasetId = 'agent-lens/20250824-example-data-20250824-221822';
-      console.log('[Simulated Microscope] Auto-loading default dataset:', defaultDatasetId);
-      
-      // Create a mock dataset object for the default dataset
-      const mockDataset = {
-        id: defaultDatasetId,
-        name: 'Simulated Sample Data',
-        created_at: new Date().toISOString(),
-        metadata: {
-          microscope_service_id: selectedMicroscopeId,
-          sample_id: 'simulated-sample-1'
-        }
-      };
-      
-      // Set the dataset and gallery for immediate use
-      setSelectedHistoricalDataset(mockDataset);
-      setSelectedGallery({
-        id: defaultDatasetId, // Use the actual dataset ID as gallery ID
-        name: 'Simulated Microscope Gallery',
-        microscope_service_id: selectedMicroscopeId
-      });
     }
   }, [isSimulatedMicroscope, mapViewMode, isHistoricalDataMode, selectedMicroscopeId, setStitchedTiles, setSelectedGallery]);
 
