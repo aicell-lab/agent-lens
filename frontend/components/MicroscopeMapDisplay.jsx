@@ -454,9 +454,9 @@ const MicroscopeMapDisplay = ({
     if (!channelMetadata || !channelMetadata.activeChannels) return;
     
     const newConfigs = {};
-    channelMetadata.activeChannels.forEach(channel => {
+    channelMetadata.activeChannels.forEach((channel, index) => {
       newConfigs[channel.label] = {
-        enabled: true, // Auto-enable all active channels as requested
+        enabled: index === 0, // Enable only the first channel initially to prevent multi-channel issues
         min: channel.window.start,
         max: channel.window.end,
         color: channel.color,
@@ -467,6 +467,7 @@ const MicroscopeMapDisplay = ({
     });
     
     console.log(`🎨 Initialized ${Object.keys(newConfigs).length} zarr channels:`, Object.keys(newConfigs));
+    console.log(`🎨 Enabled channels: ${Object.entries(newConfigs).filter(([,config]) => config.enabled).map(([name]) => name).join(', ')}`);
     setZarrChannelConfigs(newConfigs);
     setAvailableZarrChannels(channelMetadata.activeChannels);
     setIsMultiChannelMode(Object.keys(newConfigs).length > 1);
@@ -2798,6 +2799,9 @@ const MicroscopeMapDisplay = ({
   // Add state for selected dataset in historical mode
   const [selectedHistoricalDataset, setSelectedHistoricalDataset] = useState(null);
   
+  // Note: Layer management effect removed - we now set selectedHistoricalDataset directly in the browse modal
+  
+  
   // Helper function to get current channel information for annotations
   const getCurrentChannelInfo = useCallback(() => {
     const channels = [];
@@ -2902,56 +2906,9 @@ const MicroscopeMapDisplay = ({
     }
   }, [isSimulatedMicroscope, sampleLoadStatus?.isSampleLoaded, sampleLoadStatus?.selectedSampleId, selectedMicroscopeId, setStitchedTiles, setSelectedGallery]);
   
-  // Auto-select first dataset when datasets are loaded in historical mode
-  useEffect(() => {
-    if (isHistoricalDataMode && datasets.length > 0 && !selectedHistoricalDataset) {
-      console.log('[Historical Mode] Auto-selecting first dataset:', datasets[0]);
-      setSelectedHistoricalDataset(datasets[0]);
-    }
-  }, [isHistoricalDataMode, datasets, selectedHistoricalDataset]);
 
-  // Load zarr channel metadata when dataset changes (historical mode only)
-  useEffect(() => {
-    const loadZarrChannelMetadata = async () => {
-      if (!artifactZarrLoaderRef.current || 
-          !isHistoricalDataMode ||
-          !selectedHistoricalDataset) {
-        return;
-      }
-      
-      try {
-        console.log('[Zarr Channels] Loading channel metadata for dataset:', selectedHistoricalDataset.id);
-        
-        // Get available wells first to find a sample well for metadata
-        const availableWells = await artifactZarrLoaderRef.current.getAvailableWells(selectedHistoricalDataset.id);
-        if (availableWells.length === 0) {
-          console.warn('[Zarr Channels] No available wells found');
-          return;
-        }
-        
-        // Use first available well to get channel metadata
-        const sampleWell = availableWells[0];
-        const correctDatasetId = artifactZarrLoaderRef.current.extractDatasetId(selectedHistoricalDataset.id);
-        const baseUrl = `${artifactZarrLoaderRef.current.baseUrl}/${correctDatasetId}/zip-files/well_${sampleWell}_96.zip/~/data.zarr/`;
-        
-        // Get active channel metadata from zattrs
-        const channelMetadata = await artifactZarrLoaderRef.current.getActiveChannelsFromZattrs(baseUrl);
-        if (channelMetadata && channelMetadata.activeChannels.length > 0) {
-          console.log(`[Zarr Channels] Found ${channelMetadata.activeChannels.length} active channels`);
-          initializeZarrChannelsFromMetadata(channelMetadata);
-        } else {
-          console.warn('[Zarr Channels] No active channels found in metadata');
-          setIsMultiChannelMode(false);
-        }
-        
-      } catch (error) {
-        console.error('[Zarr Channels] Failed to load channel metadata:', error);
-        setIsMultiChannelMode(false);
-      }
-    };
-    
-    loadZarrChannelMetadata();
-  }, [isHistoricalDataMode, selectedHistoricalDataset, initializeZarrChannelsFromMetadata]);
+  // NOTE: Zarr metadata loading is now handled directly in the browse modal
+  // to avoid race conditions with tile loading
 
   
   // Initialize ArtifactZarrLoader for historical data
@@ -3171,8 +3128,11 @@ const MicroscopeMapDisplay = ({
     // Handle browse data layer (previously historical data mode)
     if (browseDataLayer) {
       console.log('[loadStitchedTiles] Browse data layer - checking requirements');
-      if (!artifactZarrLoaderRef.current || !selectedHistoricalDataset || !selectedGallery) {
+      if (!artifactZarrLoaderRef.current || !selectedHistoricalDataset) {
         console.log('[loadStitchedTiles] Skipping browse data - missing requirements');
+        // Don't return early - continue to check scan data layer
+      } else if (availableZarrChannels.length === 0) {
+        console.log('[loadStitchedTiles] Skipping browse data - zarr metadata not yet loaded');
         // Don't return early - continue to check scan data layer
       } else {
       
@@ -3180,7 +3140,18 @@ const MicroscopeMapDisplay = ({
       if (!container || !stageDimensions || !pixelsPerMm) return;
       
       // Get the active channel string for API calls
-      const activeChannel = getChannelString();
+      // For browse data, use zarr channels if available, otherwise fall back to microscope channels
+      const useMultiChannel = shouldUseMultiChannelLoading();
+      const enabledZarrChannels = getEnabledZarrChannels();
+      const activeChannel = useMultiChannel && enabledZarrChannels.length > 0 
+        ? enabledZarrChannels[0].channelName  // Use first enabled zarr channel
+        : getChannelString(); // Fallback to microscope channels
+      
+      console.log('[loadStitchedTiles] Channel selection:', {
+        useMultiChannel,
+        enabledZarrChannels: enabledZarrChannels.map(ch => ch.channelName),
+        selectedChannel: activeChannel
+      });
       
       // Calculate visible region in stage coordinates with buffer
       const bufferPercent = 0.2; // 20% buffer around visible area for smoother panning
@@ -4371,6 +4342,7 @@ const MicroscopeMapDisplay = ({
                       // Historical data mode props
                       isHistoricalDataMode={isHistoricalDataMode}
                       setIsHistoricalDataMode={setIsHistoricalDataMode}
+                      setSelectedHistoricalDataset={setSelectedHistoricalDataset}
                       
                       // Layer management props
                       layers={layers}
@@ -5079,38 +5051,6 @@ const MicroscopeMapDisplay = ({
                     </li>
                   ))}
                 </ul>
-                {/* View Gallery in Map Button */}
-                <div className="mt-4 flex justify-end">
-                  <button
-                    className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                    disabled={!selectedGallery}
-                    onClick={() => {
-                      setShowBrowseDataModal(false);
-                      setIsHistoricalDataMode(true);
-                      setStitchedTiles([]); // Clear all loaded tiles
-                      
-                      // Create a Browse Data layer if it doesn't exist
-                      setLayers(prev => {
-                        const existingBrowseLayer = prev.find(layer => layer.type === 'load-server');
-                        if (!existingBrowseLayer) {
-                          const browseDataLayer = {
-                            id: `browse-data-${Date.now()}`,
-                            name: 'Browse Data',
-                            type: 'load-server',
-                            visible: true,
-                            channels: [],
-                            readonly: true
-                          };
-                          return [...prev, browseDataLayer];
-                        }
-                        return prev;
-                      });
-                    }}
-                  >
-                    <i className="fas fa-map-marked-alt mr-1"></i>
-                    View Gallery in Map
-                  </button>
-                </div>
               </div>
               {/* Datasets List (Right) */}
               <div className="flex-1 p-4 overflow-y-auto">
@@ -5124,9 +5064,97 @@ const MicroscopeMapDisplay = ({
                 <ul className="space-y-1">
                   {datasets.map(ds => (
                     <li key={ds.id}>
-                      <div className="px-2 py-1 rounded bg-gray-700 text-gray-200">
-                        {ds.manifest?.name || ds.alias || ds.id}
-                      </div>
+                      <button
+                        className="w-full text-left px-2 py-1 rounded bg-gray-700 text-gray-200 hover:bg-blue-700 transition-colors"
+                        onClick={() => {
+                          // Update existing Browse Data layer with dataset information
+                          const datasetLayerName = ds.manifest?.name || ds.alias || ds.id;
+                          
+                          setLayers(prev => prev.map(layer => 
+                            layer.type === 'load-server' ? {
+                              ...layer,
+                              name: datasetLayerName,
+                              datasetId: ds.id,
+                              galleryId: selectedGallery.id,
+                              visible: true
+                            } : layer
+                          ));
+                          
+                          // Close modal and enable historical data mode for this layer
+                          setShowBrowseDataModal(false);
+                          setIsHistoricalDataMode(true);
+                          
+                          // Clear existing state for new dataset
+                          console.log('[Browse Modal] Clearing existing state for new dataset');
+                          setStitchedTiles([]);
+                          setZarrChannelConfigs({});
+                          setAvailableZarrChannels([]);
+                          
+                          // Set this dataset as the selected one for loading
+                          console.log('[Browse Modal] Setting selectedHistoricalDataset to:', ds);
+                          setSelectedHistoricalDataset(ds);
+                          
+                          // Also set gallery for the data loading dependency
+                          setSelectedGallery({
+                            id: selectedGallery.id,
+                            name: selectedGallery.name || 'Gallery'
+                          });
+                          
+                          // Immediately load zarr metadata for this dataset (synchronous)
+                          console.log('[Browse Modal] Immediately loading zarr metadata for:', ds.id);
+                          
+                          // Load zarr metadata synchronously and block tile loading until complete
+                          (async () => {
+                            try {
+                              console.log('[Browse Modal] Starting zarr metadata load...');
+                              
+                              // Create a fresh loader instance to avoid cancellation conflicts
+                              const tempLoader = new ArtifactZarrLoader();
+                              const availableWells = await tempLoader.getAvailableWells(ds.id);
+                              
+                              if (availableWells.length > 0) {
+                                const sampleWell = availableWells[0];
+                                const correctDatasetId = tempLoader.extractDatasetId(ds.id);
+                                const baseUrl = `${tempLoader.baseUrl}/${correctDatasetId}/zip-files/well_${sampleWell}_96.zip/~/data.zarr/`;
+                                
+                                console.log('[Browse Modal] Getting channel metadata from:', baseUrl);
+                                const channelMetadata = await tempLoader.getActiveChannelsFromZattrs(baseUrl);
+                                
+                                if (channelMetadata && channelMetadata.activeChannels.length > 0) {
+                                  console.log(`[Browse Modal] ✅ Successfully loaded ${channelMetadata.activeChannels.length} channels`);
+                                  
+                                  // Initialize channels immediately
+                                  initializeZarrChannelsFromMetadata(channelMetadata);
+                                  
+                                  // Wait for state to update, then trigger tile loading
+                                  await new Promise(resolve => setTimeout(resolve, 100));
+                                  
+                                  console.log('[Browse Modal] 🚀 Zarr metadata ready, triggering tiles');
+                                  setNeedsTileReload(true);
+                                } else {
+                                  console.warn('[Browse Modal] No channel metadata found');
+                                }
+                              } else {
+                                console.warn('[Browse Modal] No available wells found');
+                              }
+                            } catch (error) {
+                              console.error('[Browse Modal] Failed to load zarr metadata:', error.message);
+                            }
+                          })();
+                          
+                          showNotification && showNotification(`Added dataset layer: ${datasetLayerName}`, 'success');
+                        }}
+                      >
+                        <div className="font-medium">{ds.manifest?.name || ds.alias || ds.id}</div>
+                        {ds.manifest?.description && (
+                          <div className="text-xs text-gray-400 mt-1">{ds.manifest.description}</div>
+                        )}
+                        {ds.manifest?.created_at && (
+                          <div className="text-xs text-gray-500">
+                            Created: {new Date(ds.manifest.created_at).toLocaleDateString()}
+                          </div>
+                        )}
+                      </button>
                     </li>
                   ))}
                 </ul>
@@ -5136,48 +5164,6 @@ const MicroscopeMapDisplay = ({
         </div>
       )}
 
-      {/* Historical Timeline - positioned at bottom of main container */}
-      {isHistoricalDataMode && selectedGallery && datasets.length > 0 && (
-        <div className="absolute bottom-0 left-0 right-0 z-50">
-          <div className="historical-timeline-container">
-            <div className="historical-timeline-line">
-              {datasets.map((ds, idx) => {
-                const isSelected = selectedHistoricalDataset && selectedHistoricalDataset.id === ds.id;
-                // Adjust position to account for sidebar and window edges
-                let position;
-                if (datasets.length === 1) {
-                  position = 50; // Center if only one dataset
-                } else {
-                  // Use a smaller range to avoid edges: 10% to 90% instead of 0% to 100%
-                  position = 10 + (idx / (datasets.length - 1)) * 80;
-                }
-                return (
-                  <div
-                    key={ds.id}
-                    className={`historical-timeline-point${isSelected ? ' selected' : ''}`}
-                    style={{ left: `${position}%` }}
-                    onClick={() => setSelectedHistoricalDataset(ds)}
-                    title={ds.manifest?.name || ds.alias || ds.id}
-                  >
-                    <div className="historical-timeline-dot" />
-                    <div className="historical-timeline-tooltip">
-                      <div className="tooltip-content">
-                        <div className="tooltip-title">{ds.manifest?.name || ds.alias || ds.id}</div>
-                        <div className="tooltip-details">
-                          <div>ID: {ds.id}</div>
-                          {ds.manifest?.description && <div>Description: {ds.manifest.description}</div>}
-                          {ds.manifest?.created_at && <div>Created: {new Date(ds.manifest.created_at).toLocaleString()}</div>}
-                          {ds.manifest?.size && <div>Size: {ds.manifest.size}</div>}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Real-time chunk loading progress overlay */}
       {renderRealTimeProgress()}
