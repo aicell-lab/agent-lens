@@ -1531,8 +1531,9 @@ const MicroscopeMapDisplay = ({
   const visibleTiles = useMemo(() => {
     const browseDataLayer = getBrowseDataLayer();
     const scanDataLayer = getScanDataLayer();
+    const hasScanResults = visibleLayers.scanResults && visibleExperiments.length > 0;
     
-    if (!browseDataLayer && !scanDataLayer) return [];
+    if (!browseDataLayer && !scanDataLayer && !hasScanResults) return [];
     
     // Determine current channel configuration
     const useMultiChannel = shouldUseMultiChannelLoading();
@@ -1719,7 +1720,7 @@ const MicroscopeMapDisplay = ({
     }
     
     return [];
-  }, [stitchedTiles, scaleLevel, visibleLayers.channels, shouldUseMultiChannelLoading, getEnabledZarrChannels, getSelectedChannels, getChannelString, visibleExperiments, activeExperiment, isZooming, isPanning, getBrowseDataLayer, getScanDataLayer]); // Added interaction state dependencies for proper logging control
+  }, [stitchedTiles, scaleLevel, visibleLayers.channels, visibleLayers.scanResults, shouldUseMultiChannelLoading, getEnabledZarrChannels, getSelectedChannels, getChannelString, visibleExperiments, activeExperiment, isZooming, isPanning, getBrowseDataLayer, getScanDataLayer]); // Added interaction state dependencies for proper logging control
 
   const addOrUpdateTile = useCallback((newTile) => {
     setStitchedTiles(prevTiles => {
@@ -3153,15 +3154,21 @@ const MicroscopeMapDisplay = ({
     const browseDataLayer = getBrowseDataLayer();
     const scanDataLayer = getScanDataLayer();
     
+    // Also check if scan results are enabled (completed scan data)
+    const hasScanResults = visibleLayers.scanResults && visibleExperiments.length > 0;
+    
     console.log('[loadStitchedTiles] Layer check:', {
       browseDataLayer: browseDataLayer ? browseDataLayer.name : 'none',
       scanDataLayer: scanDataLayer ? scanDataLayer.name : 'none',
+      hasScanResults,
+      scanResultsEnabled: visibleLayers.scanResults,
+      visibleExperiments: visibleExperiments.length,
       totalLayers: layers.length,
       layerTypes: layers.map(l => `${l.name}(${l.type})`).join(', ')
     });
     
-    if (!browseDataLayer && !scanDataLayer) {
-      console.log('[loadStitchedTiles] Skipping - no visible data layers');
+    if (!browseDataLayer && !scanDataLayer && !hasScanResults) {
+      console.log('[loadStitchedTiles] Skipping - no visible data layers or scan results');
       return;
     }
     
@@ -3632,9 +3639,9 @@ const MicroscopeMapDisplay = ({
     }
     }
     
-    // Handle scan data layer (real microscope mode)
-    if (scanDataLayer) {
-      console.log('[loadStitchedTiles] Processing scan data layer:', scanDataLayer.name);
+    // Handle scan data layer (real microscope mode) or scan results
+    if (scanDataLayer || hasScanResults) {
+      console.log('[loadStitchedTiles] Processing scan data:', scanDataLayer ? `layer: ${scanDataLayer.name}` : 'scan results');
       if (!microscopeControlService || isSimulatedMicroscope) {
         console.log('[loadStitchedTiles] Skipping scan data - no microscope service or simulated mode');
         // Don't return early - browse data might have been loaded
@@ -4080,7 +4087,8 @@ const MicroscopeMapDisplay = ({
   useEffect(() => {
     const browseDataLayer = getBrowseDataLayer();
     const scanDataLayer = getScanDataLayer();
-    if (needsTileReload && mapViewMode === 'FREE_PAN' && (browseDataLayer || scanDataLayer) && !isZooming && !isPanning) {
+    const hasScanResults = visibleLayers.scanResults && visibleExperiments.length > 0;
+    if (needsTileReload && mapViewMode === 'FREE_PAN' && (browseDataLayer || scanDataLayer || hasScanResults) && !isZooming && !isPanning) {
       // Check if tiles are currently loading
       if (isLoadingCanvas || activeTileRequestsRef.current.size > 0) {
         console.log('[needsTileReload] Skipping - tiles are currently loading (isLoadingCanvas:', isLoadingCanvas, 'activeRequests:', activeTileRequestsRef.current.size, ')');
@@ -4097,7 +4105,7 @@ const MicroscopeMapDisplay = ({
         scheduleTileUpdate('needs-reload');
       }, 100);
     }
-  }, [needsTileReload, mapViewMode, getBrowseDataLayer, getScanDataLayer, scheduleTileUpdate, isZooming, isPanning]);
+  }, [needsTileReload, mapViewMode, getBrowseDataLayer, getScanDataLayer, visibleLayers.scanResults, visibleExperiments, scheduleTileUpdate, isZooming, isPanning]);
 
   // 🚀 SIMPLIFIED: Only cleanup tiles when scale changes, don't trigger new tile loading
   // This prevents the endless loop while still cleaning up memory
