@@ -4390,6 +4390,9 @@ const MicroscopeMapDisplay = ({
                       toggleWebRtcStream={toggleWebRtcStream}
                       currentOperation={currentOperation}
                       microscopeBusy={microscopeBusy}
+                      
+                      // Historical dataset props
+                      selectedHistoricalDataset={selectedHistoricalDataset}
                     />
                   </div>
                 )}

@@ -81,7 +81,10 @@ const LayerPanel = ({
   isWebRtcActive,
   toggleWebRtcStream,
   currentOperation,
-  microscopeBusy
+  microscopeBusy,
+  
+  // Historical dataset props
+  selectedHistoricalDataset
 }) => {
   const [showLayerTypeDropdown, setShowLayerTypeDropdown] = useState(false);
   const [newLayerType, setNewLayerType] = useState('quick-scan');
@@ -369,7 +372,12 @@ const LayerPanel = ({
                 >
                   <i className={`fas fa-chevron-${expandedLayers[layer.id] ? 'down' : 'right'}`}></i>
                   <i className={`${layerTypeConfig?.icon || 'fas fa-layer-group'} layer-type-icon`}></i>
-                  <span>{layer.name}</span>
+                  <span>
+                    {layer.type === 'load-server' && selectedHistoricalDataset 
+                      ? (selectedHistoricalDataset.manifest?.name || selectedHistoricalDataset.alias || selectedHistoricalDataset.id)
+                      : layer.name
+                    }
+                  </span>
                   {layer.readonly && <span className="readonly-badge" title="Read-only layer">🔒</span>}
                   {/* Data source status indicator */}
                   {layer.visible && (
@@ -492,7 +500,12 @@ const LayerPanel = ({
                   )}
                   {layer.type === 'load-server' && (
                     <div className="channel-item channel-item--server">
-                      <span className="channel-name">Browse Data</span>
+                      <span className="channel-name">
+                        {selectedHistoricalDataset 
+                          ? (selectedHistoricalDataset.manifest?.name || selectedHistoricalDataset.alias || selectedHistoricalDataset.id)
+                          : 'Browse Data'
+                        }
+                      </span>
                       <div className="server-controls">
                         <button 
                           className="load-btn"
@@ -885,7 +898,10 @@ LayerPanel.propTypes = {
   isWebRtcActive: PropTypes.bool,
   toggleWebRtcStream: PropTypes.func,
   currentOperation: PropTypes.string,
-  microscopeBusy: PropTypes.bool
+  microscopeBusy: PropTypes.bool,
+  
+  // Historical dataset props
+  selectedHistoricalDataset: PropTypes.object
 };
 
 export default LayerPanel;
