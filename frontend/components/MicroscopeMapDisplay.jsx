@@ -4137,6 +4137,18 @@ const MicroscopeMapDisplay = ({
               Samples
             </button>
 
+            {/* Control Panel Button */}
+            <button 
+              onClick={() => setIsControlPanelOpen(!isControlPanelOpen)}
+              className={`px-3 py-1 text-xs text-white rounded flex items-center ${
+                isControlPanelOpen ? 'bg-blue-600 hover:bg-blue-500' : 'bg-blue-700 hover:bg-blue-600'
+              }`}
+              title={isControlPanelOpen ? "Close Control Panel" : "Open Control Panel"}
+            >
+              <i className="fas fa-cogs mr-1"></i>
+              Controls
+            </button>
+
           </div>
           
           {mapViewMode === 'FREE_PAN' && (
