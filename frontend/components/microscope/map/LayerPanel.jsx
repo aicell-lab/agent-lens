@@ -64,7 +64,6 @@ const LayerPanel = ({
   // Historical data mode props
   isHistoricalDataMode,
   setIsHistoricalDataMode,
-  setSelectedHistoricalDataset,
   
   // Layer management props
   layers,
@@ -123,46 +122,21 @@ const LayerPanel = ({
       }
     }
     
-    // Handle load-server layer visibility changes
+    // Handle exiting historical data mode when Browse Data layer is disabled
     if (layerId !== 'well-plate' && layerId !== 'microscope-control') {
       const layer = layers.find(l => l.id === layerId);
-      if (layer && layer.type === 'load-server') {
-        // If enabling a load-server layer, set it as the selected dataset
-        if (!layer.visible && layer.datasetId) {
-          // Layer is being enabled, set it as the selected dataset
-          if (setSelectedHistoricalDataset) {
-            setSelectedHistoricalDataset({
-              id: layer.datasetId,
-              name: layer.name,
-              galleryId: layer.galleryId
-            });
+      if (layer && layer.type === 'load-server' && isHistoricalDataMode) {
+        // Check if we're disabling the layer (it was visible and now will be hidden)
+        if (layer.visible) {
+          // Layer is currently visible and we're disabling it, exit historical data mode
+          if (setIsHistoricalDataMode) {
+            setIsHistoricalDataMode(false);
           }
-        } else if (layer.visible) {
-          // Layer is being disabled, check if we need to switch to another layer
-          const otherVisibleServerLayers = layers.filter(l => 
-            l.type === 'load-server' && 
-            l.id !== layerId && 
-            l.visible
-          );
-          
-          if (otherVisibleServerLayers.length > 0) {
-            // Switch to the first other visible server layer
-            const nextLayer = otherVisibleServerLayers[0];
-            if (setSelectedHistoricalDataset && nextLayer.datasetId) {
-              setSelectedHistoricalDataset({
-                id: nextLayer.datasetId,
-                name: nextLayer.name,
-                galleryId: nextLayer.galleryId
-              });
-            }
-          } else {
-            // No other server layers visible, exit historical data mode
-            if (setIsHistoricalDataMode) {
-              setIsHistoricalDataMode(false);
-            }
-            if (setSelectedHistoricalDataset) {
-              setSelectedHistoricalDataset(null);
-            }
+          // Remove the Browse Data layer when historical data mode is turned off
+          setLayers(prev => prev.filter(l => l.type !== 'load-server'));
+          // Keep the dropdown open so user can see their layers
+          if (setIsLayerDropdownOpen) {
+            setIsLayerDropdownOpen(true);
           }
         }
       }
@@ -399,7 +373,10 @@ const LayerPanel = ({
                   <i className={`fas fa-chevron-${expandedLayers[layer.id] ? 'down' : 'right'}`}></i>
                   <i className={`${layerTypeConfig?.icon || 'fas fa-layer-group'} layer-type-icon`}></i>
                   <span>
-                    {layer.name}
+                    {layer.type === 'load-server' && selectedHistoricalDataset 
+                      ? (selectedHistoricalDataset.manifest?.name || selectedHistoricalDataset.alias || selectedHistoricalDataset.id)
+                      : layer.name
+                    }
                   </span>
                   {layer.readonly && <span className="readonly-badge" title="Read-only layer">🔒</span>}
                   {/* Data source status indicator */}
@@ -524,31 +501,22 @@ const LayerPanel = ({
                   {layer.type === 'load-server' && (
                     <div className="channel-item channel-item--server">
                       <span className="channel-name">
-                        {layer.name}
+                        {selectedHistoricalDataset 
+                          ? (selectedHistoricalDataset.manifest?.name || selectedHistoricalDataset.alias || selectedHistoricalDataset.id)
+                          : 'Browse Data'
+                        }
                       </span>
                       <div className="server-controls">
-                        {layer.datasetId ? (
-                          <div className="dataset-info">
-                            <div className="text-xs text-gray-400 mb-1">
-                              Dataset ID: {layer.datasetId}
-                            </div>
-                            <div className="text-xs text-gray-400 mb-2">
-                              Gallery ID: {layer.galleryId}
-                            </div>
-                          </div>
-                        ) : (
-                          <button 
-                            className="load-btn"
-                            onClick={() => {
-                              if (setShowBrowseDataModal) {
-                                setShowBrowseDataModal(true);
-                              }
-                            }}
-                          >
-                            <i className="fas fa-database mr-1"></i>
-                            Browse Data
-                          </button>
-                        )}
+                        <button 
+                          className="load-btn"
+                          onClick={() => {
+                            if (setShowBrowseDataModal) {
+                              setShowBrowseDataModal(true);
+                            }
+                          }}
+                        >
+                          Browse Data
+                        </button>
                       </div>
                       
                       {/* Multi-Channel Controls for Historical Data */}
@@ -869,7 +837,6 @@ LayerPanel.propTypes = {
   // Historical data mode props
   isHistoricalDataMode: PropTypes.bool,
   setIsHistoricalDataMode: PropTypes.func,
-  setSelectedHistoricalDataset: PropTypes.func,
   
   // Layer management props
   layers: PropTypes.array.isRequired,
