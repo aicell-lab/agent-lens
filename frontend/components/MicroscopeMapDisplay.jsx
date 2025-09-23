@@ -3803,7 +3803,8 @@ const MicroscopeMapDisplay = ({
   // Effect to load tiles when visible experiments change
   useEffect(() => {
     const scanDataLayer = getScanDataLayer();
-    if (mapViewMode === 'FREE_PAN' && scanDataLayer) {
+    const hasScanResults = visibleLayers.scanResults && visibleExperiments.length > 0;
+    if (mapViewMode === 'FREE_PAN' && (scanDataLayer || hasScanResults)) {
       const activeChannel = getChannelString();
       
       // Check if microscope service is available
@@ -3870,7 +3871,7 @@ const MicroscopeMapDisplay = ({
         console.log(`[Experiment Change] No real experiment change detected - UI update only`);
       }
     }
-  }, [visibleExperiments, activeExperiment, mapViewMode, getScanDataLayer, microscopeControlService, isSimulatedMicroscope, scaleLevel, stitchedTiles, getChannelString, isPanning, isZooming, appendLog, setNeedsTileReload]); // Updated to use layer-based logic
+  }, [visibleExperiments, activeExperiment, mapViewMode, getScanDataLayer, visibleLayers.scanResults, microscopeControlService, isSimulatedMicroscope, scaleLevel, stitchedTiles, getChannelString, isPanning, isZooming, appendLog, setNeedsTileReload]); // Updated to use layer-based logic
 
   // Debounce tile loading - only load after user stops interacting for 1 second
   const scheduleTileUpdate = useCallback((source = 'unknown') => {
