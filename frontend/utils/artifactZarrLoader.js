@@ -284,15 +284,14 @@ class ArtifactZarrLoader {
       const compositeWidth = referenceResult.width;
       const compositeHeight = referenceResult.height;
       
-      // Create composite canvas for additive blending
+      // Create composite canvas for additive blending with alpha support
       const compositeCanvas = document.createElement('canvas');
       compositeCanvas.width = compositeWidth;
       compositeCanvas.height = compositeHeight;
       const compositeCtx = compositeCanvas.getContext('2d');
       
-      // Clear to black (important for additive blending)
-      compositeCtx.fillStyle = 'black';
-      compositeCtx.fillRect(0, 0, compositeWidth, compositeHeight);
+      // Clear to transparent (important for proper alpha blending)
+      compositeCtx.clearRect(0, 0, compositeWidth, compositeHeight);
       
       // Apply additive blending for each channel
       for (const result of validResults) {
@@ -301,7 +300,7 @@ class ArtifactZarrLoader {
         // Apply contrast adjustment and channel color
         const adjustedCanvas = this.applyChannelAdjustments(canvas, config);
         
-        // Additive blend with existing composite
+        // Additive blend with existing composite (preserves alpha)
         compositeCtx.globalCompositeOperation = 'lighter'; // Additive blending
         compositeCtx.drawImage(adjustedCanvas, 0, 0);
       }
@@ -344,10 +343,10 @@ class ArtifactZarrLoader {
   }
 
   /**
-   * Apply channel-specific adjustments (contrast, color, min/max)
+   * Apply channel-specific adjustments (contrast, color, min/max) with alpha preservation
    * @param {HTMLCanvasElement} sourceCanvas - Source channel canvas
    * @param {Object} config - Channel configuration {channelName, enabled, min, max, color}
-   * @returns {HTMLCanvasElement} Adjusted canvas
+   * @returns {HTMLCanvasElement} Adjusted canvas with proper alpha masking
    */
   applyChannelAdjustments(sourceCanvas, config) {
     const adjustedCanvas = document.createElement('canvas');
@@ -376,17 +375,27 @@ class ArtifactZarrLoader {
     const range = max - min;
     
     for (let i = 0; i < sourceData.length; i += 4) {
-      // Get grayscale value (assuming source is grayscale)
+      // Get grayscale value and alpha
       const gray = sourceData[i]; // Red channel as grayscale
+      const alpha = sourceData[i + 3]; // Alpha channel
       
-      // Apply contrast adjustment
-      let adjustedGray = range > 0 ? Math.max(0, Math.min(255, (gray - min) * 255 / range)) : 0;
-      
-      // Apply channel color
-      adjustedData[i] = adjustedGray * r;     // Red
-      adjustedData[i + 1] = adjustedGray * g; // Green
-      adjustedData[i + 2] = adjustedGray * b; // Blue
-      adjustedData[i + 3] = sourceData[i + 3]; // Alpha (preserve)
+      // Only process pixels that have data (alpha > 0)
+      if (alpha > 0) {
+        // Apply contrast adjustment
+        let adjustedGray = range > 0 ? Math.max(0, Math.min(255, (gray - min) * 255 / range)) : 0;
+        
+        // Apply channel color
+        adjustedData[i] = adjustedGray * r;     // Red
+        adjustedData[i + 1] = adjustedGray * g; // Green
+        adjustedData[i + 2] = adjustedGray * b; // Blue
+        adjustedData[i + 3] = alpha;            // Alpha (preserve original alpha)
+      } else {
+        // Transparent pixel - keep it transparent
+        adjustedData[i] = 0;     // Red
+        adjustedData[i + 1] = 0; // Green
+        adjustedData[i + 2] = 0; // Blue
+        adjustedData[i + 3] = 0; // Alpha (transparent)
+      }
     }
     
     // Put adjusted data back to canvas
@@ -1949,29 +1958,33 @@ class ArtifactZarrLoader {
   }
 
   /**
-   * Decode chunk data to ImageData
+   * Decode chunk data to ImageData with alpha masking
    * @param {ArrayBuffer} chunkData - Raw chunk data
    * @param {Array} chunkShape - Chunk dimensions [height, width]
    * @param {string} dataType - Data type
-   * @returns {ImageData|null} Decoded image data
+   * @returns {ImageData|null} Decoded image data with proper alpha masking
    */
   decodeChunk(chunkData, chunkShape, dataType) {
     try {
       const [height, width] = chunkShape;
       
-             // Convert ArrayBuffer to appropriate data type
-       let array;
-       if (dataType === 'uint8' || dataType === '|u1') {
-         array = new Uint8Array(chunkData);
-       } else if (dataType === 'uint16' || dataType === '|u2') {
-         array = new Uint16Array(chunkData);
-       } else {
-         throw new Error(`Unsupported data type: ${dataType}`);
-       }
+      // Convert ArrayBuffer to appropriate data type
+      let array;
+      if (dataType === 'uint8' || dataType === '|u1') {
+        array = new Uint8Array(chunkData);
+      } else if (dataType === 'uint16' || dataType === '|u2') {
+        array = new Uint16Array(chunkData);
+      } else {
+        throw new Error(`Unsupported data type: ${dataType}`);
+      }
       
       // Create ImageData
       const imageData = new ImageData(width, height);
       const pixels = imageData.data;
+      
+      // Define thresholds for alpha masking
+      const minThreshold = dataType === 'uint8' || dataType === '|u1' ? 1 : 10; // Minimum value to consider as data
+      const maxValue = dataType === 'uint8' || dataType === '|u1' ? 255 : 65535;
       
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
@@ -1981,19 +1994,29 @@ class ArtifactZarrLoader {
           // Get pixel value and normalize
           const value = array[srcIndex];
           let normalizedValue;
+          let alpha = 0; // Default to transparent
           
-          if (dataType === 'uint8' || dataType === '|u1') {
-            normalizedValue = value;
+          // Check if pixel has meaningful data
+          if (value >= minThreshold) {
+            if (dataType === 'uint8' || dataType === '|u1') {
+              normalizedValue = value;
+              alpha = 255; // Fully opaque for valid data
+            } else {
+              // 16-bit data needs normalization
+              normalizedValue = Math.floor((value / maxValue) * 255);
+              alpha = 255; // Fully opaque for valid data
+            }
           } else {
-            // 16-bit data needs normalization
-            normalizedValue = Math.floor((value / 65535) * 255);
+            // No data or very low value - make transparent
+            normalizedValue = 0;
+            alpha = 0; // Transparent
           }
           
-          // Create grayscale image (R=G=B=value, A=255)
+          // Create grayscale image with alpha masking (R=G=B=value, A=alpha)
           pixels[dstIndex] = normalizedValue;     // R
           pixels[dstIndex + 1] = normalizedValue; // G
           pixels[dstIndex + 2] = normalizedValue; // B
-          pixels[dstIndex + 3] = 255;             // A
+          pixels[dstIndex + 3] = alpha;           // A (0 = transparent, 255 = opaque)
         }
       }
       
