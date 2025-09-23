@@ -257,9 +257,34 @@ const MicroscopeMapDisplay = ({
   const [isLoadingCanvas, setIsLoadingCanvas] = useState(false);
   const [needsTileReload, setNeedsTileReload] = useState(false); // Flag to trigger tile loading after refresh
   const canvasUpdateTimerRef = useRef(null);
-  const activeTileRequestsRef = useRef(new Set()); // Track active requests to prevent duplicates
+  
+  // Independent request queues for different layer types
+  const browseDataRequestsRef = useRef(new Set()); // Track browse data requests (historical)
+  const scanDataRequestsRef = useRef(new Set()); // Track scan data requests (microscope)
+  const activeTileRequestsRef = useRef(new Set()); // Legacy - for backward compatibility
+  
+  // Separate loading states to prevent cross-blocking
+  const [isBrowseDataLoading, setIsBrowseDataLoading] = useState(false);
+  const [isScanDataLoading, setIsScanDataLoading] = useState(false);
   const chunkProgressUpdateTimes = useRef(new Map()); // Track last update time for each well to throttle progress updates
   const lastTileLoadAttemptRef = useRef(0); // Track last tile load attempt to prevent excessive retries
+  
+  // Helper functions for independent request queue management
+  const getRequestQueueForLayerType = useCallback((layerType) => {
+    if (layerType === 'load-server') return browseDataRequestsRef.current;
+    if (layerType === 'quick-scan' || layerType === 'normal-scan') return scanDataRequestsRef.current;
+    return activeTileRequestsRef.current; // fallback
+  }, []);
+  
+  const getTotalActiveRequests = useCallback(() => {
+    return browseDataRequestsRef.current.size + scanDataRequestsRef.current.size;
+  }, []);
+  
+  // Update overall loading state based on individual loading states
+  useEffect(() => {
+    const overallLoading = isBrowseDataLoading || isScanDataLoading;
+    setIsLoadingCanvas(overallLoading);
+  }, [isBrowseDataLoading, isScanDataLoading]);
 
   // Multi-channel state management for zarr data (defined early to avoid hoisting issues)
   const [zarrChannelConfigs, setZarrChannelConfigs] = useState({});
@@ -286,7 +311,7 @@ const MicroscopeMapDisplay = ({
   // Function to refresh scan results (moved early to avoid dependency issues)
   const refreshScanResults = useCallback(() => {
     if (visibleLayers.scanResults && !isSimulatedMicroscope) {
-      // Clear active requests to prevent conflicts
+      // Clear only legacy active requests 
       activeTileRequestsRef.current.clear();
       
       if (appendLog) {
@@ -319,6 +344,8 @@ const MicroscopeMapDisplay = ({
     onExperimentReset: (experimentName) => {
       // Handle experiment reset - clear stitched tiles and active requests
       setStitchedTiles([]);
+      browseDataRequestsRef.current.clear();
+      scanDataRequestsRef.current.clear();
       activeTileRequestsRef.current.clear();
     }
   });
@@ -402,7 +429,9 @@ const MicroscopeMapDisplay = ({
       const hasActiveRequests = activeTileRequestsRef.current.size > 0;
       if (currentOperation === null && !hasActiveRequests) {
         // Clear active requests to prevent conflicts
-        activeTileRequestsRef.current.clear();
+        browseDataRequestsRef.current.clear();
+      scanDataRequestsRef.current.clear();
+      activeTileRequestsRef.current.clear();
         
         console.log('🎨 BROWSE DATA: Refreshing tiles with updated contrast settings');
         console.log('🎨 BROWSE DATA: Current zarrChannelConfigs:', zarrChannelConfigs);
@@ -2394,7 +2423,9 @@ const MicroscopeMapDisplay = ({
         previousChannelSelectionRef.current = currentChannelString;
         
         // Clear active requests to prevent conflicts
-        activeTileRequestsRef.current.clear();
+        browseDataRequestsRef.current.clear();
+      scanDataRequestsRef.current.clear();
+      activeTileRequestsRef.current.clear();
         
         if (appendLog) {
           appendLog(`Channel selection changed to: ${channelList.join(', ')} - refreshing tiles`);
@@ -2419,7 +2450,9 @@ const MicroscopeMapDisplay = ({
         console.log(`🎨 MicroscopeMapDisplay: Processing contrast settings change event`);
         
         // Clear active requests to prevent conflicts
-        activeTileRequestsRef.current.clear();
+        browseDataRequestsRef.current.clear();
+      scanDataRequestsRef.current.clear();
+      activeTileRequestsRef.current.clear();
         
         console.log(`🎨 MicroscopeMapDisplay: Refreshing tiles after contrast change, current configs:`, realMicroscopeChannelConfigs);
         if (appendLog) {
@@ -2854,7 +2887,7 @@ const MicroscopeMapDisplay = ({
             type: 'load-server',
             visible: true,
             channels: [],
-            readonly: true
+            readonly: false
           };
           return [...prev, browseDataLayer];
         }
@@ -2878,7 +2911,9 @@ const MicroscopeMapDisplay = ({
         
         // Clear existing tiles to force reload with new data
         setStitchedTiles([]);
-        activeTileRequestsRef.current.clear();
+        browseDataRequestsRef.current.clear();
+      scanDataRequestsRef.current.clear();
+      activeTileRequestsRef.current.clear();
         
         // Create new mock dataset with the selected sample's data alias
         const mockDataset = {
@@ -3122,7 +3157,7 @@ const MicroscopeMapDisplay = ({
     // Update request tracking at the start to prevent duplicate requests
     setLastRequestKey(currentRequestKey);
     
-    // Clear active requests to prevent conflicts
+    // Clear active requests to prevent conflicts - only clear legacy for compatibility
     activeTileRequestsRef.current.clear();
     
     console.log(`🔍 [loadStitchedTiles] Channel analysis:`, {
@@ -3168,8 +3203,8 @@ const MicroscopeMapDisplay = ({
       return;
     }
     
-    // Handle browse data layer (previously historical data mode)
-    if (browseDataLayer) {
+    // Handle both browse data and scan data in parallel to prevent blocking
+    const browseDataPromise = browseDataLayer ? (async () => {
       console.log('[loadStitchedTiles] Browse data layer - checking requirements');
       if (!artifactZarrLoaderRef.current || !selectedHistoricalDataset || !selectedGallery) {
         console.log('[loadStitchedTiles] Skipping browse data - missing requirements');
@@ -3216,13 +3251,13 @@ const MicroscopeMapDisplay = ({
       const requestKey = getTileKey(bounds, scaleLevel, activeChannel, selectedHistoricalDataset?.name || 'historical');
       
       // Check if we're already loading this tile
-      if (activeTileRequestsRef.current.has(requestKey)) {
+      if (browseDataRequestsRef.current.has(requestKey)) {
         return;
       }
       
-      // Mark this request as active
-      activeTileRequestsRef.current.add(requestKey);
-      setIsLoadingCanvas(true);
+      // Mark this request as active for browse data
+      browseDataRequestsRef.current.add(requestKey);
+      setIsBrowseDataLoading(true);
       
       try {
         // Get all possible intersecting wells using well plate configuration
@@ -3624,19 +3659,19 @@ const MicroscopeMapDisplay = ({
         console.error('Failed to load historical tiles:', error);
         if (appendLog) appendLog(`Failed to load historical tiles: ${error.message}`);
       } finally {
-        // Remove from active requests
-        activeTileRequestsRef.current.delete(requestKey);
+        // Remove from browse data requests
+        browseDataRequestsRef.current.delete(requestKey);
         
-        // Update loading state - check if any requests are still active
-        if (activeTileRequestsRef.current.size === 0) {
-          setIsLoadingCanvas(false);
+        // Update browse data loading state
+        if (browseDataRequestsRef.current.size === 0) {
+          setIsBrowseDataLoading(false);
         }
       }
     }
-    }
+    })() : Promise.resolve();
     
-    // Handle scan data layer (real microscope mode) or scan results
-    if (scanDataLayer || hasScanResults) {
+    // Handle scan data layer (real microscope mode) or scan results  
+    const scanDataPromise = (scanDataLayer || hasScanResults) ? (async () => {
       console.log('[loadStitchedTiles] Processing scan data:', scanDataLayer ? `layer: ${scanDataLayer.name}` : 'scan results');
       if (!microscopeControlService || isSimulatedMicroscope) {
         console.log('[loadStitchedTiles] Skipping scan data - no microscope service or simulated mode');
@@ -3650,8 +3685,8 @@ const MicroscopeMapDisplay = ({
       await microscopeControlService.get_status();
     } catch (error) {
       console.log('[loadStitchedTiles] Microscope service not responsive - skipping tile loading');
-      if (activeTileRequestsRef.current.size === 0) {
-        setIsLoadingCanvas(false);
+      if (scanDataRequestsRef.current.size === 0) {
+        setIsScanDataLoading(false);
       }
       return;
     }
@@ -3695,15 +3730,15 @@ const MicroscopeMapDisplay = ({
     // Create a unique request key to prevent duplicate requests
     const requestKey = getTileKey(bounds, scaleLevel, activeChannel, 'all-experiments');
     
-    // Check if we're already loading this tile
-    if (activeTileRequestsRef.current.has(requestKey)) {
-      console.log('[loadStitchedTiles] Tile request already in progress - skipping');
+    // Check if we're already loading this tile  
+    if (scanDataRequestsRef.current.has(requestKey)) {
+      console.log('[loadStitchedTiles] Scan tile request already in progress - skipping');
       return;
     }
     
-    // Mark this request as active
-    activeTileRequestsRef.current.add(requestKey);
-    setIsLoadingCanvas(true);
+    // Mark this request as active for scan data
+    scanDataRequestsRef.current.add(requestKey);
+    setIsScanDataLoading(true);
     console.log('[loadStitchedTiles] Starting tile fetch for request key:', requestKey);
     
     try {
@@ -3814,16 +3849,19 @@ const MicroscopeMapDisplay = ({
       console.error('Failed to load stitched tile:', error);
       if (appendLog) appendLog(`Failed to load scan tile: ${error.message}`);
     } finally {
-      // Remove from active requests
-      activeTileRequestsRef.current.delete(requestKey);
+      // Remove from scan data requests
+      scanDataRequestsRef.current.delete(requestKey);
       
-      // Update loading state - check if any requests are still active
-      if (activeTileRequestsRef.current.size === 0) {
-        setIsLoadingCanvas(false);
+      // Update scan data loading state
+      if (scanDataRequestsRef.current.size === 0) {
+        setIsScanDataLoading(false);
       }
     }
     }
-    }
+    })() : Promise.resolve();
+    
+    // Run both browse data and scan data loading in parallel
+    await Promise.all([browseDataPromise, scanDataPromise]);
   }, [getBrowseDataLayer, getScanDataLayer, microscopeControlService, visibleLayers.channels, mapViewMode, scaleLevel, displayToStageCoords, stageDimensions, pixelsPerMm, getTileKey, addOrUpdateTile, appendLog, isSimulatedMicroscope, selectedHistoricalDataset, selectedGallery, getIntersectingWells, calculateWellRegion, wellPlateType, realMicroscopeChannelConfigs, zarrChannelConfigs, getEnabledZarrChannels, shouldUseMultiChannelLoading, visibleExperiments, activeExperiment, getLayerContrastSettings]);
 
   // Add a ref to track previous experiment selection to avoid unnecessary reloads
@@ -3916,9 +3954,12 @@ const MicroscopeMapDisplay = ({
       console.log(`🚫 scheduleTileUpdate (${source}): Cancelled ${artifactCancelledCount} active artifact requests`);
     }
     
-    // Clear active requests
+    // Clear all active requests (keep for global refreshes)
+    browseDataRequestsRef.current.clear();
+    scanDataRequestsRef.current.clear();
     activeTileRequestsRef.current.clear();
-    setIsLoadingCanvas(false);
+    setIsBrowseDataLoading(false);
+    setIsScanDataLoading(false);
     
     console.log(`[scheduleTileUpdate] Called from ${source} - clearing existing timer and scheduling new one`);
     if (canvasUpdateTimerRef.current) {
@@ -3930,7 +3971,7 @@ const MicroscopeMapDisplay = ({
       loadStitchedTiles();
     }, 300); // Wait 0.3 second after user stops
     console.log(`[scheduleTileUpdate] New timer scheduled for 300ms (source: ${source})`);
-  }, [loadStitchedTiles, isLoadingCanvas]);
+  }, [loadStitchedTiles]);
 
   // Function to refresh canvas view (can be used by timepoint operations)
   const refreshCanvasView = useCallback(() => {
@@ -3948,7 +3989,7 @@ const MicroscopeMapDisplay = ({
         console.log(`🚫 Refresh: Cancelled ${artifactCancelledCount} active artifact requests`);
       }
       
-      // Clear active requests to prevent conflicts
+      // Clear only legacy active requests 
       activeTileRequestsRef.current.clear();
       
       // Directly load new tiles - they will replace old ones automatically
@@ -4086,9 +4127,14 @@ const MicroscopeMapDisplay = ({
     const scanDataLayer = getScanDataLayer();
     const hasScanResults = visibleLayers.scanResults && visibleExperiments.length > 0;
     if (needsTileReload && mapViewMode === 'FREE_PAN' && (browseDataLayer || scanDataLayer || hasScanResults) && !isZooming && !isPanning) {
-      // Check if tiles are currently loading
-      if (isLoadingCanvas || activeTileRequestsRef.current.size > 0) {
-        console.log('[needsTileReload] Skipping - tiles are currently loading (isLoadingCanvas:', isLoadingCanvas, 'activeRequests:', activeTileRequestsRef.current.size, ')');
+      // Check if tiles are currently loading - only check relevant layer types
+      const browseDataLayer = getBrowseDataLayer();
+      const scanDataLayer = getScanDataLayer();
+      const isBrowseLoading = browseDataLayer && isBrowseDataLoading;
+      const isScanLoading = (scanDataLayer || hasScanResults) && isScanDataLoading;
+      
+      if (isBrowseLoading || isScanLoading) {
+        console.log('[needsTileReload] Skipping - relevant tiles are currently loading (browse:', isBrowseLoading, 'scan:', isScanLoading, ')');
         setNeedsTileReload(false); // Reset flag but don't trigger new loading
         return;
       }
@@ -5100,7 +5146,7 @@ const MicroscopeMapDisplay = ({
                             type: 'load-server',
                             visible: true,
                             channels: [],
-                            readonly: true
+                            readonly: false
                           };
                           return [...prev, browseDataLayer];
                         }

@@ -94,7 +94,7 @@ const LayerPanel = ({
   const layerTypes = [
     { id: 'quick-scan', name: 'Quick Scan', readonly: false, icon: 'fas fa-search' },
     { id: 'normal-scan', name: 'Normal Scan', readonly: false, icon: 'fas fa-search-plus' },
-    { id: 'load-server', name: 'Browse Data', readonly: true, icon: 'fas fa-database' },
+    { id: 'load-server', name: 'Browse Data', readonly: false, icon: 'fas fa-database' },
   ];
 
   // Helper functions for layer management
@@ -131,12 +131,6 @@ const LayerPanel = ({
           // Layer is currently visible and we're disabling it, exit historical data mode
           if (setIsHistoricalDataMode) {
             setIsHistoricalDataMode(false);
-          }
-          // Remove the Browse Data layer when historical data mode is turned off
-          setLayers(prev => prev.filter(l => l.type !== 'load-server'));
-          // Keep the dropdown open so user can see their layers
-          if (setIsLayerDropdownOpen) {
-            setIsLayerDropdownOpen(true);
           }
         }
       }
