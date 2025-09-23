@@ -2662,7 +2662,15 @@ const MicroscopeMapDisplay = ({
     }
   }, [isDrawingMode, appendLog]);
 
-  // Load experiments when layer dropdown is opened
+  // Load experiments when microscope service becomes available
+  useEffect(() => {
+    if (microscopeControlService && !isSimulatedMicroscope) {
+      console.log('[Experiment Loading] Microscope service available - loading experiments');
+      loadExperiments();
+    }
+  }, [microscopeControlService, isSimulatedMicroscope]); // Removed loadExperiments to prevent infinite loops
+
+  // Also load experiments when layer dropdown is opened (for refresh)
   useEffect(() => {
     if (isLayerDropdownOpen && !isSimulatedMicroscope) {
       loadExperiments();
@@ -3198,8 +3206,13 @@ const MicroscopeMapDisplay = ({
       layerTypes: layers.map(l => `${l.name}(${l.type})`).join(', ')
     });
     
-    if (!browseDataLayer && !scanDataLayer && !hasScanResults) {
-      console.log('[loadStitchedTiles] Skipping - no visible data layers or scan results');
+    // Also check if there are actual experiments available even if not "visible" yet
+    const hasExperiments = experiments && experiments.length > 0;
+    const hasAnyData = browseDataLayer || scanDataLayer || hasScanResults || (hasExperiments && visibleLayers.scanResults);
+    
+    if (!hasAnyData) {
+      console.log('[loadStitchedTiles] Skipping - no visible data layers, scan results, or available experiments');
+      console.log('[loadStitchedTiles] Debug: browseDataLayer=', !!browseDataLayer, 'scanDataLayer=', !!scanDataLayer, 'hasScanResults=', hasScanResults, 'hasExperiments=', hasExperiments, 'scanResultsEnabled=', visibleLayers.scanResults);
       return;
     }
     
@@ -3862,7 +3875,7 @@ const MicroscopeMapDisplay = ({
     
     // Run both browse data and scan data loading in parallel
     await Promise.all([browseDataPromise, scanDataPromise]);
-  }, [getBrowseDataLayer, getScanDataLayer, microscopeControlService, visibleLayers.channels, mapViewMode, scaleLevel, displayToStageCoords, stageDimensions, pixelsPerMm, getTileKey, addOrUpdateTile, appendLog, isSimulatedMicroscope, selectedHistoricalDataset, selectedGallery, getIntersectingWells, calculateWellRegion, wellPlateType, realMicroscopeChannelConfigs, zarrChannelConfigs, getEnabledZarrChannels, shouldUseMultiChannelLoading, visibleExperiments, activeExperiment, getLayerContrastSettings]);
+  }, [getBrowseDataLayer, getScanDataLayer, microscopeControlService, visibleLayers.channels, mapViewMode, scaleLevel, displayToStageCoords, stageDimensions, pixelsPerMm, getTileKey, addOrUpdateTile, appendLog, isSimulatedMicroscope, selectedHistoricalDataset, selectedGallery, getIntersectingWells, calculateWellRegion, wellPlateType, realMicroscopeChannelConfigs, zarrChannelConfigs, getEnabledZarrChannels, shouldUseMultiChannelLoading, visibleExperiments, activeExperiment, getLayerContrastSettings, experiments]);
 
   // Add a ref to track previous experiment selection to avoid unnecessary reloads
   const previousExperimentSelectionRef = useRef(null);
@@ -4099,27 +4112,32 @@ const MicroscopeMapDisplay = ({
     };
   }, []); // Remove dependencies to only run on actual unmount
 
-  // 🚀 SIMPLIFIED: Initial tile loading - only when map first opens and user is not interacting
+  // 🚀 ENHANCED: Initial tile loading - when map opens AND when data becomes available
   const hasInitialLoadedRef = useRef(false);
   useEffect(() => {
-    // Only trigger initial load when map first opens
-    if (isOpen && !hasInitialLoadedRef.current) {
+    const scanDataLayer = getScanDataLayer();
+    const hasScanResults = visibleLayers.scanResults && visibleExperiments.length > 0;
+    const hasExperiments = experiments && experiments.length > 0;
+    // Check for any available data source
+    const hasData = scanDataLayer || hasScanResults || (hasExperiments && visibleLayers.scanResults);
+    
+    // Trigger initial load when map is open AND we have data available AND haven't loaded yet
+    if (isOpen && hasData && !hasInitialLoadedRef.current && mapViewMode === 'FREE_PAN' && !isZooming && !isPanning) {
       hasInitialLoadedRef.current = true;
       
-      // Use a longer delay to ensure map is fully initialized
+      console.log('[Initial Tile Loading] Triggering initial tile loading - data is available');
+      console.log('[Initial Tile Loading] Data sources: scanDataLayer=', !!scanDataLayer, 'hasScanResults=', hasScanResults, 'hasExperiments=', hasExperiments, 'scanResultsEnabled=', visibleLayers.scanResults);
+      // Use a shorter delay since data is confirmed available
       setTimeout(() => {
-        if (mapViewMode === 'FREE_PAN' && !isZooming && !isPanning) {
-          console.log('[Initial Tile Loading] Triggering one-time initial tile loading');
-          scheduleTileUpdate('initial-loading');
-        }
-      }, 500); // Delay to ensure everything is ready
+        scheduleTileUpdate('initial-loading');
+      }, 200);
     }
     
     // Reset when map closes
     if (!isOpen) {
       hasInitialLoadedRef.current = false;
     }
-  }, [isOpen, mapViewMode, isZooming, isPanning, scheduleTileUpdate]); // Added necessary dependencies
+  }, [isOpen, mapViewMode, isZooming, isPanning, scheduleTileUpdate, getScanDataLayer, visibleLayers.scanResults, visibleExperiments, experiments]); // Added experiments dependency
 
   // Effect to trigger tile loading when needsTileReload is set
   useEffect(() => {
@@ -4128,8 +4146,6 @@ const MicroscopeMapDisplay = ({
     const hasScanResults = visibleLayers.scanResults && visibleExperiments.length > 0;
     if (needsTileReload && mapViewMode === 'FREE_PAN' && (browseDataLayer || scanDataLayer || hasScanResults) && !isZooming && !isPanning) {
       // Check if tiles are currently loading - only check relevant layer types
-      const browseDataLayer = getBrowseDataLayer();
-      const scanDataLayer = getScanDataLayer();
       const isBrowseLoading = browseDataLayer && isBrowseDataLoading;
       const isScanLoading = (scanDataLayer || hasScanResults) && isScanDataLoading;
       
@@ -4139,16 +4155,14 @@ const MicroscopeMapDisplay = ({
         return;
       }
       
-      console.log('[needsTileReload] Triggering tile reload');
+      console.log('[needsTileReload] Triggering direct tile reload - no scheduling to prevent duplicates');
       // Reset the flag
       setNeedsTileReload(false);
       
-      // Trigger tile loading after a short delay to ensure tiles are cleared
-      setTimeout(() => {
-        scheduleTileUpdate('needs-reload');
-      }, 100);
+      // Call loadStitchedTiles directly instead of scheduling to prevent duplicate calls
+      loadStitchedTiles();
     }
-  }, [needsTileReload, mapViewMode, getBrowseDataLayer, getScanDataLayer, visibleLayers.scanResults, visibleExperiments, scheduleTileUpdate, isZooming, isPanning]);
+  }, [needsTileReload, mapViewMode, getBrowseDataLayer, getScanDataLayer, visibleLayers.scanResults, visibleExperiments, loadStitchedTiles, isZooming, isPanning, isBrowseDataLoading, isScanDataLoading]);
 
   // 🚀 SIMPLIFIED: Only cleanup tiles when scale changes, don't trigger new tile loading
   // This prevents the endless loop while still cleaning up memory
