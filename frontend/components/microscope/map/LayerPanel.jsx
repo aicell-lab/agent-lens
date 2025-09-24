@@ -14,8 +14,6 @@ const LayerPanel = ({
   activeExperiment,
   experiments,
   setActiveExperimentHandler,
-  setShowCreateExperimentDialog,
-  removeExperiment,
   setExperimentToReset,
   setShowClearCanvasConfirmation,
   setExperimentToDelete,
@@ -27,12 +25,10 @@ const LayerPanel = ({
   availableZarrChannels,
   zarrChannelConfigs,
   updateZarrChannelConfig,
-  getEnabledZarrChannels,
   realMicroscopeChannelConfigs,
   updateRealMicroscopeChannelConfig,
   
   // Per-layer contrast settings
-  layerContrastSettings,
   updateLayerContrastSettings,
   getLayerContrastSettings,
   
@@ -53,9 +49,7 @@ const LayerPanel = ({
   isFovFittedMode = false,
   
   // Scan configuration props
-  showScanConfig,
   setShowScanConfig,
-  showQuickScanConfig,
   setShowQuickScanConfig,
   
   // Browse data modal props
@@ -71,8 +65,6 @@ const LayerPanel = ({
   expandedLayers,
   setExpandedLayers,
   
-  // Dropdown control props
-  setIsLayerDropdownOpen,
   
   // Microscope control props
   isControlPanelOpen,
@@ -200,13 +192,17 @@ const LayerPanel = ({
       layerName = `${layerTypeConfig.name} ${layers.length + 1}`;
     }
 
-    // For scan layers, create an actual experiment in the backend
+    // For scan layers, create an actual experiment in the backend and let microscope service handle the layer
     if ((layerType === 'quick-scan' || layerType === 'normal-scan') && !isSimulatedMicroscope && createExperiment) {
       try {
         await createExperiment(layerName);
         if (appendLog) {
           appendLog(`Created experiment for ${layerType}: ${layerName}`);
         }
+        // Don't create a UI layer for scan types - let the microscope service experiments be the source of truth
+        setShowLayerTypeDropdown(false);
+        setNewLayerType('quick-scan');
+        return;
       } catch (error) {
         console.error(`Failed to create experiment for ${layerType}:`, error);
         if (showNotification) {
@@ -219,6 +215,7 @@ const LayerPanel = ({
       }
     }
 
+    // For non-scan layers, create the UI layer as before
     const newLayer = {
       id: `layer-${Date.now()}`,
       name: layerName,
@@ -238,8 +235,8 @@ const LayerPanel = ({
     setShowLayerTypeDropdown(false);
     setNewLayerType('quick-scan');
     
-    // Auto-expand the layer if it's a scan type or browse data so user can see the action buttons
-    if (layerType === 'quick-scan' || layerType === 'normal-scan' || layerType === 'load-server') {
+    // Auto-expand the layer if it's browse data so user can see the action buttons
+    if (layerType === 'load-server') {
       console.log(`[LayerPanel] Auto-expanding layer: ${newLayer.id}`);
       setExpandedLayers(prev => ({
         ...prev,
@@ -267,7 +264,7 @@ const LayerPanel = ({
       return enabledChannels.length === 1 && enabledChannels[0].label === channelName && isEnabled;
     } else {
       // For real microscope channels, check if this is the last visible channel
-      const visibleChannels = Object.entries(visibleLayers.channels).filter(([_, isVisible]) => isVisible);
+      const visibleChannels = Object.entries(visibleLayers.channels).filter(([, isVisible]) => isVisible);
       return visibleChannels.length === 1 && visibleChannels[0][0] === channelName && isEnabled;
     }
   };
@@ -443,46 +440,7 @@ const LayerPanel = ({
                       </div>
                     </div>
                   )}
-                  {layer.type === 'quick-scan' && (
-                    <div className="channel-item channel-item--scan">
-                      <span className="channel-name">Quick Scan Data</span>
-                      <div className="scan-controls">
-                        <button 
-                          className="scan-btn"
-                          onClick={() => {
-                            if (isSimulatedMicroscope) return;
-                            // Close normal scan panel if open
-                            if (setShowScanConfig) setShowScanConfig(false);
-                            // Open quick scan panel
-                            if (setShowQuickScanConfig) setShowQuickScanConfig(true);
-                          }}
-                          disabled={isSimulatedMicroscope}
-                        >
-                          Start Scan
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                  {layer.type === 'normal-scan' && (
-                    <div className="channel-item channel-item--scan">
-                      <span className="channel-name">Normal Scan Data</span>
-                      <div className="scan-controls">
-                        <button 
-                          className="scan-btn"
-                          onClick={() => {
-                            if (isSimulatedMicroscope) return;
-                            // Close quick scan panel if open
-                            if (setShowQuickScanConfig) setShowQuickScanConfig(false);
-                            // Open normal scan panel
-                            if (setShowScanConfig) setShowScanConfig(true);
-                          }}
-                          disabled={isSimulatedMicroscope}
-                        >
-                          Configure & Start
-                        </button>
-                      </div>
-                    </div>
-                  )}
+                  {/* Scan layer controls are now handled by microscope service experiments below */}
                   {layer.type === 'live-view' && (
                     <div className="channel-item channel-item--live">
                       <span className="channel-name">Live View</span>
@@ -666,13 +624,48 @@ const LayerPanel = ({
                     <div className="layer-channels">
                       <div className="channel-item channel-item--experiment">
                         <span className="channel-name">Experiment Data</span>
+                        <div className="scan-controls">
+                          {/* Show Quick Scan button if layer name contains 'quick-scan' or no specific scan type */}
+                          {(!exp.name.includes('normal-scan') || exp.name.includes('quick-scan')) && (
+                            <button 
+                              className="scan-btn"
+                              onClick={() => {
+                                if (isSimulatedMicroscope) return;
+                                // Close normal scan panel if open
+                                if (setShowScanConfig) setShowScanConfig(false);
+                                // Open quick scan panel
+                                if (setShowQuickScanConfig) setShowQuickScanConfig(true);
+                              }}
+                              disabled={isSimulatedMicroscope}
+                              title="Start Quick Scan"
+                            >
+                              Quick Scan
+                            </button>
+                          )}
+                          {/* Show Normal Scan button if layer name contains 'normal-scan' or no specific scan type */}
+                          {(!exp.name.includes('quick-scan') || exp.name.includes('normal-scan')) && (
+                            <button 
+                              className="scan-btn"
+                              onClick={() => {
+                                if (isSimulatedMicroscope) return;
+                                // Close quick scan panel if open
+                                if (setShowQuickScanConfig) setShowQuickScanConfig(false);
+                                // Open normal scan panel
+                                if (setShowScanConfig) setShowScanConfig(true);
+                              }}
+                              disabled={isSimulatedMicroscope}
+                              title="Configure and Start Normal Scan"
+                            >
+                              Normal Scan
+                            </button>
+                          )}
+                        </div>
                       </div>
                       
                       {/* Real Microscope Channel Controls for this experiment */}
-                      {shouldUseMultiChannelLoading() && !isSimulatedMicroscope && mapViewMode !== 'FOV_FITTED' && (
+                      {!isSimulatedMicroscope && mapViewMode !== 'FOV_FITTED' && (
                         <div className="experiment-channels">
                           {Object.entries(visibleLayers.channels).map(([channel, isVisible]) => {
-                            const config = realMicroscopeChannelConfigs[channel] || {};
                             const isLastChannel = isLastSelectedChannel(channel, isVisible);
                             
                             const defaultColors = {
@@ -781,8 +774,6 @@ LayerPanel.propTypes = {
   activeExperiment: PropTypes.string,
   experiments: PropTypes.array,
   setActiveExperimentHandler: PropTypes.func,
-  setShowCreateExperimentDialog: PropTypes.func,
-  removeExperiment: PropTypes.func,
   setExperimentToReset: PropTypes.func,
   setShowClearCanvasConfirmation: PropTypes.func,
   setExperimentToDelete: PropTypes.func,
@@ -794,7 +785,6 @@ LayerPanel.propTypes = {
   availableZarrChannels: PropTypes.array,
   zarrChannelConfigs: PropTypes.object,
   updateZarrChannelConfig: PropTypes.func,
-  getEnabledZarrChannels: PropTypes.func,
   realMicroscopeChannelConfigs: PropTypes.object,
   updateRealMicroscopeChannelConfig: PropTypes.func,
   
