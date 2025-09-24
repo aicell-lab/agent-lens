@@ -1618,6 +1618,7 @@ const MicroscopeMapDisplay = ({
       getChannelString();
     const scanChannelString = getChannelString(); // Always use microscope channels for scan data
     
+    
     // 🚀 REDUCED LOGGING: Only log when NOT interacting and when tiles change significantly
     const shouldLogDetails = (!isZooming && !isPanning) && (stitchedTiles.length % 5 === 0 || stitchedTiles.length <= 5); // Log every 5th tile change when not interacting
     if (shouldLogDetails) {
@@ -1643,88 +1644,23 @@ const MicroscopeMapDisplay = ({
       })));
     }
     
-    // Get tiles for current scale and channel selection
+    // SIMPLIFIED: Just show all tiles for current scale - no complex filtering
     const currentScaleTiles = stitchedTiles.filter(tile => {
-      // Multi-layer experiment filtering: only show tiles from visible experiments
-      // If no experiments are explicitly visible, show tiles from active experiment (backwards compatibility)
-      const experimentsToShow = visibleExperiments.length > 0 ? visibleExperiments : (activeExperiment ? [activeExperiment] : []);
-      const isExperimentVisible = !tile.experimentName || tile.experimentName === null || experimentsToShow.includes(tile.experimentName);
-      
-      if (!isExperimentVisible) {
-        if (shouldLogDetails) {
-          console.log(`🔍 [visibleTiles] Filtering out tile - experiment not visible:`, {
-            tileExperiment: tile.experimentName,
-            experimentsToShow,
-            isExperimentVisible
-          });
-        }
-        return false;
-      }
-      
-      // Determine tile type and apply appropriate channel filtering
-      const isBrowseDataTile = tile.metadata?.isMultiChannel || tile.channel?.includes('historical');
-      const isScanDataTile = !isBrowseDataTile && tile.experimentName;
-      
+      // Only filter by scale level - let all tiles coexist
       const scaleMatch = tile.scale === scaleLevel;
       
-      if (isBrowseDataTile) {
-        // Browse data tiles: use zarr channel matching for multi-channel, or simple channel matching
-        if (useMultiChannel && isHistoricalDataMode && tile.metadata?.isMultiChannel) {
-          // Multi-channel browse data: only check scale
-          if (shouldLogDetails) {
-            console.log(`🔍 [visibleTiles] Browse data multi-channel tile:`, {
-              scaleMatch,
-              tileScale: tile.scale,
-              targetScale: scaleLevel
-            });
-          }
-          return scaleMatch;
-        } else {
-          // Single channel browse data: check channel match using browse channel string
-          const channelMatch = tile.channel === browseChannelString;
-          const result = scaleMatch && channelMatch;
-          if (shouldLogDetails) {
-            console.log(`🔍 [visibleTiles] Browse data single-channel tile:`, {
-              tileChannel: tile.channel,
-              targetChannel: browseChannelString,
-              channelMatch,
-              scaleMatch,
-              result
-            });
-          }
-          return result;
-        }
-      } else if (isScanDataTile) {
-        // Scan data tiles: use microscope channel matching
-        const channelMatch = tile.channel === scanChannelString;
-        const result = scaleMatch && channelMatch;
-        if (shouldLogDetails) {
-          console.log(`🔍 [visibleTiles] Scan data tile:`, {
-            tileChannel: tile.channel,
-            targetChannel: scanChannelString,
-            channelMatch,
-            tileScale: tile.scale,
-            targetScale: scaleLevel,
-            scaleMatch,
-            result
-          });
-        }
-        return result;
-      } else {
-        // Fallback: use general channel matching (use scan channel string)
-        const channelMatch = tile.channel === scanChannelString;
-        const result = scaleMatch && channelMatch;
-        if (shouldLogDetails) {
-          console.log(`🔍 [visibleTiles] Fallback tile:`, {
-            tileChannel: tile.channel,
-            targetChannel: scanChannelString,
-            channelMatch,
-            scaleMatch,
-            result
-          });
-        }
-        return result;
+      if (shouldLogDetails) {
+        console.log(`🔍 [visibleTiles] Simple filtering:`, {
+          scaleMatch,
+          tileScale: tile.scale,
+          targetScale: scaleLevel,
+          tileChannel: tile.channel,
+          experiment: tile.experimentName,
+          result: scaleMatch
+        });
       }
+      
+      return scaleMatch;
     });
     
     // 🚀 REDUCED LOGGING: Only log if detailed logging is enabled
@@ -1737,19 +1673,10 @@ const MicroscopeMapDisplay = ({
       return currentScaleTiles;
     }
     
-    // In historical mode, if no tiles for current scale, show ANY available tiles to prevent blackout
-    if (isHistoricalDataMode) {
-      console.log(`[visibleTiles] Historical mode: No tiles for scale ${scaleLevel}, showing fallback tiles to prevent blackout`);
-      const fallbackTiles = stitchedTiles.filter(tile => {
-        const experimentsToShow = visibleExperiments.length > 0 ? visibleExperiments : (activeExperiment ? [activeExperiment] : []);
-        const isExperimentVisible = !tile.experimentName || tile.experimentName === null || experimentsToShow.includes(tile.experimentName);
-        return isExperimentVisible;
-      });
-      
-      if (fallbackTiles.length > 0) {
-        console.log(`[visibleTiles] Showing ${fallbackTiles.length} fallback tiles to prevent blackout`);
-        return fallbackTiles;
-      }
+    // SIMPLIFIED: If no current scale tiles, show any available tiles to prevent blackout
+    if (stitchedTiles.length > 0) {
+      console.log(`[visibleTiles] No tiles for scale ${scaleLevel}, showing ${stitchedTiles.length} fallback tiles to prevent blackout`);
+      return stitchedTiles;
     }
     
     // If no current scale tiles, show lower resolution (higher scale number) tiles as fallback
@@ -1759,35 +1686,8 @@ const MicroscopeMapDisplay = ({
       .sort((a, b) => a - b); // Sort ascending (lower numbers = higher resolution)
     
     for (const scale of availableScales) {
-      const scaleTiles = stitchedTiles.filter(tile => {
-        // Multi-layer experiment filtering: only show tiles from visible experiments (SAME AS ABOVE!)
-        const experimentsToShow = visibleExperiments.length > 0 ? visibleExperiments : (activeExperiment ? [activeExperiment] : []);
-        const isExperimentVisible = !tile.experimentName || tile.experimentName === null || experimentsToShow.includes(tile.experimentName);
-        
-        if (!isExperimentVisible) {
-          return false;
-        }
-        
-        // Determine tile type and apply appropriate channel filtering (same logic as above)
-        const isBrowseDataTile = tile.metadata?.isMultiChannel || tile.channel?.includes('historical');
-        const isScanDataTile = !isBrowseDataTile && tile.experimentName;
-        
-        if (isBrowseDataTile) {
-          // Browse data tiles: use zarr channel matching for multi-channel, or simple channel matching
-          if (useMultiChannel && isHistoricalDataMode && tile.metadata?.isMultiChannel) {
-            return tile.scale === scale && 
-                   JSON.stringify(tile.metadata.channelsUsed?.sort()) === JSON.stringify(getEnabledZarrChannels().map(ch => ch.channelName).sort());
-          } else {
-            return tile.scale === scale && tile.channel === browseChannelString;
-          }
-        } else if (isScanDataTile) {
-          // Scan data tiles: use microscope channel matching
-          return tile.scale === scale && tile.channel === scanChannelString;
-        } else {
-          // Fallback: use general channel matching (use scan channel string)
-          return tile.scale === scale && tile.channel === scanChannelString;
-        }
-      });
+      // SIMPLIFIED: Just filter by scale - no complex channel/experiment filtering
+      const scaleTiles = stitchedTiles.filter(tile => tile.scale === scale);
       if (scaleTiles.length > 0) {
         return scaleTiles;
       }
@@ -1817,10 +1717,8 @@ const MicroscopeMapDisplay = ({
 
   const cleanupOldTiles = useCallback((currentScale, activeChannel, maxTilesPerScale = 20) => {
     setStitchedTiles(prevTiles => {
-      // Keep all tiles for current scale and channel
-      const currentTiles = prevTiles.filter(tile => 
-        tile.scale === currentScale && tile.channel === activeChannel
-      );
+      // SIMPLIFIED: Only filter by scale to allow different layer types to coexist
+      const currentTiles = prevTiles.filter(tile => tile.scale === currentScale);
       
       // For historical mode, be more conservative with cleanup to prevent map clearing during zoom
       if (isHistoricalDataMode) {
@@ -1839,18 +1737,9 @@ const MicroscopeMapDisplay = ({
         }
       }
       
-      // Smart cleanup: when zooming out (to higher scale numbers), aggressively clean high-res tiles
-      // When zooming in (to lower scale numbers), keep lower-res tiles as background
-      const otherTiles = prevTiles.filter(tile => 
-        !(tile.scale === currentScale && tile.channel === activeChannel)
-      ).filter(tile => {
-        // If zooming out (currentScale > tile.scale), remove high-resolution tiles
-        if (currentScale > tile.scale) {
-          return false; // Remove higher resolution tiles to save memory
-        }
-        // If zooming in (currentScale < tile.scale), keep lower resolution tiles
-        return tile.channel === activeChannel; // Only keep same channel
-      }).slice(-maxTilesPerScale); // Limit total tiles
+      // SIMPLIFIED: Keep tiles from other scales regardless of channel to allow coexistence
+      const otherTiles = prevTiles.filter(tile => tile.scale !== currentScale)
+        .slice(-maxTilesPerScale); // Just limit total number of tiles
       
       return [...currentTiles, ...otherTiles];
     });
@@ -3694,15 +3583,20 @@ const MicroscopeMapDisplay = ({
         // Update request tracking  
         setLastRequestKey(currentRequestKey);
         
-        // Start real-time loading with cancellation support
+        // Start real-time loading with cancellation support - run in separate thread to prevent blocking
         const { promise: wellResultsPromise, cancel: cancelWellRequests } = 
-          artifactZarrLoaderRef.current.getMultipleWellRegionsRealTimeCancellable(
-            wellRequests, 
-            onChunkProgress, 
-            onWellComplete,
-            useMultiChannel,
-            enabledChannels
-          );
+          await new Promise((resolve) => {
+            setTimeout(() => {
+              const result = artifactZarrLoaderRef.current.getMultipleWellRegionsRealTimeCancellable(
+                wellRequests, 
+                onChunkProgress, 
+                onWellComplete,
+                useMultiChannel,
+                enabledChannels
+              );
+              resolve(result);
+            }, 0); // Run in next tick to prevent blocking
+          });
         
         // Store cancellation function for potential future cancellation
         setCurrentCancellableRequest({ 
