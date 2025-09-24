@@ -131,16 +131,10 @@ class ArtifactZarrLoader {
     this.requestControllers.set(reqId, controller);
     this.requestIds.set(url, reqId);
 
-    // Create the fetch promise with batching control
+    // Create the fetch promise with non-blocking queue control
     const fetchPromise = (async () => {
-      // Wait for available slot if at max concurrency, but check for cancellation
-      while (this.activeRequestCount >= this.maxConcurrentRequests) {
-        // Check if request was cancelled while waiting
-        if (controller.signal.aborted) {
-          throw new DOMException('Request was cancelled while waiting in queue', 'AbortError');
-        }
-        await new Promise(resolve => setTimeout(resolve, 10));
-      }
+      // Use Promise-based queue instead of blocking while loop
+      await this.waitForAvailableSlot(controller);
       
       // Final check before proceeding
       if (controller.signal.aborted) {
@@ -168,6 +162,8 @@ class ArtifactZarrLoader {
         this.requestPromises.delete(url);
         this.requestControllers.delete(reqId);
         this.requestIds.delete(url);
+        // Process next queued request
+        this.processQueue();
       }
     })();
 
@@ -177,6 +173,56 @@ class ArtifactZarrLoader {
     return fetchPromise;
   }
 
+  /**
+   * Wait for available request slot using Promise-based queue instead of blocking loop
+   * @param {AbortController} controller - Abort controller for cancellation
+   * @returns {Promise<void>}
+   */
+  async waitForAvailableSlot(controller) {
+    return new Promise((resolve, reject) => {
+      // If slot is available, resolve immediately
+      if (this.activeRequestCount < this.maxConcurrentRequests) {
+        resolve();
+        return;
+      }
+
+      // Add to queue instead of blocking
+      const queueItem = {
+        resolve,
+        reject,
+        controller
+      };
+      
+      this.requestQueue.push(queueItem);
+      
+      // Set up cancellation handler
+      const abortHandler = () => {
+        // Remove from queue if still queued
+        const index = this.requestQueue.indexOf(queueItem);
+        if (index !== -1) {
+          this.requestQueue.splice(index, 1);
+        }
+        reject(new DOMException('Request was cancelled while waiting in queue', 'AbortError'));
+      };
+      
+      controller.signal.addEventListener('abort', abortHandler, { once: true });
+    });
+  }
+
+  /**
+   * Process the next queued request
+   */
+  processQueue() {
+    if (this.requestQueue.length > 0 && this.activeRequestCount < this.maxConcurrentRequests) {
+      const nextRequest = this.requestQueue.shift();
+      if (nextRequest && !nextRequest.controller.signal.aborted) {
+        nextRequest.resolve();
+      } else if (nextRequest) {
+        // Request was cancelled, process next one
+        this.processQueue();
+      }
+    }
+  }
 
   /**
    * Get multi-channel well region data with additive blending
