@@ -839,6 +839,32 @@ const MicroscopeMapDisplay = ({
     }
   }, [activeExperiment, visibleExperiments]);
 
+  // Clean up visibleExperiments when experiments are deleted
+  useEffect(() => {
+    if (experiments && experiments.length > 0) {
+      const validExperimentNames = experiments.map(exp => exp.name);
+      setVisibleExperiments(prev => {
+        const filtered = prev.filter(expName => validExperimentNames.includes(expName));
+        if (filtered.length !== prev.length) {
+          const removed = prev.filter(expName => !validExperimentNames.includes(expName));
+          console.log(`[Experiment Cleanup] Removed deleted experiments from visible list: ${removed.join(', ')}`);
+          
+          // Clear tiles for deleted experiments
+          setStitchedTiles(prevTiles => {
+            const filteredTiles = prevTiles.filter(tile => 
+              !removed.includes(tile.experimentName)
+            );
+            if (filteredTiles.length !== prevTiles.length) {
+              console.log(`[Experiment Cleanup] Cleared ${prevTiles.length - filteredTiles.length} tiles for deleted experiments`);
+            }
+            return filteredTiles;
+          });
+        }
+        return filtered;
+      });
+    }
+  }, [experiments]);
+
 
   // Calculate stage dimensions from configuration (moved early to avoid dependency issues)
   const stageDimensions = useMemo(() => {
