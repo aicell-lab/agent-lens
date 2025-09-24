@@ -2637,21 +2637,21 @@ const MicroscopeMapDisplay = ({
 
 
 
-  // Click outside handler for layer dropdown
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (layerDropdownRef.current && !layerDropdownRef.current.contains(event.target)) {
-        setIsLayerDropdownOpen(false);
-      }
-    };
+  // Click outside handler for layer dropdown - DISABLED to prevent auto-collapse
+  // useEffect(() => {
+  //   const handleClickOutside = (event) => {
+  //     if (layerDropdownRef.current && !layerDropdownRef.current.contains(event.target)) {
+  //       setIsLayerDropdownOpen(false);
+  //     }
+  //   };
 
-    if (isLayerDropdownOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => {
-        document.removeEventListener('mousedown', handleClickOutside);
-      };
-    }
-  }, [isLayerDropdownOpen]);
+  //   if (isLayerDropdownOpen) {
+  //     document.addEventListener('mousedown', handleClickOutside);
+  //     return () => {
+  //       document.removeEventListener('mousedown', handleClickOutside);
+  //     };
+  //   }
+  // }, [isLayerDropdownOpen]);
 
   // Click outside handler for annotation dropdown
   useEffect(() => {

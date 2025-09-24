@@ -5,15 +5,15 @@
   background: #1f2937;
   border-radius: 0.5rem;
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-  min-width: 300px;
-  max-height: 80vh;
+  min-width: 400px;
+  max-height: 85vh;
   overflow: hidden;
 }
 
 /* Compact mode for FOV_FITTED */
 .layer-panel--compact {
-  min-width: 250px;
-  max-height: 60vh;
+  min-width: 350px;
+  max-height: 70vh;
 }
 
 /* Layer Panel Header */
