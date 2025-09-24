@@ -110,7 +110,7 @@ class TileProcessingManager {
       const color = this.getChannelColor(channel, mode, metadata);
       
       // Apply contrast adjustment with alpha masking
-      const alphaThreshold = experimentConfig.alphaThreshold || 10; // Default threshold for empty/black areas
+      const alphaThreshold = experimentConfig.alphaThreshold || 5; // Default threshold for empty/black areas
       const processedData = await this.applyContrastAdjustment(channelData, channelConfig, color, {
         alphaThreshold: alphaThreshold,
         enableAlphaMasking: true,
@@ -249,7 +249,7 @@ class TileProcessingManager {
         const colorRgb = this.hexToRgb(color);
         
         // Alpha masking threshold - pixels below this intensity will be made transparent
-        const alphaThreshold = options.alphaThreshold || 10; // Default threshold for empty/black areas
+        const alphaThreshold = options.alphaThreshold || 5; // Default threshold for empty/black areas
         
         for (let i = 0; i < data.length; i += 4) {
           const r = data[i];
@@ -448,7 +448,7 @@ class TileProcessingManager {
         const experimentConfig = {
           experimentId: experiment.id || experiment.name,
           layerId: experiment.layerId,
-          alphaThreshold: experiment.alphaThreshold || 10,
+          alphaThreshold: experiment.alphaThreshold || 5,
           layerOpacity: experiment.opacity || 1.0,
           blendMode: experiment.blendMode || 'normal'
         };
