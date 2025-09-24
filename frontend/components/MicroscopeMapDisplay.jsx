@@ -2670,14 +2670,24 @@ const MicroscopeMapDisplay = ({
     }
   }, [microscopeControlService, isSimulatedMicroscope]); // Removed loadExperiments to prevent infinite loops
 
-  // Also load experiments when layer dropdown is opened (for refresh)
+  // Only load experiments when layer dropdown is opened AND we don't have experiments yet
+  const hasExperimentsRef = useRef(false);
   useEffect(() => {
-    if (isLayerDropdownOpen && !isSimulatedMicroscope) {
+    if (experiments && experiments.length > 0) {
+      hasExperimentsRef.current = true;
+    }
+  }, [experiments]);
+
+  useEffect(() => {
+    if (isLayerDropdownOpen && !isSimulatedMicroscope && !hasExperimentsRef.current) {
+      console.log('[Layer Dropdown] Loading experiments for first time');
       loadExperiments();
       // Also get experiment info for the active experiment
       if (activeExperiment) {
         getExperimentInfo(activeExperiment);
       }
+    } else if (isLayerDropdownOpen && !isSimulatedMicroscope && hasExperimentsRef.current) {
+      console.log('[Layer Dropdown] Experiments already loaded, skipping refresh');
     }
   }, [isLayerDropdownOpen, isSimulatedMicroscope]); // Removed function dependencies to prevent infinite loops
 
