@@ -23,7 +23,9 @@ const AnnotationImagePreview = ({
   visibleChannelsConfig,
   selectedHistoricalDataset,
   wellPlateType,
-  timepoint
+  timepoint,
+  // Callback for embedding generation
+  onEmbeddingsGenerated
 }) => {
   const [previewUrl, setPreviewUrl] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -31,6 +33,12 @@ const AnnotationImagePreview = ({
   useEffect(() => {
     const generatePreview = async () => {
       if (!annotation || !wellInfo) {
+        return;
+      }
+
+      // Skip if embeddings already exist to prevent infinite loops
+      if (annotation.embeddings) {
+        console.log('🔄 Skipping preview generation - embeddings already exist');
         return;
       }
 
@@ -147,6 +155,37 @@ const AnnotationImagePreview = ({
 
         const url = URL.createObjectURL(imageBlob);
         setPreviewUrl(url);
+        
+        // Generate embeddings AFTER image is successfully processed
+        // Only generate if embeddings don't already exist to prevent infinite loops
+        if ((annotation.type === 'rectangle' || annotation.type === 'polygon' || annotation.type === 'freehand') && 
+            !annotation.embeddings && onEmbeddingsGenerated) {
+          try {
+            console.log('🔗 Generating embeddings after successful image processing');
+            
+            // Import embedding function dynamically to avoid circular dependencies
+            const { generateImageEmbedding, generateTextEmbedding } = await import('../../utils/annotationEmbeddingService');
+            
+            // Generate embeddings using the same image blob
+            const [imageEmbedding, textEmbedding] = await Promise.all([
+              generateImageEmbedding(imageBlob),
+              generateTextEmbedding(annotation.description || '')
+            ]);
+            
+            const embeddings = {
+              imageEmbedding,
+              textEmbedding,
+              generatedAt: new Date().toISOString()
+            };
+            
+            // Update annotation with embeddings via callback
+            onEmbeddingsGenerated(annotation.id, embeddings);
+            
+            console.log('✅ Embeddings generated successfully after image processing');
+          } catch (embeddingError) {
+            console.error('❌ Error generating embeddings after image processing:', embeddingError);
+          }
+        }
       } catch (error) {
         console.error('Error generating annotation preview:', error);
         // TODO: Could add a fallback to show an error icon instead of spinner
@@ -164,7 +203,9 @@ const AnnotationImagePreview = ({
       }
     };
   }, [
-    annotation, 
+    annotation?.id, // Only depend on annotation ID, not the whole object
+    // Use JSON.stringify to create a stable reference for points
+    annotation?.points ? JSON.stringify(annotation.points) : null,
     wellInfo, 
     mapScale, 
     mapPan, 
@@ -242,7 +283,8 @@ AnnotationImagePreview.propTypes = {
   visibleChannelsConfig: PropTypes.object,
   selectedHistoricalDataset: PropTypes.object,
   wellPlateType: PropTypes.string,
-  timepoint: PropTypes.number
+  timepoint: PropTypes.number,
+  onEmbeddingsGenerated: PropTypes.func
 };
 
 const AnnotationPanel = ({
@@ -279,7 +321,9 @@ const AnnotationPanel = ({
   visibleChannelsConfig = {},
   selectedHistoricalDataset = null,
   wellPlateType = '96',
-  timepoint = 0
+  timepoint = 0,
+  // Callback for embedding generation
+  onEmbeddingsGenerated = null
 }) => {
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [activeColorType, setActiveColorType] = useState('stroke'); // 'stroke' or 'fill'
@@ -647,6 +691,7 @@ const AnnotationPanel = ({
                           selectedHistoricalDataset={selectedHistoricalDataset}
                           wellPlateType={wellPlateType}
                           timepoint={timepoint}
+                          onEmbeddingsGenerated={onEmbeddingsGenerated}
                         />
                         {wellInfo && (
                           <span className="annotation-well" style={{ 
@@ -778,7 +823,8 @@ AnnotationPanel.propTypes = {
   visibleChannelsConfig: PropTypes.object,
   selectedHistoricalDataset: PropTypes.object,
   wellPlateType: PropTypes.string,
-  timepoint: PropTypes.number
+  timepoint: PropTypes.number,
+  onEmbeddingsGenerated: PropTypes.func
 };
 
 export default AnnotationPanel;

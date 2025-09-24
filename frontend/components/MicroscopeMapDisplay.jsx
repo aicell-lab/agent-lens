@@ -9,7 +9,6 @@ import QuickScanConfig from './microscope/controls/QuickScanConfig';
 import NormalScanConfig from './microscope/controls/NormalScanConfig';
 import AnnotationPanel from './annotation/AnnotationPanel';
 import AnnotationCanvas from './annotation/AnnotationCanvas';
-import { generateAnnotationEmbeddings } from '../utils/annotationEmbeddingService';
 import './MicroscopeMapDisplay.css';
 
 const MicroscopeMapDisplay = ({
@@ -655,72 +654,31 @@ const MicroscopeMapDisplay = ({
       appendLog(`Added ${annotation.type} annotation at (${annotation.points[0].x.toFixed(2)}, ${annotation.points[0].y.toFixed(2)}) mm`);
     }
 
-    // Automatically generate embeddings for rectangle, polygon, and freehand annotations
-    if (annotation.type === 'rectangle' || annotation.type === 'polygon' || annotation.type === 'freehand') {
-      try {
-        // Set embedding status to generating
-        setEmbeddingStatus(prev => ({
-          ...prev,
-          [annotation.id]: { status: 'generating', error: null }
-        }));
-
-        if (appendLog) {
-          appendLog(`Generating embeddings for ${annotation.type} annotation...`);
-        }
-
-        // Get the microscope view canvas (the main canvas showing the map)
-        const canvas = canvasRef.current;
-        if (!canvas) {
-          throw new Error('Microscope view canvas not found');
-        }
-
-        // Calculate mapScale inside the function to avoid hoisting issues
-        const currentMapScale = mapViewMode === 'FOV_FITTED' ? autoFittedScale : calculatedMapScale;
-
-        // Generate embeddings
-        const embeddings = await generateAnnotationEmbeddings(
-          canvas,
-          annotation,
-          currentMapScale,
-          mapPan,
-          stageDimensions,
-          pixelsPerMm
-        );
-
-        // Update annotation with embeddings
-        setAnnotations(prev => 
-          prev.map(ann => 
-            ann.id === annotation.id 
-              ? { ...ann, embeddings }
-              : ann
-          )
-        );
-
-        // Set embedding status to completed
-        setEmbeddingStatus(prev => ({
-          ...prev,
-          [annotation.id]: { status: 'completed', error: null }
-        }));
-
-        if (appendLog) {
-          appendLog(`Embeddings generated successfully for ${annotation.type} annotation`);
-        }
-
-      } catch (error) {
-        console.error('Error generating embeddings:', error);
-        
-        // Set embedding status to error
-        setEmbeddingStatus(prev => ({
-          ...prev,
-          [annotation.id]: { status: 'error', error: error.message }
-        }));
-
-        if (appendLog) {
-          appendLog(`Failed to generate embeddings: ${error.message}`);
-        }
-      }
-    }
+    // Note: Embeddings will be generated when the preview image is successfully loaded
+    // This ensures the embedding uses the same processed image data as the preview
   }, [appendLog, detectWellForAnnotation, mapPan, canvasRef]);
+
+  // Handle embedding generation from AnnotationPanel
+  const handleEmbeddingsGenerated = useCallback((annotationId, embeddings) => {
+    // Set embedding status to completed
+    setEmbeddingStatus(prev => ({
+      ...prev,
+      [annotationId]: { status: 'completed', error: null }
+    }));
+
+    // Update annotation with embeddings
+    setAnnotations(prev => 
+      prev.map(ann => 
+        ann.id === annotationId 
+          ? { ...ann, embeddings }
+          : ann
+      )
+    );
+
+    if (appendLog) {
+      appendLog(`Embeddings generated successfully for annotation ${annotationId}`);
+    }
+  }, [appendLog]);
 
   const handleAnnotationUpdate = useCallback((id, updates) => {
     setAnnotations(prev => 
@@ -4325,6 +4283,7 @@ const MicroscopeMapDisplay = ({
                       selectedHistoricalDataset={selectedHistoricalDataset}
                       wellPlateType={wellPlateType}
                       timepoint={0}
+                      onEmbeddingsGenerated={handleEmbeddingsGenerated}
                     />
                   </div>
                 )}
@@ -5278,3 +5237,4 @@ MicroscopeMapDisplay.propTypes = {
 };
 
 export default MicroscopeMapDisplay; 
+
