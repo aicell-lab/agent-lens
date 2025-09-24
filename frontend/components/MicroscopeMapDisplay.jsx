@@ -2465,6 +2465,49 @@ const MicroscopeMapDisplay = ({
     }
   }, [visibleLayers.channels, mapViewMode, isSimulatedMicroscope, appendLog]); // Removed visibleLayers.scanResults to prevent triggering on layer toggles
 
+  // Effect to handle historical layer cleanup when layers are toggled off or deleted
+  useEffect(() => {
+    // Check if any Browse Data (historical) layers were toggled off or deleted
+    const currentBrowseDataLayers = layers.filter(layer => layer.type === 'load-server');
+    const activeBrowseDataLayers = currentBrowseDataLayers.filter(layer => layer.visible);
+    
+    // If no active Browse Data layers, cancel all historical data requests and clear tiles
+    if (currentBrowseDataLayers.length === 0 || activeBrowseDataLayers.length === 0) {
+      console.log('[Layer Cleanup] No active Browse Data layers - cancelling historical requests and clearing tiles');
+      
+      // Cancel all artifact loader requests
+      if (artifactZarrLoaderRef.current) {
+        const cancelledCount = artifactZarrLoaderRef.current.cancelAllRequests();
+        console.log(`🚫 [Layer Cleanup] Cancelled ${cancelledCount} artifact requests`);
+      }
+      
+      // Clear historical data tiles
+      setStitchedTiles(prevTiles => {
+        const scanTiles = prevTiles.filter(tile => tile.sourceType === 'scan');
+        if (scanTiles.length !== prevTiles.length) {
+          console.log(`🧹 [Layer Cleanup] Cleared ${prevTiles.length - scanTiles.length} historical tiles`);
+        }
+        return scanTiles;
+      });
+      
+      // Clear browse data loading state
+      browseDataRequestsRef.current.clear();
+      setIsBrowseDataLoading(false);
+      
+      // Clear any active cancellable requests for historical data
+      if (currentCancellableRequest) {
+        console.log(`🚫 [Layer Cleanup] Cancelling current cancellable request`);
+        currentCancellableRequest.cancel();
+        setCurrentCancellableRequest(null);
+      }
+      
+      // Exit historical data mode if no Browse Data layers are active
+      if (activeBrowseDataLayers.length === 0 && isHistoricalDataMode) {
+        console.log('[Layer Cleanup] Exiting historical data mode - no active Browse Data layers');
+        setIsHistoricalDataMode(false);
+      }
+    }
+  }, [layers, isHistoricalDataMode, setIsHistoricalDataMode, currentCancellableRequest, setCurrentCancellableRequest]);
 
   // Effect to listen for contrast settings changes and refresh tiles
   useEffect(() => {
