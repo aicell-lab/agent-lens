@@ -509,10 +509,14 @@ const AnnotationPanel = ({
         }
       }
 
-      // Show results
+      // Show results and cleanup if successful
       if (uploadedCount > 0) {
         alert(`Successfully uploaded ${uploadedCount} annotation(s) to Weaviate collection '${collectionName}'.` + 
               (failedCount > 0 ? ` ${failedCount} failed.` : ''));
+        
+        // Clean up annotations after successful upload (same as Clear All button)
+        console.log('🧹 Cleaning up annotations after successful upload');
+        onClearAllAnnotations();
       } else {
         alert(`Failed to upload annotations. ${failedCount} failed.`);
       }
