@@ -115,7 +115,7 @@ class ArtifactZarrLoader {
    * @param {string} url - URL to fetch
    * @param {Object} options - Fetch options
    * @param {string} requestId - Optional request ID for cancellation
-   * @returns {Promise<Response>} Fetch response
+   * @returns {Promise<Response>} Fetch response (CLONED for concurrent usage)
    */
   async managedFetch(url, options = {}, requestId = null) {
     // Generate request ID if not provided
@@ -123,7 +123,10 @@ class ArtifactZarrLoader {
     
     // Check if this exact request is already in progress
     if (this.requestPromises.has(url)) {
-      return this.requestPromises.get(url);
+      const sharedResponse = await this.requestPromises.get(url);
+      // CRITICAL FIX: Clone the response to prevent "body stream already read" errors
+      // Each consumer gets their own copy of the response body
+      return sharedResponse.clone();
     }
 
     // Create AbortController for this request
@@ -1372,23 +1375,38 @@ class ArtifactZarrLoader {
     }
 
     try {
-      // 🚀 SIMPLE CACHE: Check if we already have zattrs for this dataset
+      // 🚀 IMPROVED CACHE: Use promise-based caching for zattrs to prevent concurrent parsing
       const zattrsUrl = `${baseUrl}.zattrs`;
       const zattrsCacheKey = zattrsUrl;
+      const zattrsPromiseCacheKey = `${zattrsCacheKey}_parse_promise`;
       
       let zattrs;
       if (this.datasetZattrsCache.has(zattrsCacheKey)) {
         console.log(`📋 Using cached zattrs for ${zattrsUrl}`);
         zattrs = this.datasetZattrsCache.get(zattrsCacheKey);
+      } else if (this.requestPromises.has(zattrsPromiseCacheKey)) {
+        console.log(`⏳ Waiting for concurrent zattrs parsing (fetchZarrMetadata): ${zattrsUrl}`);
+        zattrs = await this.requestPromises.get(zattrsPromiseCacheKey);
       } else {
         console.log(`📥 Fetching zattrs for ${zattrsUrl}`);
-        const zattrsResponse = await this.managedFetch(zattrsUrl);
-        if (!zattrsResponse.ok) {
-          throw new Error(`Failed to fetch zattrs: ${zattrsResponse.status}`);
+        
+        const parsePromise = (async () => {
+          const zattrsResponse = await this.managedFetch(zattrsUrl);
+          if (!zattrsResponse.ok) {
+            throw new Error(`Failed to fetch zattrs: ${zattrsResponse.status}`);
+          }
+          const parsedZattrs = await zattrsResponse.json();
+          this.datasetZattrsCache.set(zattrsCacheKey, parsedZattrs);
+          console.log(`✅ Cached zattrs for ${zattrsUrl}`);
+          return parsedZattrs;
+        })();
+        
+        this.requestPromises.set(zattrsPromiseCacheKey, parsePromise);
+        try {
+          zattrs = await parsePromise;
+        } finally {
+          this.requestPromises.delete(zattrsPromiseCacheKey);
         }
-        zattrs = await zattrsResponse.json();
-        this.datasetZattrsCache.set(zattrsCacheKey, zattrs);
-        console.log(`✅ Cached zattrs for ${zattrsUrl}`);
       }
       
       // Fetch zarray
@@ -1423,37 +1441,34 @@ class ArtifactZarrLoader {
     try {
       const zattrsUrl = `${baseUrl}.zattrs`;
       const zattrsCacheKey = zattrsUrl;
+      const zattrsPromiseCacheKey = `${zattrsCacheKey}_parse_promise`;
       
       let zattrs;
       if (this.datasetZattrsCache.has(zattrsCacheKey)) {
         console.log(`📋 Using cached zattrs for active channels: ${zattrsUrl}`);
         zattrs = this.datasetZattrsCache.get(zattrsCacheKey);
+      } else if (this.requestPromises.has(zattrsPromiseCacheKey)) {
+        console.log(`⏳ Waiting for concurrent zattrs parsing (active channels): ${zattrsUrl}`);
+        zattrs = await this.requestPromises.get(zattrsPromiseCacheKey);
       } else {
         console.log(`📥 Fetching zattrs for active channels: ${zattrsUrl}`);
         
-        // Create a unique cache key for the JSON parsing promise to prevent concurrent parsing
-        const jsonCacheKey = `${zattrsCacheKey}_json_promise`;
-        if (this.requestPromises.has(jsonCacheKey)) {
-          console.log(`⏳ Waiting for concurrent zattrs parsing (active channels): ${zattrsUrl}`);
-          zattrs = await this.requestPromises.get(jsonCacheKey);
-        } else {
-          const jsonPromise = (async () => {
-            const response = await this.managedFetch(zattrsUrl);
-            if (!response.ok) {
-              throw new Error(`Failed to fetch zattrs: ${response.status}`);
-            }
-            const parsedZattrs = await response.json();
-            this.datasetZattrsCache.set(zattrsCacheKey, parsedZattrs);
-            console.log(`✅ Cached zattrs for active channels: ${zattrsUrl}`);
-            return parsedZattrs;
-          })();
-          
-          this.requestPromises.set(jsonCacheKey, jsonPromise);
-          try {
-            zattrs = await jsonPromise;
-          } finally {
-            this.requestPromises.delete(jsonCacheKey);
+        const parsePromise = (async () => {
+          const response = await this.managedFetch(zattrsUrl);
+          if (!response.ok) {
+            throw new Error(`Failed to fetch zattrs: ${response.status}`);
           }
+          const parsedZattrs = await response.json();
+          this.datasetZattrsCache.set(zattrsCacheKey, parsedZattrs);
+          console.log(`✅ Cached zattrs for active channels: ${zattrsUrl}`);
+          return parsedZattrs;
+        })();
+        
+        this.requestPromises.set(zattrsPromiseCacheKey, parsePromise);
+        try {
+          zattrs = await parsePromise;
+        } finally {
+          this.requestPromises.delete(zattrsPromiseCacheKey);
         }
       }
       
