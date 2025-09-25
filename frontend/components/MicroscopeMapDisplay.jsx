@@ -5068,29 +5068,34 @@ const MicroscopeMapDisplay = ({
             {/* Modal Body: Two columns */}
             <div className="flex flex-row divide-x divide-gray-700" style={{ minHeight: '350px' }}>
               {/* Experiments/Galleries List (Left) */}
-              <div className="flex-1 p-4 overflow-y-auto">
-                <div className="text-gray-300 font-medium mb-2">All Experiment Galleries</div>
-                {galleriesLoading && <div className="text-xs text-gray-400">Loading galleries...</div>}
-                {galleriesError && <div className="text-xs text-red-400">{galleriesError}</div>}
-                {!galleriesLoading && !galleriesError && galleries.length === 0 && (
-                  <div className="text-xs text-gray-400">No galleries found.</div>
-                )}
-                <ul className="space-y-1">
-                  {galleries.map(gal => (
-                    <li key={gal.id}>
-                      <button
-                        className={`w-full text-left px-2 py-1 rounded ${selectedGallery && selectedGallery.id === gal.id ? 'bg-blue-700 text-white' : 'bg-gray-700 text-gray-200 hover:bg-blue-800'}`}
-                        onClick={() => setSelectedGallery(gal)}
-                      >
-                        {gal.manifest?.name || gal.alias || gal.id}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
+              <div className="flex-1 flex flex-col">
+                <div className="p-4 border-b border-gray-600">
+                  <div className="text-gray-300 font-medium mb-2">All Experiment Galleries</div>
+                  {galleriesLoading && <div className="text-xs text-gray-400">Loading galleries...</div>}
+                  {galleriesError && <div className="text-xs text-red-400">{galleriesError}</div>}
+                  {!galleriesLoading && !galleriesError && galleries.length === 0 && (
+                    <div className="text-xs text-gray-400">No galleries found.</div>
+                  )}
+                </div>
+                {/* Scrollable Galleries List */}
+                <div className="flex-1 overflow-y-auto p-4" style={{ maxHeight: '250px' }}>
+                  <ul className="space-y-1">
+                    {galleries.map(gal => (
+                      <li key={gal.id}>
+                        <button
+                          className={`w-full text-left px-2 py-1 rounded text-sm ${selectedGallery && selectedGallery.id === gal.id ? 'bg-blue-700 text-white' : 'bg-gray-700 text-gray-200 hover:bg-blue-800'}`}
+                          onClick={() => setSelectedGallery(gal)}
+                        >
+                          {gal.manifest?.name || gal.alias || gal.id}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
                 {/* View Gallery in Map Button */}
-                <div className="mt-4 flex justify-end">
+                <div className="p-4 border-t border-gray-600">
                   <button
-                    className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                     disabled={!selectedGallery}
                     onClick={() => {
                       setShowBrowseDataModal(false);
@@ -5121,23 +5126,28 @@ const MicroscopeMapDisplay = ({
                 </div>
               </div>
               {/* Datasets List (Right) */}
-              <div className="flex-1 p-4 overflow-y-auto">
-                <div className="text-gray-300 font-medium mb-2">Datasets</div>
-                {!selectedGallery && <div className="text-xs text-gray-400">Select a gallery to view datasets.</div>}
-                {datasetsLoading && <div className="text-xs text-gray-400">Loading datasets...</div>}
-                {datasetsError && <div className="text-xs text-red-400">{datasetsError}</div>}
-                {!datasetsLoading && !datasetsError && selectedGallery && datasets.length === 0 && (
-                  <div className="text-xs text-gray-400">No datasets found in this gallery.</div>
-                )}
-                <ul className="space-y-1">
-                  {datasets.map(ds => (
-                    <li key={ds.id}>
-                      <div className="px-2 py-1 rounded bg-gray-700 text-gray-200">
-                        {ds.manifest?.name || ds.alias || ds.id}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
+              <div className="flex-1 flex flex-col">
+                <div className="p-4 border-b border-gray-600">
+                  <div className="text-gray-300 font-medium mb-2">Datasets</div>
+                  {!selectedGallery && <div className="text-xs text-gray-400">Select a gallery to view datasets.</div>}
+                  {datasetsLoading && <div className="text-xs text-gray-400">Loading datasets...</div>}
+                  {datasetsError && <div className="text-xs text-red-400">{datasetsError}</div>}
+                  {!datasetsLoading && !datasetsError && selectedGallery && datasets.length === 0 && (
+                    <div className="text-xs text-gray-400">No datasets found in this gallery.</div>
+                  )}
+                </div>
+                {/* Scrollable Datasets List */}
+                <div className="flex-1 overflow-y-auto p-4" style={{ maxHeight: '250px' }}>
+                  <ul className="space-y-1">
+                    {datasets.map(ds => (
+                      <li key={ds.id}>
+                        <div className="px-2 py-1 rounded bg-gray-700 text-gray-200 text-sm">
+                          {ds.manifest?.name || ds.alias || ds.id}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               </div>
             </div>
           </div>
