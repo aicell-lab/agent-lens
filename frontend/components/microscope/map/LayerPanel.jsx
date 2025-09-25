@@ -25,7 +25,6 @@ const LayerPanel = ({
   availableZarrChannels,
   zarrChannelConfigs,
   updateZarrChannelConfig,
-  realMicroscopeChannelConfigs,
   updateRealMicroscopeChannelConfig,
   
   // Per-layer contrast settings
@@ -785,7 +784,6 @@ LayerPanel.propTypes = {
   availableZarrChannels: PropTypes.array,
   zarrChannelConfigs: PropTypes.object,
   updateZarrChannelConfig: PropTypes.func,
-  realMicroscopeChannelConfigs: PropTypes.object,
   updateRealMicroscopeChannelConfig: PropTypes.func,
   
   // Per-layer contrast settings
