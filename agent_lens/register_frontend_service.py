@@ -417,21 +417,31 @@ def get_frontend_api():
             if not await similarity_service.ensure_connected():
                 raise HTTPException(status_code=500, detail="Failed to connect to similarity search service")
             
+            # Convert collection name to valid Weaviate class name (same logic as insert endpoint)
+            # Split by hyphens and capitalize each word, then join
+            words = collection_name.split('-')
+            valid_collection_name = ''.join(word.capitalize() for word in words)
+            
+            # Ensure it starts with uppercase letter
+            if not valid_collection_name[0].isupper():
+                valid_collection_name = 'A' + valid_collection_name[1:]
+            
             # Generate application ID if not provided
             if not application_id:
                 application_id = f"app_{uuid.uuid4().hex[:8]}"
             
-            # Create collection
-            collection_result = await similarity_service.create_collection(collection_name, description)
+            # Create collection with the transformed name
+            collection_result = await similarity_service.create_collection(valid_collection_name, description)
             
             # Create application for the collection
             app_result = await similarity_service.create_application(
-                collection_name, application_id, f"Application for {description}"
+                valid_collection_name, application_id, f"Application for {description}"
             )
             
             return {
                 "success": True,
-                "collection_name": collection_name,
+                "collection_name": valid_collection_name,  # Return the transformed name
+                "original_name": collection_name,  # Also return original for reference
                 "application_id": application_id,
                 "collection_result": collection_result,
                 "application_result": app_result
@@ -636,9 +646,18 @@ def get_frontend_api():
             if not await similarity_service.ensure_connected():
                 raise HTTPException(status_code=500, detail="Failed to connect to similarity search service")
             
+            # Convert collection name to valid Weaviate class name (same logic as other endpoints)
+            words = collection_name.split('-')
+            valid_collection_name = ''.join(word.capitalize() for word in words)
+            if not valid_collection_name[0].isupper():
+                valid_collection_name = 'A' + valid_collection_name[1:]
+            
+            # Extract just the dataset ID part (last part after slash)
+            clean_application_id = application_id.split('/')[-1] if '/' in application_id else application_id
+            
             results = await similarity_service.search_by_text(
-                collection_name=collection_name,
-                application_id=application_id,
+                collection_name=valid_collection_name,
+                application_id=clean_application_id,
                 query_text=query_text,
                 limit=limit
             )

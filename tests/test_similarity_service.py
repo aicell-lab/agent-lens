@@ -376,8 +376,10 @@ class TestWeaviateSimilarityService:
     async def test_similarity_endpoints_lifecycle(self, test_frontend_service):
         """Test complete similarity search endpoints lifecycle using real frontend service."""
         service, service_url = test_frontend_service
-        collection_name = self._generate_test_collection_name()
-        application_id = f"test_app_{collection_name.split('_')[-1]}"
+        # Use hyphenated collection name to match the transformation logic in insert endpoint
+        base_name = self._generate_test_collection_name().replace('_', '-')
+        collection_name = base_name
+        application_id = f"test_app_{base_name.split('-')[-1]}"
         
         import aiohttp
         
@@ -396,11 +398,13 @@ class TestWeaviateSimilarityService:
                     assert response.status == 200
                     result = await response.json()
                     assert result["success"] is True
-                    print("✅ Collection created successfully")
+                    # Get the transformed collection name from the response
+                    valid_collection_name = result["collection_name"]
+                    print(f"✅ Collection created successfully: {valid_collection_name}")
                 
                 # 2. Check collection exists
                 print("🧪 Checking collection exists...")
-                exists_url = f"{service_url}/similarity/collections/{collection_name}/exists"
+                exists_url = f"{service_url}/similarity/collections/{valid_collection_name}/exists"
                 async with session.get(exists_url) as response:
                     assert response.status == 200
                     result = await response.json()
@@ -410,15 +414,29 @@ class TestWeaviateSimilarityService:
                 # 3. Insert test image
                 print("🧪 Inserting test image...")
                 insert_url = f"{service_url}/similarity/insert"
-                insert_data = {
-                    "collection_name": collection_name,
-                    "application_id": application_id,
-                    "image_id": "test_img_001",
-                    "description": "Test microscopy image",
-                    "metadata": '{"channel": "BF_LED_matrix_full"}'
+                
+                # Generate a test image embedding
+                test_embedding = self._generate_clip_vector("Test microscopy image")
+                import json
+                from aiohttp import FormData
+                
+                # Use query parameters for required fields and FormData for image_embedding
+                query_params = {
+                    'collection_name': collection_name,
+                    'application_id': application_id,
+                    'image_id': 'test_img_001',
+                    'description': 'Test microscopy image',
+                    'metadata': '{"channel": "BF_LED_matrix_full"}'
                 }
                 
-                async with session.post(insert_url, params=insert_data) as response:
+                # Use FormData only for image_embedding
+                data = FormData()
+                data.add_field('image_embedding', json.dumps(test_embedding))
+                
+                async with session.post(insert_url, params=query_params, data=data) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        print(f"❌ Insert failed with status {response.status}: {error_text}")
                     assert response.status == 200
                     result = await response.json()
                     assert result["success"] is True
@@ -428,7 +446,7 @@ class TestWeaviateSimilarityService:
                 print("🧪 Testing text search...")
                 search_url = f"{service_url}/similarity/search/text"
                 search_data = {
-                    "collection_name": collection_name,
+                    "collection_name": collection_name,  # Use original name - search endpoint will transform it
                     "application_id": application_id,
                     "query_text": "microscopy",
                     "limit": 5
@@ -446,7 +464,7 @@ class TestWeaviateSimilarityService:
                 vector_url = f"{service_url}/similarity/search/vector"
                 test_vector = self._generate_clip_vector("test microscopy image")
                 vector_data = {
-                    "collection_name": collection_name,
+                    "collection_name": collection_name,  # Use original name - search endpoint will transform it
                     "application_id": application_id,
                     "limit": 5
                 }
@@ -458,15 +476,31 @@ class TestWeaviateSimilarityService:
                     print("✅ Vector search completed successfully")
                 
         finally:
-            # 6. Cleanup
-            print("🧹 Cleaning up test collection...")
+            # 6. Cleanup - clean all test collections that start with 'TestWeaviate'
+            print("🧹 Cleaning up all test collections...")
             try:
                 async with aiohttp.ClientSession() as session:
-                    cleanup_url = f"{service_url}/similarity/collections/{collection_name}"
-                    async with session.delete(cleanup_url) as response:
-                        print(f"Cleanup response: {response.status}")
+                    # First, list all collections to find test collections
+                    list_url = f"{service_url}/similarity/collections"
+                    async with session.get(list_url) as response:
+                        if response.status == 200:
+                            result = await response.json()
+                            collections = result.get("collections", {})
+                            
+                            # Find all collections that start with 'TestWeaviate'
+                            test_collections = [name for name in collections.keys() if name.startswith("TestWeaviate")]
+                            
+                            print(f"Found {len(test_collections)} test collections to clean up: {test_collections}")
+                            
+                            # Delete each test collection
+                            for collection_name in test_collections:
+                                cleanup_url = f"{service_url}/similarity/collections/{collection_name}"
+                                async with session.delete(cleanup_url) as cleanup_response:
+                                    print(f"Cleanup response for {collection_name}: {cleanup_response.status}")
+                        else:
+                            print(f"Failed to list collections: {response.status}")
             except Exception as e:
-                print(f"Error cleaning up {collection_name}: {e}")
+                print(f"Error during cleanup: {e}")
 
     @pytest.mark.integration
     async def test_embedding_endpoints(self, test_frontend_service):
