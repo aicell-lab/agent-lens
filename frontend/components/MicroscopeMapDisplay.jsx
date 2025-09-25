@@ -4243,60 +4243,6 @@ const MicroscopeMapDisplay = ({
                                 
               </div>
               
-              {/* Annotation dropdown */}
-              <div className="relative" ref={annotationDropdownRef}>
-                <button
-                  onClick={() => setIsAnnotationDropdownOpen(!isAnnotationDropdownOpen)}
-                  className={`px-3 py-1 text-xs text-white rounded flex items-center ${
-                    isDrawingMode ? 'bg-orange-600 hover:bg-orange-500' : 'bg-gray-700 hover:bg-gray-600'
-                  }`}
-                  title="Annotation tools"
-                >
-                  <i className="fas fa-draw-polygon mr-1"></i>
-                  Annotations
-                  <i className={`fas ml-1 transition-transform ${isAnnotationDropdownOpen ? 'fa-caret-up' : 'fa-caret-down'}`}></i>
-                </button>
-                
-                <div className={`absolute top-full right-0 mt-1 z-20 ${isAnnotationDropdownOpen ? 'block' : 'hidden'}`}>
-                  <AnnotationPanel
-                      isDrawingMode={isDrawingMode}
-                      setIsDrawingMode={setIsDrawingMode}
-                      currentTool={currentAnnotationTool}
-                      setCurrentTool={setCurrentAnnotationTool}
-                      strokeColor={annotationStrokeColor}
-                      setStrokeColor={setAnnotationStrokeColor}
-                      strokeWidth={annotationStrokeWidth}
-                      setStrokeWidth={setAnnotationStrokeWidth}
-                      fillColor={annotationFillColor}
-                      setFillColor={setAnnotationFillColor}
-                      description={annotationDescription}
-                      setDescription={setAnnotationDescription}
-                      annotations={annotations}
-                      onAnnotationDelete={handleAnnotationDelete}
-                      onClearAllAnnotations={handleClearAllAnnotations}
-                      onExportAnnotations={handleExportAnnotations}
-                      wellInfoMap={annotationWellMap}
-                      embeddingStatus={embeddingStatus}
-                      mapScale={mapScale}
-                      mapPan={mapPan}
-                      stageDimensions={stageDimensions}
-                      pixelsPerMm={pixelsPerMm}
-                      // New props for advanced extraction
-                      isHistoricalDataMode={isHistoricalDataMode}
-                      microscopeControlService={microscopeControlService}
-                      artifactZarrLoader={artifactZarrLoaderRef.current}
-                      zarrChannelConfigs={zarrChannelConfigs}
-                      realMicroscopeChannelConfigs={realMicroscopeChannelConfigs}
-                      enabledZarrChannels={getEnabledZarrChannels()}
-                      visibleChannelsConfig={visibleLayers.channels}
-                      selectedHistoricalDataset={selectedHistoricalDataset}
-                      wellPlateType={wellPlateType}
-                      timepoint={0}
-                      onEmbeddingsGenerated={handleEmbeddingsGenerated}
-                    />
-                </div>
-              </div>
-              
               {/* Layer selector dropdown */}
               <div className="relative" ref={layerDropdownRef}>
                 <button
@@ -4406,6 +4352,67 @@ const MicroscopeMapDisplay = ({
               <span className="text-xs text-gray-300">Zoom: {Math.round(videoZoom * 100)}%</span>
               <span className="text-xs text-gray-400">• Scroll down to see stage map</span>
             </div>
+          )}
+        </div>
+        
+        {/* Right side controls */}
+        <div className="flex items-center space-x-2">
+          {mapViewMode === 'FREE_PAN' && (
+            <>
+              {/* Annotation dropdown */}
+              <div className="relative" ref={annotationDropdownRef}>
+                <button
+                  onClick={() => setIsAnnotationDropdownOpen(!isAnnotationDropdownOpen)}
+                  className={`px-3 py-1 text-xs text-white rounded flex items-center ${
+                    isDrawingMode ? 'bg-orange-600 hover:bg-orange-500' : 'bg-gray-700 hover:bg-gray-600'
+                  }`}
+                  title="Annotation tools"
+                >
+                  <i className="fas fa-draw-polygon mr-1"></i>
+                  Annotations
+                  <i className={`fas ml-1 transition-transform ${isAnnotationDropdownOpen ? 'fa-caret-up' : 'fa-caret-down'}`}></i>
+                </button>
+                
+                <div className={`absolute top-full right-0 mt-1 z-20 ${isAnnotationDropdownOpen ? 'block' : 'hidden'}`}>
+                  <AnnotationPanel
+                      isDrawingMode={isDrawingMode}
+                      setIsDrawingMode={setIsDrawingMode}
+                      currentTool={currentAnnotationTool}
+                      setCurrentTool={setCurrentAnnotationTool}
+                      strokeColor={annotationStrokeColor}
+                      setStrokeColor={setAnnotationStrokeColor}
+                      strokeWidth={annotationStrokeWidth}
+                      setStrokeWidth={setAnnotationStrokeWidth}
+                      fillColor={annotationFillColor}
+                      setFillColor={setAnnotationFillColor}
+                      description={annotationDescription}
+                      setDescription={setAnnotationDescription}
+                      annotations={annotations}
+                      onAnnotationDelete={handleAnnotationDelete}
+                      onClearAllAnnotations={handleClearAllAnnotations}
+                      onExportAnnotations={handleExportAnnotations}
+                      wellInfoMap={annotationWellMap}
+                      embeddingStatus={embeddingStatus}
+                      mapScale={mapScale}
+                      mapPan={mapPan}
+                      stageDimensions={stageDimensions}
+                      pixelsPerMm={pixelsPerMm}
+                      // New props for advanced extraction
+                      isHistoricalDataMode={isHistoricalDataMode}
+                      microscopeControlService={microscopeControlService}
+                      artifactZarrLoader={artifactZarrLoaderRef.current}
+                      zarrChannelConfigs={zarrChannelConfigs}
+                      realMicroscopeChannelConfigs={realMicroscopeChannelConfigs}
+                      enabledZarrChannels={getEnabledZarrChannels()}
+                      visibleChannelsConfig={visibleLayers.channels}
+                      selectedHistoricalDataset={selectedHistoricalDataset}
+                      wellPlateType={wellPlateType}
+                      timepoint={0}
+                      onEmbeddingsGenerated={handleEmbeddingsGenerated}
+                    />
+                </div>
+              </div>
+            </>
           )}
         </div>
       </div>
