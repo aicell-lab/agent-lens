@@ -164,6 +164,13 @@ const AnnotationImagePreview = ({
           try {
             console.log('🔗 Generating embeddings after successful image processing');
             
+            // Convert imageBlob to data URL for future preview generation
+            const extractedImageDataUrl = await new Promise((resolve) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(reader.result);
+              reader.readAsDataURL(imageBlob);
+            });
+            
             // Import embedding function dynamically to avoid circular dependencies
             const { generateImageEmbedding, generateTextEmbedding } = await import('../../utils/annotationEmbeddingService');
             
@@ -176,7 +183,8 @@ const AnnotationImagePreview = ({
             const embeddings = {
               imageEmbedding,
               textEmbedding,
-              generatedAt: new Date().toISOString()
+              generatedAt: new Date().toISOString(),
+              extractedImageDataUrl  // Store the data URL for preview generation
             };
             
             // Update annotation with embeddings via callback
@@ -434,8 +442,25 @@ const AnnotationPanel = ({
 
           // Generate preview image if annotation has extracted image data
           let previewImage = null;
-          if (annotation.extractedImageDataUrl) {
-            previewImage = await generatePreviewFromDataUrl(annotation.extractedImageDataUrl);
+          const extractedImageDataUrl = annotation.extractedImageDataUrl || annotation.embeddings?.extractedImageDataUrl;
+          
+          console.log(`🖼️ Debugging annotation ${annotation.id}:`, {
+            hasExtractedImageDataUrl: !!annotation.extractedImageDataUrl,
+            hasEmbeddingsExtractedImageDataUrl: !!annotation.embeddings?.extractedImageDataUrl,
+            hasEmbeddings: !!annotation.embeddings,
+            hasImageEmbedding: !!annotation.embeddings?.imageEmbedding,
+            finalExtractedImageDataUrl: !!extractedImageDataUrl
+          });
+          
+          if (extractedImageDataUrl) {
+            console.log(`🖼️ Generating preview for annotation ${annotation.id}`);
+            previewImage = await generatePreviewFromDataUrl(extractedImageDataUrl);
+            console.log(`🖼️ Preview generated for annotation ${annotation.id}:`, {
+              previewGenerated: !!previewImage,
+              previewSize: previewImage ? previewImage.length : 0
+            });
+          } else {
+            console.log(`⚠️ No extractedImageDataUrl found for annotation ${annotation.id} - check embeddings generation`);
           }
 
           // Prepare URL with query parameters as expected by backend
@@ -1008,54 +1033,26 @@ const AnnotationPanel = ({
 
       {/* Similarity Search Results Panel */}
       {showSimilarityPanel && (
-        <div className="similarity-panel" style={{
-          position: 'fixed',
-          top: '10px',
-          right: '10px',
-          width: '300px',
-          maxHeight: '500px',
-          backgroundColor: 'white',
-          border: '1px solid #ccc',
-          borderRadius: '8px',
-          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
-          zIndex: 1000,
-          overflow: 'hidden'
-        }}>
-          <div style={{
-            padding: '10px',
-            borderBottom: '1px solid #eee',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            backgroundColor: '#f8f9fa'
-          }}>
-            <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 'bold' }}>
+        <div className="similarity-panel">
+          <div className="similarity-panel-header">
+            <h3 className="similarity-panel-title">
+              <i className="fas fa-search"></i>
               Similar Annotations
-            </h4>
+            </h3>
             <button
+              className="similarity-panel-close"
               onClick={() => setShowSimilarityPanel(false)}
-              style={{
-                background: 'none',
-                border: 'none',
-                fontSize: '16px',
-                cursor: 'pointer',
-                color: '#666'
-              }}
-              title="Close"
+              title="Close similarity search"
             >
-              ×
+              <i className="fas fa-times"></i>
             </button>
           </div>
           
-          <div style={{ 
-            padding: '10px', 
-            maxHeight: '400px', 
-            overflowY: 'auto' 
-          }}>
+          <div className="similarity-panel-content">
             {isSearching ? (
-              <div style={{ textAlign: 'center', padding: '20px' }}>
+              <div className="similarity-panel-loading">
                 <i className="fas fa-spinner fa-spin"></i>
-                <div style={{ marginTop: '8px', fontSize: '12px' }}>Searching...</div>
+                <div>Searching for similar annotations...</div>
               </div>
             ) : similarityResults.length > 0 ? (
               <div>
@@ -1067,63 +1064,65 @@ const AnnotationPanel = ({
                   // Try to parse metadata if it's a string
                   let parsedMetadata = {};
                   if (typeof metadata === 'string') {
+                    console.log('Raw metadata string:', metadata);
                     try {
+                      // First try JSON.parse
                       parsedMetadata = JSON.parse(metadata);
+                      console.log('JSON parse successful:', parsedMetadata);
                     } catch {
-                      parsedMetadata = { raw: metadata };
+                      try {
+                        // If JSON fails, try to handle Python dict format
+                        // Replace single quotes with double quotes for JSON compatibility
+                        const jsonString = metadata
+                          .replace(/'/g, '"')
+                          .replace(/True/g, 'true')
+                          .replace(/False/g, 'false')
+                          .replace(/None/g, 'null');
+                        parsedMetadata = JSON.parse(jsonString);
+                        console.log('Python dict parse successful:', parsedMetadata);
+                      } catch (error) {
+                        // If both fail, use raw metadata
+                        console.error('Both JSON and Python dict parsing failed:', error);
+                        parsedMetadata = { raw: metadata };
+                      }
                     }
                   } else {
                     parsedMetadata = metadata;
                   }
                   
                   return (
-                    <div key={index} style={{
-                      padding: '8px',
-                      borderBottom: '1px solid #eee',
-                      fontSize: '12px',
-                      display: 'flex',
-                      gap: '8px'
-                    }}>
+                    <div key={index} className="similarity-result-item">
                       {/* Preview Image */}
                       {props.preview_image && (
-                        <div style={{ flexShrink: 0 }}>
-                          <img 
-                            src={props.preview_image} 
-                            alt="Preview" 
-                            style={{ 
-                              width: '50px', 
-                              height: '50px', 
-                              border: '1px solid #ddd',
-                              borderRadius: '4px',
-                              objectFit: 'cover'
-                            }} 
-                          />
-                        </div>
+                        <img 
+                          src={props.preview_image} 
+                          alt="Preview" 
+                          className="similarity-preview-image"
+                        />
                       )}
                       
                       {/* Content */}
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>
+                      <div className="similarity-result-content">
+                        <div className="similarity-result-title">
                           {props.description || 'No description'}
                         </div>
-                        <div style={{ color: '#999', fontSize: '10px', marginBottom: '4px' }}>
-                          ID: {props.image_id || 'Unknown'}
+                        <div className="similarity-result-id">
+                          {props.image_id || 'Unknown'}
                         </div>
                         {parsedMetadata && Object.keys(parsedMetadata).length > 0 && (
-                          <div style={{ color: '#666', marginBottom: '4px' }}>
-                            <strong>Metadata:</strong>
-                            <div style={{ fontSize: '10px', margin: '2px 0', maxHeight: '60px', overflow: 'auto' }}>
-                              Well: {parsedMetadata.well_id || 'Unknown'}<br/>
-                              Type: {parsedMetadata.annotation_type || 'Unknown'}<br/>
-                              {parsedMetadata.timestamp && (
-                                <>Time: {new Date(parsedMetadata.timestamp).toLocaleString()}</>
-                              )}
-                            </div>
+                          <div className="similarity-result-metadata">
+                            <strong>Well:</strong> {parsedMetadata.well_id || 'Unknown'}<br/>
+                            <strong>Type:</strong> {parsedMetadata.annotation_type || 'Unknown'}<br/>
+                            {parsedMetadata.timestamp && (
+                              <>
+                                <strong>Time:</strong> {new Date(parsedMetadata.timestamp).toLocaleString()}
+                              </>
+                            )}
                           </div>
                         )}
                         {result.metadata?.score && (
-                          <div style={{ color: '#28a745', fontSize: '11px' }}>
-                            Score: {result.metadata.score.toFixed(3)}
+                          <div className="similarity-result-score">
+                            Similarity: {(result.metadata.score * 100).toFixed(1)}%
                           </div>
                         )}
                       </div>
@@ -1132,13 +1131,10 @@ const AnnotationPanel = ({
                 })}
               </div>
             ) : (
-              <div style={{ 
-                textAlign: 'center', 
-                padding: '20px', 
-                color: '#666',
-                fontSize: '12px'
-              }}>
-                No similar annotations found
+              <div className="similarity-panel-empty">
+                <i className="fas fa-search"></i>
+                <h4>No Similar Annotations Found</h4>
+                <p>Try creating more annotations or check if the current annotation has embeddings.</p>
               </div>
             )}
           </div>

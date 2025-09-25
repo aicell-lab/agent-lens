@@ -171,10 +171,11 @@ class WeaviateSimilarityService:
         if not await self.ensure_connected():
             raise RuntimeError("Not connected to Weaviate service")
         
+        import json
         properties = {
             "image_id": image_id,
             "description": description,
-            "metadata": str(metadata),
+            "metadata": json.dumps(metadata) if metadata else "",
             "dataset_id": dataset_id or "",
             "file_path": file_path or "",
             "preview_image": preview_image or ""

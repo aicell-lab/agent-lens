@@ -54,13 +54,20 @@ export const generatePreviewImage = async (canvas, annotation) => {
  */
 export const generatePreviewFromDataUrl = async (extractedImageDataUrl) => {
   try {
+    console.log('🖼️ generatePreviewFromDataUrl called with:', {
+      hasDataUrl: !!extractedImageDataUrl,
+      dataUrlPrefix: extractedImageDataUrl ? extractedImageDataUrl.substring(0, 30) : null
+    });
+    
     if (!extractedImageDataUrl) {
+      console.log('⚠️ No extractedImageDataUrl provided');
       return null;
     }
 
     return new Promise((resolve) => {
       const img = new Image();
       img.onload = () => {
+        console.log('🖼️ Image loaded successfully, generating preview...');
         // Create preview canvas
         const previewCanvas = document.createElement('canvas');
         const previewCtx = previewCanvas.getContext('2d');
@@ -73,6 +80,11 @@ export const generatePreviewFromDataUrl = async (extractedImageDataUrl) => {
         
         // Convert to base64 PNG
         const base64 = previewCanvas.toDataURL('image/png', 0.8);
+        console.log('🖼️ Preview generated successfully:', {
+          originalSize: `${img.width}x${img.height}`,
+          previewSize: base64.length,
+          previewPrefix: base64.substring(0, 30)
+        });
         resolve(base64);
       };
       img.onerror = () => {

@@ -4263,9 +4263,8 @@ const MicroscopeMapDisplay = ({
                   <i className={`fas ml-1 transition-transform ${isAnnotationDropdownOpen ? 'fa-caret-up' : 'fa-caret-down'}`}></i>
                 </button>
                 
-                {isAnnotationDropdownOpen && (
-                  <div className="absolute top-full right-0 mt-1 z-20">
-                    <AnnotationPanel
+                <div className={`absolute top-full right-0 mt-1 z-20 ${isAnnotationDropdownOpen ? 'block' : 'hidden'}`}>
+                  <AnnotationPanel
                       isDrawingMode={isDrawingMode}
                       setIsDrawingMode={setIsDrawingMode}
                       currentTool={currentAnnotationTool}
@@ -4302,8 +4301,7 @@ const MicroscopeMapDisplay = ({
                       timepoint={0}
                       onEmbeddingsGenerated={handleEmbeddingsGenerated}
                     />
-                  </div>
-                )}
+                </div>
               </div>
               
               {/* Layer selector dropdown */}
