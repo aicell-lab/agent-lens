@@ -527,12 +527,6 @@ const MicroscopeMapDisplay = ({
   // Embedding status tracking
   const [embeddingStatus, setEmbeddingStatus] = useState({}); // Track embedding status per annotation
 
-  const handleImportAnnotations = useCallback((importedAnnotations) => {
-    setAnnotations(importedAnnotations);
-    if (appendLog) {
-      appendLog(`Imported ${importedAnnotations.length} annotations`);
-    }
-  }, [appendLog]);
 
   // Helper function to render real-time loading progress
   const renderRealTimeProgress = useCallback(() => {
@@ -4281,7 +4275,6 @@ const MicroscopeMapDisplay = ({
                       onAnnotationDelete={handleAnnotationDelete}
                       onClearAllAnnotations={handleClearAllAnnotations}
                       onExportAnnotations={handleExportAnnotations}
-                      onImportAnnotations={handleImportAnnotations}
                       wellInfoMap={annotationWellMap}
                       embeddingStatus={embeddingStatus}
                       mapScale={mapScale}

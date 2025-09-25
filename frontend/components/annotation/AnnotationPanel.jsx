@@ -313,7 +313,6 @@ const AnnotationPanel = ({
   onAnnotationDelete,
   onClearAllAnnotations,
   onExportAnnotations,
-  onImportAnnotations,
   wellInfoMap = {}, // Map of annotation IDs to well information
   embeddingStatus = {}, // Map of annotation IDs to embedding status
   mapScale = null, // Current map scale for image extraction
@@ -583,81 +582,6 @@ const AnnotationPanel = ({
     }
   };
 
-  const handleImport = (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const data = JSON.parse(e.target.result);
-        if (data.annotations && Array.isArray(data.annotations)) {
-          // Check if this is the new format with well-relative coordinates
-          if (data.metadata && data.metadata.coordinate_system === 'well_relative_mm') {
-            // Convert back to stage coordinates for display
-            const convertedAnnotations = data.annotations.map(annotationData => {
-              const wellInfo = wellInfoMap[annotationData.obj_id];
-              if (!wellInfo) {
-                console.warn(`No well info found for annotation ${annotationData.obj_id}`);
-                return null;
-              }
-              
-              // Convert well-relative points back to stage coordinates
-              const stagePoints = annotationData.well_relative_points.map(point => ({
-                x: point.x + wellInfo.centerX,
-                y: point.y + wellInfo.centerY
-              }));
-              
-              const convertedAnnotation = {
-                id: annotationData.obj_id,
-                type: annotationData.type,
-                points: stagePoints,
-                strokeColor: annotationData.strokeColor,
-                strokeWidth: annotationData.strokeWidth,
-                fillColor: annotationData.fillColor,
-                timestamp: annotationData.timestamp
-              };
-              
-              // Include channel information if available
-              if (annotationData.channels || annotationData.process_settings) {
-                convertedAnnotation.channelInfo = {
-                  channels: annotationData.channels || [],
-                  process_settings: annotationData.process_settings || {}
-                };
-              }
-              
-              return convertedAnnotation;
-            }).filter(annotation => annotation !== null);
-            
-            onImportAnnotations(convertedAnnotations);
-          } else {
-            // Legacy format - convert to include channel info if available
-            const legacyAnnotations = data.annotations.map(annotation => {
-              const convertedAnnotation = { ...annotation };
-              
-              // Include channel information if available in legacy format
-              if (annotation.channels || annotation.process_settings) {
-                convertedAnnotation.channelInfo = {
-                  channels: annotation.channels || [],
-                  process_settings: annotation.process_settings || {}
-                };
-              }
-              
-              return convertedAnnotation;
-            });
-            
-            onImportAnnotations(legacyAnnotations);
-          }
-        } else {
-          alert('Invalid annotation file format');
-        }
-      } catch (error) {
-        alert('Error reading annotation file: ' + error.message);
-      }
-    };
-    reader.readAsText(file);
-    event.target.value = ''; // Reset input
-  };
 
   const handleAnnotationClick = (annotation) => {
     const wellInfo = wellInfoMap[annotation.id];
@@ -1008,16 +932,6 @@ const AnnotationPanel = ({
                 Export
               </button>
               
-              <label className="annotation-action-btn" title="Import annotations from file">
-                <i className="fas fa-upload"></i>
-                Import
-                <input
-                  type="file"
-                  accept=".json"
-                  onChange={handleImport}
-                  className="hidden"
-                />
-              </label>
             </div>
           </div>
         </>
@@ -1161,7 +1075,6 @@ AnnotationPanel.propTypes = {
   onAnnotationDelete: PropTypes.func.isRequired,
   onClearAllAnnotations: PropTypes.func.isRequired,
   onExportAnnotations: PropTypes.func.isRequired,
-  onImportAnnotations: PropTypes.func.isRequired,
   wellInfoMap: PropTypes.object, // Map of annotation IDs to well information
   embeddingStatus: PropTypes.object, // Map of annotation IDs to embedding status
   mapScale: PropTypes.object, // Current map scale for image extraction
