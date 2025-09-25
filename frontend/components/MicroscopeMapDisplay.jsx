@@ -2316,10 +2316,14 @@ const MicroscopeMapDisplay = ({
     if (currentBrowseDataLayers.length === 0 || activeBrowseDataLayers.length === 0) {
       console.log('[Layer Cleanup] No active Browse Data layers - cancelling historical requests and clearing tiles');
       
-      // Cancel all artifact loader requests
+      // Cancel all artifact loader requests and clear caches
       if (artifactZarrLoaderRef.current) {
         const cancelledCount = artifactZarrLoaderRef.current.cancelAllRequests();
         console.log(`🚫 [Layer Cleanup] Cancelled ${cancelledCount} artifact requests`);
+        
+        // Clear all caches to prevent stale data
+        artifactZarrLoaderRef.current.clearCaches();
+        console.log(`🧹 [Layer Cleanup] Cleared artifact loader caches`);
       }
       
       // Clear historical data tiles
@@ -2346,6 +2350,16 @@ const MicroscopeMapDisplay = ({
       if (activeBrowseDataLayers.length === 0 && isHistoricalDataMode) {
         console.log('[Layer Cleanup] Exiting historical data mode - no active Browse Data layers');
         setIsHistoricalDataMode(false);
+        
+        // Clear dataset selection state to prevent stale data from being loaded
+        console.log('[Layer Cleanup] Clearing selected dataset and gallery state');
+        setSelectedHistoricalDataset(null);
+        setSelectedGallery(null);
+        
+        // Clear zarr channel configurations to prevent stale channel data
+        console.log('[Layer Cleanup] Clearing zarr channel configurations');
+        setZarrChannelConfigs({});
+        setAvailableZarrChannels([]);
       }
     }
   }, [layers, isHistoricalDataMode, setIsHistoricalDataMode, currentCancellableRequest, setCurrentCancellableRequest]);
@@ -2798,32 +2812,6 @@ const MicroscopeMapDisplay = ({
     };
   }, [isHistoricalDataMode, getEnabledZarrChannels, getSelectedChannels, realMicroscopeChannelConfigs, selectedHistoricalDataset]);
   
-  // Auto-enable historical data mode for simulated microscope when switching to FREE_PAN mode
-  useEffect(() => {
-    if (isSimulatedMicroscope && mapViewMode === 'FREE_PAN' && !isHistoricalDataMode) {
-      console.log('[Simulated Microscope] Auto-enabling historical data mode in FREE_PAN mode');
-      setIsHistoricalDataMode(true);
-      setStitchedTiles([]); // Clear existing tiles
-      
-      // Create a Browse Data layer if it doesn't exist
-      setLayers(prev => {
-        const existingBrowseLayer = prev.find(layer => layer.type === 'load-server');
-        if (!existingBrowseLayer) {
-          const browseDataLayer = {
-            id: `browse-data-${Date.now()}`,
-            name: 'Browse Data',
-            type: 'load-server',
-            visible: true,
-            channels: [],
-            readonly: false
-          };
-          return [...prev, browseDataLayer];
-        }
-        return prev;
-      });
-    }
-  }, [isSimulatedMicroscope, mapViewMode, isHistoricalDataMode, selectedMicroscopeId, setStitchedTiles, setSelectedGallery]);
-
   // Handle simulated sample switching - update dataset when sample changes
   useEffect(() => {
     if (isSimulatedMicroscope && sampleLoadStatus?.isSampleLoaded && sampleLoadStatus?.selectedSampleId) {
