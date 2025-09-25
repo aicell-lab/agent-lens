@@ -3811,6 +3811,23 @@ const MicroscopeMapDisplay = ({
   // Add a ref to track previous experiment selection to avoid unnecessary reloads
   const previousExperimentSelectionRef = useRef(null);
 
+  // Effect to clean up tiles when experiments become invisible
+  useEffect(() => {
+    if (visibleExperiments.length === 0) return; // Don't clean up if no experiments are visible
+    
+    setStitchedTiles(prevTiles => {
+      const filteredTiles = prevTiles.filter(tile => 
+        tile.experimentName === null || visibleExperiments.includes(tile.experimentName)
+      );
+      
+      if (filteredTiles.length !== prevTiles.length) {
+        console.log(`[Tile Cleanup] Removed ${prevTiles.length - filteredTiles.length} tiles for hidden experiments`);
+      }
+      
+      return filteredTiles;
+    });
+  }, [visibleExperiments]);
+
   // Effect to load tiles when visible experiments change
   useEffect(() => {
     const scanDataLayer = getScanDataLayer();
