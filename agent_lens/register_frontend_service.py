@@ -518,6 +518,49 @@ def get_frontend_api():
             if not await similarity_service.ensure_connected():
                 raise HTTPException(status_code=500, detail="Failed to connect to similarity search service")
             
+            # Convert collection name to valid Weaviate class name (no hyphens, starts with uppercase)
+            # Split by hyphens and capitalize each word, then join
+            words = collection_name.split('-')
+            valid_collection_name = ''.join(word.capitalize() for word in words)
+            
+            # Ensure it starts with uppercase letter
+            if not valid_collection_name[0].isupper():
+                valid_collection_name = 'A' + valid_collection_name[1:]
+            
+            # Check if collection exists, create if it doesn't
+            try:
+                collection_exists = await similarity_service.collection_exists(valid_collection_name)
+                if not collection_exists:
+                    logger.info(f"Collection {valid_collection_name} does not exist, creating it...")
+                    collection_result = await similarity_service.create_collection(valid_collection_name, f"Collection for {collection_name}")
+                    logger.info(f"Successfully created collection {valid_collection_name}: {collection_result}")
+                else:
+                    logger.info(f"Collection {valid_collection_name} already exists")
+            except Exception as e:
+                logger.error(f"Failed to check/create collection {valid_collection_name}: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to create collection {valid_collection_name}: {str(e)}")
+            
+            # Extract just the dataset ID part (last part after slash)
+            clean_application_id = application_id.split('/')[-1] if '/' in application_id else application_id
+            
+            # Check if application exists, create if it doesn't
+            try:
+                app_exists = await similarity_service.application_exists(valid_collection_name, clean_application_id)
+                if not app_exists:
+                    logger.info(f"Application {clean_application_id} does not exist in collection {valid_collection_name}, creating it...")
+                    app_result = await similarity_service.create_application(
+                        collection_name=valid_collection_name,
+                        application_id=clean_application_id,
+                        description=f"Application for dataset {clean_application_id}"
+                    )
+                    logger.info(f"Successfully created application {clean_application_id}: {app_result}")
+                else:
+                    logger.info(f"Application {clean_application_id} already exists in collection {valid_collection_name}")
+            except Exception as e:
+                logger.error(f"Failed to check/create application {clean_application_id}: {e}")
+                # Don't continue if we can't create the application
+                raise HTTPException(status_code=500, detail=f"Failed to create application {clean_application_id}: {str(e)}")
+            
             # Parse metadata
             import json
             try:
@@ -536,8 +579,8 @@ def get_frontend_api():
                 vector = await generate_text_embedding(description)
             
             result = await similarity_service.insert_image(
-                collection_name=collection_name,
-                application_id=application_id,
+                collection_name=valid_collection_name,
+                application_id=clean_application_id,
                 image_id=image_id,
                 description=description,
                 metadata=metadata_dict,
@@ -661,9 +704,18 @@ def get_frontend_api():
             if not await similarity_service.ensure_connected():
                 raise HTTPException(status_code=500, detail="Failed to connect to similarity search service")
             
+            # Convert collection name to valid Weaviate class name
+            words = collection_name.split('-')
+            valid_collection_name = ''.join(word.capitalize() for word in words)
+            if not valid_collection_name[0].isupper():
+                valid_collection_name = 'A' + valid_collection_name[1:]
+            
+            # Extract just the dataset ID part (last part after slash)
+            clean_application_id = application_id.split('/')[-1] if '/' in application_id else application_id
+            
             results = await similarity_service.search_similar_images(
-                collection_name=collection_name,
-                application_id=application_id,
+                collection_name=valid_collection_name,
+                application_id=clean_application_id,
                 query_vector=query_vector,
                 limit=limit,
                 include_vector=include_vector

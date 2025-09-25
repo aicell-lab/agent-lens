@@ -330,6 +330,11 @@ const AnnotationPanel = ({
   const [selectedAnnotation, setSelectedAnnotation] = useState(null);
   const [showDetailsWindow, setShowDetailsWindow] = useState(false);
   const [detailsWindowPosition, setDetailsWindowPosition] = useState({ x: 100, y: 100 });
+  
+  // Similarity search states
+  const [similarityResults, setSimilarityResults] = useState([]);
+  const [showSimilarityPanel, setShowSimilarityPanel] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
 
   const tools = [
     { id: 'rectangle', name: 'Rectangle', icon: 'fa-square', tooltip: 'Draw rectangles' },
@@ -373,6 +378,172 @@ const AnnotationPanel = ({
     a.click();
     URL.revokeObjectURL(url);
     onExportAnnotations();
+  };
+
+  // Convert collection name to valid Weaviate class name (no hyphens, starts with uppercase)
+  const convertToValidCollectionName = (name) => {
+    // Split by hyphens and capitalize each word, then join
+    let valid = name.split('-').map(word => 
+      word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+    ).join('');
+    
+    // Ensure it starts with uppercase letter
+    if (!valid[0] || !valid[0].match(/[A-Z]/)) {
+      valid = 'A' + valid.slice(1);
+    }
+    return valid;
+  };
+
+  const handleUpload = async () => {
+    // Only upload annotations that have image embeddings
+    const annotationsWithEmbeddings = annotations.filter(annotation => 
+      annotation.embeddings && 
+      annotation.embeddings.imageEmbedding
+    );
+
+    if (annotationsWithEmbeddings.length === 0) {
+      alert('No annotations with image embeddings to upload. Annotations need image embeddings.');
+      return;
+    }
+
+    // Get dataset ID for application ID
+    const applicationId = selectedHistoricalDataset?.id;
+    if (!applicationId) {
+      alert('No dataset selected. Cannot upload annotations.');
+      return;
+    }
+
+    const collectionName = convertToValidCollectionName('agent-lens');
+    let uploadedCount = 0;
+    let failedCount = 0;
+
+    try {
+      // Upload each annotation with embeddings
+      for (const annotation of annotationsWithEmbeddings) {
+        try {
+          // Prepare metadata
+          const wellInfo = wellInfoMap[annotation.id];
+          const metadata = {
+            annotation_id: annotation.id,
+            well_id: wellInfo?.id || 'unknown',
+            annotation_type: annotation.type,
+            timestamp: annotation.timestamp || new Date().toISOString(),
+            ...(annotation.channelInfo && { channel_info: annotation.channelInfo })
+          };
+
+          // Prepare URL with query parameters as expected by backend
+          const queryParams = new URLSearchParams({
+            collection_name: collectionName,
+            application_id: applicationId,
+            image_id: `${applicationId}_${annotation.id}`,
+            description: annotation.description || `${annotation.type} annotation`,
+            metadata: JSON.stringify(metadata),
+            dataset_id: applicationId
+          });
+
+          // Use the insert endpoint with correct URL pattern
+          const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
+          const insertResponse = await fetch(`/agent-lens/apps/${serviceId}/similarity/insert?${queryParams}`, {
+            method: 'POST'
+          });
+
+          if (insertResponse.ok) {
+            const result = await insertResponse.json();
+            console.log(`Uploaded annotation ${annotation.id}:`, result);
+            uploadedCount++;
+          } else {
+            console.error(`Failed to upload annotation ${annotation.id}:`, await insertResponse.text());
+            failedCount++;
+          }
+        } catch (error) {
+          console.error(`Error uploading annotation ${annotation.id}:`, error);
+          failedCount++;
+        }
+      }
+
+      // Show results
+      if (uploadedCount > 0) {
+        alert(`Successfully uploaded ${uploadedCount} annotation(s) to Weaviate collection '${collectionName}'.` + 
+              (failedCount > 0 ? ` ${failedCount} failed.` : ''));
+      } else {
+        alert(`Failed to upload annotations. ${failedCount} failed.`);
+      }
+
+    } catch (error) {
+      console.error('Upload error:', error);
+      alert('Failed to upload annotations: ' + error.message);
+    }
+  };
+
+  const handleFindSimilar = async (annotation) => {
+    if (!annotation.embeddings?.imageEmbedding) {
+      alert('This annotation does not have embeddings. Cannot search for similar annotations.');
+      return;
+    }
+
+    const applicationId = selectedHistoricalDataset?.id;
+    if (!applicationId) {
+      alert('No dataset selected. Cannot search for similar annotations.');
+      return;
+    }
+
+    setIsSearching(true);
+    setSimilarityResults([]);
+    setShowSimilarityPanel(true);
+
+    try {
+      const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
+      
+      // Prepare query parameters
+      const queryParams = new URLSearchParams({
+        collection_name: convertToValidCollectionName('agent-lens'),
+        application_id: applicationId,
+        limit: '10',
+        include_vector: 'false'
+      });
+      
+      const response = await fetch(`/agent-lens/apps/${serviceId}/similarity/search/vector?${queryParams}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(annotation.embeddings.imageEmbedding)
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        console.log('Full similarity search response:', result);
+        
+        if (result.success && result.results) {
+          // Handle different result formats from Weaviate
+          let results = result.results;
+          
+          // If results has an 'objects' property, extract it
+          if (results.objects && Array.isArray(results.objects)) {
+            results = results.objects;
+          }
+          
+          // If results is not an array, try to extract objects from it
+          if (!Array.isArray(results) && results.objects) {
+            results = results.objects;
+          }
+          
+          setSimilarityResults(results);
+          console.log('Processed similarity search results:', results);
+        } else {
+          console.error('No results found:', result);
+          setSimilarityResults([]);
+        }
+      } else {
+        console.error('Similarity search failed:', await response.text());
+        alert('Failed to search for similar annotations.');
+      }
+    } catch (error) {
+      console.error('Error searching for similar annotations:', error);
+      alert('Error searching for similar annotations: ' + error.message);
+    } finally {
+      setIsSearching(false);
+    }
   };
 
   const handleImport = (event) => {
@@ -486,6 +657,12 @@ const AnnotationPanel = ({
         <div className="flex items-center space-x-2">
           <i className="fas fa-draw-polygon text-blue-400"></i>
           <span className="font-medium">Enter Annotations</span>
+          {/* Dataset ID Display */}
+          {selectedHistoricalDataset?.id && (
+            <span className="text-xs text-gray-500 ml-2">
+              Dataset: {selectedHistoricalDataset.id}
+            </span>
+          )}
         </div>
         <button
           onClick={() => setIsDrawingMode(!isDrawingMode)}
@@ -724,6 +901,26 @@ const AnnotationPanel = ({
                         )}
                       </div>
                       <div className="annotation-item-actions">
+                        {/* Find Similar button - only show if annotation has image embeddings */}
+                        {annotation.embeddings?.imageEmbedding && (
+                          <button
+                            onClick={() => handleFindSimilar(annotation)}
+                            className="annotation-action-btn"
+                            style={{ 
+                              fontSize: '10px', 
+                              padding: '2px 4px', 
+                              marginRight: '4px',
+                              backgroundColor: '#17a2b8',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '3px'
+                            }}
+                            title="Find similar annotations"
+                            disabled={isSearching}
+                          >
+                            <i className="fas fa-search"></i>
+                          </button>
+                        )}
                         <button
                           onClick={() => onAnnotationDelete(annotation.id)}
                           className="annotation-delete-btn"
@@ -754,10 +951,21 @@ const AnnotationPanel = ({
               </button>
               
               <button
+                onClick={handleUpload}
+                className="annotation-action-btn"
+                disabled={annotations.filter(a => a.embeddings?.imageEmbedding).length === 0}
+                title="Upload annotations with embeddings to Weaviate"
+              >
+                <i className="fas fa-cloud-upload-alt"></i>
+                Upload
+              </button>
+              
+              <button
                 onClick={handleExport}
                 className="annotation-action-btn"
                 disabled={annotations.length === 0}
-                title="Export annotations to file"
+                title="Export annotations to JSON file"
+                style={{ fontSize: '11px', padding: '4px 8px' }}
               >
                 <i className="fas fa-download"></i>
                 Export
@@ -785,6 +993,119 @@ const AnnotationPanel = ({
         onClose={handleCloseDetailsWindow}
         position={detailsWindowPosition}
       />
+
+      {/* Similarity Search Results Panel */}
+      {showSimilarityPanel && (
+        <div className="similarity-panel" style={{
+          position: 'fixed',
+          top: '10px',
+          right: '10px',
+          width: '300px',
+          maxHeight: '500px',
+          backgroundColor: 'white',
+          border: '1px solid #ccc',
+          borderRadius: '8px',
+          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+          zIndex: 1000,
+          overflow: 'hidden'
+        }}>
+          <div style={{
+            padding: '10px',
+            borderBottom: '1px solid #eee',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            backgroundColor: '#f8f9fa'
+          }}>
+            <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 'bold' }}>
+              Similar Annotations
+            </h4>
+            <button
+              onClick={() => setShowSimilarityPanel(false)}
+              style={{
+                background: 'none',
+                border: 'none',
+                fontSize: '16px',
+                cursor: 'pointer',
+                color: '#666'
+              }}
+              title="Close"
+            >
+              ×
+            </button>
+          </div>
+          
+          <div style={{ 
+            padding: '10px', 
+            maxHeight: '400px', 
+            overflowY: 'auto' 
+          }}>
+            {isSearching ? (
+              <div style={{ textAlign: 'center', padding: '20px' }}>
+                <i className="fas fa-spinner fa-spin"></i>
+                <div style={{ marginTop: '8px', fontSize: '12px' }}>Searching...</div>
+              </div>
+            ) : similarityResults.length > 0 ? (
+              <div>
+                {similarityResults.map((result, index) => {
+                  // Extract properties from Weaviate object structure
+                  const props = result.properties || result;
+                  const metadata = props.metadata || '';
+                  
+                  // Try to parse metadata if it's a string
+                  let parsedMetadata = {};
+                  if (typeof metadata === 'string') {
+                    try {
+                      parsedMetadata = JSON.parse(metadata);
+                    } catch {
+                      parsedMetadata = { raw: metadata };
+                    }
+                  } else {
+                    parsedMetadata = metadata;
+                  }
+                  
+                  return (
+                    <div key={index} style={{
+                      padding: '8px',
+                      borderBottom: '1px solid #eee',
+                      fontSize: '12px'
+                    }}>
+                      <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>
+                        {props.description || 'No description'}
+                      </div>
+                      <div style={{ color: '#999', fontSize: '10px', marginBottom: '4px' }}>
+                        ID: {props.image_id || 'Unknown'}
+                      </div>
+                      {parsedMetadata && Object.keys(parsedMetadata).length > 0 && (
+                        <div style={{ color: '#666', marginBottom: '4px' }}>
+                          <strong>Metadata:</strong>
+                          <pre style={{ fontSize: '10px', margin: '2px 0', whiteSpace: 'pre-wrap' }}>
+                            {JSON.stringify(parsedMetadata, null, 2)}
+                          </pre>
+                        </div>
+                      )}
+                      {result.metadata?.score && (
+                        <div style={{ color: '#28a745', fontSize: '11px' }}>
+                          Score: {result.metadata.score.toFixed(3)}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div style={{ 
+                textAlign: 'center', 
+                padding: '20px', 
+                color: '#666',
+                fontSize: '12px'
+              }}>
+                No similar annotations found
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

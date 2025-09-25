@@ -4,9 +4,7 @@ Provides functions for connecting to Weaviate, managing collections, and perform
 """
 
 import os
-import uuid
-import asyncio
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from hypha_rpc import connect_to_server
 import numpy as np
 import clip
@@ -247,6 +245,19 @@ class WeaviateSimilarityService:
         result = await self.weaviate_service.collections.delete(collection_name)
         logger.info(f"Deleted collection: {collection_name}")
         return result
+    
+    async def application_exists(self, collection_name: str, application_id: str) -> bool:
+        """Check if an application exists in a collection."""
+        if not await self.ensure_connected():
+            raise RuntimeError("Not connected to Weaviate service")
+        
+        try:
+            # Use the applications.exists method directly
+            exists = await self.weaviate_service.applications.exists(collection_name, application_id)
+            return exists
+        except Exception as e:
+            logger.warning(f"Could not check if application {application_id} exists in collection {collection_name}: {e}")
+            return False
 
 # Global instance for the frontend service
 similarity_service = WeaviateSimilarityService()
