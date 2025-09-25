@@ -6,7 +6,7 @@ that serves the frontend application.
 import os
 from typing import List
 from fastapi import FastAPI
-from fastapi import UploadFile, File, HTTPException
+from fastapi import UploadFile, File, HTTPException, Form
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from agent_lens.utils.artifact_manager import AgentLensArtifactManager
@@ -495,7 +495,9 @@ def get_frontend_api():
         dataset_id: str = None,
         file_path: str = None,
         image: UploadFile = File(None),
-        preview_image: str = None
+        preview_image: str = None,
+        # NEW: Accept pre-generated image embedding from request body
+        image_embedding: str = Form(None)   # JSON string of image embedding vector from FormData
     ):
         """
         Insert an image into a similarity search collection.
@@ -514,7 +516,6 @@ def get_frontend_api():
             dict: Result of insertion
         """
         try:
-            from agent_lens.utils.weaviate_search import generate_text_embedding
             
             if not await similarity_service.ensure_connected():
                 raise HTTPException(status_code=500, detail="Failed to connect to similarity search service")
@@ -569,15 +570,29 @@ def get_frontend_api():
             except json.JSONDecodeError:
                 metadata_dict = {"raw_metadata": metadata}
             
-            # Generate vector from image if provided, otherwise from description
+            # Use pre-generated image embedding if provided, otherwise generate from uploaded image
             vector = None
-            if image and image.content_type and image.content_type.startswith("image/"):
+            
+            # Priority 1: Use pre-generated image embedding if available
+            if image_embedding:
+                try:
+                    import json
+                    vector = json.loads(image_embedding)
+                    logger.info(f"Using pre-generated image embedding for {image_id}")
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Failed to parse image_embedding JSON: {e}")
+                    vector = None
+            
+            # Priority 2: Generate from uploaded image if no pre-generated embedding
+            if vector is None and image and image.content_type and image.content_type.startswith("image/"):
                 image_bytes = await image.read()
                 if image_bytes:
                     vector = await generate_image_embedding(image_bytes)
+                    logger.info(f"Generated image embedding from uploaded image for {image_id}")
             
+            # If no vector available, raise an error
             if vector is None:
-                vector = await generate_text_embedding(description)
+                raise HTTPException(status_code=400, detail="No image embedding available. Provide either image_embedding parameter or upload an image file.")
             
             result = await similarity_service.insert_image(
                 collection_name=valid_collection_name,

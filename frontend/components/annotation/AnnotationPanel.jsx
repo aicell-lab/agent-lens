@@ -462,7 +462,7 @@ const AnnotationPanel = ({
             console.log(`⚠️ No extractedImageDataUrl found for annotation ${annotation.id} - check embeddings generation`);
           }
 
-          // Prepare URL with query parameters as expected by backend
+          // Prepare URL with basic query parameters (without embedding)
           const queryParams = new URLSearchParams({
             collection_name: collectionName,
             application_id: applicationId,
@@ -477,10 +477,22 @@ const AnnotationPanel = ({
             queryParams.append('preview_image', previewImage);
           }
 
+          // Prepare request body with the embedding (to avoid URL length limits)
+          const requestBody = new FormData();
+          
+          // CRITICAL: Add the pre-generated image embedding to request body
+          if (annotation.embeddings && annotation.embeddings.imageEmbedding) {
+            requestBody.append('image_embedding', JSON.stringify(annotation.embeddings.imageEmbedding));
+            console.log(`🔗 Sending pre-generated image embedding for annotation ${annotation.id}`);
+          } else {
+            console.warn(`⚠️ No image embedding found for annotation ${annotation.id} - upload will fail`);
+          }
+
           // Use the insert endpoint with correct URL pattern
           const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
           const insertResponse = await fetch(`/agent-lens/apps/${serviceId}/similarity/insert?${queryParams}`, {
-            method: 'POST'
+            method: 'POST',
+            body: requestBody
           });
 
           if (insertResponse.ok) {
