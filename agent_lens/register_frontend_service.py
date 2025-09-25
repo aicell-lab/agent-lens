@@ -495,7 +495,7 @@ def get_frontend_api():
         dataset_id: str = None,
         file_path: str = None,
         image: UploadFile = File(None),
-        preview_image: str = None,
+        preview_image: str = Form(None),  # Preview image from FormData
         # NEW: Accept pre-generated image embedding from request body
         image_embedding: str = Form(None)   # JSON string of image embedding vector from FormData
     ):

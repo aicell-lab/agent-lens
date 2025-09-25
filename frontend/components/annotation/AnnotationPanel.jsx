@@ -472,13 +472,14 @@ const AnnotationPanel = ({
             dataset_id: applicationId
           });
 
-          // Add preview image if generated
-          if (previewImage) {
-            queryParams.append('preview_image', previewImage);
-          }
-
-          // Prepare request body with the embedding (to avoid URL length limits)
+          // Prepare request body with large data (to avoid URL length limits)
           const requestBody = new FormData();
+          
+          // Add preview image to request body if generated
+          if (previewImage) {
+            requestBody.append('preview_image', previewImage);
+            console.log(`🖼️ Sending preview image in request body for annotation ${annotation.id}`);
+          }
           
           // CRITICAL: Add the pre-generated image embedding to request body
           if (annotation.embeddings && annotation.embeddings.imageEmbedding) {
