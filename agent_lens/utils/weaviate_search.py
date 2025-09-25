@@ -140,7 +140,8 @@ class WeaviateSimilarityService:
                 {"name": "description", "dataType": ["text"]},
                 {"name": "metadata", "dataType": ["text"]},
                 {"name": "dataset_id", "dataType": ["text"]},
-                {"name": "file_path", "dataType": ["text"]}
+                {"name": "file_path", "dataType": ["text"]},
+                {"name": "preview_image", "dataType": ["text"]}  # Base64 encoded 50x50 preview
             ],
             "vectorizer": "none"  # We'll provide vectors manually
         }
@@ -165,7 +166,7 @@ class WeaviateSimilarityService:
     async def insert_image(self, collection_name: str, application_id: str, 
                           image_id: str, description: str, metadata: Dict[str, Any],
                           dataset_id: str = None, file_path: str = None,
-                          vector: List[float] = None) -> Dict[str, Any]:
+                          vector: List[float] = None, preview_image: str = None) -> Dict[str, Any]:
         """Insert an image with its embedding into Weaviate."""
         if not await self.ensure_connected():
             raise RuntimeError("Not connected to Weaviate service")
@@ -175,7 +176,8 @@ class WeaviateSimilarityService:
             "description": description,
             "metadata": str(metadata),
             "dataset_id": dataset_id or "",
-            "file_path": file_path or ""
+            "file_path": file_path or "",
+            "preview_image": preview_image or ""
         }
         
         # Generate vector if not provided

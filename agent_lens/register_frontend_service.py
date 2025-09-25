@@ -494,7 +494,8 @@ def get_frontend_api():
         metadata: str = "{}",
         dataset_id: str = None,
         file_path: str = None,
-        image: UploadFile = File(None)
+        image: UploadFile = File(None),
+        preview_image: str = None
     ):
         """
         Insert an image into a similarity search collection.
@@ -586,7 +587,8 @@ def get_frontend_api():
                 metadata=metadata_dict,
                 dataset_id=dataset_id,
                 file_path=file_path,
-                vector=vector
+                vector=vector,
+                preview_image=preview_image
             )
             
             return {"success": True, "result": result}

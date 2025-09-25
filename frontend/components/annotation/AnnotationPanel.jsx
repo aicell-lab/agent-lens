@@ -4,6 +4,7 @@ import './AnnotationPanel.css';
 import AnnotationDetailsWindow from './AnnotationDetailsWindow';
 import { generateAnnotationData, exportAnnotationsToJson } from '../../utils/annotationUtils';
 import { extractAnnotationImageRegion, extractAnnotationImageRegionAdvanced } from '../../utils/annotationEmbeddingService';
+import { generatePreviewFromDataUrl } from '../../utils/previewImageUtils';
 
 // Component for displaying annotation image previews
 const AnnotationImagePreview = ({ 
@@ -431,6 +432,12 @@ const AnnotationPanel = ({
             ...(annotation.channelInfo && { channel_info: annotation.channelInfo })
           };
 
+          // Generate preview image if annotation has extracted image data
+          let previewImage = null;
+          if (annotation.extractedImageDataUrl) {
+            previewImage = await generatePreviewFromDataUrl(annotation.extractedImageDataUrl);
+          }
+
           // Prepare URL with query parameters as expected by backend
           const queryParams = new URLSearchParams({
             collection_name: collectionName,
@@ -440,6 +447,11 @@ const AnnotationPanel = ({
             metadata: JSON.stringify(metadata),
             dataset_id: applicationId
           });
+
+          // Add preview image if generated
+          if (previewImage) {
+            queryParams.append('preview_image', previewImage);
+          }
 
           // Use the insert endpoint with correct URL pattern
           const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
@@ -1068,27 +1080,53 @@ const AnnotationPanel = ({
                     <div key={index} style={{
                       padding: '8px',
                       borderBottom: '1px solid #eee',
-                      fontSize: '12px'
+                      fontSize: '12px',
+                      display: 'flex',
+                      gap: '8px'
                     }}>
-                      <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>
-                        {props.description || 'No description'}
-                      </div>
-                      <div style={{ color: '#999', fontSize: '10px', marginBottom: '4px' }}>
-                        ID: {props.image_id || 'Unknown'}
-                      </div>
-                      {parsedMetadata && Object.keys(parsedMetadata).length > 0 && (
-                        <div style={{ color: '#666', marginBottom: '4px' }}>
-                          <strong>Metadata:</strong>
-                          <pre style={{ fontSize: '10px', margin: '2px 0', whiteSpace: 'pre-wrap' }}>
-                            {JSON.stringify(parsedMetadata, null, 2)}
-                          </pre>
+                      {/* Preview Image */}
+                      {props.preview_image && (
+                        <div style={{ flexShrink: 0 }}>
+                          <img 
+                            src={props.preview_image} 
+                            alt="Preview" 
+                            style={{ 
+                              width: '50px', 
+                              height: '50px', 
+                              border: '1px solid #ddd',
+                              borderRadius: '4px',
+                              objectFit: 'cover'
+                            }} 
+                          />
                         </div>
                       )}
-                      {result.metadata?.score && (
-                        <div style={{ color: '#28a745', fontSize: '11px' }}>
-                          Score: {result.metadata.score.toFixed(3)}
+                      
+                      {/* Content */}
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>
+                          {props.description || 'No description'}
                         </div>
-                      )}
+                        <div style={{ color: '#999', fontSize: '10px', marginBottom: '4px' }}>
+                          ID: {props.image_id || 'Unknown'}
+                        </div>
+                        {parsedMetadata && Object.keys(parsedMetadata).length > 0 && (
+                          <div style={{ color: '#666', marginBottom: '4px' }}>
+                            <strong>Metadata:</strong>
+                            <div style={{ fontSize: '10px', margin: '2px 0', maxHeight: '60px', overflow: 'auto' }}>
+                              Well: {parsedMetadata.well_id || 'Unknown'}<br/>
+                              Type: {parsedMetadata.annotation_type || 'Unknown'}<br/>
+                              {parsedMetadata.timestamp && (
+                                <>Time: {new Date(parsedMetadata.timestamp).toLocaleString()}</>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        {result.metadata?.score && (
+                          <div style={{ color: '#28a745', fontSize: '11px' }}>
+                            Score: {result.metadata.score.toFixed(3)}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
