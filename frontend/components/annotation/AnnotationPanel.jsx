@@ -760,10 +760,11 @@ const AnnotationPanel = ({
               <textarea
                 value={description || ''}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Enter annotation description..."
+                placeholder="text ... in development"
                 className="description-input"
                 rows="2"
                 maxLength="200"
+                disabled
               />
               <div className="description-counter">
                 {(description || '').length}/200 characters
