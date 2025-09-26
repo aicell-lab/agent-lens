@@ -352,7 +352,6 @@ const AnnotationPanel = ({
     { id: 'polygon', name: 'Polygon', icon: 'fa-draw-polygon', tooltip: 'Draw polygons (click to add points, double-click to finish)' },
     { id: 'freehand', name: 'Freehand', icon: 'fa-pencil', tooltip: 'Draw freehand shapes' },
     { id: 'map-browse', name: 'Map Browse', icon: 'fa-hand-paper', tooltip: 'Browse the map (pan and zoom)' },
-    { id: 'delete', name: 'Delete', icon: 'fa-trash', tooltip: 'Delete annotations' },
   ];
 
   const presetColors = [
