@@ -174,6 +174,7 @@ const MicroscopeMapDisplay = ({
   const [isAnnotationDropdownOpen, setIsAnnotationDropdownOpen] = useState(false);
   const [isDrawingMode, setIsDrawingMode] = useState(false);
   const [currentAnnotationTool, setCurrentAnnotationTool] = useState('select');
+  const [isMapBrowsingMode, setIsMapBrowsingMode] = useState(false);
   const [annotationStrokeColor, setAnnotationStrokeColor] = useState('#ff0000');
   const [annotationStrokeWidth, setAnnotationStrokeWidth] = useState(2);
   const [annotationFillColor, setAnnotationFillColor] = useState('transparent');
@@ -1186,14 +1187,14 @@ const MicroscopeMapDisplay = ({
 
   // Split interaction controls: hardware vs map browsing, exclude simulated microscope in historical mode
   const isHardwareInteractionDisabled = (isHistoricalDataMode && !(isSimulatedMicroscope && isHistoricalDataMode)) || microscopeBusy || currentOperation !== null || isScanInProgress || isQuickScanInProgress || isDrawingMode || isHardwareLocked;
-  const isMapBrowsingDisabled = false; // Allow map browsing - annotation canvas will handle its own interactions
+  const isMapBrowsingDisabled = isDrawingMode && !isMapBrowsingMode; // Disable map browsing when in drawing mode unless map browsing is explicitly enabled
   
   // Legacy compatibility - some UI elements still use the general disabled state
   const isInteractionDisabled = isHardwareInteractionDisabled;
 
   // Handle panning (only in FREE_PAN mode)
   const handleMapPanning = (e) => {
-    if (mapViewMode !== 'FREE_PAN' || isDrawingMode) return;
+    if (mapViewMode !== 'FREE_PAN' || isMapBrowsingDisabled) return;
     
     // During active scanning, disable rectangle selection to allow map browsing
     if (isRectangleSelection && !isScanInProgress && !isQuickScanInProgress) {
@@ -1214,7 +1215,7 @@ const MicroscopeMapDisplay = ({
       return;
     }
     
-    if (isPanning && mapViewMode === 'FREE_PAN' && !isDrawingMode) {
+    if (isPanning && mapViewMode === 'FREE_PAN' && !isMapBrowsingDisabled) {
       // Cancel any pending tile loads during active panning
       if (canvasUpdateTimerRef.current) {
         clearTimeout(canvasUpdateTimerRef.current);
@@ -1234,7 +1235,7 @@ const MicroscopeMapDisplay = ({
       return;
     }
     
-    if (isDrawingMode) {
+    if (isMapBrowsingDisabled) {
       setIsPanning(false);
       return;
     }
@@ -1435,7 +1436,7 @@ const MicroscopeMapDisplay = ({
   const handleWheel = useCallback((e) => {
     e.preventDefault();
     
-    if (isDrawingMode) return;
+    if (isMapBrowsingDisabled) return;
     
     // Set zooming state to true and reset timeout
     setIsZooming(true);
@@ -4371,6 +4372,8 @@ const MicroscopeMapDisplay = ({
                       setIsDrawingMode={setIsDrawingMode}
                       currentTool={currentAnnotationTool}
                       setCurrentTool={setCurrentAnnotationTool}
+                      isMapBrowsingMode={isMapBrowsingMode}
+                      setIsMapBrowsingMode={setIsMapBrowsingMode}
                       strokeColor={annotationStrokeColor}
                       setStrokeColor={setAnnotationStrokeColor}
                       strokeWidth={annotationStrokeWidth}
@@ -4413,18 +4416,20 @@ const MicroscopeMapDisplay = ({
       <div
         ref={mapContainerRef}
         className={`absolute inset-0 top-12 overflow-hidden ${
-          isDrawingMode 
+          isDrawingMode && !isMapBrowsingMode
             ? 'cursor-crosshair' 
-            : mapViewMode === 'FOV_FITTED' 
-              ? (isHardwareInteractionDisabled ? 'cursor-not-allowed' : 'cursor-grab')
-              : (isRectangleSelection && !isScanInProgress && !isQuickScanInProgress)
-                ? (isHardwareInteractionDisabled ? 'cursor-not-allowed' : 'cursor-crosshair')
-                : 'cursor-move'
+            : isMapBrowsingMode
+              ? (isDragging || isPanning ? 'cursor-grabbing' : 'cursor-grab')
+              : mapViewMode === 'FOV_FITTED' 
+                ? (isHardwareInteractionDisabled ? 'cursor-not-allowed' : 'cursor-grab')
+                : (isRectangleSelection && !isScanInProgress && !isQuickScanInProgress)
+                  ? (isHardwareInteractionDisabled ? 'cursor-not-allowed' : 'cursor-crosshair')
+                  : 'cursor-move'
         } ${isDragging || isPanning ? 'cursor-grabbing' : ''}`}
-        onMouseDown={isDrawingMode ? undefined : (mapViewMode === 'FOV_FITTED' ? (isHardwareInteractionDisabled ? undefined : onMouseDown) : handleMapPanning)}
-        onMouseMove={isDrawingMode ? undefined : (mapViewMode === 'FOV_FITTED' ? (isHardwareInteractionDisabled ? undefined : onMouseMove) : handleMapPanMove)}
-        onMouseUp={isDrawingMode ? undefined : (mapViewMode === 'FOV_FITTED' ? (isHardwareInteractionDisabled ? undefined : onMouseUp) : handleMapPanEnd)}
-        onMouseLeave={isDrawingMode ? undefined : (mapViewMode === 'FOV_FITTED' ? (isHardwareInteractionDisabled ? undefined : onMouseLeave) : handleMapPanEnd)}
+        onMouseDown={isMapBrowsingDisabled ? undefined : (mapViewMode === 'FOV_FITTED' ? (isHardwareInteractionDisabled ? undefined : onMouseDown) : handleMapPanning)}
+        onMouseMove={isMapBrowsingDisabled ? undefined : (mapViewMode === 'FOV_FITTED' ? (isHardwareInteractionDisabled ? undefined : onMouseMove) : handleMapPanMove)}
+        onMouseUp={isMapBrowsingDisabled ? undefined : (mapViewMode === 'FOV_FITTED' ? (isHardwareInteractionDisabled ? undefined : onMouseUp) : handleMapPanEnd)}
+        onMouseLeave={isMapBrowsingDisabled ? undefined : (mapViewMode === 'FOV_FITTED' ? (isHardwareInteractionDisabled ? undefined : onMouseLeave) : handleMapPanEnd)}
         onDoubleClick={isHardwareInteractionDisabled ? undefined : (mapViewMode === 'FREE_PAN' && !isRectangleSelection ? handleDoubleClick : undefined)}
                   style={{
             userSelect: 'none',
@@ -4504,7 +4509,7 @@ const MicroscopeMapDisplay = ({
          {/* Annotation Canvas Overlay */}
          <AnnotationCanvas
            containerRef={mapContainerRef}
-           isDrawingMode={isDrawingMode}
+           isDrawingMode={isDrawingMode && !isMapBrowsingMode}
            currentTool={currentAnnotationTool}
            strokeColor={annotationStrokeColor}
            strokeWidth={annotationStrokeWidth}

@@ -331,7 +331,10 @@ const AnnotationPanel = ({
   wellPlateType = '96',
   timepoint = 0,
   // Callback for embedding generation
-  onEmbeddingsGenerated = null
+  onEmbeddingsGenerated = null,
+  // Map browsing state
+  isMapBrowsingMode = false,
+  setIsMapBrowsingMode = null
 }) => {
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [activeColorType, setActiveColorType] = useState('stroke'); // 'stroke' or 'fill'
@@ -348,6 +351,7 @@ const AnnotationPanel = ({
     { id: 'rectangle', name: 'Rectangle', icon: 'fa-square', tooltip: 'Draw rectangles' },
     { id: 'polygon', name: 'Polygon', icon: 'fa-draw-polygon', tooltip: 'Draw polygons (click to add points, double-click to finish)' },
     { id: 'freehand', name: 'Freehand', icon: 'fa-pencil', tooltip: 'Draw freehand shapes' },
+    { id: 'map-browse', name: 'Map Browse', icon: 'fa-hand-paper', tooltip: 'Browse the map (pan and zoom)' },
     { id: 'delete', name: 'Delete', icon: 'fa-trash', tooltip: 'Delete annotations' },
   ];
 
@@ -364,6 +368,22 @@ const AnnotationPanel = ({
       setFillColor(color);
     }
     setShowColorPicker(false);
+  };
+
+  const handleToolSelection = (toolId) => {
+    if (toolId === 'map-browse') {
+      // Toggle map browsing mode
+      if (setIsMapBrowsingMode) {
+        setIsMapBrowsingMode(!isMapBrowsingMode);
+      }
+      // Don't change currentTool when toggling map browsing
+    } else {
+      // For other tools, deactivate map browsing and set the tool
+      if (setIsMapBrowsingMode) {
+        setIsMapBrowsingMode(false);
+      }
+      setCurrentTool(toolId);
+    }
   };
 
   const handleExport = () => {
@@ -660,8 +680,12 @@ const AnnotationPanel = ({
               {tools.map(tool => (
                 <button
                   key={tool.id}
-                  onClick={() => setCurrentTool(tool.id)}
-                  className={`annotation-tool-btn ${currentTool === tool.id ? 'active' : ''}`}
+                  onClick={() => handleToolSelection(tool.id)}
+                  className={`annotation-tool-btn ${
+                    tool.id === 'map-browse' 
+                      ? (isMapBrowsingMode ? 'active' : '') 
+                      : (currentTool === tool.id ? 'active' : '')
+                  }`}
                   title={tool.tooltip}
                 >
                   <i className={`fas ${tool.icon}`}></i>
@@ -1109,7 +1133,10 @@ AnnotationPanel.propTypes = {
   selectedHistoricalDataset: PropTypes.object,
   wellPlateType: PropTypes.string,
   timepoint: PropTypes.number,
-  onEmbeddingsGenerated: PropTypes.func
+  onEmbeddingsGenerated: PropTypes.func,
+  // Map browsing state
+  isMapBrowsingMode: PropTypes.bool,
+  setIsMapBrowsingMode: PropTypes.func
 };
 
 export default AnnotationPanel;
