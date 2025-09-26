@@ -538,7 +538,6 @@ const MicroscopeMapDisplay = ({
     setActiveExperimentHandler,
     removeExperiment,
     getExperimentInfo,
-    autoCreateExperiment,
     handleResetExperiment,
     handleDeleteExperiment,
     renderDialogs,
@@ -2181,14 +2180,6 @@ const MicroscopeMapDisplay = ({
     }
   }, [isLayerDropdownOpen, isSimulatedMicroscope]); // Removed function dependencies to prevent infinite loops
 
-  // Auto-create experiment when sample is loaded
-  useEffect(() => {
-    if (sampleLoadStatus?.isSampleLoaded && sampleLoadStatus?.isRealMicroscope && sampleLoadStatus?.loadedSampleOnMicroscope) {
-      const sampleId = sampleLoadStatus.loadedSampleOnMicroscope;
-      const sampleName = sampleLoadStatus.loadedSampleName;
-      autoCreateExperiment(sampleId, sampleName);
-    }
-  }, [sampleLoadStatus?.isSampleLoaded, sampleLoadStatus?.isRealMicroscope, sampleLoadStatus?.loadedSampleOnMicroscope, sampleLoadStatus?.loadedSampleName, autoCreateExperiment]);
 
   // Cleanup timeouts on unmount
   useEffect(() => {
