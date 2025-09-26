@@ -269,16 +269,94 @@ class ArtifactZarrLoader {
         color: c.color 
       })));
       
-      // Load each channel separately in parallel
+      // 🚀 REAL-TIME MERGED UPDATES: Track loaded channels and provide progressive merging
+      const loadedChannels = new Map(); // channelName -> { config, canvas, width, height, actualBounds, actualStageBounds }
+      let compositeCanvas = null;
+      let compositeCtx = null;
+      
+      // Track actual chunk progress across all channels
+      let totalChunksLoaded = 0;
+      let totalChunksExpected = 0;
+      const channelChunkProgress = new Map(); // channelName -> { loaded, total }
+      
+      // Helper function to create/update composite canvas with current loaded channels
+      const updateCompositeCanvas = () => {
+        if (loadedChannels.size === 0) return null;
+        
+        // Use the first loaded channel as reference for dimensions
+        const firstChannel = Array.from(loadedChannels.values())[0];
+        const compositeWidth = firstChannel.width;
+        const compositeHeight = firstChannel.height;
+        
+        // Create or reuse composite canvas
+        if (!compositeCanvas || compositeCanvas.width !== compositeWidth || compositeCanvas.height !== compositeHeight) {
+          compositeCanvas = document.createElement('canvas');
+          compositeCanvas.width = compositeWidth;
+          compositeCanvas.height = compositeHeight;
+          compositeCtx = compositeCanvas.getContext('2d');
+        }
+        
+        // Clear to transparent (important for proper alpha blending)
+        compositeCtx.clearRect(0, 0, compositeWidth, compositeHeight);
+        
+        // Apply additive blending for each loaded channel
+        for (const [, channelData] of loadedChannels) {
+          const { config, canvas } = channelData;
+          
+          // Apply contrast adjustment and channel color
+          const adjustedCanvas = this.applyChannelAdjustments(canvas, config);
+          
+          // Additive blend with existing composite (preserves alpha)
+          compositeCtx.globalCompositeOperation = 'lighter'; // Additive blending
+          compositeCtx.drawImage(adjustedCanvas, 0, 0);
+        }
+        
+        // Reset composite operation
+        compositeCtx.globalCompositeOperation = 'source-over';
+        
+        return compositeCanvas;
+      };
+      
+      // Load each channel with real-time merging updates
       const channelPromises = enabledChannels.map(async (config) => {
         try {
           const channelRegion = await this.getWellCanvasRegionRealTime(
             centerX, centerY, width_mm, height_mm,
             config.channelName, scaleLevel, timepoint, datasetId, wellId,
             (loadedChunks, totalChunks, partialCanvas) => {
-              // Forward progress updates
-              if (onChunkProgress) {
-                onChunkProgress(loadedChunks, totalChunks, partialCanvas, config.channelName);
+              // Store the partial canvas for this channel
+              if (partialCanvas) {
+                loadedChannels.set(config.channelName, {
+                  config,
+                  canvas: partialCanvas,
+                  width: partialCanvas.width,
+                  height: partialCanvas.height,
+                  actualBounds: null, // Will be updated when complete
+                  actualStageBounds: null
+                });
+                
+                // Update chunk progress tracking for this channel
+                const previousProgress = channelChunkProgress.get(config.channelName) || { loaded: 0, total: 0 };
+                const previousLoaded = previousProgress.loaded;
+                const previousTotal = previousProgress.total;
+                
+                // Update total expected chunks if this is the first time we see this channel's total
+                if (previousTotal === 0 && totalChunks > 0) {
+                  totalChunksExpected += totalChunks;
+                }
+                
+                // Update total loaded chunks (subtract previous progress and add new progress)
+                totalChunksLoaded = totalChunksLoaded - previousLoaded + loadedChunks;
+                
+                // Store current progress for this channel
+                channelChunkProgress.set(config.channelName, { loaded: loadedChunks, total: totalChunks });
+                
+                // 🚀 REAL-TIME MERGED UPDATE: Create merged composite and send progress update
+                const mergedCanvas = updateCompositeCanvas();
+                if (mergedCanvas && onChunkProgress) {
+                  // Report actual chunk progress across all channels
+                  onChunkProgress(totalChunksLoaded, totalChunksExpected, mergedCanvas, config.channelName);
+                }
               }
             }
           );
@@ -286,6 +364,26 @@ class ArtifactZarrLoader {
           if (!channelRegion) {
             console.warn(`Channel ${config.channelName} not available for well ${wellId}`);
             return null;
+          }
+          
+          // Store the complete channel data
+          loadedChannels.set(config.channelName, {
+            config,
+            canvas: channelRegion.canvas,
+            width: channelRegion.width,
+            height: channelRegion.height,
+            actualBounds: channelRegion.actualBounds,
+            actualStageBounds: channelRegion.actualStageBounds
+          });
+          
+          // Update final chunk progress for this channel
+          const finalProgress = channelChunkProgress.get(config.channelName) || { loaded: 0, total: 0 };
+          totalChunksLoaded = totalChunksLoaded - finalProgress.loaded + finalProgress.total;
+          
+          // 🚀 REAL-TIME MERGED UPDATE: Send progress update with merged result
+          const mergedCanvas = updateCompositeCanvas();
+          if (mergedCanvas && onChunkProgress) {
+            onChunkProgress(totalChunksLoaded, totalChunksExpected, mergedCanvas, config.channelName);
           }
           
           return {
@@ -328,46 +426,24 @@ class ArtifactZarrLoader {
         console.log(`⚠️ Failed channels: ${failedChannels.join(', ')}`);
       }
       
-      // Use the first valid result as the reference for dimensions
-      const referenceResult = validResults[0];
-      const compositeWidth = referenceResult.width;
-      const compositeHeight = referenceResult.height;
-      
-      // Create composite canvas for additive blending with alpha support
-      const compositeCanvas = document.createElement('canvas');
-      compositeCanvas.width = compositeWidth;
-      compositeCanvas.height = compositeHeight;
-      const compositeCtx = compositeCanvas.getContext('2d');
-      
-      // Clear to transparent (important for proper alpha blending)
-      compositeCtx.clearRect(0, 0, compositeWidth, compositeHeight);
-      
-      // Apply additive blending for each channel
-      for (const result of validResults) {
-        const { config, canvas } = result;
-        
-        // Apply contrast adjustment and channel color
-        const adjustedCanvas = this.applyChannelAdjustments(canvas, config);
-        
-        // Additive blend with existing composite (preserves alpha)
-        compositeCtx.globalCompositeOperation = 'lighter'; // Additive blending
-        compositeCtx.drawImage(adjustedCanvas, 0, 0);
+      // Create final composite canvas with all loaded channels
+      const finalCompositeCanvas = updateCompositeCanvas();
+      if (!finalCompositeCanvas) {
+        console.warn(`Failed to create final composite canvas for well ${wellId}`);
+        return { success: false, message: `Failed to create composite for well ${wellId}` };
       }
       
-      // Reset composite operation
-      compositeCtx.globalCompositeOperation = 'source-over';
-      
-      console.log(`✅ Multi-channel composite created: ${validResults.length} channels, ${compositeWidth}x${compositeHeight}px`);
+      console.log(`✅ Multi-channel composite created: ${validResults.length} channels, ${finalCompositeCanvas.width}x${finalCompositeCanvas.height}px`);
       
       // Convert to requested output format
-      const outputData = await this.normalizeAndEncodeImage({ canvas: compositeCanvas }, null, outputFormat);
+      const outputData = await this.normalizeAndEncodeImage({ canvas: finalCompositeCanvas }, null, outputFormat);
       
       return {
         success: true,
         data: outputData,
         metadata: {
-          width: compositeWidth,
-          height: compositeHeight,
+          width: finalCompositeCanvas.width,
+          height: finalCompositeCanvas.height,
           channelsUsed: validResults.map(r => r.config.channelName),
           scale: scaleLevel,
           timepoint,
@@ -376,8 +452,8 @@ class ArtifactZarrLoader {
           centerY,
           width_mm,
           height_mm,
-          actualBounds: referenceResult.actualBounds,
-          actualStageBounds: referenceResult.actualStageBounds,
+          actualBounds: validResults[0].actualBounds,
+          actualStageBounds: validResults[0].actualStageBounds,
           isMultiChannel: true
         }
       };
@@ -796,16 +872,15 @@ class ArtifactZarrLoader {
       console.log(`🎨 MULTI-CHANNEL REAL-TIME: Starting progressive loading for ${wellRequests.length} wells with ${channelConfigs.length} channels`);
       
       // Process each well with multi-channel support
-      const wellPromises = wellRequests.map(async (request, index) => {
+      const wellPromises = wellRequests.map(async (request) => {
         const { wellId, centerX, centerY, width_mm, height_mm, scaleLevel, timepoint, datasetId, outputFormat } = request;
-        const wellRequestId = `${requestBatchId}_well_${index}`;
         
         try {
           const result = await this.getMultiChannelWellRegion(
             wellId, centerX, centerY, width_mm, height_mm,
             channelConfigs, scaleLevel, timepoint, datasetId,
-            (loadedChunks, totalChunks, partialCanvas, channelName) => {
-              // Forward progress updates for this specific well
+            (loadedChunks, totalChunks, partialCanvas) => {
+              // 🚀 REAL-TIME MERGED UPDATES: Forward merged progress updates for this specific well
               if (onChunkProgress) {
                 onChunkProgress(wellId, loadedChunks, totalChunks, partialCanvas);
               }
@@ -830,11 +905,7 @@ class ArtifactZarrLoader {
             height_mm
           };
           
-          // Call completion callback with progress simulation for multi-channel
-          if (onChunkProgress) {
-            onChunkProgress(wellId, channelConfigs.filter(c => c.enabled).length, channelConfigs.filter(c => c.enabled).length, null);
-          }
-          
+          // Call completion callback - no need for progress simulation since we have real progress
           if (onWellComplete) {
             onWellComplete(wellId, finalResult);
           }
@@ -1691,7 +1762,7 @@ class ArtifactZarrLoader {
       // Process chunks in parallel: fetch, decode and prepare canvas data
       const processingTimerName = `Parallel chunk processing ${Date.now()}_${Math.random()}`;
       console.time(processingTimerName);
-      const chunkPromises = chunks.map(async (chunk, index) => {
+      const chunkPromises = chunks.map(async (chunk) => {
         const [t, c, z, y, x] = chunk.coordinates;
         const chunkUrl = `${baseUrl}${scaleLevel}/${t}.${c}.${z}.${y}.${x}`;
         

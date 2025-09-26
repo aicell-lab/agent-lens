@@ -3352,13 +3352,13 @@ const MicroscopeMapDisplay = ({
         // Track completed wells for final processing
         const completedWells = new Map();
         
-        // Real-time chunk progress callback
+        // Real-time chunk progress callback with merged channel support
         const onChunkProgress = (wellId, loadedChunks, totalChunks, partialCanvas) => {
-          console.log(`🔄 REAL-TIME: Well ${wellId} progress: ${loadedChunks}/${totalChunks} chunks loaded`);
+          console.log(`🔄 REAL-TIME: Well ${wellId} progress: ${loadedChunks}/${totalChunks} chunks loaded (merged channels)`);
           
 
           
-          // 🚀 REAL-TIME TILE UPDATES: Allow frequent updates for smooth progress visualization
+          // 🚀 REAL-TIME MERGED TILE UPDATES: Show progressively merged channels during loading
           const now = Date.now();
           const lastUpdate = chunkProgressUpdateTimes.current.get(wellId) || 0;
           const UPDATE_INTERVAL = 200; // Only update state every 200ms per well
@@ -3401,7 +3401,7 @@ const MicroscopeMapDisplay = ({
               }
             };
             
-            // Create temporary tile with partial data
+            // Create temporary tile with merged channel data
             const tempTile = {
               data: partialDataUrl,
               bounds: wellBounds,
@@ -3419,7 +3419,9 @@ const MicroscopeMapDisplay = ({
               progress: `${loadedChunks}/${totalChunks}`,
               metadata: {
                 isMultiChannel: useMultiChannel,
-                channelsUsed: useMultiChannel ? enabledChannels.map(ch => ch.channelName) : [activeChannel]
+                channelsUsed: useMultiChannel ? enabledChannels.map(ch => ch.channelName) : [activeChannel],
+                isMerged: useMultiChannel, // Indicate this is a merged result
+                loadingProgress: `${loadedChunks}/${totalChunks}`
               }
             };
             
@@ -3484,7 +3486,7 @@ const MicroscopeMapDisplay = ({
           const centerY = (wellBounds.topLeft.y + wellBounds.bottomRight.y) / 2;
           console.log(`📍 ${wellId}: rel(${wellRequest.centerX.toFixed(2)}, ${wellRequest.centerY.toFixed(2)}) → center(${centerX.toFixed(1)}, ${centerY.toFixed(1)}) ${finalResult.metadata.width_mm.toFixed(1)}×${finalResult.metadata.height_mm.toFixed(1)}mm`);
           
-          // Create final tile with complete data
+          // Create final tile with complete merged data
           const finalTile = {
             data: `data:image/png;base64,${finalResult.data}`,
             bounds: wellBounds,
@@ -3502,7 +3504,9 @@ const MicroscopeMapDisplay = ({
             metadata: {
               ...finalResult.metadata,
               isMultiChannel: useMultiChannel,
-              channelsUsed: finalResult.metadata.channelsUsed || (useMultiChannel ? enabledChannels.map(ch => ch.channelName) : [activeChannel])
+              channelsUsed: finalResult.metadata.channelsUsed || (useMultiChannel ? enabledChannels.map(ch => ch.channelName) : [activeChannel]),
+              isMerged: useMultiChannel, // Indicate this is a merged result
+              loadingProgress: 'complete'
             }
           };
           
