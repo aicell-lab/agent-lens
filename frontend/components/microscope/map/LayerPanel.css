@@ -227,6 +227,10 @@
 .layer-name--active {
   color: #10b981;
   font-weight: 600;
+  background: rgba(16, 185, 129, 0.1);
+  border-left: 3px solid #10b981;
+  padding-left: 0.5rem;
+  margin-left: -0.5rem;
 }
 
 .layer-name i {

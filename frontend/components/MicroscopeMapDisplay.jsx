@@ -222,6 +222,7 @@ const MicroscopeMapDisplay = ({
     }
   ]);
   const [expandedLayers, setExpandedLayers] = useState({});
+  const [activeLayer, setActiveLayer] = useState(null); // Track which layer is currently activated
 
   // Helper functions for layer-driven data loading (moved early to avoid hoisting issues)
   const getVisibleLayersByType = useCallback((type) => {
@@ -4444,6 +4445,10 @@ const MicroscopeMapDisplay = ({
                       
                       // Historical dataset props
                       selectedHistoricalDataset={selectedHistoricalDataset}
+                      
+                      // Layer activation props
+                      activeLayer={activeLayer}
+                      setActiveLayer={setActiveLayer}
                     />
                   </div>
                 )}

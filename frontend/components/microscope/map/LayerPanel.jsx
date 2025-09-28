@@ -76,7 +76,11 @@ const LayerPanel = ({
   microscopeBusy,
   
   // Historical dataset props
-  selectedHistoricalDataset
+  selectedHistoricalDataset,
+  
+  // Layer activation props
+  activeLayer,
+  setActiveLayer
 }) => {
   const [showLayerTypeDropdown, setShowLayerTypeDropdown] = useState(false);
   const [newLayerType, setNewLayerType] = useState('quick-scan');
@@ -255,6 +259,34 @@ const LayerPanel = ({
     setLayers(prev => prev.filter(layer => layer.id !== layerId));
   };
 
+  // Handle layer activation - only for data layers (not well-plate or microscope-control)
+  const handleLayerActivation = async (layerId, layerType) => {
+    // Skip activation for well-plate and microscope-control layers
+    if (layerType === 'plate-view' || layerType === 'microscope-control') {
+      return;
+    }
+    
+    // ALWAYS clear any existing active layer first to ensure only one layer is active
+    if (activeLayer) {
+      console.log(`[LayerPanel] Deactivating previous active layer: ${activeLayer}`);
+    }
+    
+    // Set the active layer
+    setActiveLayer(layerId);
+    console.log(`[LayerPanel] Activated layer: ${layerId} (${layerType})`);
+    
+    // For real microscope experiments ONLY, also call setActiveExperimentHandler
+    // Browse Data layers are remote data and don't need microscope experiment activation
+    if (layerType === 'experiment' && setActiveExperimentHandler) {
+      try {
+        await setActiveExperimentHandler(layerId);
+        console.log(`[LayerPanel] Set active experiment: ${layerId}`);
+      } catch (error) {
+        console.error(`[LayerPanel] Failed to set active experiment: ${error.message}`);
+      }
+    }
+  };
+
   // Helper function to check if this is the last selected channel
   const isLastSelectedChannel = (channelName, isEnabled) => {
     if (isHistoricalDataMode || mapViewMode === 'FOV_FITTED') {
@@ -356,11 +388,22 @@ const LayerPanel = ({
                 </button>
                 
                 <div 
-                  className="layer-name"
-                  onClick={() => toggleLayerExpansion(layer.id)}
-                  title="Click to expand/collapse channels"
+                  className={`layer-name ${activeLayer === layer.id ? 'layer-name--active' : ''}`}
+                  onClick={() => {
+                    // Handle layer activation on click
+                    handleLayerActivation(layer.id, layer.type);
+                    // Also toggle expansion
+                    toggleLayerExpansion(layer.id);
+                  }}
+                  title={layer.type === 'plate-view' || layer.type === 'microscope-control' 
+                    ? "Click to expand/collapse channels" 
+                    : "Click to activate layer and expand/collapse channels"
+                  }
                 >
                   <i className={`fas fa-chevron-${expandedLayers[layer.id] ? 'down' : 'right'}`}></i>
+                  {activeLayer === layer.id && (
+                    <i className="fas fa-star active-indicator" title="Active layer"></i>
+                  )}
                   <i className={`${layerTypeConfig?.icon || 'fas fa-layer-group'} layer-type-icon`}></i>
                   <span>
                     {layer.type === 'load-server' && selectedHistoricalDataset 
@@ -569,19 +612,33 @@ const LayerPanel = ({
                     
                     <button
                       className="layer-active-btn"
-                      onClick={() => setActiveExperimentHandler(exp.name)}
+                      onClick={async () => {
+                        // Clear any existing active layer first
+                        if (activeLayer && activeLayer !== exp.name) {
+                          console.log(`[LayerPanel] Deactivating previous active layer: ${activeLayer}`);
+                        }
+                        // Update our activeLayer state
+                        setActiveLayer(exp.name);
+                        // Call the experiment handler for real microscope experiments
+                        await setActiveExperimentHandler(exp.name);
+                      }}
                       title={isActive ? "Currently active experiment" : "Set as active experiment"}
                     >
-                      <i className={`fas fa-${isActive ? 'star' : 'star'} ${isActive ? 'active-indicator' : ''}`}></i>
+                      <i className={`fas fa-star ${activeLayer === exp.name ? 'active-indicator' : ''}`}></i>
                     </button>
                     
                     <div 
-                      className="layer-name"
-                      onClick={() => toggleLayerExpansion(exp.name)}
-                      title="Click to expand/collapse channels"
+                      className={`layer-name ${activeLayer === exp.name ? 'layer-name--active' : ''}`}
+                      onClick={() => {
+                        // Handle experiment activation on click
+                        handleLayerActivation(exp.name, 'experiment');
+                        // Also toggle expansion
+                        toggleLayerExpansion(exp.name);
+                      }}
+                      title="Click to activate experiment and expand/collapse channels"
                     >
                       <i className={`fas fa-chevron-${expandedLayers[exp.name] ? 'down' : 'right'}`}></i>
-                      <span className={exp.name === activeExperiment ? 'layer-name--active' : ''}>
+                      <span>
                         {exp.name}
                       </span>
                       {/* Channel count for experiment layers with real microscope channels */}
@@ -840,7 +897,11 @@ LayerPanel.propTypes = {
   microscopeBusy: PropTypes.bool,
   
   // Historical dataset props
-  selectedHistoricalDataset: PropTypes.object
+  selectedHistoricalDataset: PropTypes.object,
+  
+  // Layer activation props
+  activeLayer: PropTypes.string,
+  setActiveLayer: PropTypes.func
 };
 
 export default LayerPanel;
