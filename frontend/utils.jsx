@@ -79,6 +79,8 @@ export class HyphaServerManager {
         token: workspace === 'agent-lens' ? null : this.token,
         workspace: workspace === 'agent-lens' ? null : workspace,
         method_timeout: 30000, // Increased timeout slightly
+        ping_interval: 60000,  // Send ping every 60 seconds to prevent idle timeout
+        ping_timeout: 30000,   // Wait 30 seconds for pong response
       }).then(server => {
         this.serverConnections[workspace] = server; // Cache the resolved server object
         console.log(`[HyphaServerManager] Successfully connected to workspace: ${workspace}`);
