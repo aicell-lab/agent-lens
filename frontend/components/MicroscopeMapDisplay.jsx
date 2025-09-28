@@ -9,6 +9,7 @@ import QuickScanConfig from './microscope/controls/QuickScanConfig';
 import NormalScanConfig from './microscope/controls/NormalScanConfig';
 import AnnotationPanel from './annotation/AnnotationPanel';
 import AnnotationCanvas from './annotation/AnnotationCanvas';
+import SimilarAnnotationRenderer from './annotation/SimilarAnnotationRenderer';
 import './MicroscopeMapDisplay.css';
 
 const MicroscopeMapDisplay = ({
@@ -181,6 +182,11 @@ const MicroscopeMapDisplay = ({
   const [annotationDescription, setAnnotationDescription] = useState('');
   const [annotations, setAnnotations] = useState([]);
   const annotationDropdownRef = useRef(null);
+
+  // Similar annotations state
+  const [similarAnnotations, setSimilarAnnotations] = useState([]);
+  const [showSimilarAnnotations, setShowSimilarAnnotations] = useState(false);
+  const [similarAnnotationWellMap, setSimilarAnnotationWellMap] = useState({});
 
   // Layer visibility management (moved early to avoid dependency issues)
   const [visibleLayers, setVisibleLayers] = useState({
@@ -712,6 +718,103 @@ const MicroscopeMapDisplay = ({
       appendLog(`Cleared all annotations (${annotations.length} removed)`);
     }
   }, [appendLog, annotations.length]);
+
+  // Helper function to get well info by well ID
+  const getWellInfoById = useCallback((wellId) => {
+    const wellConfig = getWellPlateConfig();
+    if (!wellConfig) return null;
+    
+    const { well_size_mm, well_spacing_mm, a1_x_mm, a1_y_mm } = wellConfig;
+    const layout = getWellPlateLayout();
+    const { rows, cols } = layout;
+    
+    // Find the well by ID
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+      for (let colIndex = 0; colIndex < cols.length; colIndex++) {
+        const currentWellId = `${rows[rowIndex]}${cols[colIndex]}`;
+        if (currentWellId === wellId) {
+          const wellCenterX = a1_x_mm + colIndex * well_spacing_mm;
+          const wellCenterY = a1_y_mm + rowIndex * well_spacing_mm;
+          
+          return {
+            id: wellId,
+            centerX: wellCenterX,
+            centerY: wellCenterY,
+            rowIndex,
+            colIndex,
+            radius: (well_size_mm / 2) + wellPaddingMm
+          };
+        }
+      }
+    }
+    
+    return null;
+  }, [getWellPlateConfig, getWellPlateLayout, wellPaddingMm]);
+
+  // Similar annotation handlers
+  const handleSimilarAnnotationsUpdate = useCallback((newSimilarAnnotations) => {
+    setSimilarAnnotations(newSimilarAnnotations);
+    
+    // Build well map for similar annotations
+    const wellMap = {};
+    newSimilarAnnotations.forEach((similarAnnotation, index) => {
+      const props = similarAnnotation.properties || similarAnnotation;
+      const metadata = props.metadata || '';
+      
+      let parsedMetadata = {};
+      if (typeof metadata === 'string') {
+        try {
+          parsedMetadata = JSON.parse(metadata);
+        } catch {
+          try {
+            const jsonString = metadata
+              .replace(/'/g, '"')
+              .replace(/True/g, 'true')
+              .replace(/False/g, 'false')
+              .replace(/None/g, 'null');
+            parsedMetadata = JSON.parse(jsonString);
+          } catch (error) {
+            console.error('Error parsing similar annotation metadata:', error);
+            parsedMetadata = { raw: metadata };
+          }
+        }
+      } else {
+        parsedMetadata = metadata;
+      }
+
+      const wellId = parsedMetadata.well_id;
+      if (wellId) {
+        const wellInfo = getWellInfoById(wellId);
+        if (wellInfo) {
+          // Store well info with well ID as key for easy lookup
+          wellMap[wellId] = wellInfo;
+        } else {
+          console.warn(`Could not find well info for well ID: ${wellId}`);
+        }
+      }
+    });
+    
+    setSimilarAnnotationWellMap(wellMap);
+    setShowSimilarAnnotations(true);
+    
+    console.log('🔍 Built well map for similar annotations:', wellMap);
+    console.log('🔍 Available well IDs:', Object.keys(wellMap));
+    
+    if (appendLog) {
+      appendLog(`Showing ${newSimilarAnnotations.length} similar annotations on map`);
+    }
+  }, [getWellInfoById, appendLog]);
+
+  // Note: handleClearSimilarAnnotations is available for future use
+  // const handleClearSimilarAnnotations = useCallback(() => {
+  //   setSimilarAnnotations([]);
+  //   setSimilarAnnotationWellMap({});
+  //   setShowSimilarAnnotations(false);
+  //   
+  //   if (appendLog) {
+  //     appendLog('Cleared similar annotations from map');
+  //   }
+  // }, [appendLog]);
 
   const handleExportAnnotations = useCallback(() => {
     if (appendLog) {
@@ -2145,6 +2248,14 @@ const MicroscopeMapDisplay = ({
     const displayY = mapY * mapScale + effectivePan.y;
     return { x: displayX, y: displayY };
   }, [mapViewMode, stageDimensions, pixelsPerMm, mapScale, effectivePan]);
+
+  // Note: wellRelativeToStageCoords is implemented in SimilarAnnotationRenderer
+  // const wellRelativeToStageCoords = useCallback((wellRelativeX, wellRelativeY, wellInfo) => {
+  //   return {
+  //     x: wellInfo.centerX + wellRelativeX,
+  //     y: wellInfo.centerY + wellRelativeY
+  //   };
+  // }, []);
 
   // Calculate FOV positions for scan preview
   const calculateFOVPositions = useCallback(() => {
@@ -4404,9 +4515,27 @@ const MicroscopeMapDisplay = ({
                       wellPlateType={wellPlateType}
                       timepoint={0}
                       onEmbeddingsGenerated={handleEmbeddingsGenerated}
+                      onSimilarAnnotationsUpdate={handleSimilarAnnotationsUpdate}
                     />
                 </div>
               </div>
+              
+              {/* Similar Annotations Toggle */}
+              {similarAnnotations.length > 0 && (
+                <div className="relative mr-4">
+                  <button
+                    onClick={() => setShowSimilarAnnotations(!showSimilarAnnotations)}
+                    className={`px-3 py-1 text-xs text-white rounded flex items-center ${
+                      showSimilarAnnotations ? 'bg-orange-600 hover:bg-orange-500' : 'bg-gray-700 hover:bg-gray-600'
+                    }`}
+                    title={`${showSimilarAnnotations ? 'Hide' : 'Show'} similar annotations on map`}
+                  >
+                    <i className="fas fa-map-marker-alt mr-1"></i>
+                    Similar ({similarAnnotations.length})
+                    <i className={`fas ml-1 ${showSimilarAnnotations ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                  </button>
+                </div>
+              )}
             </>
           )}
         </div>
@@ -4524,6 +4653,18 @@ const MicroscopeMapDisplay = ({
            stageDimensions={stageDimensions}
            pixelsPerMm={pixelsPerMm}
            channelInfo={getCurrentChannelInfo()}
+         />
+         
+         {/* Similar Annotations Renderer */}
+         <SimilarAnnotationRenderer
+           containerRef={mapContainerRef}
+           similarAnnotations={similarAnnotations}
+           isVisible={showSimilarAnnotations}
+           mapScale={mapScale}
+           mapPan={effectivePan}
+           stageDimensions={stageDimensions}
+           pixelsPerMm={pixelsPerMm}
+           wellInfoMap={similarAnnotationWellMap}
          />
         
         {/* Rectangle selection active indicator */}

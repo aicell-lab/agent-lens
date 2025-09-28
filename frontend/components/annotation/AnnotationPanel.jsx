@@ -372,7 +372,9 @@ const AnnotationPanel = ({
   onEmbeddingsGenerated = null,
   // Map browsing state
   isMapBrowsingMode = false,
-  setIsMapBrowsingMode = null
+  setIsMapBrowsingMode = null,
+  // Similar annotation map rendering
+  onSimilarAnnotationsUpdate = null
 }) => {
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [activeColorType, setActiveColorType] = useState('stroke'); // 'stroke' or 'fill'
@@ -1047,13 +1049,41 @@ const AnnotationPanel = ({
               <i className="fas fa-search"></i>
               Similar Annotations
             </h3>
-            <button
-              className="similarity-panel-close"
-              onClick={() => setShowSimilarityPanel(false)}
-              title="Close similarity search"
-            >
-              <i className="fas fa-times"></i>
-            </button>
+            <div className="similarity-panel-actions">
+              {onSimilarAnnotationsUpdate && similarityResults.length > 0 && (
+                <button
+                  className="similarity-show-map-btn"
+                  onClick={() => {
+                    // Show all similar annotations on the map
+                    onSimilarAnnotationsUpdate(similarityResults);
+                  }}
+                  style={{
+                    backgroundColor: '#ff6b35',
+                    color: 'white',
+                    border: 'none',
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    fontSize: '11px',
+                    cursor: 'pointer',
+                    marginRight: '8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                  title="Show similar annotations on the map"
+                >
+                  <i className="fas fa-map-marker-alt"></i>
+                  Show on Map
+                </button>
+              )}
+              <button
+                className="similarity-panel-close"
+                onClick={() => setShowSimilarityPanel(false)}
+                title="Close similarity search"
+              >
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
           </div>
           
           <div className="similarity-panel-content">
@@ -1193,7 +1223,9 @@ AnnotationPanel.propTypes = {
   onEmbeddingsGenerated: PropTypes.func,
   // Map browsing state
   isMapBrowsingMode: PropTypes.bool,
-  setIsMapBrowsingMode: PropTypes.func
+  setIsMapBrowsingMode: PropTypes.func,
+  // Similar annotation map rendering
+  onSimilarAnnotationsUpdate: PropTypes.func
 };
 
 export default AnnotationPanel;
