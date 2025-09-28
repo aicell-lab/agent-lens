@@ -6,6 +6,44 @@ import { generateAnnotationData, exportAnnotationsToJson } from '../../utils/ann
 import { extractAnnotationImageRegion, extractAnnotationImageRegionAdvanced } from '../../utils/annotationEmbeddingService';
 import { generatePreviewFromDataUrl } from '../../utils/previewImageUtils';
 
+// Helper function to extract coordinate information from annotation metadata
+const extractCoordinate = (metadata) => {
+  if (!metadata || typeof metadata !== 'object') {
+    return 'Unknown';
+  }
+  
+  // Try polygon_wkt first (for polygon/freehand annotations)
+  if (metadata.polygon_wkt && typeof metadata.polygon_wkt === 'string') {
+    try {
+      // Extract coordinates from WKT format: POLYGON((x1 y1, x2 y2, ...))
+      const match = metadata.polygon_wkt.match(/POLYGON\(\(([^)]+)\)\)/);
+      if (match && match[1]) {
+        const coords = match[1].split(',')[0].trim(); // Get first coordinate pair
+        const [x, y] = coords.split(' ').map(coord => parseFloat(coord));
+        if (!isNaN(x) && !isNaN(y)) {
+          return `(${x.toFixed(3)}, ${y.toFixed(3)})`;
+        }
+      }
+    } catch (error) {
+      console.error('Error parsing WKT polygon:', error);
+    }
+  }
+  
+  // Try bbox (for rectangle annotations) - format: [x, y, width, height]
+  if (metadata.bbox && Array.isArray(metadata.bbox) && metadata.bbox.length >= 2) {
+    try {
+      const [x, y] = metadata.bbox;
+      if (!isNaN(x) && !isNaN(y)) {
+        return `(${x.toFixed(3)}, ${y.toFixed(3)})`;
+      }
+    } catch (error) {
+      console.error('Error parsing bbox:', error);
+    }
+  }
+  
+  return 'Unknown';
+};
+
 // Component for displaying annotation image previews
 const AnnotationImagePreview = ({ 
   annotation, 
@@ -1081,11 +1119,15 @@ const AnnotationPanel = ({
                         </div>
                         {parsedMetadata && Object.keys(parsedMetadata).length > 0 && (
                           <div className="similarity-result-metadata">
-                            <strong>Well:</strong> {parsedMetadata.well_id || 'Unknown'}<br/>
+                            <strong>Well:</strong> {parsedMetadata.well_id || 'Unknown'}
+                            {(parsedMetadata.polygon_wkt || parsedMetadata.bbox) && (
+                              <> - {extractCoordinate(parsedMetadata)}</>
+                            )}
+                            <br/>
                             <strong>Type:</strong> {parsedMetadata.annotation_type || 'Unknown'}<br/>
                             {parsedMetadata.timestamp && (
                               <>
-                                <strong>Time:</strong> {new Date(parsedMetadata.timestamp).toLocaleString()}
+                                <strong>Time:</strong> {new Date(parsedMetadata.timestamp).toLocaleString()}<br/>
                               </>
                             )}
                           </div>
