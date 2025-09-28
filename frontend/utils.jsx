@@ -132,7 +132,6 @@ export class HyphaServerManager {
 export const initializeServices = async (
   hyphaManager, // Changed from server to hyphaManager
   setMicroscopeControlService,
-  setSimilarityService,
   setSegmentService,
   setIncubatorControlService,
   setRoboticArmService,
@@ -170,17 +169,6 @@ export const initializeServices = async (
   );
   setMicroscopeControlService(microscopeControlService);
 
-  const similarityServiceRemoteId = "agent-lens/image-text-similarity-search";
-  const similarityServiceLocalId = "image-text-similarity-search";
-  const similarityService = await tryGetService(
-    hyphaManager,
-    "Similarity Search",
-    similarityServiceRemoteId,
-    similarityServiceLocalId,
-    appendLog,
-    showNotification
-  );
-  setSimilarityService(similarityService);
   
   const incubatorServiceIdFull = "reef-imaging/mirror-incubator-control";
   const incubatorControlService = await tryGetService(

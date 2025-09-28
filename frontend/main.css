@@ -522,14 +522,6 @@
   opacity: 0.75 !important;
 }
 
-/* Image Search Panel Integration */
-.control-view .image-search-panel {
-  height: 100%;
-  margin: 0;
-  border-radius: 0;
-  box-shadow: none;
-  background-color: transparent;
-}
 
 /* Notification type styling for non-Tailwind classes */
 .notification-popup.bg-green-500 {
