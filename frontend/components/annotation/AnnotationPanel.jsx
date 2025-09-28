@@ -1030,6 +1030,147 @@ const AnnotationPanel = ({
               
             </div>
           </div>
+
+          {/* Similarity Search Results - Embedded in Actions */}
+          {showSimilarityPanel && (
+            <div className="similarity-results-embedded">
+              <div className="similarity-results-header">
+                <h4 className="similarity-results-title">
+                  <i className="fas fa-search"></i>
+                  Similar Annotations
+                </h4>
+                <div className="similarity-results-actions">
+                  {onSimilarAnnotationsUpdate && similarityResults.length > 0 && (
+                    <button
+                      className="similarity-show-map-btn"
+                      onClick={() => {
+                        onSimilarAnnotationsUpdate(similarityResults);
+                      }}
+                      style={{
+                        backgroundColor: '#374151',
+                        color: '#d1d5db',
+                        border: '1px solid #4b5563',
+                        padding: '3px 6px',
+                        borderRadius: '4px',
+                        fontSize: '10px',
+                        cursor: 'pointer',
+                        marginRight: '6px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '3px',
+                        fontWeight: '500'
+                      }}
+                      title="Show similar annotations on the map"
+                    >
+                      <i className="fas fa-map-marker-alt"></i>
+                      Show on Map
+                    </button>
+                  )}
+                  <button
+                    className="similarity-close-btn"
+                    onClick={() => setShowSimilarityPanel(false)}
+                    title="Close similarity search"
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#ccc',
+                      cursor: 'pointer',
+                      padding: '2px',
+                      fontSize: '14px'
+                    }}
+                  >
+                    <i className="fas fa-times"></i>
+                  </button>
+                </div>
+              </div>
+              
+              <div className="similarity-results-content">
+                {isSearching ? (
+                  <div className="similarity-loading">
+                    <i className="fas fa-spinner fa-spin"></i>
+                    <div>Searching for similar annotations...</div>
+                  </div>
+                ) : similarityResults.length > 0 ? (
+                  <div className="similarity-results-list">
+                    {similarityResults.map((result, index) => {
+                      const props = result.properties || result;
+                      const metadata = props.metadata || '';
+                      
+                      let parsedMetadata = {};
+                      if (typeof metadata === 'string') {
+                        try {
+                          parsedMetadata = JSON.parse(metadata);
+                        } catch {
+                          try {
+                            const jsonString = metadata
+                              .replace(/'/g, '"')
+                              .replace(/True/g, 'true')
+                              .replace(/False/g, 'false')
+                              .replace(/None/g, 'null');
+                            parsedMetadata = JSON.parse(jsonString);
+                          } catch (error) {
+                            console.error('Both JSON and Python dict parsing failed:', error);
+                            parsedMetadata = { raw: metadata };
+                          }
+                        }
+                      } else {
+                        parsedMetadata = metadata;
+                      }
+                      
+                      return (
+                        <div key={index} className="similarity-result-item-embedded">
+                          {/* Preview Image */}
+                          {props.preview_image && (
+                            <img 
+                              src={props.preview_image} 
+                              alt="Preview" 
+                              className="similarity-preview-image-small"
+                            />
+                          )}
+                          
+                          {/* Content */}
+                          <div className="similarity-result-content-embedded">
+                            <div className="similarity-result-title-embedded">
+                              {props.description || 'No description'}
+                            </div>
+                            <div className="similarity-result-id-embedded">
+                              {props.image_id || 'Unknown'}
+                            </div>
+                            {parsedMetadata && Object.keys(parsedMetadata).length > 0 && (
+                              <div className="similarity-result-metadata-embedded">
+                                <strong>Well:</strong> {parsedMetadata.well_id || 'Unknown'}
+                                {(parsedMetadata.polygon_wkt || parsedMetadata.bbox) && (
+                                  <> - {extractCoordinate(parsedMetadata)}</>
+                                )}
+                                <br/>
+                                <strong>Type:</strong> {parsedMetadata.annotation_type || 'Unknown'}<br/>
+                                {parsedMetadata.timestamp && (
+                                  <>
+                                    <strong>Time:</strong> {new Date(parsedMetadata.timestamp).toLocaleString()}<br/>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                            {result.metadata?.score && (
+                              <div className="similarity-result-score-embedded">
+                                Similarity: {(result.metadata.score * 100).toFixed(1)}%
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="similarity-empty-embedded">
+                    <i className="fas fa-search"></i>
+                    <h4>No Similar Annotations Found</h4>
+                    <p>Try creating more annotations or check if the current annotation has embeddings.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </>
       )}
 
@@ -1041,147 +1182,6 @@ const AnnotationPanel = ({
         position={detailsWindowPosition}
       />
 
-      {/* Similarity Search Results Panel */}
-      {showSimilarityPanel && (
-        <div className="similarity-panel">
-          <div className="similarity-panel-header">
-            <h3 className="similarity-panel-title">
-              <i className="fas fa-search"></i>
-              Similar Annotations
-            </h3>
-            <div className="similarity-panel-actions">
-              {onSimilarAnnotationsUpdate && similarityResults.length > 0 && (
-                <button
-                  className="similarity-show-map-btn"
-                  onClick={() => {
-                    // Show all similar annotations on the map
-                    onSimilarAnnotationsUpdate(similarityResults);
-                  }}
-                  style={{
-                    backgroundColor: '#ff6b35',
-                    color: 'white',
-                    border: 'none',
-                    padding: '4px 8px',
-                    borderRadius: '4px',
-                    fontSize: '11px',
-                    cursor: 'pointer',
-                    marginRight: '8px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px'
-                  }}
-                  title="Show similar annotations on the map"
-                >
-                  <i className="fas fa-map-marker-alt"></i>
-                  Show on Map
-                </button>
-              )}
-              <button
-                className="similarity-panel-close"
-                onClick={() => setShowSimilarityPanel(false)}
-                title="Close similarity search"
-              >
-                <i className="fas fa-times"></i>
-              </button>
-            </div>
-          </div>
-          
-          <div className="similarity-panel-content">
-            {isSearching ? (
-              <div className="similarity-panel-loading">
-                <i className="fas fa-spinner fa-spin"></i>
-                <div>Searching for similar annotations...</div>
-              </div>
-            ) : similarityResults.length > 0 ? (
-              <div>
-                {similarityResults.map((result, index) => {
-                  // Extract properties from Weaviate object structure
-                  const props = result.properties || result;
-                  const metadata = props.metadata || '';
-                  
-                  // Try to parse metadata if it's a string
-                  let parsedMetadata = {};
-                  if (typeof metadata === 'string') {
-                    console.log('Raw metadata string:', metadata);
-                    try {
-                      // First try JSON.parse
-                      parsedMetadata = JSON.parse(metadata);
-                      console.log('JSON parse successful:', parsedMetadata);
-                    } catch {
-                      try {
-                        // If JSON fails, try to handle Python dict format
-                        // Replace single quotes with double quotes for JSON compatibility
-                        const jsonString = metadata
-                          .replace(/'/g, '"')
-                          .replace(/True/g, 'true')
-                          .replace(/False/g, 'false')
-                          .replace(/None/g, 'null');
-                        parsedMetadata = JSON.parse(jsonString);
-                        console.log('Python dict parse successful:', parsedMetadata);
-                      } catch (error) {
-                        // If both fail, use raw metadata
-                        console.error('Both JSON and Python dict parsing failed:', error);
-                        parsedMetadata = { raw: metadata };
-                      }
-                    }
-                  } else {
-                    parsedMetadata = metadata;
-                  }
-                  
-                  return (
-                    <div key={index} className="similarity-result-item">
-                      {/* Preview Image */}
-                      {props.preview_image && (
-                        <img 
-                          src={props.preview_image} 
-                          alt="Preview" 
-                          className="similarity-preview-image"
-                        />
-                      )}
-                      
-                      {/* Content */}
-                      <div className="similarity-result-content">
-                        <div className="similarity-result-title">
-                          {props.description || 'No description'}
-                        </div>
-                        <div className="similarity-result-id">
-                          {props.image_id || 'Unknown'}
-                        </div>
-                        {parsedMetadata && Object.keys(parsedMetadata).length > 0 && (
-                          <div className="similarity-result-metadata">
-                            <strong>Well:</strong> {parsedMetadata.well_id || 'Unknown'}
-                            {(parsedMetadata.polygon_wkt || parsedMetadata.bbox) && (
-                              <> - {extractCoordinate(parsedMetadata)}</>
-                            )}
-                            <br/>
-                            <strong>Type:</strong> {parsedMetadata.annotation_type || 'Unknown'}<br/>
-                            {parsedMetadata.timestamp && (
-                              <>
-                                <strong>Time:</strong> {new Date(parsedMetadata.timestamp).toLocaleString()}<br/>
-                              </>
-                            )}
-                          </div>
-                        )}
-                        {result.metadata?.score && (
-                          <div className="similarity-result-score">
-                            Similarity: {(result.metadata.score * 100).toFixed(1)}%
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="similarity-panel-empty">
-                <i className="fas fa-search"></i>
-                <h4>No Similar Annotations Found</h4>
-                <p>Try creating more annotations or check if the current annotation has embeddings.</p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 };
