@@ -450,11 +450,24 @@ const AnnotationPanel = ({
         try {
           // Prepare metadata
           const wellInfo = wellInfoMap[annotation.id];
+          
+          // Generate full annotation data including coordinates
+          const annotationData = generateAnnotationData(annotation, wellInfo, annotation.channelInfo);
+          
+          console.log(`📍 Generated annotation data for ${annotation.id}:`, {
+            bbox: annotationData.bbox,
+            polygon_wkt: annotationData.polygon_wkt,
+            type: annotationData.type
+          });
+          
           const metadata = {
             annotation_id: annotation.id,
             well_id: wellInfo?.id || 'unknown',
             annotation_type: annotation.type,
             timestamp: annotation.timestamp || new Date().toISOString(),
+            // Include coordinate data from generateAnnotationData
+            ...(annotationData.bbox && { bbox: annotationData.bbox }),
+            ...(annotationData.polygon_wkt && { polygon_wkt: annotationData.polygon_wkt }),
             ...(annotation.channelInfo && { channel_info: annotation.channelInfo })
           };
 
@@ -490,6 +503,8 @@ const AnnotationPanel = ({
             metadata: JSON.stringify(metadata),
             dataset_id: applicationId
           });
+          
+          console.log(`📤 Sending metadata for ${annotation.id}:`, metadata);
 
           // Prepare request body with large data (to avoid URL length limits)
           const requestBody = new FormData();
