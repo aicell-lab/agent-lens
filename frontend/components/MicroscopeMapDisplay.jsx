@@ -4353,7 +4353,7 @@ const MicroscopeMapDisplay = ({
           {mapViewMode === 'FREE_PAN' && (
             <>
               {/* Annotation dropdown */}
-              <div className="relative" ref={annotationDropdownRef}>
+              <div className="relative mr-4" ref={annotationDropdownRef}>
                 <button
                   onClick={() => setIsAnnotationDropdownOpen(!isAnnotationDropdownOpen)}
                   className={`px-3 py-1 text-xs text-white rounded flex items-center ${
