@@ -43,16 +43,16 @@ export function wellRelativeToStageCoords(wellX, wellY, wellInfo) {
 
 /**
  * Generate WKT polygon string from points
- * @param {Array} points - Array of {x, y} coordinate objects
- * @returns {string} WKT polygon string
+ * @param {Array} points - Array of {x, y} coordinate objects in well-relative coordinates (mm)
+ * @returns {string} WKT polygon string with sub-micron precision (0.01μm = 0.00001mm)
  */
 export function generateWktPolygon(points) {
   if (points.length < 3) {
     return null; // Need at least 3 points for a polygon
   }
   
-  // Format coordinates as "x y" pairs
-  const coordPairs = points.map(point => `${point.x.toFixed(1)} ${point.y.toFixed(1)}`);
+  // Format coordinates as "x y" pairs with sub-micron precision (0.01μm = 0.00001mm)
+  const coordPairs = points.map(point => `${point.x.toFixed(5)} ${point.y.toFixed(5)}`);
   
   // Ensure polygon is closed (first and last points are the same)
   const firstPoint = coordPairs[0];
@@ -67,8 +67,8 @@ export function generateWktPolygon(points) {
 
 /**
  * Generate bounding box from points
- * @param {Array} points - Array of {x, y} coordinate objects
- * @returns {Array} Bounding box [x, y, width, height]
+ * @param {Array} points - Array of {x, y} coordinate objects in well-relative coordinates (mm)
+ * @returns {Array} Bounding box [x, y, width, height] with sub-micron precision (0.01μm = 0.00001mm)
  */
 export function generateBoundingBox(points) {
   if (points.length === 0) {
@@ -84,10 +84,10 @@ export function generateBoundingBox(points) {
   const maxY = Math.max(...yValues);
   
   return [
-    Math.round(minX * 10000) / 10000, // Round to 4 decimal places (0.0001 mm)
-    Math.round(minY * 10000) / 10000,
-    Math.round((maxX - minX) * 10000) / 10000,
-    Math.round((maxY - minY) * 10000) / 10000
+    Math.round(minX * 100000) / 100000, // Round to 5 decimal places (0.00001 mm = 0.01 μm)
+    Math.round(minY * 100000) / 100000,
+    Math.round((maxX - minX) * 100000) / 100000,
+    Math.round((maxY - minY) * 100000) / 100000
   ];
 }
 
@@ -173,7 +173,8 @@ export function exportAnnotationsToJson(annotations, wellInfoMap, channelInfoMap
     metadata: {
       export_timestamp: new Date().toISOString(),
       total_annotations: annotationData.length,
-      coordinate_system: 'well_relative_mm'
+      coordinate_system: 'well_relative_mm',
+      precision: '0.01μm (0.00001mm)'
     }
   };
 }
