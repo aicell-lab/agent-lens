@@ -82,7 +82,7 @@
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 8px;
   color: white;
-  width: 300px;
+  width: 400px;
   max-height: 600px;
   overflow-y: auto;
   font-size: 14px;
@@ -127,6 +127,18 @@
 .annotation-toggle-btn.active.exit-mode:hover {
   background: rgba(239, 68, 68, 1);
   border-color: rgba(239, 68, 68, 1);
+}
+
+.annotation-toggle-btn.disabled {
+  background: rgba(107, 114, 128, 0.3);
+  border-color: rgba(107, 114, 128, 0.5);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.annotation-toggle-btn.disabled:hover {
+  background: rgba(107, 114, 128, 0.3);
+  border-color: rgba(107, 114, 128, 0.5);
 }
 
 .annotation-close-btn {
@@ -752,7 +764,7 @@
 /* Responsive Design */
 @media (max-width: 768px) {
   .annotation-panel {
-    width: 280px;
+    width: 350px;
     max-height: 500px;
   }
   
@@ -976,4 +988,18 @@
   margin: 0;
   font-size: 10px;
   line-height: 1.4;
+}
+
+/* Similar Annotations Toggle Button */
+.similarity-toggle-btn {
+  transition: all 0.2s ease;
+}
+
+.similarity-toggle-btn:hover {
+  opacity: 0.8;
+  transform: translateY(-1px);
+}
+
+.similarity-toggle-btn.active {
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.3);
 }

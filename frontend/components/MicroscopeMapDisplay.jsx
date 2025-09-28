@@ -806,6 +806,17 @@ const MicroscopeMapDisplay = ({
     }
   }, [getWellInfoById, appendLog]);
 
+  // Cleanup similar annotations when window is closed
+  const handleSimilarAnnotationsCleanup = useCallback(() => {
+    setSimilarAnnotations([]);
+    setSimilarAnnotationWellMap({});
+    setShowSimilarAnnotations(false);
+    
+    if (appendLog) {
+      appendLog('Cleared similar annotations from map');
+    }
+  }, [appendLog]);
+
   // Note: handleClearSimilarAnnotations is available for future use
   // const handleClearSimilarAnnotations = useCallback(() => {
   //   setSimilarAnnotations([]);
@@ -2699,6 +2710,51 @@ const MicroscopeMapDisplay = ({
     }
   }, [isDrawingMode, appendLog]);
 
+  // Auto-disable other layers when annotation panel is opened for better annotation accuracy
+  useEffect(() => {
+    if (isAnnotationDropdownOpen && activeLayer) {
+      // Check if activeLayer is an experiment (not in layers array)
+      const isExperimentLayer = experiments.some(exp => exp.name === activeLayer);
+      
+      if (isExperimentLayer) {
+        // For experiment layers, don't modify layer visibility since experiments are managed separately
+        if (appendLog) {
+          appendLog(`Annotation mode: Using experiment layer ${activeLayer} - no layer visibility changes needed`);
+        }
+        return;
+      }
+      
+      // For regular layers, store current layer visibility state before disabling
+      const currentLayerStates = {};
+      layers.forEach(layer => {
+        if (layer.id !== activeLayer) {
+          currentLayerStates[layer.id] = layer.visible;
+        }
+      });
+      
+      // Disable all other layers except the active one
+      setLayers(prev => prev.map(layer => 
+        layer.id === activeLayer ? layer : { ...layer, visible: false }
+      ));
+      
+      if (appendLog) {
+        appendLog(`Annotation mode: Disabled other layers, keeping only active layer: ${activeLayer}`);
+      }
+      
+      // Store the previous states for restoration
+      return () => {
+        // Restore previous layer visibility when annotation panel closes
+        setLayers(prev => prev.map(layer => ({
+          ...layer,
+          visible: currentLayerStates[layer.id] !== undefined ? currentLayerStates[layer.id] : layer.visible
+        })));
+        if (appendLog) {
+          appendLog('Annotation mode: Restored previous layer visibility states');
+        }
+      };
+    }
+  }, [isAnnotationDropdownOpen, activeLayer, layers, setLayers, experiments, appendLog]);
+
   // Load experiments when microscope service becomes available
   useEffect(() => {
     if (microscopeControlService && !isSimulatedMicroscope) {
@@ -4471,11 +4527,21 @@ const MicroscopeMapDisplay = ({
               {/* Annotation dropdown */}
               <div className="relative mr-4" ref={annotationDropdownRef}>
                 <button
-                  onClick={() => setIsAnnotationDropdownOpen(!isAnnotationDropdownOpen)}
+                  onClick={() => {
+                    if (!activeLayer) {
+                      showNotification('No selected map layer. Please go to "Layers" panel to activate a layer first', 'warning');
+                    }
+                    setIsAnnotationDropdownOpen(!isAnnotationDropdownOpen);
+                  }}
                   className={`px-3 py-1 text-xs text-white rounded flex items-center ${
-                    isDrawingMode ? 'bg-orange-600 hover:bg-orange-500' : 'bg-gray-700 hover:bg-gray-600'
+                    !activeLayer 
+                      ? 'bg-gray-500 hover:bg-gray-400' 
+                      : isDrawingMode 
+                        ? 'bg-orange-600 hover:bg-orange-500' 
+                        : 'bg-gray-700 hover:bg-gray-600'
                   }`}
-                  title="Annotation tools"
+                  disabled={isDrawingMode}
+                  title={!activeLayer ? "No selected map layer. Please go to 'Layers' panel to activate a layer first" : "Open annotation tools"}
                 >
                   <i className="fas fa-draw-polygon mr-1"></i>
                   Annotations
@@ -4521,26 +4587,19 @@ const MicroscopeMapDisplay = ({
                       timepoint={0}
                       onEmbeddingsGenerated={handleEmbeddingsGenerated}
                       onSimilarAnnotationsUpdate={handleSimilarAnnotationsUpdate}
+                      // Similar annotations state and controls
+                      similarAnnotations={similarAnnotations}
+                      showSimilarAnnotations={showSimilarAnnotations}
+                      setShowSimilarAnnotations={setShowSimilarAnnotations}
+                      onSimilarAnnotationsCleanup={handleSimilarAnnotationsCleanup}
+                      // Layer activation props
+                      activeLayer={activeLayer}
+                      layers={layers}
+                      experiments={experiments}
                     />
                 </div>
               </div>
               
-              {/* Similar Annotations Toggle */}
-              {similarAnnotations.length > 0 && (
-                <div className="relative mr-4">
-                  <button
-                    onClick={() => setShowSimilarAnnotations(!showSimilarAnnotations)}
-                    className={`px-3 py-1 text-xs text-white rounded flex items-center ${
-                      showSimilarAnnotations ? 'bg-orange-600 hover:bg-orange-500' : 'bg-gray-700 hover:bg-gray-600'
-                    }`}
-                    title={`${showSimilarAnnotations ? 'Hide' : 'Show'} similar annotations on map`}
-                  >
-                    <i className="fas fa-map-marker-alt mr-1"></i>
-                    Similar ({similarAnnotations.length})
-                    <i className={`fas ml-1 ${showSimilarAnnotations ? 'fa-eye-slash' : 'fa-eye'}`}></i>
-                  </button>
-                </div>
-              )}
             </>
           )}
         </div>

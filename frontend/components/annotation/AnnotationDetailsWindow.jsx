@@ -43,8 +43,8 @@ const AnnotationDetailsWindow = ({
         border: '2px solid #007bff',
         borderRadius: '8px',
         boxShadow: '0 4px 12px rgba(0, 0, 0, 0.5)',
-        minWidth: '300px',
-        maxWidth: '500px',
+        minWidth: '400px',
+        maxWidth: '600px',
         fontFamily: 'Arial, sans-serif',
         color: '#ffffff'
       }}
@@ -96,14 +96,18 @@ const AnnotationDetailsWindow = ({
             <div>
               <strong>Object ID:</strong>
               <div 
-                style={{ 
+                style={{
                   fontFamily: 'monospace', 
                   backgroundColor: '#374151', 
                   color: '#f3f4f6',
                   padding: '4px', 
                   borderRadius: '4px',
                   marginTop: '2px',
-                  cursor: 'pointer'
+                  cursor: 'pointer',
+                  maxWidth: '200px',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap'
                 }}
                 onClick={() => handleCopyToClipboard(displayData.id)}
                 title="Click to copy"

@@ -64,7 +64,11 @@ const AnnotationImagePreview = ({
   wellPlateType,
   timepoint,
   // Callback for embedding generation
-  onEmbeddingsGenerated
+  onEmbeddingsGenerated,
+  // Layer activation props
+  activeLayer,
+  layers,
+  experiments
 }) => {
   const [previewUrl, setPreviewUrl] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -82,9 +86,13 @@ const AnnotationImagePreview = ({
       }
 
       // Check if we have the required services and data for advanced extraction
+      // Support both Browse Data (historical) and experiment layers
+      const isBrowseDataMode = isHistoricalDataMode || (activeLayer && layers.find(l => l.id === activeLayer)?.type === 'load-server');
+      const isExperimentMode = !isHistoricalDataMode && (activeLayer && layers.find(l => l.id === activeLayer)?.type === 'experiment');
+      
       const canUseAdvancedExtraction = 
-        (isHistoricalDataMode && artifactZarrLoader && enabledZarrChannels.length > 0) ||
-        (!isHistoricalDataMode && microscopeControlService && Object.values(visibleChannelsConfig).some(v => v));
+        (isBrowseDataMode && artifactZarrLoader && enabledZarrChannels.length > 0) ||
+        (isExperimentMode && microscopeControlService && Object.values(visibleChannelsConfig).some(v => v));
 
       setIsLoading(true);
       try {
@@ -93,16 +101,16 @@ const AnnotationImagePreview = ({
         if (canUseAdvancedExtraction) {
           console.log('🎨 Using advanced extraction for annotation preview');
           
-          // Determine mode and prepare services
-          const mode = isHistoricalDataMode ? 'HISTORICAL' : 'FREE_PAN';
+          // Determine mode and prepare services based on layer type
+          const mode = isBrowseDataMode ? 'HISTORICAL' : 'FREE_PAN';
           const services = {
             microscopeControlService,
             artifactZarrLoader
           };
 
-          // Prepare channel configurations based on mode
+          // Prepare channel configurations based on layer type
           let channelConfigs, enabledChannels;
-          if (isHistoricalDataMode) {
+          if (isBrowseDataMode) {
             channelConfigs = zarrChannelConfigs;
             enabledChannels = enabledZarrChannels;
           } else {
@@ -331,7 +339,11 @@ AnnotationImagePreview.propTypes = {
   selectedHistoricalDataset: PropTypes.object,
   wellPlateType: PropTypes.string,
   timepoint: PropTypes.number,
-  onEmbeddingsGenerated: PropTypes.func
+  onEmbeddingsGenerated: PropTypes.func,
+  // Layer activation props
+  activeLayer: PropTypes.string,
+  layers: PropTypes.array,
+  experiments: PropTypes.array
 };
 
 const AnnotationPanel = ({
@@ -374,7 +386,16 @@ const AnnotationPanel = ({
   isMapBrowsingMode = false,
   setIsMapBrowsingMode = null,
   // Similar annotation map rendering
-  onSimilarAnnotationsUpdate = null
+  onSimilarAnnotationsUpdate = null,
+  // Similar annotations state and controls
+  similarAnnotations = [],
+  showSimilarAnnotations = false,
+  setShowSimilarAnnotations = null,
+  onSimilarAnnotationsCleanup = null,
+  // Layer activation props
+  activeLayer = null,
+  layers = [],
+  experiments = []
 }) => {
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [activeColorType, setActiveColorType] = useState('stroke'); // 'stroke' or 'fill'
@@ -386,6 +407,44 @@ const AnnotationPanel = ({
   const [similarityResults, setSimilarityResults] = useState([]);
   const [showSimilarityPanel, setShowSimilarityPanel] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
+
+  // Helper functions for layer management
+  const getActiveLayerInfo = () => {
+    if (!activeLayer || !layers.length) return null;
+    return layers.find(layer => layer.id === activeLayer);
+  };
+
+  const getActiveLayerType = () => {
+    const layerInfo = getActiveLayerInfo();
+    return layerInfo ? layerInfo.type : null;
+  };
+
+  const isBrowseDataLayer = () => {
+    return getActiveLayerType() === 'load-server';
+  };
+
+
+  const getLayerDisplayName = () => {
+    const layerInfo = getActiveLayerInfo();
+    
+    // If no layer info found in layers array, check if it's an experiment
+    if (!layerInfo && activeLayer && experiments.length > 0) {
+      const experiment = experiments.find(exp => exp.name === activeLayer);
+      if (experiment) {
+        return `Experiment: ${experiment.name}`;
+      }
+    }
+    
+    if (!layerInfo) return 'Unknown Layer';
+    
+    if (layerInfo.type === 'load-server' && selectedHistoricalDataset) {
+      return `Browse Data: ${selectedHistoricalDataset.name || 'Dataset'}`;
+    } else if (layerInfo.type === 'experiment') {
+      return `Experiment: ${layerInfo.name || 'Experiment'}`;
+    }
+    
+    return layerInfo.name || 'Layer';
+  };
 
   const tools = [
     { id: 'rectangle', name: 'Rectangle', icon: 'fa-square', tooltip: 'Draw rectangles' },
@@ -473,10 +532,19 @@ const AnnotationPanel = ({
       return;
     }
 
-    // Get dataset ID for application ID
-    const applicationId = selectedHistoricalDataset?.id;
+    // Get dataset ID for application ID - support both historical datasets and experiments
+    let applicationId = selectedHistoricalDataset?.id;
+    
+    // If no historical dataset, check if we're using an experiment layer
+    if (!applicationId && activeLayer && experiments.length > 0) {
+      const experiment = experiments.find(exp => exp.name === activeLayer);
+      if (experiment) {
+        applicationId = experiment.name; // Use experiment name as application ID
+      }
+    }
+    
     if (!applicationId) {
-      alert('No dataset selected. Cannot upload annotations.');
+      alert('No dataset or experiment selected. Cannot upload annotations.');
       return;
     }
 
@@ -608,9 +676,19 @@ const AnnotationPanel = ({
       return;
     }
 
-    const applicationId = selectedHistoricalDataset?.id;
+    // Get dataset ID for application ID - support both historical datasets and experiments
+    let applicationId = selectedHistoricalDataset?.id;
+    
+    // If no historical dataset, check if we're using an experiment layer
+    if (!applicationId && activeLayer && experiments.length > 0) {
+      const experiment = experiments.find(exp => exp.name === activeLayer);
+      if (experiment) {
+        applicationId = experiment.name; // Use experiment name as application ID
+      }
+    }
+    
     if (!applicationId) {
-      alert('No dataset selected. Cannot search for similar annotations.');
+      alert('No dataset or experiment selected. Cannot search for similar annotations.');
       return;
     }
 
@@ -709,8 +787,14 @@ const AnnotationPanel = ({
         <div className="flex items-center space-x-2">
           <i className="fas fa-draw-polygon text-blue-400"></i>
           <span className="font-medium">Enter Annotations</span>
-          {/* Dataset ID Display */}
-          {selectedHistoricalDataset?.id && (
+          {/* Active Layer Display */}
+          {activeLayer && (
+            <span className="text-xs text-blue-300 ml-2 px-2 py-1 bg-blue-900 rounded">
+              {getLayerDisplayName()}
+            </span>
+          )}
+          {/* Dataset ID Display for Browse Data layers */}
+          {isBrowseDataLayer() && selectedHistoricalDataset?.id && (
             <span className="text-xs text-gray-500 ml-2">
               Dataset: {selectedHistoricalDataset.id}
             </span>
@@ -718,8 +802,9 @@ const AnnotationPanel = ({
         </div>
         <button
           onClick={() => setIsDrawingMode(!isDrawingMode)}
-          className={`annotation-toggle-btn ${isDrawingMode ? 'active exit-mode' : ''}`}
-          title={isDrawingMode ? 'Exit drawing mode' : 'Enter drawing mode'}
+          className={`annotation-toggle-btn ${isDrawingMode ? 'active exit-mode' : ''} ${!activeLayer ? 'disabled' : ''}`}
+          title={!activeLayer ? 'No active layer - cannot enter drawing mode' : (isDrawingMode ? 'Exit drawing mode' : 'Enter drawing mode')}
+          disabled={!activeLayer}
         >
           <i className={`fas ${isDrawingMode ? 'fa-times' : 'fa-edit'}`}></i>
         </button>
@@ -926,6 +1011,9 @@ const AnnotationPanel = ({
                           wellPlateType={wellPlateType}
                           timepoint={timepoint}
                           onEmbeddingsGenerated={onEmbeddingsGenerated}
+                          activeLayer={activeLayer}
+                          layers={layers}
+                          experiments={experiments}
                         />
                         {wellInfo && (
                           <span className="annotation-well" style={{ 
@@ -993,53 +1081,43 @@ const AnnotationPanel = ({
             )}
           </div>
 
-          {/* Actions */}
-          <div className="annotation-section">
-            <div className="annotation-section-title">Actions</div>
-            <div className="annotation-actions">
-              <button
-                onClick={onClearAllAnnotations}
-                className="annotation-action-btn danger"
-                disabled={annotations.length === 0}
-                title="Clear all annotations"
-              >
-                <i className="fas fa-trash-alt"></i>
-                Clear All
-              </button>
-              
-              <button
-                onClick={handleUpload}
-                className="annotation-action-btn"
-                disabled={annotations.filter(a => a.embeddings?.imageEmbedding).length === 0}
-                title="Upload annotations with embeddings to Weaviate"
-              >
-                <i className="fas fa-cloud-upload-alt"></i>
-                Upload
-              </button>
-              
-              <button
-                onClick={handleExport}
-                className="annotation-action-btn"
-                disabled={annotations.length === 0}
-                title="Export annotations to JSON file"
-                style={{ fontSize: '11px', padding: '4px 8px' }}
-              >
-                <i className="fas fa-download"></i>
-                Export
-              </button>
-              
-            </div>
-          </div>
-
-          {/* Similarity Search Results - Embedded in Actions */}
+          {/* Similar Annotations */}
           {showSimilarityPanel && (
-            <div className="similarity-results-embedded">
-              <div className="similarity-results-header">
-                <h4 className="similarity-results-title">
-                  <i className="fas fa-search"></i>
-                  Similar Annotations
-                </h4>
+            <div className="annotation-section">
+              <div className="annotation-section-title">
+                <i className="fas fa-search"></i>
+                Similar Annotations
                 <div className="similarity-results-actions">
+                  {/* Map Toggle - only show if we have similar annotations on the map */}
+                  {similarAnnotations.length > 0 && setShowSimilarAnnotations && (
+                    <button
+                      onClick={() => setShowSimilarAnnotations(!showSimilarAnnotations)}
+                      className={`similarity-toggle-btn ${
+                        showSimilarAnnotations ? 'active' : ''
+                      }`}
+                      style={{
+                        backgroundColor: showSimilarAnnotations ? '#f59e0b' : '#374151',
+                        color: '#d1d5db',
+                        border: '1px solid #4b5563',
+                        padding: '3px 6px',
+                        borderRadius: '4px',
+                        fontSize: '10px',
+                        cursor: 'pointer',
+                        marginRight: '6px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '3px',
+                        fontWeight: '500'
+                      }}
+                      title={`${showSimilarAnnotations ? 'Hide' : 'Show'} similar annotations on map`}
+                    >
+                      <i className="fas fa-map-marker-alt"></i>
+                      Map ({similarAnnotations.length})
+                      <i className={`fas ${showSimilarAnnotations ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                    </button>
+                  )}
+                  
+                  {/* Show on Map button - for new search results */}
                   {onSimilarAnnotationsUpdate && similarityResults.length > 0 && (
                     <button
                       className="similarity-show-map-btn"
@@ -1066,10 +1144,18 @@ const AnnotationPanel = ({
                       Show on Map
                     </button>
                   )}
+                  
+                  {/* Close button with cleanup */}
                   <button
                     className="similarity-close-btn"
-                    onClick={() => setShowSimilarityPanel(false)}
-                    title="Close similarity search"
+                    onClick={() => {
+                      setShowSimilarityPanel(false);
+                      // Clean up similar annotations from map when closing the window
+                      if (onSimilarAnnotationsCleanup) {
+                        onSimilarAnnotationsCleanup();
+                      }
+                    }}
+                    title="Close similarity search and clear map"
                     style={{
                       background: 'none',
                       border: 'none',
@@ -1171,6 +1257,44 @@ const AnnotationPanel = ({
               </div>
             </div>
           )}
+
+          {/* Actions */}
+          <div className="annotation-section">
+            <div className="annotation-section-title">Actions</div>
+            <div className="annotation-actions">
+              <button
+                onClick={onClearAllAnnotations}
+                className="annotation-action-btn danger"
+                disabled={annotations.length === 0}
+                title="Clear all annotations"
+              >
+                <i className="fas fa-trash-alt"></i>
+                Clear All
+              </button>
+              
+              <button
+                onClick={handleUpload}
+                className="annotation-action-btn"
+                disabled={annotations.filter(a => a.embeddings?.imageEmbedding).length === 0}
+                title="Upload annotations with embeddings to Weaviate"
+              >
+                <i className="fas fa-cloud-upload-alt"></i>
+                Upload
+              </button>
+              
+              <button
+                onClick={handleExport}
+                className="annotation-action-btn"
+                disabled={annotations.length === 0}
+                title="Export annotations to JSON file"
+                style={{ fontSize: '11px', padding: '4px 8px' }}
+              >
+                <i className="fas fa-download"></i>
+                Export
+              </button>
+              
+            </div>
+          </div>
         </>
       )}
 
@@ -1225,7 +1349,16 @@ AnnotationPanel.propTypes = {
   isMapBrowsingMode: PropTypes.bool,
   setIsMapBrowsingMode: PropTypes.func,
   // Similar annotation map rendering
-  onSimilarAnnotationsUpdate: PropTypes.func
+  onSimilarAnnotationsUpdate: PropTypes.func,
+  // Similar annotations state and controls
+  similarAnnotations: PropTypes.array,
+  showSimilarAnnotations: PropTypes.bool,
+  setShowSimilarAnnotations: PropTypes.func,
+  onSimilarAnnotationsCleanup: PropTypes.func,
+  // Layer activation props
+  activeLayer: PropTypes.string,
+  layers: PropTypes.array,
+  experiments: PropTypes.array
 };
 
 export default AnnotationPanel;
