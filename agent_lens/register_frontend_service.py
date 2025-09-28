@@ -472,7 +472,7 @@ def get_frontend_api():
             logger.error(traceback.format_exc())
             raise HTTPException(status_code=500, detail=str(e))
 
-    @app.delete("/similarity/collections/{collection_name}")
+    @app.delete("/similarity/collections/delete/{collection_name}")
     async def delete_similarity_collection(collection_name: str):
         """
         Delete a similarity search collection.
