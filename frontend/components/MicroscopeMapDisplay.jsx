@@ -1457,6 +1457,12 @@ const MicroscopeMapDisplay = ({
     setMapViewMode('FOV_FITTED');
     setScaleLevel(0); // FOV_FITTED mode always uses scale 0 (highest resolution)
     setZoomLevel(1.0); // Reset to 100% zoom
+    setMapPan({ x: 0, y: 0 }); // Reset pan to center for clean FOV_FITTED view
+    
+    // Reset video zoom to 100% for clean FOV_FITTED view
+    if (setVideoZoom) {
+      setVideoZoom(1.0);
+    }
     
     // For simulated microscope, quit historical mode when switching to FOV_FITTED
     // Note: Data loading is now handled by layer visibility, not mode switching
@@ -1468,7 +1474,7 @@ const MicroscopeMapDisplay = ({
     // Container dimensions will be automatically updated by ResizeObserver
     // No need for setTimeout hack - memoized calculations will recalculate
     // when containerDimensions state updates
-  }, [onFitToViewUncollapse, appendLog, isSimulatedMicroscope, isHistoricalDataMode, setStitchedTiles]);
+  }, [onFitToViewUncollapse, appendLog, isSimulatedMicroscope, isHistoricalDataMode, setStitchedTiles, setVideoZoom]);
 
   const handleDoubleClick = async (e) => {
     if (!microscopeControlService || !microscopeConfiguration || !stageDimensions || isHardwareInteractionDisabled) {
