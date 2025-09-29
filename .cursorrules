@@ -157,26 +157,40 @@ const chunkUrl = `${baseUrl}${channel}/scale${scale}/${y}.zip?path=${x}`;
 ```
 agent_lens/                 # Main Python package
 ├── __main__.py            # Entry point with CLI argument parsing
+├── log.py                 # Logging configuration
+├── register_frontend_service.py  # Frontend ASGI service registration
+├── register_similarity_search_service.py  # Similarity search service
 ├── utils/                 # Utility modules
 │   ├── artifact_manager.py    # Data storage and Zarr tile management
 │   ├── register_sam_service.py  # SAM segmentation service registration
 │   └── weaviate_search.py     # Similarity search utilities
-├── register_*_service.py  # Service registration modules
 
 tests/                     # Pytest test files (project root level)
+├── test-frontend-components/  # Frontend component tests
+│   ├── README.md                           # Test documentation
+│   ├── run_tests.js                        # Main test runner
+│   ├── test_tile_processing_manager.js     # TileProcessingManager tests
+│   └── test_layer_panel.js                 # LayerPanel component tests
 ├── conftest.py           # Test configuration and fixtures
 ├── test_basic.py         # Basic functionality tests
 ├── test_artifact_manager.py  # Artifact manager tests
-└── test_similarity_service.py  # Similarity service tests
+├── test_artifact_manager_basic.py  # Basic artifact manager tests
+├── test_similarity_service.py  # Similarity service tests
+├── test_frontend_service.py  # Frontend service tests (Playwright)
+├── test_frontend_integration.js  # Frontend integration tests
+├── test_artifact_zarr_loader.js  # Artifact Zarr loader tests
+└── run_js_tests.sh       # JavaScript test runner script
 
 frontend/                  # React application
 ├── main.jsx              # Root React component
+├── main.css              # Global styles with input validation CSS classes
 ├── components/           # Reusable UI components
 │   ├── annotation/       # Image annotation system
 │   │   ├── AnnotationCanvas.jsx      # Canvas for drawing annotations
 │   │   ├── AnnotationDetailsWindow.jsx  # Annotation details modal
 │   │   ├── AnnotationPanel.css       # Annotation panel styles
-│   │   └── AnnotationPanel.jsx       # Main annotation control panel
+│   │   ├── AnnotationPanel.jsx       # Main annotation control panel
+│   │   └── SimilarAnnotationRenderer.jsx  # Similar annotation rendering
 │   ├── microscope/       # Microscope-specific components
 │   │   ├── controls/     # Microscope control interfaces
 │   │   │   ├── NormalScanConfig.css  # Normal scan configuration styles
@@ -189,11 +203,11 @@ frontend/                  # React application
 │   │       ├── LayerPanel.jsx               # Layer control panel
 │   │       ├── README_TileProcessingManager.md  # Tile processing documentation
 │   │       └── TileProcessingManager.jsx    # Tile processing and caching
-│   ├── hooks/            # Custom React hooks (currently empty)
 │   ├── CameraSettings.jsx        # Camera configuration component
 │   ├── ChannelSettings.jsx       # Channel configuration component
 │   ├── ChatbotButton.jsx         # AI chatbot interface button
 │   ├── ControlButton.jsx         # Generic control button component
+│   ├── DualRangeSlider.jsx       # Dual range slider component
 │   ├── ImageJPanel.jsx           # ImageJ integration panel
 │   ├── ImageSearchPanel.css      # Image search panel styles
 │   ├── ImageSearchPanel.jsx      # Image similarity search interface
@@ -209,16 +223,32 @@ frontend/                  # React application
 │   ├── SampleSelector.jsx            # Sample management and transfer
 │   ├── Sidebar.css                   # Main sidebar styles
 │   └── Sidebar.jsx                   # Main application sidebar
+├── utils/                # Frontend utility modules
+│   ├── artifactZarrLoader.js  # OME-Zarr data loading service
+│   ├── annotationEmbeddingService.js  # Annotation embedding service
+│   ├── annotationUtils.js     # Annotation utility functions
+│   └── previewImageUtils.js   # Image preview utilities
 ├── utils.jsx            # Utility functions, service connections, and input validation
-└── main.css             # Global styles with input validation CSS classes
+├── package.json         # Frontend dependencies and scripts
+└── vite.config.mjs      # Vite build configuration
 
 docker/                   # Containerization
-├── docker-compose-*.yml  # Multi-service configurations
+├── docker-compose-agent-lens-app.yml  # Main application compose
 ├── dockerfile           # Main application container
 └── healthcheck.sh       # Health monitoring
 
 scripts/                  # Development and deployment scripts
-docs/                    # Documentation and diagrams
+├── run_tests.py         # Comprehensive test runner
+├── run_frontend_tests.py # Frontend service test runner
+├── setup_dev.sh         # Development setup script
+├── docker_start.sh      # Docker startup script
+└── run_dev.sh           # Development server script
+
+performance-analysis/     # Performance analysis tools
+├── README.md            # Performance analysis documentation
+├── chunk_performance_analysis.js  # Chunk loading performance tests
+├── server_processing_bottleneck_analysis.js  # Server bottleneck analysis
+└── parallel_curl_test.sh  # Parallel request testing
 ```
 
 ### 3.2. Coding Standards & Best Practices
@@ -336,6 +366,8 @@ docs/                    # Documentation and diagrams
 - **Test Runner**: `python scripts/run_tests.py` with multiple test types
 - **Coverage**: pytest-cov for comprehensive coverage reporting
 - **Frontend Testing**: Playwright integration for FastAPI service UI testing
+- **Frontend Component Testing**: Vanilla JavaScript test runners for React components
+- **Test Structure**: Tests located at project root level with comprehensive coverage
 
 ### 5.2. Test Categories & Execution
 ```bash
@@ -351,8 +383,14 @@ python scripts/run_tests.py --type slow
 # Frontend service tests with Playwright
 python scripts/run_tests.py --frontend-service
 
+# Frontend component tests (vanilla JavaScript)
+node tests/test-frontend-components/run_tests.js
+
 # With coverage reporting
 python scripts/run_tests.py --coverage
+
+# Check dependencies only
+python scripts/run_tests.py --check-deps
 ```
 
 ### 5.3. Writing Tests
@@ -393,8 +431,7 @@ filterwarnings = [
 ### 5.6. GitHub Actions CI/CD Patterns
 ```yaml
 # Container-based testing for reliable dependency management
-runs-on: ubuntu-latest
-container: python:3.11-slim
+runs-on: ubuntu-24.04
 
 # System dependencies for Playwright and networking
 - name: Install system dependencies
@@ -411,6 +448,21 @@ container: python:3.11-slim
   run: python scripts/run_tests.py --type fast
 - name: Run frontend service tests
   run: python scripts/run_tests.py --frontend-service
+- name: Run frontend component tests
+  run: node tests/test-frontend-components/run_tests.js
+```
+
+#### Docker Publishing Workflow
+```yaml
+# Build and publish Docker images
+- name: Build and push Docker image
+  uses: docker/build-push-action@v5.0.0
+  with:
+    context: .
+    file: docker/Dockerfile
+    push: ${{ github.event_name == 'push' }}
+    tags: ${{ steps.meta.outputs.tags }}
+    labels: ${{ steps.meta.outputs.labels }}
 ```
 
 ## 6. Deployment & Operations
@@ -495,8 +547,41 @@ const myNumberInput = useValidatedNumberInput(
 #### Service Registration Pattern
 ```python
 async def setup_service(server, server_id="service-name"):
+    """
+    Set up the service with proper configuration.
+    
+    Args:
+        server (Server): The server instance.
+        server_id (str): Service identifier.
+    """
     # Service configuration and registration
-    await server.register_service(service_config)
+    await server.register_service({
+        "id": server_id,
+        "name": "Service Name",
+        "type": "echo",  # or "asgi" for frontend services
+        "config": {"visibility": "public"},
+        # Service methods and endpoints
+    })
+```
+
+#### Frontend Service Registration Pattern
+```python
+async def setup_service(server, server_id="agent-lens"):
+    """
+    Set up the frontend ASGI service.
+    
+    Args:
+        server (Server): The server instance.
+        server_id (str): Service identifier.
+    """
+    # Register ASGI service with Hypha-RPC
+    await server.register_service({
+        "id": server_id,
+        "name": "Agent Lens", 
+        "type": "asgi",           # Key: ASGI type registration
+        "serve": get_frontend_api(),  # FastAPI app factory
+        "config": {"visibility": "public"},
+    })
 ```
 
 #### React Component Pattern
@@ -590,4 +675,15 @@ async def hypha_server():
 
 ---
 *Remember: This is a research platform for autonomous microscopy. Prioritize reliability, performance, and scientific accuracy in all implementations.* 
-- When starting the frontend webapp (npm start), a circular dependency check (madge) is run automatically before the app launches. This ensures no import cycles are present in the codebase. 
+
+## 8. Development Notes
+
+### 8.1. Frontend Development
+- When starting the frontend webapp (`npm start`), a circular dependency check (madge) is run automatically before the app launches. This ensures no import cycles are present in the codebase.
+- The frontend uses a hybrid styling approach: Bootstrap 5 + Tailwind CSS + CSS modules for maximum flexibility.
+- All number inputs must use the `useValidatedNumberInput` hook to prevent NaN crashes and provide consistent UX.
+
+### 8.2. Performance Considerations
+- The platform includes performance analysis tools in the `performance-analysis/` directory for optimizing chunk loading and server processing.
+- OME-Zarr data access uses efficient chunked loading with zip compression for optimal bandwidth usage.
+- Frontend component testing uses vanilla JavaScript test runners for better performance and reliability. 
