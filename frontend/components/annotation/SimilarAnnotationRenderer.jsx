@@ -157,10 +157,10 @@ const SimilarAnnotationRenderer = ({
     
     switch (annotation.type) {
       case 'rectangle':
-        if (displayPoints.length >= 2) {
-          const [p1, p2] = displayPoints;
+        if (displayPoints.length >= 4) {
+          const [p1, p2, p3] = displayPoints; // top-left, top-right, bottom-right
           const width = p2.x - p1.x;
-          const height = p2.y - p1.y;
+          const height = p3.y - p2.y; // Use bottom-right point for correct height
           ctx.rect(p1.x, p1.y, width, height);
           ctx.fill();
           ctx.stroke();
