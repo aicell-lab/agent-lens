@@ -901,11 +901,19 @@ const MicroscopeMapDisplay = ({
   const [visibleExperiments, setVisibleExperiments] = useState([]);
 
   // Auto-show active experiment when it changes (backwards compatibility)
+  // Only triggers when activeExperiment changes, not when visibleExperiments changes
   useEffect(() => {
-    if (activeExperiment && !visibleExperiments.includes(activeExperiment)) {
-      setVisibleExperiments(prev => [...prev, activeExperiment]);
+    if (activeExperiment) {
+      setVisibleExperiments(prev => {
+        // Only add if not already visible
+        if (!prev.includes(activeExperiment)) {
+          console.log(`[Auto-show] Adding active experiment to visible list: ${activeExperiment}`);
+          return [...prev, activeExperiment];
+        }
+        return prev;
+      });
     }
-  }, [activeExperiment, visibleExperiments]);
+  }, [activeExperiment]); // Removed visibleExperiments dependency to prevent auto-re-showing
 
   // Clean up visibleExperiments when experiments are deleted
   useEffect(() => {
@@ -1687,8 +1695,8 @@ const MicroscopeMapDisplay = ({
     const scanChannelString = getChannelString(); // Always use microscope channels for scan data
     
     
-    // 🚀 REDUCED LOGGING: Only log when NOT interacting and when tiles change significantly
-    const shouldLogDetails = (!isZooming && !isPanning) && (stitchedTiles.length % 5 === 0 || stitchedTiles.length <= 5); // Log every 5th tile change when not interacting
+    // 🚀 REDUCED LOGGING: Only log when NOT interacting to prevent infinite loops
+    const shouldLogDetails = !isZooming && !isPanning; // Only log when not interacting
     if (shouldLogDetails) {
       console.log(`🔍 [visibleTiles] Multi-layer filtering logic:`, {
         useMultiChannel,
@@ -3968,15 +3976,18 @@ const MicroscopeMapDisplay = ({
 
   // Effect to clean up tiles when experiments become invisible
   useEffect(() => {
-    if (visibleExperiments.length === 0) return; // Don't clean up if no experiments are visible
-    
     setStitchedTiles(prevTiles => {
-      const filteredTiles = prevTiles.filter(tile => 
-        tile.experimentName === null || visibleExperiments.includes(tile.experimentName)
-      );
+      const filteredTiles = prevTiles.filter(tile => {
+        // Keep tiles with no experiment name (e.g., from browse data layers)
+        if (tile.experimentName === null || tile.experimentName === undefined) {
+          return true;
+        }
+        // Keep tiles from visible experiments only
+        return visibleExperiments.includes(tile.experimentName);
+      });
       
       if (filteredTiles.length !== prevTiles.length) {
-        console.log(`[Tile Cleanup] Removed ${prevTiles.length - filteredTiles.length} tiles for hidden experiments`);
+        console.log(`[Tile Cleanup] Removed ${prevTiles.length - filteredTiles.length} tiles for hidden experiments. Visible experiments: [${visibleExperiments.join(', ')}]`);
       }
       
       return filteredTiles;
