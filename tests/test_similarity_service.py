@@ -3,7 +3,6 @@ import pytest_asyncio
 import os
 import dotenv
 import uuid
-import asyncio
 from hypha_rpc import connect_to_server
 
 dotenv.load_dotenv()
@@ -71,9 +70,21 @@ class TestWeaviateSimilarityService:
 
     @staticmethod
     def _generate_test_collection_name():
-        """Generate a unique test collection name."""
-        import uuid
-        return f"test_weaviate_{uuid.uuid4().hex[:8]}"
+        """Generate a consistent test collection name for better organization."""
+        return "AgentLensTest"
+    
+    @staticmethod
+    async def _cleanup_test_collection(weaviate_service, collection_name):
+        """Helper method to clean up test collection with proper error handling."""
+        try:
+            exists = await weaviate_service.collections.exists(collection_name)
+            if exists:
+                await weaviate_service.collections.delete(collection_name)
+                print(f"✅ Cleaned up collection: {collection_name}")
+            else:
+                print(f"Collection {collection_name} does not exist - no cleanup needed")
+        except Exception as e:
+            print(f"Error cleaning up {collection_name}: {e}")
 
     @pytest.fixture
     async def weaviate_service(self):
@@ -229,45 +240,8 @@ class TestWeaviateSimilarityService:
             assert len(vector_results) > 0, "Vector search should return results"
             
         finally:
-            # 6. Remove all collections which start with 'test_weaviate_xxxx'
-            print("Cleaning up test collections...")
-            
-            try:
-                all_collections = await weaviate_service.collections.list_all()
-                test_collections = [name for name in all_collections.keys() if name.startswith("test_weaviate_")]
-                
-                for test_collection in test_collections:
-                    print(f"Deleting test collection: {test_collection}")
-                    try:
-                        # Add timeout for individual delete operations
-                        delete_result = await asyncio.wait_for(
-                            weaviate_service.collections.delete(test_collection),
-                            timeout=30.0
-                        )
-                        print(f"Deleted {test_collection}: {delete_result}")
-                    except asyncio.TimeoutError:
-                        print(f"Timeout deleting {test_collection} - continuing cleanup")
-                    except Exception as e:
-                        print(f"Error deleting {test_collection}: {e}")
-                
-                # Verify cleanup with timeout
-                try:
-                    remaining_collections = await asyncio.wait_for(
-                        weaviate_service.collections.list_all(),
-                        timeout=30.0
-                    )
-                    remaining_test_collections = [name for name in remaining_collections.keys() if name.startswith("test_weaviate_")]
-                    if len(remaining_test_collections) > 0:
-                        print(f"Warning: {len(remaining_test_collections)} test collections still remain: {remaining_test_collections}")
-                    else:
-                        print("✅ All test collections cleaned up successfully")
-                except asyncio.TimeoutError:
-                    print("Warning: Timeout during cleanup verification")
-                except Exception as e:
-                    print(f"Warning: Error during cleanup verification: {e}")
-                    
-            except Exception as cleanup_error:
-                print(f"Warning: Error during cleanup process: {cleanup_error}")
+            # 6. Clean up the test collection
+            await self._cleanup_test_collection(weaviate_service, collection_name)
 
     @pytest.mark.integration
     async def test_weaviate_text_search(self, weaviate_service):
@@ -336,10 +310,7 @@ class TestWeaviateSimilarityService:
             
         finally:
             # Cleanup
-            try:
-                await weaviate_service.collections.delete(collection_name)
-            except Exception as e:
-                print(f"Error cleaning up {collection_name}: {e}")
+            await self._cleanup_test_collection(weaviate_service, collection_name)
 
     @pytest.mark.unit
     def test_utility_functions(self):
@@ -386,10 +357,7 @@ class TestWeaviateSimilarityService:
             
         finally:
             # Cleanup
-            try:
-                await weaviate_service.collections.delete(collection_name)
-            except Exception as e:
-                print(f"Error cleaning up {collection_name}: {e}")
+            await self._cleanup_test_collection(weaviate_service, collection_name)
 
     #########################################################################################
     # FastAPI Endpoint Tests
@@ -399,10 +367,9 @@ class TestWeaviateSimilarityService:
     async def test_similarity_endpoints_lifecycle(self, test_frontend_service):
         """Test complete similarity search endpoints lifecycle using real frontend service."""
         service, service_url = test_frontend_service
-        # Use hyphenated collection name to match the transformation logic in insert endpoint
-        base_name = self._generate_test_collection_name().replace('_', '-')
-        collection_name = base_name
-        application_id = f"test_app_{base_name.split('-')[-1]}"
+        # Use consistent collection name for better organization
+        collection_name = "AgentLensTest"
+        application_id = "test_app_001"
         
         import aiohttp
         
@@ -501,29 +468,27 @@ class TestWeaviateSimilarityService:
                     print("✅ Vector search completed successfully")
                 
         finally:
-            # 6. Cleanup - clean all test collections that start with 'TestWeaviate'
-            print("🧹 Cleaning up all test collections...")
+            # 6. Cleanup - clean the test collection
+            print("🧹 Cleaning up test collection...")
             try:
                 async with aiohttp.ClientSession() as session:
-                    # First, list all collections to find test collections
-                    list_url = f"{service_url}/similarity/collections"
-                    async with session.get(list_url) as response:
+                    # Check if collection exists first
+                    exists_url = f"{service_url}/similarity/collections/{collection_name}/exists"
+                    async with session.get(exists_url) as response:
                         if response.status == 200:
                             result = await response.json()
-                            collections = result.get("collections", {})
-                            
-                            # Find all collections that start with 'TestWeaviate'
-                            test_collections = [name for name in collections.keys() if name.startswith("TestWeaviate")]
-                            
-                            print(f"Found {len(test_collections)} test collections to clean up: {test_collections}")
-                            
-                            # Delete each test collection
-                            for collection_name in test_collections:
+                            if result.get("exists", False):
+                                # Delete the test collection
                                 cleanup_url = f"{service_url}/similarity/collections/{collection_name}"
                                 async with session.delete(cleanup_url) as cleanup_response:
-                                    print(f"Cleanup response for {collection_name}: {cleanup_response.status}")
+                                    if cleanup_response.status == 200:
+                                        print(f"✅ Cleaned up collection: {collection_name}")
+                                    else:
+                                        print(f"Warning: Cleanup response for {collection_name}: {cleanup_response.status}")
+                            else:
+                                print(f"Collection {collection_name} does not exist - no cleanup needed")
                         else:
-                            print(f"Failed to list collections: {response.status}")
+                            print(f"Failed to check if collection exists: {response.status}")
             except Exception as e:
                 print(f"Error during cleanup: {e}")
 
