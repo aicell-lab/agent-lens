@@ -413,9 +413,13 @@ def get_frontend_api():
             dict: Result of collection creation
         """
         try:
-            # Ensure similarity service is connected
-            if not await similarity_service.ensure_connected():
-                raise HTTPException(status_code=500, detail="Failed to connect to similarity search service")
+            # Check if similarity service is available
+            try:
+                if not await similarity_service.ensure_connected():
+                    raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            except Exception as e:
+                logger.warning(f"Similarity service not available: {e}")
+                raise HTTPException(status_code=503, detail="Similarity search service is not available")
             
             # Convert collection name to valid Weaviate class name (same logic as insert endpoint)
             # Split by hyphens and capitalize each word, then join
@@ -461,8 +465,12 @@ def get_frontend_api():
             dict: List of collections
         """
         try:
-            if not await similarity_service.ensure_connected():
-                raise HTTPException(status_code=500, detail="Failed to connect to similarity search service")
+            try:
+                if not await similarity_service.ensure_connected():
+                    raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            except Exception as e:
+                logger.warning(f"Similarity service not available: {e}")
+                raise HTTPException(status_code=503, detail="Similarity search service is not available")
             
             collections = await similarity_service.list_collections()
             return {"success": True, "collections": collections}
@@ -484,8 +492,12 @@ def get_frontend_api():
             dict: Result of deletion
         """
         try:
-            if not await similarity_service.ensure_connected():
-                raise HTTPException(status_code=500, detail="Failed to connect to similarity search service")
+            try:
+                if not await similarity_service.ensure_connected():
+                    raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            except Exception as e:
+                logger.warning(f"Similarity service not available: {e}")
+                raise HTTPException(status_code=503, detail="Similarity search service is not available")
             
             result = await similarity_service.delete_collection(collection_name)
             return {"success": True, "result": result}
@@ -527,8 +539,12 @@ def get_frontend_api():
         """
         try:
             
-            if not await similarity_service.ensure_connected():
-                raise HTTPException(status_code=500, detail="Failed to connect to similarity search service")
+            try:
+                if not await similarity_service.ensure_connected():
+                    raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            except Exception as e:
+                logger.warning(f"Similarity service not available: {e}")
+                raise HTTPException(status_code=503, detail="Similarity search service is not available")
             
             # Convert collection name to valid Weaviate class name (no hyphens, starts with uppercase)
             # Split by hyphens and capitalize each word, then join
@@ -643,8 +659,12 @@ def get_frontend_api():
             dict: Search results
         """
         try:
-            if not await similarity_service.ensure_connected():
-                raise HTTPException(status_code=500, detail="Failed to connect to similarity search service")
+            try:
+                if not await similarity_service.ensure_connected():
+                    raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            except Exception as e:
+                logger.warning(f"Similarity service not available: {e}")
+                raise HTTPException(status_code=503, detail="Similarity search service is not available")
             
             # Convert collection name to valid Weaviate class name (same logic as other endpoints)
             words = collection_name.split('-')
@@ -692,8 +712,12 @@ def get_frontend_api():
             if not image.content_type or not image.content_type.startswith("image/"):
                 raise HTTPException(status_code=400, detail="Uploaded file must be an image")
             
-            if not await similarity_service.ensure_connected():
-                raise HTTPException(status_code=500, detail="Failed to connect to similarity search service")
+            try:
+                if not await similarity_service.ensure_connected():
+                    raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            except Exception as e:
+                logger.warning(f"Similarity service not available: {e}")
+                raise HTTPException(status_code=503, detail="Similarity search service is not available")
             
             image_bytes = await image.read()
             if not image_bytes:
@@ -737,8 +761,12 @@ def get_frontend_api():
             dict: Search results
         """
         try:
-            if not await similarity_service.ensure_connected():
-                raise HTTPException(status_code=500, detail="Failed to connect to similarity search service")
+            try:
+                if not await similarity_service.ensure_connected():
+                    raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            except Exception as e:
+                logger.warning(f"Similarity service not available: {e}")
+                raise HTTPException(status_code=503, detail="Similarity search service is not available")
             
             # Convert collection name to valid Weaviate class name
             words = collection_name.split('-')
@@ -776,8 +804,12 @@ def get_frontend_api():
             dict: Whether the collection exists
         """
         try:
-            if not await similarity_service.ensure_connected():
-                raise HTTPException(status_code=500, detail="Failed to connect to similarity search service")
+            try:
+                if not await similarity_service.ensure_connected():
+                    raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            except Exception as e:
+                logger.warning(f"Similarity service not available: {e}")
+                raise HTTPException(status_code=503, detail="Similarity search service is not available")
             
             exists = await similarity_service.collection_exists(collection_name)
             return {"success": True, "exists": exists, "collection_name": collection_name}

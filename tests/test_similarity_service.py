@@ -418,6 +418,8 @@ class TestWeaviateSimilarityService:
                 }
                 
                 async with session.post(create_url, params=create_data) as response:
+                    if response.status == 503:
+                        pytest.skip("Similarity search service is not available - skipping test")
                     assert response.status == 200
                     result = await response.json()
                     assert result["success"] is True

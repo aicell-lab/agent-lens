@@ -94,7 +94,7 @@ class WeaviateSimilarityService:
         try:
             token = os.getenv("HYPHA_AGENTS_TOKEN")
             if not token:
-                logger.error("HYPHA_AGENTS_TOKEN not set in environment")
+                logger.warning("HYPHA_AGENTS_TOKEN not set in environment - similarity search will not be available")
                 return False
             
             self.server = await connect_to_server({
@@ -103,13 +103,20 @@ class WeaviateSimilarityService:
                 "token": token
             })
             
-            self.weaviate_service = await self.server.get_service(WEAVIATE_SERVICE_NAME, mode="first")
-            self.connected = True
-            logger.info("Connected to Weaviate service")
-            return True
+            try:
+                self.weaviate_service = await self.server.get_service(WEAVIATE_SERVICE_NAME, mode="first")
+                self.connected = True
+                logger.info("Connected to Weaviate service")
+                return True
+            except Exception as service_error:
+                logger.warning(f"Weaviate service not found: {service_error}")
+                # Clean up the server connection since we can't use it
+                await self.server.disconnect()
+                self.server = None
+                return False
             
         except Exception as e:
-            logger.error(f"Failed to connect to Weaviate service: {e}")
+            logger.warning(f"Failed to connect to Weaviate service: {e}")
             return False
     
     async def disconnect(self):
@@ -125,7 +132,7 @@ class WeaviateSimilarityService:
         """Ensure we're connected to Weaviate service."""
         if not self.connected:
             return await self.connect()
-        return True
+        return self.connected and self.weaviate_service is not None
     
     async def create_collection(self, collection_name: str, description: str = "Microscopy images collection") -> Dict[str, Any]:
         """Create a new collection in Weaviate."""
