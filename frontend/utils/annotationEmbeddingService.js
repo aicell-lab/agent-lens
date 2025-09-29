@@ -14,7 +14,7 @@
  * - Falls back when advanced extraction requirements not met
  */
 
-import tileProcessingManager from '../components/microscope/map/TileProcessingManager.jsx';
+import TileProcessingManager from '../components/microscope/map/TileProcessingManager.jsx';
 
 /**
  * Extract image region from canvas based on annotation coordinates
@@ -156,7 +156,7 @@ export async function extractAnnotationImageRegionAdvanced(
     console.log(`🎨 AdvancedAnnotationExtraction: Tile request:`, tileRequest);
 
     // Process all enabled channels using the same logic as the main system
-    const processedTile = await tileProcessingManager.processTileChannels(
+    const processedTile = await TileProcessingManager.processTileChannels(
       enabledChannels,
       tileRequest,
       mode,

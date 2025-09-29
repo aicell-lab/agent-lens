@@ -2761,7 +2761,7 @@ const MicroscopeMapDisplay = ({
         }
       };
     }
-  }, [isAnnotationDropdownOpen, activeLayer, layers, setLayers, experiments, appendLog]);
+  }, [isAnnotationDropdownOpen, activeLayer, setLayers, experiments, appendLog]); // Removed layers dependency to prevent infinite loop
 
   // Load experiments when microscope service becomes available
   useEffect(() => {
