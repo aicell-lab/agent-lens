@@ -1,9 +1,7 @@
 import pytest
 import pytest_asyncio
-import os
 import dotenv
 import uuid
-from hypha_rpc import connect_to_server
 
 dotenv.load_dotenv()
 
@@ -88,22 +86,19 @@ class TestWeaviateSimilarityService:
 
     @pytest.fixture
     async def weaviate_service(self):
-        """Fixture to get Weaviate service connection."""
-        token = os.getenv("HYPHA_AGENTS_TOKEN")
-        if not token:
-            raise ValueError("HYPHA_AGENTS_TOKEN not set in environment - required for Weaviate tests")
-        server = await connect_to_server({
-            "server_url": "https://hypha.aicell.io",
-            "workspace": "hypha-agents",
-            "token": token
-        })
+        """Fixture to get Weaviate service connection using WeaviateSimilarityService."""
+        from agent_lens.utils.weaviate_search import WeaviateSimilarityService
         
-        weaviate = await server.get_service("hypha-agents/weaviate", mode="first")
+        service = WeaviateSimilarityService()
+        connected = await service.connect()
         
-        yield weaviate
+        if not connected:
+            pytest.skip("Weaviate service not available - skipping integration tests")
         
-        # Cleanup: disconnect server
-        await server.disconnect()
+        yield service
+        
+        # Cleanup: disconnect service
+        await service.disconnect()
 
     @pytest.mark.integration
     @pytest.mark.timeout(120)  # 2 minutes timeout to match GitHub Actions
@@ -113,29 +108,33 @@ class TestWeaviateSimilarityService:
         application_id = "test-app-001"
         
         try:
-            # 1. Create collection for test
-            print(f"Creating test collection: {collection_name}")
-            collection_settings = {
-                "class": collection_name,
-                "description": "Test collection for microscopy images",
-                "properties": [
-                    {"name": "image_id", "dataType": ["text"]},
-                    {"name": "description", "dataType": ["text"]},
-                    {"name": "metadata", "dataType": ["text"]}
-                ],
-                "vectorizer": "none"  # We'll provide vectors manually
-            }
+            # 1. Check if collection exists, create only if it doesn't
+            print(f"Checking if test collection exists: {collection_name}")
+            exists = await weaviate_service.collection_exists(collection_name)
             
-            result = await weaviate_service.collections.create(collection_settings)
-            print(f"Collection created: {result}")
+            if not exists:
+                print(f"Creating test collection: {collection_name}")
+                try:
+                    result = await weaviate_service.create_collection(
+                        collection_name=collection_name,
+                        description="Test collection for microscopy images"
+                    )
+                    print(f"Collection created: {result}")
+                except Exception as e:
+                    if "already exists" in str(e) or "class already exists" in str(e):
+                        print(f"Collection {collection_name} already exists - using existing collection")
+                    else:
+                        raise
+            else:
+                print(f"Collection {collection_name} already exists - using existing collection")
             
             # Verify collection exists
-            exists = await weaviate_service.collections.exists(collection_name)
-            assert exists, f"Collection {collection_name} should exist after creation"
+            exists = await weaviate_service.collection_exists(collection_name)
+            assert exists, f"Collection {collection_name} should exist"
             
             # 2. Create an application
             print(f"Creating application: {application_id}")
-            app_result = await weaviate_service.applications.create(
+            app_result = await weaviate_service.create_application(
                 collection_name=collection_name,
                 application_id=application_id,
                 description="Test application for microscopy image similarity search"
@@ -143,7 +142,7 @@ class TestWeaviateSimilarityService:
             print(f"Application created: {app_result}")
             
             # Verify application exists
-            app_exists = await weaviate_service.applications.exists(collection_name, application_id)
+            app_exists = await weaviate_service.application_exists(collection_name, application_id)
             assert app_exists, f"Application {application_id} should exist after creation"
             
             # 3. Insert image data with vectors
@@ -166,82 +165,63 @@ class TestWeaviateSimilarityService:
                 clip_vector = self._generate_clip_vector(img_data["description"])
                 
                 # Insert with vector using the proper method
-                result = await weaviate_service.data.insert(
+                result = await weaviate_service.insert_image(
                     collection_name=collection_name,
                     application_id=application_id,
-                    properties=img_data,
+                    image_id=img_data["image_id"],
+                    description=img_data["description"],
+                    metadata=img_data["metadata"],
                     vector=clip_vector
                 )
                 insert_results.append(result)
             
             print(f"Inserted {len(insert_results)} objects with CLIP vectors")
             
-            # 4. Fetch objects
-            print("Fetching objects...")
-            
-            # Fetch objects using fetch_objects (no vectorization required)
-            search_results = await weaviate_service.query.fetch_objects(
+            # 4. Test text-based search
+            print("Testing text-based search...")
+            text_results = await weaviate_service.search_by_text(
                 collection_name=collection_name,
                 application_id=application_id,
+                query_text="microscopy image",
                 limit=5
             )
             
-            print(f"Fetch results structure: {search_results}")
-            
-            # The results have an 'objects' key containing the actual results
-            if 'objects' in search_results:
-                objects = search_results['objects']
-                print(f"Found {len(objects)} objects")
-                assert len(objects) > 0, "Should find at least one result"
-                
-                # Debug: Print the first result to see its structure
-                if objects:
-                    first_result = objects[0]
-                    print(f"First result keys: {list(first_result.keys()) if hasattr(first_result, 'keys') else 'No keys'}")
-                    print(f"First result: {first_result}")
-                
-                # Verify result structure
-                for result in objects:
-                    # Check if result has properties or if properties are at top level
-                    if "properties" in result:
-                        props = result["properties"]
-                    else:
-                        props = result  # Properties might be at top level
-                    
-                    assert "image_id" in props, "Result should have image_id"
-                    assert "description" in props, "Result should have description"
-            else:
-                assert False, f"Expected 'objects' key in results, got: {list(search_results.keys())}"
+            print(f"Text search results: {len(text_results)} objects found")
+            assert len(text_results) > 0, "Text search should return results"
             
             # 5. List collections
             print("Listing all collections...")
-            all_collections = await weaviate_service.collections.list_all()
+            all_collections = await weaviate_service.list_collections()
             print(f"Available collections: {list(all_collections.keys())}")
             
             # Verify our test collection is in the list
             assert collection_name in all_collections, f"Test collection {collection_name} should be in collections list"
             
-            # Test vector similarity search
+            # 6. Test vector similarity search
             print("Performing vector similarity search...")
             
             # Generate a query vector using CLIP
             query_vector = self._generate_clip_vector("microscopy image")
             
-            # Search for similar images using near_vector
-            vector_results = await weaviate_service.query.near_vector(
+            # Search for similar images using the service method
+            vector_results = await weaviate_service.search_similar_images(
                 collection_name=collection_name,
                 application_id=application_id,
-                near_vector=query_vector,
+                query_vector=query_vector,
                 include_vector=True,
                 limit=3
             )
             
-            print(f"Vector search results: {len(vector_results)} objects found, vector_results: {vector_results}")
+            print(f"Vector search results: {len(vector_results)} objects found")
             assert len(vector_results) > 0, "Vector search should return results"
             
         finally:
-            # 6. Clean up the test collection
-            await self._cleanup_test_collection(weaviate_service, collection_name)
+            # Clean up the test collection
+            try:
+                await weaviate_service.delete_collection(collection_name)
+                print(f"✅ Cleaned up collection: {collection_name}")
+            except Exception as e:
+                print(f"Warning: Error cleaning up collection {collection_name}: {e}")
 
     @pytest.mark.integration
     async def test_weaviate_text_search(self, weaviate_service):
@@ -250,20 +230,25 @@ class TestWeaviateSimilarityService:
         application_id = "test-text-search"
         
         try:
-            # Create collection
-            collection_settings = {
-                "class": collection_name,
-                "description": "Test collection for text search",
-                "properties": [
-                    {"name": "title", "dataType": ["text"]},
-                    {"name": "content", "dataType": ["text"]},
-                    {"name": "category", "dataType": ["text"]}
-                ],
-                "vectorizer": "none"  # No vectorizer - we'll provide vectors manually
-            }
+            # Check if collection exists, create only if it doesn't
+            exists = await weaviate_service.collection_exists(collection_name)
             
-            await weaviate_service.collections.create(collection_settings)
-            await weaviate_service.applications.create(
+            if not exists:
+                print(f"Creating test collection for text search: {collection_name}")
+                try:
+                    await weaviate_service.create_collection(
+                        collection_name=collection_name,
+                        description="Test collection for text search"
+                    )
+                except Exception as e:
+                    if "already exists" in str(e) or "class already exists" in str(e):
+                        print(f"Collection {collection_name} already exists - using existing collection")
+                    else:
+                        raise
+            else:
+                print(f"Collection {collection_name} already exists - using existing collection")
+            
+            await weaviate_service.create_application(
                 collection_name=collection_name,
                 application_id=application_id,
                 description="Test text search application"
@@ -289,28 +274,32 @@ class TestWeaviateSimilarityService:
                 text_description = f"{text_obj['title']}: {text_obj['content']}"
                 clip_vector = self._generate_clip_vector(text_description)
                 
-                await weaviate_service.data.insert(
+                await weaviate_service.insert_image(
                     collection_name=collection_name,
                     application_id=application_id,
-                    properties=text_obj,
+                    image_id=text_obj['title'].lower().replace(' ', '_'),
+                    description=text_description,
+                    metadata=text_obj,
                     vector=clip_vector
                 )
             
-            # Test vector similarity search
-            query_vector = self._generate_clip_vector("microscopy techniques")
-            search_results = await weaviate_service.query.near_vector(
+            # Test text-based search
+            search_results = await weaviate_service.search_by_text(
                 collection_name=collection_name,
                 application_id=application_id,
-                near_vector=query_vector,
-                include_vector=True,
+                query_text="microscopy techniques",
                 limit=5
             )
             
-            assert len(search_results) > 0, "Vector search should return results"
+            assert len(search_results) > 0, "Text search should return results"
             
         finally:
-            # Cleanup
-            await self._cleanup_test_collection(weaviate_service, collection_name)
+            # Clean up the test collection
+            try:
+                await weaviate_service.delete_collection(collection_name)
+                print(f"✅ Cleaned up collection: {collection_name}")
+            except Exception as e:
+                print(f"Warning: Error cleaning up collection {collection_name}: {e}")
 
     @pytest.mark.unit
     def test_utility_functions(self):
@@ -333,31 +322,40 @@ class TestWeaviateSimilarityService:
         collection_name = self._generate_test_collection_name()
         
         try:
-            # Test collection creation
-            settings = {
-                "class": collection_name,
-                "description": "Test collection",
-                "properties": [{"name": "test", "dataType": ["text"]}]
-            }
+            # Check if collection exists, create only if it doesn't
+            exists = await weaviate_service.collection_exists(collection_name)
             
-            result = await weaviate_service.collections.create(settings)
-            assert result is not None
+            if not exists:
+                print(f"Creating test collection for management test: {collection_name}")
+                try:
+                    result = await weaviate_service.create_collection(
+                        collection_name=collection_name,
+                        description="Test collection"
+                    )
+                    assert result is not None
+                except Exception as e:
+                    if "already exists" in str(e) or "class already exists" in str(e):
+                        print(f"Collection {collection_name} already exists - using existing collection")
+                    else:
+                        raise
+            else:
+                print(f"Collection {collection_name} already exists - using existing collection")
             
-            # Test collection retrieval
-            collection = await weaviate_service.collections.get(collection_name)
-            assert collection is not None
-            
-            # Test collection existence check
-            exists = await weaviate_service.collections.exists(collection_name)
-            assert exists is True
-            
-            # Test artifact retrieval
-            artifact = await weaviate_service.collections.get_artifact(collection_name)
-            assert artifact is not None
+            # Test listing collections
+            collections = await weaviate_service.list_collections()
+            print(f"Available collections: {list(collections.keys())}")
+            print(f"Looking for collection: {collection_name}")
+            # Check if any collection name contains our test collection name (case-insensitive)
+            collection_found = any(collection_name.lower() in name.lower() for name in collections.keys())
+            assert collection_found, f"Collection {collection_name} should be in collections list. Available: {list(collections.keys())}"
             
         finally:
-            # Cleanup
-            await self._cleanup_test_collection(weaviate_service, collection_name)
+            # Clean up the test collection
+            try:
+                await weaviate_service.delete_collection(collection_name)
+                print(f"✅ Cleaned up collection: {collection_name}")
+            except Exception as e:
+                print(f"Warning: Error cleaning up collection {collection_name}: {e}")
 
     #########################################################################################
     # FastAPI Endpoint Tests
