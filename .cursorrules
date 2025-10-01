@@ -427,6 +427,7 @@ filterwarnings = [
 - **CI Dependencies**: Use container approach with pre-installed system libraries
 - **Test Configuration**: Use `pyproject.toml` instead of `pytest.ini` for modern pytest setup
 - **Async Decorators**: Always use `@pytest.mark.asyncio` for async test functions
+- **Weaviate Collection Names**: Always use lowercase collection names, for example "Agentlenstest" instead of "AgentLensTest" - Weaviate normalizes collection names to lowercase internally
 
 ### 5.6. GitHub Actions CI/CD Patterns
 ```yaml
