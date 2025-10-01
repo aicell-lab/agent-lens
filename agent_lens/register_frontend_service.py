@@ -434,8 +434,22 @@ def get_frontend_api():
             if not application_id:
                 application_id = f"app_{uuid.uuid4().hex[:8]}"
             
-            # Create collection with the transformed name
-            collection_result = await similarity_service.create_collection(valid_collection_name, description)
+            # Check if collection already exists
+            collection_exists = await similarity_service.collection_exists(valid_collection_name)
+            
+            if not collection_exists:
+                # Create collection with the transformed name
+                try:
+                    collection_result = await similarity_service.create_collection(valid_collection_name, description)
+                except Exception as e:
+                    if "already exists" in str(e) or "class already exists" in str(e):
+                        logger.info(f"Collection {valid_collection_name} already exists - using existing collection")
+                        collection_result = {"message": "Collection already exists"}
+                    else:
+                        raise
+            else:
+                logger.info(f"Collection {valid_collection_name} already exists - using existing collection")
+                collection_result = {"message": "Collection already exists"}
             
             # Create application for the collection
             app_result = await similarity_service.create_application(
