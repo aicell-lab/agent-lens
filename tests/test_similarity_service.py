@@ -316,16 +316,16 @@ class TestWeaviateSimilarityService:
     def test_utility_functions(self):
         """Test utility functions for test data generation."""
         # Test CLIP vector generation
-        vector = self._generate_clip_vector("test microscopy image")
+        vector = TestWeaviateSimilarityService._generate_clip_vector("test microscopy image")
         assert len(vector) == 512  # CLIP ViT-B/32 produces 512-dimensional vectors
         assert all(isinstance(v, float) for v in vector)
         # CLIP vectors are normalized, so they can be negative
         assert all(-1 <= v <= 1 for v in vector)
         
         # Test collection name generation
-        collection_name = self._generate_test_collection_name()
-        assert collection_name.startswith("test_weaviate_")
-        assert len(collection_name) == len("test_weaviate_") + 8  # 8 hex chars
+        collection_name = TestWeaviateSimilarityService._generate_test_collection_name()
+        assert collection_name == "AgentLensTest"  # Fixed collection name for testing
+        assert len(collection_name) == len("AgentLensTest")
 
     @pytest.mark.integration
     async def test_collection_management(self, weaviate_service):
