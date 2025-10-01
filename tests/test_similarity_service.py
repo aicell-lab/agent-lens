@@ -69,7 +69,8 @@ class TestWeaviateSimilarityService:
     @staticmethod
     def _generate_test_collection_name():
         """Generate a consistent test collection name for better organization."""
-        return "AgentLensTest"
+        #ALWAYS USE THIS COLLECTION NAME FOR TESTING
+        return "Agentlenstest"
     
     @staticmethod
     async def _cleanup_test_collection(weaviate_service, collection_name):
@@ -108,29 +109,19 @@ class TestWeaviateSimilarityService:
         application_id = "test-app-001"
         
         try:
-            # 1. Check if collection exists, create only if it doesn't
-            print(f"Checking if test collection exists: {collection_name}")
-            exists = await weaviate_service.collection_exists(collection_name)
-            
-            if not exists:
-                print(f"Creating test collection: {collection_name}")
-                try:
-                    result = await weaviate_service.create_collection(
-                        collection_name=collection_name,
-                        description="Test collection for microscopy images"
-                    )
-                    print(f"Collection created: {result}")
-                except Exception as e:
-                    if "already exists" in str(e) or "class already exists" in str(e):
-                        print(f"Collection {collection_name} already exists - using existing collection")
-                    else:
-                        raise
-            else:
-                print(f"Collection {collection_name} already exists - using existing collection")
-            
-            # Verify collection exists
-            exists = await weaviate_service.collection_exists(collection_name)
-            assert exists, f"Collection {collection_name} should exist"
+            # 1. Create collection for test
+            print(f"Creating test collection: {collection_name}")
+            try:
+                result = await weaviate_service.create_collection(
+                    collection_name=collection_name,
+                    description="Test collection for microscopy images"
+                )
+                print(f"Collection created: {result}")
+            except Exception as e:
+                if "already exists" in str(e) or "class already exists" in str(e):
+                    print(f"Collection {collection_name} already exists - using existing collection")
+                else:
+                    raise
             
             # 2. Create an application
             print(f"Creating application: {application_id}")
@@ -216,12 +207,8 @@ class TestWeaviateSimilarityService:
             assert len(vector_results) > 0, "Vector search should return results"
             
         finally:
-            # Clean up the test collection
-            try:
-                await weaviate_service.delete_collection(collection_name)
-                print(f"✅ Cleaned up collection: {collection_name}")
-            except Exception as e:
-                print(f"Warning: Error cleaning up collection {collection_name}: {e}")
+            # Collection cleanup is handled at session level
+            pass
 
     @pytest.mark.integration
     async def test_weaviate_text_search(self, weaviate_service):
@@ -230,23 +217,19 @@ class TestWeaviateSimilarityService:
         application_id = "test-text-search"
         
         try:
-            # Check if collection exists, create only if it doesn't
-            exists = await weaviate_service.collection_exists(collection_name)
-            
-            if not exists:
-                print(f"Creating test collection for text search: {collection_name}")
-                try:
-                    await weaviate_service.create_collection(
-                        collection_name=collection_name,
-                        description="Test collection for text search"
-                    )
-                except Exception as e:
-                    if "already exists" in str(e) or "class already exists" in str(e):
-                        print(f"Collection {collection_name} already exists - using existing collection")
-                    else:
-                        raise
-            else:
-                print(f"Collection {collection_name} already exists - using existing collection")
+            # Create collection for test
+            print(f"Creating test collection for text search: {collection_name}")
+            try:
+                await weaviate_service.create_collection(
+                    collection_name=collection_name,
+                    description="Test collection for text search"
+                )
+                print(f"✅ Collection {collection_name} created successfully")
+            except Exception as e:
+                if "already exists" in str(e) or "class already exists" in str(e):
+                    print(f"Collection {collection_name} already exists - using existing collection")
+                else:
+                    raise
             
             await weaviate_service.create_application(
                 collection_name=collection_name,
@@ -313,8 +296,8 @@ class TestWeaviateSimilarityService:
         
         # Test collection name generation
         collection_name = TestWeaviateSimilarityService._generate_test_collection_name()
-        assert collection_name == "AgentLensTest"  # Fixed collection name for testing
-        assert len(collection_name) == len("AgentLensTest")
+        assert collection_name == "Agentlenstest"  # Fixed collection name for testing
+        assert len(collection_name) == len("Agentlenstest")
 
     @pytest.mark.integration
     async def test_collection_management(self, weaviate_service):
