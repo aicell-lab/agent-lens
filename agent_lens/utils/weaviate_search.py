@@ -148,7 +148,7 @@ class WeaviateSimilarityService:
                 {"name": "metadata", "dataType": ["text"]},
                 {"name": "dataset_id", "dataType": ["text"]},
                 {"name": "file_path", "dataType": ["text"]},
-                {"name": "preview_image", "dataType": ["text"]}  # Base64 encoded 50x50 preview
+                {"name": "preview_image", "dataType": ["blob"]}  # Base64 encoded 50x50 preview
             ],
             "vectorizer": "none"  # We'll provide vectors manually
         }
@@ -209,12 +209,23 @@ class WeaviateSimilarityService:
         if not await self.ensure_connected():
             raise RuntimeError("Not connected to Weaviate service")
         
+        # Explicitly specify which properties to return, including the blob preview_image
+        return_properties = [
+            "image_id",
+            "description", 
+            "metadata",
+            "dataset_id",
+            "file_path",
+            "preview_image"  # This is the key - explicitly include the blob property
+        ]
+        
         results = await self.weaviate_service.query.near_vector(
             collection_name=collection_name,
             application_id=application_id,
             near_vector=query_vector,
             include_vector=include_vector,
-            limit=limit
+            limit=limit,
+            return_properties=return_properties  # Add this parameter
         )
         
         logger.info(f"Found {len(results)} similar images in collection: {collection_name}")

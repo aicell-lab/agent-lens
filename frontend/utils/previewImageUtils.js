@@ -37,8 +37,9 @@ export const generatePreviewImage = async (canvas, annotation) => {
       0, 0, 50, 50                                   // Destination rectangle (50x50)
     );
     
-    // Convert to base64 PNG with data URL prefix
-    const base64 = previewCanvas.toDataURL('image/png', 0.8); // 0.8 quality for compression
+    // Convert to base64 PNG and extract just the base64 part (without data URL prefix)
+    const dataUrl = previewCanvas.toDataURL('image/png', 0.8); // 0.8 quality for compression
+    const base64 = dataUrl.split(',')[1]; // Remove "data:image/png;base64," prefix
     
     return base64;
   } catch (error) {
@@ -78,8 +79,9 @@ export const generatePreviewFromDataUrl = async (extractedImageDataUrl) => {
         // Draw image scaled to 50x50
         previewCtx.drawImage(img, 0, 0, 50, 50);
         
-        // Convert to base64 PNG
-        const base64 = previewCanvas.toDataURL('image/png', 0.8);
+        // Convert to base64 PNG and extract just the base64 part (without data URL prefix)
+        const dataUrl = previewCanvas.toDataURL('image/png', 0.8);
+        const base64 = dataUrl.split(',')[1]; // Remove "data:image/png;base64," prefix
         console.log('🖼️ Preview generated successfully:', {
           originalSize: `${img.width}x${img.height}`,
           previewSize: base64.length,

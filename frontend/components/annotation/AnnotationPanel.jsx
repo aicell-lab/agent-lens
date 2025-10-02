@@ -717,7 +717,6 @@ const AnnotationPanel = ({
 
       if (response.ok) {
         const result = await response.json();
-        console.log('Full similarity search response:', result);
         
         if (result.success && result.results) {
           // Handle different result formats from Weaviate
@@ -733,8 +732,12 @@ const AnnotationPanel = ({
             results = results.objects;
           }
           
+          // Final validation
+          if (!Array.isArray(results)) {
+            results = results ? [results] : [];
+          }
+          
           setSimilarityResults(results);
-          console.log('Processed similarity search results:', results);
         } else {
           console.error('No results found:', result);
           setSimilarityResults([]);
@@ -1208,7 +1211,7 @@ const AnnotationPanel = ({
                           {/* Preview Image */}
                           {props.preview_image && (
                             <img 
-                              src={props.preview_image} 
+                              src={`data:image/png;base64,${props.preview_image}`} 
                               alt="Preview" 
                               className="similarity-preview-image-small"
                             />
