@@ -1319,6 +1319,13 @@ const AnnotationPanel = ({
                                         console.log(`✅ Well center: (${wellInfo.centerX.toFixed(3)}, ${wellInfo.centerY.toFixed(3)})`);
                                         console.log(`✅ Stage coords: (${stageX.toFixed(3)}, ${stageY.toFixed(3)})`);
                                         
+                                        // Automatically show similar annotations on map if not already shown
+                                        if (onSimilarAnnotationsUpdate && similarityResults.length > 0 && similarAnnotations.length === 0) {
+                                          console.log('🗺️ Auto-triggering similar annotations render on map');
+                                          onSimilarAnnotationsUpdate(similarityResults);
+                                        }
+                                        
+                                        // Navigate to the coordinates
                                         navigateToCoordinates(stageX, stageY);
                                       } else {
                                         console.warn(`❌ No well info found for well ${parsedMetadata.well_id}`);

@@ -2328,7 +2328,7 @@ const MicroscopeMapDisplay = ({
   const [previousMapState, setPreviousMapState] = useState(null);
 
   // Function to navigate to specific stage coordinates
-  const navigateToCoordinates = useCallback((stageX_mm, stageY_mm, zoomLevel = 8.0, scaleLevel = 2) => {
+  const navigateToCoordinates = useCallback((stageX_mm, stageY_mm, newZoomLevel = 8.0, newScaleLevel = 2) => {
     if (!stageDimensions || !pixelsPerMm) {
       if (showNotification) {
         showNotification('Cannot navigate: stage dimensions not available', 'warning');
@@ -2336,11 +2336,11 @@ const MicroscopeMapDisplay = ({
       return;
     }
 
-    // Save current map state for go back functionality
+    // Save current map state for go back functionality (IMPORTANT: save CURRENT state, not new parameters)
     setPreviousMapState({
       mapPan: { ...mapPan },
-      scaleLevel: scaleLevel,
-      zoomLevel: zoomLevel,
+      scaleLevel: scaleLevel,  // Current scaleLevel from state
+      zoomLevel: zoomLevel,    // Current zoomLevel from state
       mapViewMode: mapViewMode
     });
 
@@ -2360,16 +2360,16 @@ const MicroscopeMapDisplay = ({
     const centerX = containerRect.width / 2;
     const centerY = containerRect.height / 2;
     
-    // Calculate new map scale
-    const newMapScale = (1 / Math.pow(4, scaleLevel)) * zoomLevel;
+    // Calculate new map scale using the NEW zoom and scale levels
+    const newMapScale = (1 / Math.pow(4, newScaleLevel)) * newZoomLevel;
     
     // Calculate pan position to center the target coordinates
     const newPanX = centerX - mapX * newMapScale;
     const newPanY = centerY - mapY * newMapScale;
     
-    // Update map state
-    setScaleLevel(scaleLevel);
-    setZoomLevel(zoomLevel);
+    // Update map state to NEW values
+    setScaleLevel(newScaleLevel);
+    setZoomLevel(newZoomLevel);
     setMapPan({ x: newPanX, y: newPanY });
 
     if (appendLog) {
