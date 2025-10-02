@@ -184,9 +184,13 @@ class WeaviateSimilarityService:
             "description": description,
             "metadata": json.dumps(metadata) if metadata else "",
             "dataset_id": dataset_id or "",
-            "file_path": file_path or "",
-            "preview_image": preview_image or ""
+            "file_path": file_path or ""
         }
+        
+        # Only include preview_image if it's a valid base64 string
+        # Weaviate blob data type doesn't accept empty strings
+        if preview_image and preview_image.strip():
+            properties["preview_image"] = preview_image
         
         # Generate vector if not provided
         if vector is None:
