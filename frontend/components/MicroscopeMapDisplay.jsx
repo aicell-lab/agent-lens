@@ -2324,6 +2324,82 @@ const MicroscopeMapDisplay = ({
     return positions;
   }, [scanParameters, fovSize, pixelsPerMm, mapScale, stageToDisplayCoords, dragSelectedWell]);
   
+  // Navigation functions for similarity search results
+  const [previousMapState, setPreviousMapState] = useState(null);
+
+  // Function to navigate to specific stage coordinates
+  const navigateToCoordinates = useCallback((stageX_mm, stageY_mm, zoomLevel = 8.0, scaleLevel = 2) => {
+    if (!stageDimensions || !pixelsPerMm) {
+      if (showNotification) {
+        showNotification('Cannot navigate: stage dimensions not available', 'warning');
+      }
+      return;
+    }
+
+    // Save current map state for go back functionality
+    setPreviousMapState({
+      mapPan: { ...mapPan },
+      scaleLevel: scaleLevel,
+      zoomLevel: zoomLevel,
+      mapViewMode: mapViewMode
+    });
+
+    // Switch to FREE_PAN mode if not already
+    if (mapViewMode !== 'FREE_PAN') {
+      setMapViewMode('FREE_PAN');
+    }
+
+    // Convert stage coordinates to display coordinates
+    const mapX = (stageX_mm - stageDimensions.xMin) * pixelsPerMm;
+    const mapY = (stageY_mm - stageDimensions.yMin) * pixelsPerMm;
+    
+    // Calculate the center of the container
+    const containerRect = mapContainerRef.current?.getBoundingClientRect();
+    if (!containerRect) return;
+    
+    const centerX = containerRect.width / 2;
+    const centerY = containerRect.height / 2;
+    
+    // Calculate new map scale
+    const newMapScale = (1 / Math.pow(4, scaleLevel)) * zoomLevel;
+    
+    // Calculate pan position to center the target coordinates
+    const newPanX = centerX - mapX * newMapScale;
+    const newPanY = centerY - mapY * newMapScale;
+    
+    // Update map state
+    setScaleLevel(scaleLevel);
+    setZoomLevel(zoomLevel);
+    setMapPan({ x: newPanX, y: newPanY });
+
+    if (appendLog) {
+      appendLog(`Navigated to coordinates: (${stageX_mm.toFixed(3)}, ${stageY_mm.toFixed(3)})`);
+    }
+  }, [stageDimensions, pixelsPerMm, mapPan, mapScale, scaleLevel, zoomLevel, mapViewMode, showNotification, appendLog]);
+
+  // Function to go back to previous map position
+  const goBackToPreviousPosition = useCallback(() => {
+    if (!previousMapState) {
+      if (showNotification) {
+        showNotification('No previous position to go back to', 'info');
+      }
+      return;
+    }
+
+    // Restore previous map state
+    setMapViewMode(previousMapState.mapViewMode);
+    setScaleLevel(previousMapState.scaleLevel);
+    setZoomLevel(previousMapState.zoomLevel);
+    setMapPan(previousMapState.mapPan);
+
+    // Clear the previous state
+    setPreviousMapState(null);
+
+    if (appendLog) {
+      appendLog('Returned to previous map position');
+    }
+  }, [previousMapState, showNotification, appendLog]);
+
   // Helper function to get intensity/exposure pair from status object (similar to MicroscopeControlPanel)
   const getIntensityExposurePairFromStatus = (status, channel) => {
     if (!status || channel === null || channel === undefined) return null;
@@ -4586,6 +4662,8 @@ const MicroscopeMapDisplay = ({
                       onClearAllAnnotations={handleClearAllAnnotations}
                       onExportAnnotations={handleExportAnnotations}
                       wellInfoMap={annotationWellMap}
+                      similarAnnotationWellMap={similarAnnotationWellMap}
+                      getWellInfoById={getWellInfoById}
                       embeddingStatus={embeddingStatus}
                       mapScale={mapScale}
                       mapPan={mapPan}
@@ -4609,6 +4687,10 @@ const MicroscopeMapDisplay = ({
                       showSimilarAnnotations={showSimilarAnnotations}
                       setShowSimilarAnnotations={setShowSimilarAnnotations}
                       onSimilarAnnotationsCleanup={handleSimilarAnnotationsCleanup}
+                      // Navigation functions
+                      navigateToCoordinates={navigateToCoordinates}
+                      goBackToPreviousPosition={goBackToPreviousPosition}
+                      hasPreviousPosition={previousMapState !== null}
                       // Layer activation props
                       activeLayer={activeLayer}
                       layers={layers}

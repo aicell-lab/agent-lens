@@ -364,6 +364,8 @@ const AnnotationPanel = ({
   onClearAllAnnotations,
   onExportAnnotations,
   wellInfoMap = {}, // Map of annotation IDs to well information
+  similarAnnotationWellMap = {}, // Map of well IDs to well information for similar annotations
+  getWellInfoById = null, // Function to get well info by well ID
   embeddingStatus = {}, // Map of annotation IDs to embedding status
   mapScale = null, // Current map scale for image extraction
   mapPan = null, // Current map pan offset for image extraction
@@ -392,6 +394,10 @@ const AnnotationPanel = ({
   showSimilarAnnotations = false,
   setShowSimilarAnnotations = null,
   onSimilarAnnotationsCleanup = null,
+  // Navigation functions
+  navigateToCoordinates = null,
+  goBackToPreviousPosition = null,
+  hasPreviousPosition = false,
   // Layer activation props
   activeLayer = null,
   layers = [],
@@ -1091,6 +1097,31 @@ const AnnotationPanel = ({
                 <i className="fas fa-search"></i>
                 Similar Annotations
                 <div className="similarity-results-actions">
+                  {/* Go back button */}
+                  {goBackToPreviousPosition && hasPreviousPosition && (
+                    <button
+                      onClick={goBackToPreviousPosition}
+                      className="similarity-go-back-btn"
+                      style={{
+                        backgroundColor: '#374151',
+                        color: '#d1d5db',
+                        border: '1px solid #4b5563',
+                        padding: '3px 6px',
+                        borderRadius: '4px',
+                        fontSize: '10px',
+                        cursor: 'pointer',
+                        marginRight: '6px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '3px',
+                        fontWeight: '500'
+                      }}
+                      title="Go back to previous map position"
+                    >
+                      <i className="fas fa-arrow-left"></i>
+                      Go Back
+                    </button>
+                  )}
                   {/* Map Toggle - only show if we have similar annotations on the map */}
                   {similarAnnotations.length > 0 && setShowSimilarAnnotations && (
                     <button
@@ -1245,6 +1276,84 @@ const AnnotationPanel = ({
                                 Similarity: {(result.metadata.score * 100).toFixed(1)}%
                               </div>
                             )}
+                            
+                            {/* Go to button */}
+                            {navigateToCoordinates && parsedMetadata && (parsedMetadata.polygon_wkt || parsedMetadata.bbox) && (
+                              <div className="similarity-result-actions-embedded" style={{ marginTop: '8px' }}>
+                                <button
+                                  onClick={() => {
+                                    // Extract well-relative coordinates from metadata
+                                    let wellRelativeX, wellRelativeY;
+                                    
+                                    if (parsedMetadata.polygon_wkt) {
+                                      // For polygon annotations, get the first coordinate
+                                      const match = parsedMetadata.polygon_wkt.match(/POLYGON\(\(([^)]+)\)\)/);
+                                      if (match && match[1]) {
+                                        const firstCoord = match[1].split(',')[0].trim();
+                                        const [x, y] = firstCoord.split(' ').map(coord => parseFloat(coord));
+                                        wellRelativeX = x;
+                                        wellRelativeY = y;
+                                      }
+                                    } else if (parsedMetadata.bbox && Array.isArray(parsedMetadata.bbox)) {
+                                      // For bbox annotations, use the center of the bounding box
+                                      const [x, y, width, height] = parsedMetadata.bbox;
+                                      wellRelativeX = x + width / 2;
+                                      wellRelativeY = y + height / 2;
+                                    }
+                                    
+                                    if (wellRelativeX !== undefined && wellRelativeY !== undefined && parsedMetadata.well_id) {
+                                      // Get well information - try similarAnnotationWellMap first, then use getWellInfoById
+                                      let wellInfo = similarAnnotationWellMap[parsedMetadata.well_id];
+                                      
+                                      // If not in similarAnnotationWellMap, try to get it dynamically
+                                      if (!wellInfo && getWellInfoById) {
+                                        wellInfo = getWellInfoById(parsedMetadata.well_id);
+                                      }
+                                      
+                                      if (wellInfo) {
+                                        // Convert well-relative coordinates to stage coordinates
+                                        const stageX = wellInfo.centerX + wellRelativeX;
+                                        const stageY = wellInfo.centerY + wellRelativeY;
+                                        
+                                        console.log(`✅ Navigating to well-relative coords (${wellRelativeX.toFixed(3)}, ${wellRelativeY.toFixed(3)}) in well ${parsedMetadata.well_id}`);
+                                        console.log(`✅ Well center: (${wellInfo.centerX.toFixed(3)}, ${wellInfo.centerY.toFixed(3)})`);
+                                        console.log(`✅ Stage coords: (${stageX.toFixed(3)}, ${stageY.toFixed(3)})`);
+                                        
+                                        navigateToCoordinates(stageX, stageY);
+                                      } else {
+                                        console.warn(`❌ No well info found for well ${parsedMetadata.well_id}`);
+                                        console.warn(`Available wells in similarAnnotationWellMap:`, Object.keys(similarAnnotationWellMap));
+                                      }
+                                    }
+                                  }}
+                                  className="similarity-go-to-btn"
+                                  style={{
+                                    backgroundColor: '#059669',
+                                    color: 'white',
+                                    border: '1px solid #10b981',
+                                    padding: '4px 8px',
+                                    borderRadius: '4px',
+                                    fontSize: '10px',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    fontWeight: '500',
+                                    transition: 'background-color 0.2s'
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    e.target.style.backgroundColor = '#047857';
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.target.style.backgroundColor = '#059669';
+                                  }}
+                                  title="Go to this annotation on the map"
+                                >
+                                  <i className="fas fa-map-marker-alt"></i>
+                                  Go to
+                                </button>
+                              </div>
+                            )}
                           </div>
                         </div>
                       );
@@ -1331,6 +1440,8 @@ AnnotationPanel.propTypes = {
   onClearAllAnnotations: PropTypes.func.isRequired,
   onExportAnnotations: PropTypes.func.isRequired,
   wellInfoMap: PropTypes.object, // Map of annotation IDs to well information
+  similarAnnotationWellMap: PropTypes.object, // Map of well IDs to well information for similar annotations
+  getWellInfoById: PropTypes.func, // Function to get well info by well ID
   embeddingStatus: PropTypes.object, // Map of annotation IDs to embedding status
   mapScale: PropTypes.object, // Current map scale for image extraction
   mapPan: PropTypes.object, // Current map pan offset for image extraction
@@ -1358,6 +1469,10 @@ AnnotationPanel.propTypes = {
   showSimilarAnnotations: PropTypes.bool,
   setShowSimilarAnnotations: PropTypes.func,
   onSimilarAnnotationsCleanup: PropTypes.func,
+  // Navigation functions
+  navigateToCoordinates: PropTypes.func,
+  goBackToPreviousPosition: PropTypes.func,
+  hasPreviousPosition: PropTypes.bool,
   // Layer activation props
   activeLayer: PropTypes.string,
   layers: PropTypes.array,
