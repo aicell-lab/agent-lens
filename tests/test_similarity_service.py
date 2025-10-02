@@ -67,6 +67,30 @@ class TestWeaviateSimilarityService:
         return text_features.cpu().numpy()[0].tolist()
 
     @staticmethod
+    def _generate_test_preview_image():
+        """Generate a test base64 preview image for blob testing."""
+        from PIL import Image
+        import io
+        import base64
+        
+        # Create a simple 50x50 test image (matching the frontend preview size)
+        test_image = Image.new('RGB', (50, 50), color='red')
+        
+        # Add some content to make it more realistic
+        from PIL import ImageDraw
+        draw = ImageDraw.Draw(test_image)
+        draw.rectangle([10, 10, 40, 40], fill='blue')
+        draw.ellipse([20, 20, 30, 30], fill='yellow')
+        
+        # Convert to base64 (without data URL prefix, as expected by Weaviate blob)
+        img_buffer = io.BytesIO()
+        test_image.save(img_buffer, format='PNG')
+        img_buffer.seek(0)
+        
+        # Return pure base64 string (no data URL prefix)
+        return base64.b64encode(img_buffer.getvalue()).decode('utf-8')
+
+    @staticmethod
     def _generate_test_collection_name():
         """Generate a consistent test collection name for better organization."""
         #ALWAYS USE THIS COLLECTION NAME FOR TESTING
@@ -149,20 +173,24 @@ class TestWeaviateSimilarityService:
                 }
                 test_images.append(image_data)
             
-            # Insert test image data with CLIP vectors
+            # Insert test image data with CLIP vectors and preview images
             insert_results = []
             for img_data in test_images:
                 # Generate CLIP vector for the image description
                 clip_vector = self._generate_clip_vector(img_data["description"])
                 
-                # Insert with vector using the proper method
+                # Generate test preview image
+                preview_image = self._generate_test_preview_image()
+                
+                # Insert with vector and preview image using the proper method
                 result = await weaviate_service.insert_image(
                     collection_name=collection_name,
                     application_id=application_id,
                     image_id=img_data["image_id"],
                     description=img_data["description"],
                     metadata=img_data["metadata"],
-                    vector=clip_vector
+                    vector=clip_vector,
+                    preview_image=preview_image
                 )
                 insert_results.append(result)
             
@@ -205,6 +233,21 @@ class TestWeaviateSimilarityService:
             
             print(f"Vector search results: {len(vector_results)} objects found")
             assert len(vector_results) > 0, "Vector search should return results"
+            
+            # Verify that preview images are returned in search results
+            print("Verifying preview images in search results...")
+            for i, result in enumerate(vector_results):
+                if isinstance(result, dict) and 'properties' in result:
+                    if 'preview_image' in result['properties']:
+                        preview_image = result['properties']['preview_image']
+                        assert preview_image, "Preview image should not be empty"
+                        assert isinstance(preview_image, str), "Preview image should be a string"
+                        assert len(preview_image) > 100, "Preview image should be a substantial base64 string"
+                        print(f"✅ Found preview image with {len(preview_image)} characters")
+                    else:
+                        assert False, f"Preview image not found in result {i} properties"
+                else:
+                    assert False, f"Result {i} is not a valid dict with properties"
             
         finally:
             # Collection cleanup is handled at session level
@@ -251,11 +294,14 @@ class TestWeaviateSimilarityService:
                 }
             ]
             
-            # Insert objects with CLIP vectors
+            # Insert objects with CLIP vectors and preview images
             for text_obj in text_objects:
                 # Generate CLIP vector for the title + content
                 text_description = f"{text_obj['title']}: {text_obj['content']}"
                 clip_vector = self._generate_clip_vector(text_description)
+                
+                # Generate test preview image
+                preview_image = self._generate_test_preview_image()
                 
                 await weaviate_service.insert_image(
                     collection_name=collection_name,
@@ -263,7 +309,8 @@ class TestWeaviateSimilarityService:
                     image_id=text_obj['title'].lower().replace(' ', '_'),
                     description=text_description,
                     metadata=text_obj,
-                    vector=clip_vector
+                    vector=clip_vector,
+                    preview_image=preview_image
                 )
             
             # Test text-based search
@@ -275,6 +322,26 @@ class TestWeaviateSimilarityService:
             )
             
             assert len(search_results) > 0, "Text search should return results"
+            
+            # Verify that preview images are returned in search results
+            print("Verifying preview images in text search results...")
+            
+            # Convert ObjectProxy to list if needed
+            if hasattr(search_results, '__iter__') and not isinstance(search_results, (list, tuple)):
+                search_results = list(search_results)
+            
+            for i, result in enumerate(search_results):
+                if isinstance(result, dict) and 'properties' in result:
+                    if 'preview_image' in result['properties']:
+                        preview_image = result['properties']['preview_image']
+                        assert preview_image, "Preview image should not be empty"
+                        assert isinstance(preview_image, str), "Preview image should be a string"
+                        assert len(preview_image) > 100, "Preview image should be a substantial base64 string"
+                        print(f"✅ Found preview image with {len(preview_image)} characters")
+                    else:
+                        assert False, f"Preview image not found in result {i} properties"
+                else:
+                    assert False, f"Result {i} is not a valid dict with properties"
             
         finally:
             # Clean up the test collection

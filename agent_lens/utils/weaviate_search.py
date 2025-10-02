@@ -184,13 +184,9 @@ class WeaviateSimilarityService:
             "description": description,
             "metadata": json.dumps(metadata) if metadata else "",
             "dataset_id": dataset_id or "",
-            "file_path": file_path or ""
+            "file_path": file_path or "",
+            "preview_image": preview_image or ""
         }
-        
-        # Only include preview_image if it's a valid base64 string
-        # Weaviate blob data type doesn't accept empty strings
-        if preview_image and preview_image.strip():
-            properties["preview_image"] = preview_image
         
         # Generate vector if not provided
         if vector is None:
@@ -232,8 +228,23 @@ class WeaviateSimilarityService:
             return_properties=return_properties  # Add this parameter
         )
         
-        logger.info(f"Found {len(results)} similar images in collection: {collection_name}")
-        return results
+        # Handle different result formats
+        if hasattr(results, 'objects') and results.objects:
+            # If results has an 'objects' property, extract it
+            actual_results = results.objects
+        elif isinstance(results, (list, tuple)):
+            # If results is already a list/tuple, use it directly
+            actual_results = results
+        else:
+            # Fallback: try to convert to list
+            try:
+                actual_results = list(results) if hasattr(results, '__iter__') else [results]
+            except Exception as e:
+                logger.error(f"Failed to process results: {e}")
+                actual_results = []
+        
+        logger.info(f"Found {len(actual_results)} similar images in collection: {collection_name}")
+        return actual_results
     
     async def search_by_text(self, collection_name: str, application_id: str,
                            query_text: str, limit: int = 10) -> List[Dict[str, Any]]:
