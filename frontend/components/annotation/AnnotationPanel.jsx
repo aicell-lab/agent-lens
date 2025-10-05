@@ -415,6 +415,10 @@ const AnnotationPanel = ({
   const [similarityResults, setSimilarityResults] = useState([]);
   const [showSimilarityPanel, setShowSimilarityPanel] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
+  
+  // Load all annotations states
+  const [isLoadingAllAnnotations, setIsLoadingAllAnnotations] = useState(false);
+  const [loadedAnnotationsCount, setLoadedAnnotationsCount] = useState(0);
 
   // Helper functions for layer management
   const getActiveLayerInfo = () => {
@@ -678,6 +682,74 @@ const AnnotationPanel = ({
     }
   };
 
+  const handleLoadAllAnnotations = async () => {
+    // Get dataset ID for application ID - support both historical datasets and experiments
+    let applicationId = selectedHistoricalDataset?.id;
+    
+    // If no historical dataset, check if we're using an experiment layer
+    if (!applicationId && activeLayer && experiments.length > 0) {
+      const experiment = experiments.find(exp => exp.name === activeLayer);
+      if (experiment) {
+        applicationId = experiment.name; // Use experiment name as application ID
+      }
+    }
+    
+    if (!applicationId) {
+      alert('No dataset or experiment selected. Cannot load annotations.');
+      return;
+    }
+
+    setIsLoadingAllAnnotations(true);
+    
+    try {
+      const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
+      
+      // Prepare query parameters
+      const queryParams = new URLSearchParams({
+        collection_name: convertToValidCollectionName('agent-lens'),
+        application_id: applicationId,
+        limit: '1000',
+        include_vector: 'false'
+      });
+      
+      const response = await fetch(`/agent-lens/apps/${serviceId}/similarity/fetch-all?${queryParams}`, {
+        method: 'GET'
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        
+        if (result.success && result.annotations) {
+          console.log(`📥 Loaded ${result.annotations.length} annotations from Weaviate`);
+          
+          // Update similar annotations to display all loaded annotations on the map
+          if (onSimilarAnnotationsUpdate) {
+            onSimilarAnnotationsUpdate(result.annotations);
+            setLoadedAnnotationsCount(result.annotations.length);
+          }
+          
+          // Show the annotations on the map
+          if (setShowSimilarAnnotations) {
+            setShowSimilarAnnotations(true);
+          }
+          
+          alert(`Successfully loaded ${result.annotations.length} annotation(s) from the database.`);
+        } else {
+          console.error('No annotations found:', result);
+          alert('No annotations found in the database.');
+        }
+      } else {
+        console.error('Load annotations failed:', await response.text());
+        alert('Failed to load annotations from database.');
+      }
+    } catch (error) {
+      console.error('Error loading annotations:', error);
+      alert('Error loading annotations: ' + error.message);
+    } finally {
+      setIsLoadingAllAnnotations(false);
+    }
+  };
+
   const handleFindSimilar = async (annotation) => {
     if (!annotation.embeddings?.imageEmbedding) {
       alert('This annotation does not have embeddings. Cannot search for similar annotations.');
@@ -810,6 +882,19 @@ const AnnotationPanel = ({
               Dataset: {selectedHistoricalDataset.id}
             </span>
           )}
+          {/* Load All Button / Loaded Annotations Indicator */}
+          <span 
+            className="text-xs text-green-400 ml-2 px-2 py-1 bg-green-900 rounded cursor-pointer hover:bg-green-800 transition-colors" 
+            title={loadedAnnotationsCount > 0 ? "Loaded annotations from database" : "Click to load all annotations from database"}
+            onClick={handleLoadAllAnnotations}
+            style={{ 
+              pointerEvents: isLoadingAllAnnotations ? 'none' : 'auto',
+              opacity: isLoadingAllAnnotations ? 0.6 : 1 
+            }}
+          >
+            <i className={`fas ${isLoadingAllAnnotations ? 'fa-spinner fa-spin' : 'fa-database'} mr-1`}></i>
+            {isLoadingAllAnnotations ? 'Loading...' : (loadedAnnotationsCount > 0 ? `${loadedAnnotationsCount} loaded` : 'Load All')}
+          </span>
         </div>
       </div>
 

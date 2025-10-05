@@ -246,6 +246,47 @@ class WeaviateSimilarityService:
         logger.info(f"Found {len(actual_results)} similar images in collection: {collection_name}")
         return actual_results
     
+    async def fetch_all_annotations(self, collection_name: str, application_id: str,
+                                   limit: int = 1000, include_vector: bool = False) -> List[Dict[str, Any]]:
+        """Fetch all annotations from a collection without vector search."""
+        if not await self.ensure_connected():
+            raise RuntimeError("Not connected to Weaviate service")
+        
+        # Explicitly specify which properties to return, including the blob preview_image
+        return_properties = [
+            "image_id",
+            "description", 
+            "metadata",
+            "dataset_id",
+            "file_path",
+            "preview_image"
+        ]
+        
+        # Use fetch_objects to get all annotations for this application
+        results = await self.weaviate_service.query.fetch_objects(
+            collection_name=collection_name,
+            application_id=application_id,
+            limit=limit,
+            return_properties=return_properties
+        )
+        
+        # Handle different result formats
+        if hasattr(results, 'objects') and results.objects:
+            actual_results = results.objects
+        elif isinstance(results, dict) and 'objects' in results:
+            actual_results = results['objects']
+        elif isinstance(results, (list, tuple)):
+            actual_results = results
+        else:
+            try:
+                actual_results = list(results) if hasattr(results, '__iter__') else [results]
+            except Exception as e:
+                logger.error(f"Failed to process results: {e}")
+                actual_results = []
+        
+        logger.info(f"Fetched {len(actual_results)} annotations from collection: {collection_name}")
+        return actual_results
+    
     async def search_by_text(self, collection_name: str, application_id: str,
                            query_text: str, limit: int = 10) -> List[Dict[str, Any]]:
         """Search for similar images using text query."""

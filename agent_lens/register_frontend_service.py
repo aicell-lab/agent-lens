@@ -806,6 +806,57 @@ def get_frontend_api():
             logger.error(traceback.format_exc())
             raise HTTPException(status_code=500, detail=str(e))
 
+    @app.get("/similarity/fetch-all")
+    async def fetch_all_annotations(
+        collection_name: str,
+        application_id: str,
+        limit: int = 1000,
+        include_vector: bool = False
+    ):
+        """
+        Fetch all annotations from a collection for a given application.
+        
+        Args:
+            collection_name (str): Name of the collection
+            application_id (str): Application ID (dataset or experiment name)
+            limit (int): Maximum number of annotations to return
+            include_vector (bool): Whether to include vectors in results
+            
+        Returns:
+            dict: All annotations in the collection
+        """
+        try:
+            try:
+                if not await similarity_service.ensure_connected():
+                    raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            except Exception as e:
+                logger.warning(f"Similarity service not available: {e}")
+                raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            
+            # Convert collection name to valid Weaviate class name
+            words = collection_name.split('-')
+            valid_collection_name = ''.join(word.capitalize() for word in words)
+            if not valid_collection_name[0].isupper():
+                valid_collection_name = 'A' + valid_collection_name[1:]
+            
+            # Extract just the dataset ID part (last part after slash)
+            clean_application_id = application_id.split('/')[-1] if '/' in application_id else application_id
+            
+            results = await similarity_service.fetch_all_annotations(
+                collection_name=valid_collection_name,
+                application_id=clean_application_id,
+                limit=limit,
+                include_vector=include_vector
+            )
+            
+            logger.info(f"Fetched {len(results)} annotations for application {clean_application_id}")
+            return {"success": True, "annotations": results, "total": len(results)}
+            
+        except Exception as e:
+            logger.error(f"Error fetching all annotations: {e}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
+
     @app.get("/similarity/collections/{collection_name}/exists")
     async def check_collection_exists(collection_name: str):
         """
