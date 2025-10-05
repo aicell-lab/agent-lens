@@ -398,6 +398,8 @@ const AnnotationPanel = ({
   navigateToCoordinates = null,
   goBackToPreviousPosition = null,
   hasPreviousPosition = false,
+  currentZoomLevel = null,
+  currentScaleLevel = null,
   // Layer activation props
   activeLayer = null,
   layers = [],
@@ -1317,8 +1319,8 @@ const AnnotationPanel = ({
                                           onSimilarAnnotationsUpdate(similarityResults);
                                         }
                                         
-                                        // Navigate to the coordinates
-                                        navigateToCoordinates(stageX, stageY);
+                                        // Navigate to the coordinates while preserving current zoom level
+                                        navigateToCoordinates(stageX, stageY, currentZoomLevel, currentScaleLevel);
                                       } else {
                                         console.warn(`❌ No well info found for well ${parsedMetadata.well_id}`);
                                         console.warn(`Available wells in similarAnnotationWellMap:`, Object.keys(similarAnnotationWellMap));
@@ -1472,6 +1474,8 @@ AnnotationPanel.propTypes = {
   navigateToCoordinates: PropTypes.func,
   goBackToPreviousPosition: PropTypes.func,
   hasPreviousPosition: PropTypes.bool,
+  currentZoomLevel: PropTypes.number,
+  currentScaleLevel: PropTypes.number,
   // Layer activation props
   activeLayer: PropTypes.string,
   layers: PropTypes.array,

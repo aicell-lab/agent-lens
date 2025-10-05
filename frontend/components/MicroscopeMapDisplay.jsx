@@ -4725,6 +4725,8 @@ const MicroscopeMapDisplay = ({
                       navigateToCoordinates={navigateToCoordinates}
                       goBackToPreviousPosition={goBackToPreviousPosition}
                       hasPreviousPosition={previousMapState !== null}
+                      currentZoomLevel={zoomLevel}
+                      currentScaleLevel={scaleLevel}
                       // Layer activation props
                       activeLayer={activeLayer}
                       layers={layers}
