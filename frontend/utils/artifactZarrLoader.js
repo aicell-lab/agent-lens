@@ -1727,6 +1727,7 @@ class ArtifactZarrLoader {
 
   /**
    * Compose image from multiple chunks with optimized parallel loading
+   * PRIORITY LOADING: Cached chunks first, then network chunks
    * @param {string} baseUrl - Base URL for zarr data
    * @param {Array} chunks - Array of chunk coordinates (filtered to available chunks)
    * @param {Object} metadata - Zarr metadata
@@ -1755,47 +1756,50 @@ class ArtifactZarrLoader {
       canvas.height = totalHeight;
       const ctx = canvas.getContext('2d');
       
-      // Fetch chunks individually using the caching system
-      const fetchTimerName = `Individual chunk fetch ${Date.now()}_${Math.random()}`;
-      console.time(fetchTimerName);
+      // 🚀 PHASE 1: Separate cached vs non-cached chunks
+      const cachedChunks = [];
+      const networkChunks = [];
       
-      // Process chunks in parallel: fetch, decode and prepare canvas data
-      const processingTimerName = `Parallel chunk processing ${Date.now()}_${Math.random()}`;
-      console.time(processingTimerName);
-      const chunkPromises = chunks.map(async (chunk) => {
+      for (const chunk of chunks) {
+        const [t, c, z, y, x] = chunk.coordinates;
+        const chunkUrl = `${baseUrl}${scaleLevel}/${t}.${c}.${z}.${y}.${x}`;
+        const cacheKey = `${chunkUrl}_${dataType}`;
+        
+        if (this.chunkCache.has(cacheKey)) {
+          cachedChunks.push(chunk);
+        } else {
+          networkChunks.push(chunk);
+        }
+      }
+      
+      console.log(`📊 Cache split: ${cachedChunks.length} cached, ${networkChunks.length} network`);
+      
+      // Helper function to process a chunk
+      const processChunk = async (chunk) => {
         const [t, c, z, y, x] = chunk.coordinates;
         const chunkUrl = `${baseUrl}${scaleLevel}/${t}.${c}.${z}.${y}.${x}`;
         
-        // Use fetchZarrChunk which has proper caching
         const chunkData = await this.fetchZarrChunk(chunkUrl, dataType);
-        if (!chunkData) {
-          console.warn(`Chunk not available: ${chunk.filename}`);
-          return null;
-        }
+        if (!chunkData) return null;
         
         try {
-          // Decode chunk data (chunkData is already ArrayBuffer from fetchZarrChunk)
           const imageData = this.decodeChunk(chunkData, [yChunk, xChunk], dataType);
           
           if (imageData) {
-            // Create temporary canvas for this chunk
             const chunkCanvas = document.createElement('canvas');
             chunkCanvas.width = imageData.width;
             chunkCanvas.height = imageData.height;
             const chunkCtx = chunkCanvas.getContext('2d');
             chunkCtx.putImageData(imageData, 0, 0);
             
-            // Calculate position in composed image relative to region start
             const chunkAbsX = x * xChunk;
             const chunkAbsY = y * yChunk;
             const posX = chunkAbsX - regionStartX;
             const posY = chunkAbsY - regionStartY;
             
-            // Only process if the chunk intersects with our region
             if (posX < totalWidth && posY < totalHeight && 
                 posX + chunkCanvas.width > 0 && posY + chunkCanvas.height > 0) {
               
-              // Calculate source and destination rectangles for partial chunks
               const srcX = Math.max(0, regionStartX - chunkAbsX);
               const srcY = Math.max(0, regionStartY - chunkAbsY);
               const srcWidth = Math.min(chunkCanvas.width - srcX, totalWidth - Math.max(0, posX));
@@ -1821,28 +1825,40 @@ class ArtifactZarrLoader {
         }
         
         return null;
-      });
+      };
       
-      // Wait for all chunks to load in parallel
-      const chunkResults = await Promise.all(chunkPromises);
-      console.timeEnd(fetchTimerName);
-      console.timeEnd(processingTimerName);
+      // 🚀 PHASE 2: Load cached chunks immediately (synchronous from cache)
+      const cachedResults = await Promise.all(cachedChunks.map(processChunk));
       
-      // Draw all loaded chunks onto the main canvas
-      const compositionTimerName = `Canvas composition ${Date.now()}_${Math.random()}`;
-      console.time(compositionTimerName);
+      // Draw cached chunks immediately
       let loadedChunks = 0;
-      const totalChunks = chunks.length;
-      
-      for (const result of chunkResults) {
+      for (const result of cachedResults) {
         if (result) {
           const { chunkCanvas, destX, destY, srcX, srcY, srcWidth, srcHeight } = result;
           ctx.drawImage(chunkCanvas, srcX, srcY, srcWidth, srcHeight, destX, destY, srcWidth, srcHeight);
           loadedChunks++;
         }
       }
-      console.timeEnd(compositionTimerName);
       
+      console.log(`✅ Loaded ${loadedChunks} cached chunks immediately`);
+      
+      // 🚀 PHASE 3: Load network chunks in parallel
+      if (networkChunks.length > 0) {
+        const networkResults = await Promise.all(networkChunks.map(processChunk));
+        
+        // Draw network chunks
+        for (const result of networkResults) {
+          if (result) {
+            const { chunkCanvas, destX, destY, srcX, srcY, srcWidth, srcHeight } = result;
+            ctx.drawImage(chunkCanvas, srcX, srcY, srcWidth, srcHeight, destX, destY, srcWidth, srcHeight);
+            loadedChunks++;
+          }
+        }
+        
+        console.log(`✅ Loaded ${networkChunks.length} network chunks`);
+      }
+      
+      const totalChunks = chunks.length;
       console.log(`✅ Successfully loaded ${loadedChunks}/${totalChunks} chunks for scale ${scaleLevel}`);
       
       return {
@@ -1870,7 +1886,7 @@ class ArtifactZarrLoader {
 
   /**
    * 🚀 REAL-TIME: Compose image from chunks with progressive updates
-   * Provides live feedback as chunks become available
+   * PRIORITY LOADING: Cached chunks first, then network chunks with real-time feedback
    */
   async composeImageFromChunksRealTime(baseUrl, chunks, metadata, scaleLevel, regionStartX, regionStartY, regionWidth, regionHeight, onChunkProgress, batchId = null) {
     const chunkBatchId = batchId || `chunk_batch_${Date.now()}`;
@@ -1892,7 +1908,24 @@ class ArtifactZarrLoader {
       canvas.height = totalHeight;
       const ctx = canvas.getContext('2d');
       
-      // REAL-TIME: Process chunks individually and provide progressive updates
+      // 🚀 PHASE 1: Separate cached vs non-cached chunks
+      const cachedChunks = [];
+      const networkChunks = [];
+      
+      for (const chunk of chunks) {
+        const [t, c, z, y, x] = chunk.coordinates;
+        const chunkUrl = `${baseUrl}${scaleLevel}/${t}.${c}.${z}.${y}.${x}`;
+        const cacheKey = `${chunkUrl}_${dataType}`;
+        
+        if (this.chunkCache.has(cacheKey)) {
+          cachedChunks.push(chunk);
+        } else {
+          networkChunks.push(chunk);
+        }
+      }
+      
+      console.log(`📊 REAL-TIME Cache split: ${cachedChunks.length} cached, ${networkChunks.length} network`);
+      
       let loadedChunks = 0;
       const totalChunks = chunks.length;
       
@@ -1900,48 +1933,34 @@ class ArtifactZarrLoader {
       let lastProgressUpdate = 0;
       const PROGRESS_UPDATE_INTERVAL = 100; // Only update progress every 100ms
       
-      // 🚀 PERFORMANCE OPTIMIZATION: Track partial canvas for progress updates
-      let lastPartialCanvas = null;
-      
-      // Create a map to track processed chunks for efficient updates
-      const processedChunks = new Map();
-      
-      // Process chunks one by one for real-time feedback
-      for (let i = 0; i < chunks.length; i++) {
-        const chunk = chunks[i];
+      // Helper function to process a chunk and return canvas data
+      const processChunk = async (chunk, chunkIndex) => {
         const [, , , y, x] = chunk.coordinates;
         
         try {
-          // Fetch individual chunk with caching support
           const chunkUrl = `${baseUrl}${scaleLevel}/${chunk.coordinates.join('.')}`;
-          const chunkRequestId = `${chunkBatchId}_chunk_${i}`;
+          const chunkRequestId = `${chunkBatchId}_chunk_${chunkIndex}`;
           const chunkData = await this.fetchZarrChunk(chunkUrl, dataType, chunkRequestId);
           
-          if (!chunkData) {
-            console.warn(`Chunk not available: ${chunk.filename}`);
-            continue;
-          }
+          if (!chunkData) return null;
+          
           const imageData = this.decodeChunk(chunkData, [yChunk, xChunk], dataType);
           
           if (imageData) {
-            // Create temporary canvas for this chunk
             const chunkCanvas = document.createElement('canvas');
             chunkCanvas.width = imageData.width;
             chunkCanvas.height = imageData.height;
             const chunkCtx = chunkCanvas.getContext('2d');
             chunkCtx.putImageData(imageData, 0, 0);
             
-            // Calculate position in composed image relative to region start
             const chunkAbsX = x * xChunk;
             const chunkAbsY = y * yChunk;
             const posX = chunkAbsX - regionStartX;
             const posY = chunkAbsY - regionStartY;
             
-            // Only process if the chunk intersects with our region
             if (posX < totalWidth && posY < totalHeight && 
                 posX + chunkCanvas.width > 0 && posY + chunkCanvas.height > 0) {
               
-              // Calculate source and destination rectangles for partial chunks
               const srcX = Math.max(0, regionStartX - chunkAbsX);
               const srcY = Math.max(0, regionStartY - chunkAbsY);
               const srcWidth = Math.min(chunkCanvas.width - srcX, totalWidth - Math.max(0, posX));
@@ -1950,56 +1969,88 @@ class ArtifactZarrLoader {
               const destX = Math.max(0, posX);
               const destY = Math.max(0, posY);
               
-              // Draw this chunk onto the main canvas
-              ctx.drawImage(chunkCanvas, srcX, srcY, srcWidth, srcHeight, destX, destY, srcWidth, srcHeight);
-              
-              // Store processed chunk info
-              processedChunks.set(chunk.filename, {
-                destX, destY, srcWidth, srcHeight
-              });
-              
-              loadedChunks++;
-              
-              // 🚀 PERFORMANCE OPTIMIZATION: Throttled progress updates
-              const now = Date.now();
-              if (onChunkProgress && (now - lastProgressUpdate > PROGRESS_UPDATE_INTERVAL || i === chunks.length - 1)) {
-                // Only create partial canvas when we actually need to provide an update
-                if (!lastPartialCanvas) {
-                  lastPartialCanvas = document.createElement('canvas');
-                  lastPartialCanvas.width = totalWidth;
-                  lastPartialCanvas.height = totalHeight;
-                }
-                
-                // Copy current canvas state to partial canvas
-                const partialCtx = lastPartialCanvas.getContext('2d');
-                partialCtx.clearRect(0, 0, totalWidth, totalHeight);
-                partialCtx.drawImage(canvas, 0, 0);
-                
-                onChunkProgress(loadedChunks, totalChunks, lastPartialCanvas);
-                lastProgressUpdate = now;
-              }
-              
-              console.log(`✅ REAL-TIME: Loaded chunk ${i + 1}/${totalChunks} (${chunk.filename}) - ${loadedChunks}/${totalChunks} total`);
+              return {
+                chunkCanvas,
+                destX,
+                destY,
+                srcX,
+                srcY,
+                srcWidth,
+                srcHeight,
+                chunkId: chunk.filename
+              };
             }
-            
-            // 🚀 MEMORY OPTIMIZATION: Clean up chunk canvas immediately
-            chunkCanvas.width = 0;
-            chunkCanvas.height = 0;
           }
         } catch (error) {
-          if (error.name === 'AbortError') {
-            console.log(`🚫 Chunk ${chunk.filename} loading aborted`);
-            throw error;
-          }
+          if (error.name === 'AbortError') throw error;
           console.warn(`Error processing chunk ${chunk.filename}:`, error);
+        }
+        
+        return null;
+      };
+      
+      // 🚀 PHASE 2: Load cached chunks in parallel (fast from RAM)
+      const cachedResults = await Promise.all(cachedChunks.map((chunk, i) => processChunk(chunk, i)));
+      
+      // Draw cached chunks immediately
+      for (const result of cachedResults) {
+        if (result) {
+          const { chunkCanvas, destX, destY, srcX, srcY, srcWidth, srcHeight } = result;
+          ctx.drawImage(chunkCanvas, srcX, srcY, srcWidth, srcHeight, destX, destY, srcWidth, srcHeight);
+          loadedChunks++;
+          
+          // Clean up
+          chunkCanvas.width = 0;
+          chunkCanvas.height = 0;
         }
       }
       
-      // 🚀 MEMORY OPTIMIZATION: Clean up partial canvas
-      if (lastPartialCanvas) {
-        lastPartialCanvas.width = 0;
-        lastPartialCanvas.height = 0;
-        lastPartialCanvas = null;
+      console.log(`✅ REAL-TIME: Loaded ${loadedChunks} cached chunks immediately`);
+      
+      // Send progress update after cached chunks
+      if (onChunkProgress && loadedChunks > 0) {
+        const partialCanvas = document.createElement('canvas');
+        partialCanvas.width = totalWidth;
+        partialCanvas.height = totalHeight;
+        const partialCtx = partialCanvas.getContext('2d');
+        partialCtx.drawImage(canvas, 0, 0);
+        
+        onChunkProgress(loadedChunks, totalChunks, partialCanvas);
+        lastProgressUpdate = Date.now();
+        
+        // DON'T clean up partial canvas - caller may store reference to it
+      }
+      
+      // 🚀 PHASE 3: Load network chunks progressively with real-time updates
+      for (let i = 0; i < networkChunks.length; i++) {
+        const result = await processChunk(networkChunks[i], cachedChunks.length + i);
+        
+        if (result) {
+          const { chunkCanvas, destX, destY, srcX, srcY, srcWidth, srcHeight } = result;
+          ctx.drawImage(chunkCanvas, srcX, srcY, srcWidth, srcHeight, destX, destY, srcWidth, srcHeight);
+          loadedChunks++;
+          
+          // Clean up
+          chunkCanvas.width = 0;
+          chunkCanvas.height = 0;
+          
+          // Send progress update for network chunks
+          const now = Date.now();
+          if (onChunkProgress && (now - lastProgressUpdate > PROGRESS_UPDATE_INTERVAL || i === networkChunks.length - 1)) {
+            const partialCanvas = document.createElement('canvas');
+            partialCanvas.width = totalWidth;
+            partialCanvas.height = totalHeight;
+            const partialCtx = partialCanvas.getContext('2d');
+            partialCtx.drawImage(canvas, 0, 0);
+            
+            onChunkProgress(loadedChunks, totalChunks, partialCanvas);
+            lastProgressUpdate = now;
+            
+            // DON'T clean up partial canvas - caller may store reference to it
+          }
+          
+          console.log(`✅ REAL-TIME: Network chunk ${i + 1}/${networkChunks.length} - ${loadedChunks}/${totalChunks} total`);
+        }
       }
       
       console.log(`✅ REAL-TIME: Successfully loaded ${loadedChunks}/${totalChunks} chunks for scale ${scaleLevel}`);
