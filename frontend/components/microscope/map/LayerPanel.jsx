@@ -513,6 +513,47 @@ const LayerPanel = ({
                         </button>
                       </div>
                       
+                      {/* Annotation Sublayer */}
+                      <div className="channel-item channel-item--annotation">
+                        <div className="channel-header">
+                          <button
+                            className="channel-visibility-btn"
+                            onClick={() => {
+                              const newVisibility = !(layer.annotationVisible || false);
+                              setLayers(prev => prev.map(l => 
+                                l.id === layer.id 
+                                  ? { ...l, annotationVisible: newVisibility }
+                                  : l
+                              ));
+                              
+                              // If enabling annotation layer, activate the parent layer and open annotation dropdown
+                              if (newVisibility) {
+                                setActiveLayer(layer.id);
+                                // Trigger annotation activation through a custom event
+                                const event = new CustomEvent('annotationLayerActivated', {
+                                  detail: { layerId: layer.id, layerType: layer.type }
+                                });
+                                window.dispatchEvent(event);
+                              } else {
+                                // If disabling annotation layer, trigger deactivation event
+                                const event = new CustomEvent('annotationLayerDeactivated', {
+                                  detail: { layerId: layer.id, layerType: layer.type }
+                                });
+                                window.dispatchEvent(event);
+                              }
+                            }}
+                            title={layer.annotationVisible ? "Hide annotation layer" : "Show annotation layer"}
+                          >
+                            <i className={`fas fa-eye${layer.annotationVisible ? '' : '-slash'}`}></i>
+                          </button>
+                          <span className="channel-name">
+                            <i className="fas fa-draw-polygon mr-2 text-blue-400"></i>
+                            Annotations
+                          </span>
+                          <span className="channel-color-indicator" style={{ backgroundColor: '#3B82F6' }}></span>
+                        </div>
+                      </div>
+                      
                       {/* Multi-Channel Controls for Historical Data */}
                       {shouldUseMultiChannelLoading() && (isHistoricalDataMode || mapViewMode === 'FOV_FITTED') && (
                         <div className="server-channels">
@@ -715,6 +756,47 @@ const LayerPanel = ({
                               Normal Scan
                             </button>
                           )}
+                        </div>
+                      </div>
+                      
+                      {/* Annotation Sublayer for Experiments */}
+                      <div className="channel-item channel-item--annotation">
+                        <div className="channel-header">
+                          <button
+                            className="channel-visibility-btn"
+                            onClick={() => {
+                              const newVisibility = !(exp.annotationVisible || false);
+                              // Update experiment annotation visibility (we'll need to track this in parent component)
+                              const event = new CustomEvent('experimentAnnotationToggled', {
+                                detail: { experimentName: exp.name, annotationVisible: newVisibility }
+                              });
+                              window.dispatchEvent(event);
+                              
+                              // If enabling annotation layer, activate the experiment and open annotation dropdown
+                              if (newVisibility) {
+                                setActiveLayer(exp.name);
+                                // Trigger annotation activation through a custom event
+                                const activationEvent = new CustomEvent('annotationLayerActivated', {
+                                  detail: { layerId: exp.name, layerType: 'experiment' }
+                                });
+                                window.dispatchEvent(activationEvent);
+                              } else {
+                                // If disabling annotation layer, trigger deactivation event
+                                const deactivationEvent = new CustomEvent('annotationLayerDeactivated', {
+                                  detail: { layerId: exp.name, layerType: 'experiment' }
+                                });
+                                window.dispatchEvent(deactivationEvent);
+                              }
+                            }}
+                            title={exp.annotationVisible ? "Hide annotation layer" : "Show annotation layer"}
+                          >
+                            <i className={`fas fa-eye${exp.annotationVisible ? '' : '-slash'}`}></i>
+                          </button>
+                          <span className="channel-name">
+                            <i className="fas fa-draw-polygon mr-2 text-blue-400"></i>
+                            Annotations
+                          </span>
+                          <span className="channel-color-indicator" style={{ backgroundColor: '#3B82F6' }}></span>
                         </div>
                       </div>
                       

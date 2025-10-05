@@ -381,6 +381,30 @@
   padding: 0.5rem;
 }
 
+.channel-item--annotation {
+  background: rgba(59, 130, 246, 0.1);
+  border-left: 3px solid #3B82F6;
+  margin-left: 1rem;
+  border-radius: 0.25rem;
+  color: #93C5FD;
+}
+
+.channel-item--annotation:hover {
+  background: rgba(59, 130, 246, 0.2);
+}
+
+.channel-item--annotation .channel-name {
+  color: #93C5FD;
+  font-weight: 500;
+}
+
+.channel-item--annotation .channel-color-indicator {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid #1E40AF;
+}
+
 .scan-controls, .live-controls, .server-controls, .microscope-controls {
   display: flex;
   gap: 0.5rem;

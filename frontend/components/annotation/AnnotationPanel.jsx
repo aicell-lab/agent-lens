@@ -795,7 +795,7 @@ const AnnotationPanel = ({
       <div className="annotation-panel-header">
         <div className="flex items-center space-x-2">
           <i className="fas fa-draw-polygon text-blue-400"></i>
-          <span className="font-medium">Enter Annotations</span>
+          <span className="font-medium">Annotations</span>
           {/* Active Layer Display */}
           {activeLayer && (
             <span className="text-xs text-blue-300 ml-2 px-2 py-1 bg-blue-900 rounded">
@@ -809,14 +809,6 @@ const AnnotationPanel = ({
             </span>
           )}
         </div>
-        <button
-          onClick={() => setIsDrawingMode(!isDrawingMode)}
-          className={`annotation-toggle-btn ${isDrawingMode ? 'active exit-mode' : ''} ${!activeLayer ? 'disabled' : ''}`}
-          title={!activeLayer ? 'No active layer - cannot enter drawing mode' : (isDrawingMode ? 'Exit drawing mode' : 'Enter drawing mode')}
-          disabled={!activeLayer}
-        >
-          <i className={`fas ${isDrawingMode ? 'fa-times' : 'fa-edit'}`}></i>
-        </button>
       </div>
 
       {isDrawingMode && (

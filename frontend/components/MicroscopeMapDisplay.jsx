@@ -2800,6 +2800,62 @@ const MicroscopeMapDisplay = ({
     }
   }, [isDrawingMode, appendLog]);
 
+  // Handle annotation layer activation events from LayerPanel
+  useEffect(() => {
+    const handleAnnotationLayerActivated = (event) => {
+      const { layerId, layerType } = event.detail;
+      console.log(`[MicroscopeMapDisplay] Annotation layer activated: ${layerId} (${layerType})`);
+      
+      // Set the active layer
+      setActiveLayer(layerId);
+      
+      // Open the annotation dropdown
+      setIsAnnotationDropdownOpen(true);
+      
+      // Automatically enable drawing mode
+      setIsDrawingMode(true);
+      
+      // Show notification
+      showNotification('Annotation layer activated. You can now draw annotations.', 'success');
+    };
+
+    const handleExperimentAnnotationToggled = (event) => {
+      const { experimentName, annotationVisible } = event.detail;
+      console.log(`[MicroscopeMapDisplay] Experiment annotation toggled: ${experimentName} = ${annotationVisible}`);
+      
+      // If annotation layer is being disabled, close annotation panel and exit drawing mode
+      if (!annotationVisible) {
+        setIsAnnotationDropdownOpen(false);
+        setIsDrawingMode(false);
+        showNotification('Annotation layer disabled. Exiting annotation mode.', 'info');
+      }
+      
+      // Update experiment annotation visibility in experiments state
+      // This will be handled by the parent component that manages experiments
+    };
+
+    const handleAnnotationLayerDeactivated = (event) => {
+      const { layerId, layerType } = event.detail;
+      console.log(`[MicroscopeMapDisplay] Annotation layer deactivated: ${layerId} (${layerType})`);
+      
+      // Close annotation panel and exit drawing mode
+      setIsAnnotationDropdownOpen(false);
+      setIsDrawingMode(false);
+      showNotification('Annotation layer disabled. Exiting annotation mode.', 'info');
+    };
+
+    // Add event listeners
+    window.addEventListener('annotationLayerActivated', handleAnnotationLayerActivated);
+    window.addEventListener('experimentAnnotationToggled', handleExperimentAnnotationToggled);
+    window.addEventListener('annotationLayerDeactivated', handleAnnotationLayerDeactivated);
+
+    return () => {
+      window.removeEventListener('annotationLayerActivated', handleAnnotationLayerActivated);
+      window.removeEventListener('experimentAnnotationToggled', handleExperimentAnnotationToggled);
+      window.removeEventListener('annotationLayerDeactivated', handleAnnotationLayerDeactivated);
+    };
+  }, [setActiveLayer, showNotification]);
+
   // Auto-disable other layers when annotation panel is opened for better annotation accuracy
   useEffect(() => {
     if (isAnnotationDropdownOpen && activeLayer) {
@@ -4617,30 +4673,8 @@ const MicroscopeMapDisplay = ({
         <div className="flex items-center space-x-2">
           {mapViewMode === 'FREE_PAN' && (
             <>
-              {/* Annotation dropdown */}
+              {/* Annotation panel - now controlled by layer panel */}
               <div className="relative mr-4" ref={annotationDropdownRef}>
-                <button
-                  onClick={() => {
-                    if (!activeLayer) {
-                      showNotification('No selected map layer. Please go to "Layers" panel to activate a layer first', 'warning');
-                    }
-                    setIsAnnotationDropdownOpen(!isAnnotationDropdownOpen);
-                  }}
-                  className={`px-3 py-1 text-xs text-white rounded flex items-center ${
-                    !activeLayer 
-                      ? 'bg-gray-500 hover:bg-gray-400' 
-                      : isDrawingMode 
-                        ? 'bg-orange-600 hover:bg-orange-500' 
-                        : 'bg-gray-700 hover:bg-gray-600'
-                  }`}
-                  disabled={isDrawingMode}
-                  title={!activeLayer ? "No selected map layer. Please go to 'Layers' panel to activate a layer first" : "Open annotation tools"}
-                >
-                  <i className="fas fa-draw-polygon mr-1"></i>
-                  Annotations
-                  <i className={`fas ml-1 transition-transform ${isAnnotationDropdownOpen ? 'fa-caret-up' : 'fa-caret-down'}`}></i>
-                </button>
-                
                 <div className={`absolute top-full right-0 mt-1 z-20 ${isAnnotationDropdownOpen ? 'block' : 'hidden'}`}>
                   <AnnotationPanel
                       isDrawingMode={isDrawingMode}
