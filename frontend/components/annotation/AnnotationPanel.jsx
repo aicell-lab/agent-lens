@@ -450,7 +450,7 @@ const AnnotationPanel = ({
     if (!layerInfo) return 'Unknown Layer';
     
     if (layerInfo.type === 'load-server' && selectedHistoricalDataset) {
-      return `Browse Data: ${selectedHistoricalDataset.name || 'Dataset'}`;
+      return '';
     } else if (layerInfo.type === 'experiment') {
       return `Experiment: ${layerInfo.name || 'Experiment'}`;
     }
@@ -871,7 +871,7 @@ const AnnotationPanel = ({
           <i className="fas fa-draw-polygon text-blue-400"></i>
           <span className="font-medium">Annotations</span>
           {/* Active Layer Display */}
-          {activeLayer && (
+          {activeLayer && getLayerDisplayName() && (
             <span className="text-xs text-blue-300 ml-2 px-2 py-1 bg-blue-900 rounded">
               {getLayerDisplayName()}
             </span>
@@ -893,7 +893,7 @@ const AnnotationPanel = ({
             }}
           >
             <i className={`fas ${isLoadingAllAnnotations ? 'fa-spinner fa-spin' : 'fa-database'} mr-1`}></i>
-            {isLoadingAllAnnotations ? 'Loading...' : (loadedAnnotationsCount > 0 ? `${loadedAnnotationsCount} loaded` : 'Load All')}
+            {isLoadingAllAnnotations ? 'Loading...' : (loadedAnnotationsCount > 0 ? `Load All (${loadedAnnotationsCount} loaded)` : 'Load All')}
           </span>
         </div>
       </div>

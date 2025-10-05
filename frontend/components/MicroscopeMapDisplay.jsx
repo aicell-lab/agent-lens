@@ -4854,17 +4854,19 @@ const MicroscopeMapDisplay = ({
            channelInfo={getCurrentChannelInfo()}
          />
          
-         {/* Similar Annotations Renderer */}
-         <SimilarAnnotationRenderer
-           containerRef={mapContainerRef}
-           similarAnnotations={similarAnnotations}
-           isVisible={showSimilarAnnotations}
-           mapScale={mapScale}
-           mapPan={effectivePan}
-           stageDimensions={stageDimensions}
-           pixelsPerMm={pixelsPerMm}
-           wellInfoMap={similarAnnotationWellMap}
-         />
+         {/* Similar Annotations Renderer - only in FREE_PAN mode */}
+         {mapViewMode === 'FREE_PAN' && (
+           <SimilarAnnotationRenderer
+             containerRef={mapContainerRef}
+             similarAnnotations={similarAnnotations}
+             isVisible={showSimilarAnnotations}
+             mapScale={mapScale}
+             mapPan={effectivePan}
+             stageDimensions={stageDimensions}
+             pixelsPerMm={pixelsPerMm}
+             wellInfoMap={similarAnnotationWellMap}
+           />
+         )}
         
         {/* Rectangle selection active indicator */}
         {mapViewMode === 'FREE_PAN' && isRectangleSelection && !rectangleStart && !isScanInProgress && !isQuickScanInProgress && (

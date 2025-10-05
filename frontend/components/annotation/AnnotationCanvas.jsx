@@ -469,18 +469,18 @@ const AnnotationCanvas = ({
     return () => {
       resizeObserver.disconnect();
     };
-  }, [annotations, previewShape, currentPath, strokeColor, strokeWidth, fillColor, selectedAnnotation, containerRef, drawAnnotation, stageToDisplayCoords]);
+  }, [annotations, previewShape, currentPath, strokeColor, strokeWidth, fillColor, selectedAnnotation, containerRef, drawAnnotation, stageToDisplayCoords, isPolygonMode, polygonPoints, mapPan, mapScale]);
 
-  // Separate effect to re-render when annotations change
+  // Separate effect to re-render when annotations change or map view changes
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !isDrawingMode) return;
+    if (!canvas) return;
 
     const renderAnnotations = () => {
       const ctx = canvas.getContext('2d');
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // Draw all annotations
+      // Draw all annotations (always render, regardless of drawing mode)
       annotations.forEach(annotation => {
         drawAnnotation(ctx, annotation);
         
@@ -494,59 +494,62 @@ const AnnotationCanvas = ({
         }
       });
 
-      // Draw preview shape
-      if (previewShape) {
-        drawAnnotation(ctx, { ...previewShape, strokeColor, strokeWidth, fillColor }, true);
-      }
-
-      // Draw current path for freehand tool
-      if (currentPath.length > 1) {
-        const displayPath = currentPath.map(p => stageToDisplayCoords(p.x, p.y));
-        ctx.strokeStyle = strokeColor;
-        ctx.lineWidth = strokeWidth;
-        ctx.globalAlpha = 0.7;
-        ctx.setLineDash([5, 5]);
-        ctx.beginPath();
-        ctx.moveTo(displayPath[0].x, displayPath[0].y);
-        for (let i = 1; i < displayPath.length; i++) {
-          ctx.lineTo(displayPath[i].x, displayPath[i].y);
+      // Only draw preview elements when in drawing mode
+      if (isDrawingMode) {
+        // Draw preview shape
+        if (previewShape) {
+          drawAnnotation(ctx, { ...previewShape, strokeColor, strokeWidth, fillColor }, true);
         }
-        ctx.stroke();
-        ctx.globalAlpha = 1;
-        ctx.setLineDash([]);
-      }
 
-      // Draw polygon preview
-      if (isPolygonMode && polygonPoints.length > 0) {
-        const displayPolygonPoints = polygonPoints.map(p => stageToDisplayCoords(p.x, p.y));
-        ctx.strokeStyle = strokeColor;
-        ctx.lineWidth = strokeWidth;
-        ctx.globalAlpha = 0.7;
-        ctx.setLineDash([5, 5]);
-        ctx.beginPath();
-        ctx.moveTo(displayPolygonPoints[0].x, displayPolygonPoints[0].y);
-        for (let i = 1; i < displayPolygonPoints.length; i++) {
-          ctx.lineTo(displayPolygonPoints[i].x, displayPolygonPoints[i].y);
-        }
-        // Don't close the polygon yet, just show the line
-        ctx.stroke();
-        
-        // Draw points
-        ctx.fillStyle = strokeColor;
-        ctx.globalAlpha = 0.9;
-        ctx.setLineDash([]);
-        displayPolygonPoints.forEach(point => {
+        // Draw current path for freehand tool
+        if (currentPath.length > 1) {
+          const displayPath = currentPath.map(p => stageToDisplayCoords(p.x, p.y));
+          ctx.strokeStyle = strokeColor;
+          ctx.lineWidth = strokeWidth;
+          ctx.globalAlpha = 0.7;
+          ctx.setLineDash([5, 5]);
           ctx.beginPath();
-          ctx.arc(point.x, point.y, 3, 0, 2 * Math.PI);
-          ctx.fill();
-        });
-        
-        ctx.globalAlpha = 1;
+          ctx.moveTo(displayPath[0].x, displayPath[0].y);
+          for (let i = 1; i < displayPath.length; i++) {
+            ctx.lineTo(displayPath[i].x, displayPath[i].y);
+          }
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+          ctx.setLineDash([]);
+        }
+
+        // Draw polygon preview
+        if (isPolygonMode && polygonPoints.length > 0) {
+          const displayPolygonPoints = polygonPoints.map(p => stageToDisplayCoords(p.x, p.y));
+          ctx.strokeStyle = strokeColor;
+          ctx.lineWidth = strokeWidth;
+          ctx.globalAlpha = 0.7;
+          ctx.setLineDash([5, 5]);
+          ctx.beginPath();
+          ctx.moveTo(displayPolygonPoints[0].x, displayPolygonPoints[0].y);
+          for (let i = 1; i < displayPolygonPoints.length; i++) {
+            ctx.lineTo(displayPolygonPoints[i].x, displayPolygonPoints[i].y);
+          }
+          // Don't close the polygon yet, just show the line
+          ctx.stroke();
+          
+          // Draw points
+          ctx.fillStyle = strokeColor;
+          ctx.globalAlpha = 0.9;
+          ctx.setLineDash([]);
+          displayPolygonPoints.forEach(point => {
+            ctx.beginPath();
+            ctx.arc(point.x, point.y, 3, 0, 2 * Math.PI);
+            ctx.fill();
+          });
+          
+          ctx.globalAlpha = 1;
+        }
       }
     };
 
     renderAnnotations();
-  }, [annotations, selectedAnnotation, previewShape, currentPath, strokeColor, strokeWidth, fillColor, isDrawingMode, drawAnnotation, stageToDisplayCoords, isPolygonMode, polygonPoints]);
+  }, [annotations, selectedAnnotation, previewShape, currentPath, strokeColor, strokeWidth, fillColor, isDrawingMode, drawAnnotation, stageToDisplayCoords, isPolygonMode, polygonPoints, mapPan, mapScale]);
 
   // Set up event listeners
   useEffect(() => {
@@ -588,18 +591,17 @@ const AnnotationCanvas = ({
     };
   }, [isDrawingMode, handleMouseDown, handleMouseMove, handleMouseUp, handleDoubleClick, containerRef]);
 
-  if (!isDrawingMode) return null;
-
+  // Always render the canvas to show annotations, but only enable interactions when in drawing mode
   return (
     <canvas
       ref={canvasRef}
-      className={`absolute inset-0 pointer-events-auto ${className}`}
+      className={`absolute inset-0 ${isDrawingMode ? 'pointer-events-auto' : 'pointer-events-none'} ${className}`}
       style={{
         zIndex: 1000, // High z-index to be above map elements
-        cursor: currentTool === 'select' ? 'pointer' : 
+        cursor: isDrawingMode ? (currentTool === 'select' ? 'pointer' : 
                 currentTool === 'delete' ? 'crosshair' : 
-                'crosshair',
-        pointerEvents: 'auto', // Ensure canvas can receive mouse events
+                'crosshair') : 'default',
+        pointerEvents: isDrawingMode ? 'auto' : 'none', // Only enable interactions when drawing
         top: 0,
         left: 0,
         width: '100%',
