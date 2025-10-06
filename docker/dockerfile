@@ -44,7 +44,7 @@ USER agent_lens
 
 # Set environment variables
 ENV HOME=/home/agent_lens \
-    CLIP_CACHE=/home/agent_lens/.cache/clip \
+    CLIP_CACHE=/app/.cache \
     npm_config_cache=/home/agent_lens/.npm \
     NPM_CONFIG_PREFIX=/home/agent_lens/.npm-global \
     PATH="/home/agent_lens/.local/bin:${PATH}" \

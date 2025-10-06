@@ -38,8 +38,15 @@ def _load_clip_model():
     """Load CLIP ViT-B/32 model lazily and cache it in memory."""
     global _clip_model, _clip_preprocess
     if _clip_model is None:
+        # Use CLIP_CACHE environment variable if set, otherwise use default
+        clip_cache_dir = os.getenv("CLIP_CACHE")
         logger.info(f"Loading CLIP ViT-B/32 on {device}")
-        _clip_model, _clip_preprocess = clip.load("ViT-B/32", device=device)
+        if clip_cache_dir:
+            logger.info(f"Using CLIP cache directory: {clip_cache_dir}")
+            _clip_model, _clip_preprocess = clip.load("ViT-B/32", device=device, download_root=clip_cache_dir)
+        else:
+            logger.info("Using default CLIP cache directory")
+            _clip_model, _clip_preprocess = clip.load("ViT-B/32", device=device)
         logger.info("CLIP model loaded")
     return _clip_model, _clip_preprocess
 
