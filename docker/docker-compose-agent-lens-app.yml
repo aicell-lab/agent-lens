@@ -1,6 +1,6 @@
 services:
   agent-lens:
-    image: ghcr.io/aicell-lab/agent-lens:sha-e15b5b2
+    image: ghcr.io/aicell-lab/agent-lens:sha-6404c3c
     container_name: agent-lens
     environment:
       - WORKSPACE_TOKEN=${WORKSPACE_TOKEN}
@@ -8,14 +8,15 @@ services:
       - CLIP_CACHE=/app/.cache
       - JWT_SECRET=${JWT_SECRET}
       - REEF_WORKSPACE_TOKEN=${REEF_WORKSPACE_TOKEN}
+      - HYPHA_AGENTS_TOKEN=${HYPHA_AGENTS_TOKEN}
     labels:
       - "autoheal.enable=true"
     volumes:
       - agent-lens-cache:/app/.cache
     healthcheck:
       test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/agent-lens/services/probes/readiness-agent-lens | jq -e '.status == \"ok\"'"]
-      interval: 60s
-      timeout: 30s
+      interval: 120s
+      timeout: 60s
       retries: 1
       start_period: 120s
     restart: on-failure
@@ -32,7 +33,7 @@ services:
       - ALL
 
   squid-control:
-    image: ghcr.io/aicell-lab/squid-control:sha-793e7e5
+    image: ghcr.io/aicell-lab/squid-control:sha-2bdaff4
     container_name: squid-control
     network_mode: "host"
     ports:
