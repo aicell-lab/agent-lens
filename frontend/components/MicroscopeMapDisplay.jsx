@@ -435,10 +435,22 @@ const MicroscopeMapDisplay = ({
       // Don't clear tiles if real-time loading is in progress
       const hasActiveRequests = activeTileRequestsRef.current.size > 0;
       if (currentOperation === null && !hasActiveRequests) {
-        // Clear active requests to prevent conflicts
+        // 🚫 CANCEL ABANDONED CHANNEL REQUESTS: Actually cancel ongoing HTTP requests for disabled channels
+        if (currentCancellableRequest) {
+          const cancelledCount = currentCancellableRequest.cancel();
+          console.log(`🚫 [Zarr Config Change] Cancelled ${cancelledCount} pending requests for disabled channels`);
+          setCurrentCancellableRequest(null);
+        }
+        
+        if (artifactZarrLoaderRef.current) {
+          const artifactCancelledCount = artifactZarrLoaderRef.current.cancelAllRequests();
+          console.log(`🚫 [Zarr Config Change] Cancelled ${artifactCancelledCount} artifact requests for disabled channels`);
+        }
+        
+        // Clear active request tracking refs
         browseDataRequestsRef.current.clear();
-      scanDataRequestsRef.current.clear();
-      activeTileRequestsRef.current.clear();
+        scanDataRequestsRef.current.clear();
+        activeTileRequestsRef.current.clear();
         
         console.log('🎨 BROWSE DATA: Refreshing tiles with updated contrast settings');
         console.log('🎨 BROWSE DATA: Current zarrChannelConfigs:', zarrChannelConfigs);
@@ -2503,10 +2515,22 @@ const MicroscopeMapDisplay = ({
         // Update the ref to track current selection
         previousChannelSelectionRef.current = currentChannelString;
         
-        // Clear active requests to prevent conflicts
+        // 🚫 CANCEL ABANDONED CHANNEL REQUESTS: Actually cancel ongoing HTTP requests for old channels
+        if (currentCancellableRequest) {
+          const cancelledCount = currentCancellableRequest.cancel();
+          console.log(`🚫 [Channel Change] Cancelled ${cancelledCount} pending requests for abandoned channels`);
+          setCurrentCancellableRequest(null);
+        }
+        
+        if (artifactZarrLoaderRef.current) {
+          const artifactCancelledCount = artifactZarrLoaderRef.current.cancelAllRequests();
+          console.log(`🚫 [Channel Change] Cancelled ${artifactCancelledCount} artifact requests for abandoned channels`);
+        }
+        
+        // Clear active request tracking refs
         browseDataRequestsRef.current.clear();
-      scanDataRequestsRef.current.clear();
-      activeTileRequestsRef.current.clear();
+        scanDataRequestsRef.current.clear();
+        activeTileRequestsRef.current.clear();
         
         if (appendLog) {
           appendLog(`Channel selection changed to: ${channelList.join(', ')} - refreshing tiles`);
