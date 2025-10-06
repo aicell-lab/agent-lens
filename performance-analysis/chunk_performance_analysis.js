@@ -8,7 +8,7 @@ class ChunkTest {
     this.baseUrl = 'https://hypha.aicell.io/agent-lens/artifacts';
     this.datasetId = '20250824-example-data-20250824-221822';
     this.well = 'B2';
-    this.scaleLevel = 3;
+    this.scaleLevel = 1;
   }
 
   async listChunks() {

@@ -176,7 +176,7 @@ def mock_hypha_server():
 @pytest.fixture
 def mock_artifact_manager():
     """Mock artifact manager for testing data operations."""
-    with patch('agent_lens.artifact_manager.AgentLensArtifactManager') as mock:
+    with patch('agent_lens.utils.artifact_manager.AgentLensArtifactManager') as mock:
         instance = AsyncMock()
         mock.return_value = instance
         

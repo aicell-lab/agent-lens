@@ -8,7 +8,7 @@
  * in the MicroscopeMapDisplay component.
  */
 
-import ArtifactZarrLoader from '../frontend/services/artifactZarrLoader.js';
+import ArtifactZarrLoader from '../frontend/utils/artifactZarrLoader.js';
 
 console.log('🔬 Frontend Integration Test for ArtifactZarrLoader');
 console.log('============================================================');

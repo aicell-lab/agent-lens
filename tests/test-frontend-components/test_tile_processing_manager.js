@@ -27,6 +27,9 @@ const mockBrowserAPIs = () => {
               height: 512
             }),
             putImageData: () => {},
+            fillRect: () => {},
+            clearRect: () => {},
+            fillStyle: 'black',
             globalCompositeOperation: 'source-over'
           }),
           toDataURL: () => 'data:image/png;base64,mockData'
@@ -83,8 +86,11 @@ class TileProcessingManagerTest {
       },
       artifactZarrLoader: {
         getWellRegion: async (wellId, centerX, centerY, width_mm, height_mm, channel, scaleLevel, timepoint, datasetId, outputFormat) => {
-          // Simulate successful response
-          return 'data:image/png;base64,mockZarrData';
+          // Simulate successful response with proper structure
+          return {
+            success: true,
+            data: 'mockZarrData'
+          };
         }
       }
     };
@@ -325,22 +331,22 @@ class TileProcessingManagerTest {
     
     try {
       // Test with default colors
-      const defaultColor = TileProcessingManager.getChannelColor('BF_LED_matrix_full', 'FREE_PAN');
-      assert(defaultColor === '#FFFFFF', 'Should return default color for BF_LED_matrix_full');
+      const defaultColor = TileProcessingManager.getChannelColor('BF LED matrix full', 'FREE_PAN');
+      assert(defaultColor === '#FFFFFF', 'Should return default color for BF LED matrix full');
 
-      const fluorescenceColor = TileProcessingManager.getChannelColor('Fluorescence_488_nm_Ex', 'FREE_PAN');
-      assert(fluorescenceColor === '#00FF00', 'Should return green for Fluorescence_488_nm_Ex');
+      const fluorescenceColor = TileProcessingManager.getChannelColor('Fluorescence 488 nm Ex', 'FREE_PAN');
+      assert(fluorescenceColor === '#00FF00', 'Should return green for Fluorescence 488 nm Ex');
 
       // Test with zarr metadata
       const metadata = {
         zarrMetadata: {
           activeChannels: [
-            { label: 'BF_LED_matrix_full', color: 'FF0000' }
+            { label: 'BF LED matrix full', color: 'FF0000' }
           ]
         }
       };
       
-      const zarrColor = TileProcessingManager.getChannelColor('BF_LED_matrix_full', 'HISTORICAL', metadata);
+      const zarrColor = TileProcessingManager.getChannelColor('BF LED matrix full', 'HISTORICAL', metadata);
       assert(zarrColor === '#FF0000', 'Should return color from zarr metadata');
 
       this.recordTestResult('Get Channel Color', true, 'Color management works correctly');

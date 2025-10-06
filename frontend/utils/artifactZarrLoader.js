@@ -31,6 +31,11 @@ class ArtifactZarrLoader {
     this.maxCacheSize = 2000; // Limit cache size to prevent memory bloat
     this.lastCleanup = Date.now();
     this.cleanupInterval = 30000; // Clean up every 30 seconds
+    
+    // 🚀 BATCH REQUEST MANAGEMENT: Control concurrent requests
+    this.maxConcurrentRequests = 10; // Limit concurrent chunk requests
+    this.requestQueue = []; // Queue for pending requests
+    this.activeRequestCount = 0; // Track active request count
   }
 
   /**
@@ -67,10 +72,20 @@ class ArtifactZarrLoader {
       controller.abort();
       cancelledCount++;
     }
+    
+    // Clear request queue to prevent queued requests from starting
+    const queuedCount = this.requestQueue.length;
+    this.requestQueue.length = 0; // Clear the queue
+    
+    // Reset active request count
+    this.activeRequestCount = 0;
+    
     this.requestControllers.clear();
     this.requestIds.clear();
-    console.log(`🚫 Cancelled all ${cancelledCount} active requests`);
-    return cancelledCount;
+    this.requestPromises.clear(); // Also clear promises to prevent duplicate requests
+    
+    console.log(`🚫 Cancelled all ${cancelledCount} active requests and ${queuedCount} queued requests`);
+    return cancelledCount + queuedCount;
   }
 
   /**
@@ -96,11 +111,11 @@ class ArtifactZarrLoader {
   }
 
   /**
-   * MAXIMUM SPEED fetch - no waiting, just fire all requests!
+   * 🚀 BATCHED FETCH: Controlled concurrent requests with queuing
    * @param {string} url - URL to fetch
    * @param {Object} options - Fetch options
    * @param {string} requestId - Optional request ID for cancellation
-   * @returns {Promise<Response>} Fetch response
+   * @returns {Promise<Response>} Fetch response (CLONED for concurrent usage)
    */
   async managedFetch(url, options = {}, requestId = null) {
     // Generate request ID if not provided
@@ -108,7 +123,10 @@ class ArtifactZarrLoader {
     
     // Check if this exact request is already in progress
     if (this.requestPromises.has(url)) {
-      return this.requestPromises.get(url);
+      const sharedResponse = await this.requestPromises.get(url);
+      // CRITICAL FIX: Clone the response to prevent "body stream already read" errors
+      // Each consumer gets their own copy of the response body
+      return sharedResponse.clone();
     }
 
     // Create AbortController for this request
@@ -116,8 +134,16 @@ class ArtifactZarrLoader {
     this.requestControllers.set(reqId, controller);
     this.requestIds.set(url, reqId);
 
-    // Create the fetch promise - NO WAITING, just fire!
+    // Create the fetch promise with non-blocking queue control
     const fetchPromise = (async () => {
+      // Use Promise-based queue instead of blocking while loop
+      await this.waitForAvailableSlot(controller);
+      
+      // Final check before proceeding
+      if (controller.signal.aborted) {
+        throw new DOMException('Request was cancelled before starting', 'AbortError');
+      }
+      
       this.activeRequestCount++;
       
       try {
@@ -139,6 +165,8 @@ class ArtifactZarrLoader {
         this.requestPromises.delete(url);
         this.requestControllers.delete(reqId);
         this.requestIds.delete(url);
+        // Process next queued request
+        this.processQueue();
       }
     })();
 
@@ -148,6 +176,56 @@ class ArtifactZarrLoader {
     return fetchPromise;
   }
 
+  /**
+   * Wait for available request slot using Promise-based queue instead of blocking loop
+   * @param {AbortController} controller - Abort controller for cancellation
+   * @returns {Promise<void>}
+   */
+  async waitForAvailableSlot(controller) {
+    return new Promise((resolve, reject) => {
+      // If slot is available, resolve immediately
+      if (this.activeRequestCount < this.maxConcurrentRequests) {
+        resolve();
+        return;
+      }
+
+      // Add to queue instead of blocking
+      const queueItem = {
+        resolve,
+        reject,
+        controller
+      };
+      
+      this.requestQueue.push(queueItem);
+      
+      // Set up cancellation handler
+      const abortHandler = () => {
+        // Remove from queue if still queued
+        const index = this.requestQueue.indexOf(queueItem);
+        if (index !== -1) {
+          this.requestQueue.splice(index, 1);
+        }
+        reject(new DOMException('Request was cancelled while waiting in queue', 'AbortError'));
+      };
+      
+      controller.signal.addEventListener('abort', abortHandler, { once: true });
+    });
+  }
+
+  /**
+   * Process the next queued request
+   */
+  processQueue() {
+    if (this.requestQueue.length > 0 && this.activeRequestCount < this.maxConcurrentRequests) {
+      const nextRequest = this.requestQueue.shift();
+      if (nextRequest && !nextRequest.controller.signal.aborted) {
+        nextRequest.resolve();
+      } else if (nextRequest) {
+        // Request was cancelled, process next one
+        this.processQueue();
+      }
+    }
+  }
 
   /**
    * Get multi-channel well region data with additive blending
@@ -191,16 +269,94 @@ class ArtifactZarrLoader {
         color: c.color 
       })));
       
-      // Load each channel separately in parallel
+      // 🚀 REAL-TIME MERGED UPDATES: Track loaded channels and provide progressive merging
+      const loadedChannels = new Map(); // channelName -> { config, canvas, width, height, actualBounds, actualStageBounds }
+      let compositeCanvas = null;
+      let compositeCtx = null;
+      
+      // Track actual chunk progress across all channels
+      let totalChunksLoaded = 0;
+      let totalChunksExpected = 0;
+      const channelChunkProgress = new Map(); // channelName -> { loaded, total }
+      
+      // Helper function to create/update composite canvas with current loaded channels
+      const updateCompositeCanvas = () => {
+        if (loadedChannels.size === 0) return null;
+        
+        // Use the first loaded channel as reference for dimensions
+        const firstChannel = Array.from(loadedChannels.values())[0];
+        const compositeWidth = firstChannel.width;
+        const compositeHeight = firstChannel.height;
+        
+        // Create or reuse composite canvas
+        if (!compositeCanvas || compositeCanvas.width !== compositeWidth || compositeCanvas.height !== compositeHeight) {
+          compositeCanvas = document.createElement('canvas');
+          compositeCanvas.width = compositeWidth;
+          compositeCanvas.height = compositeHeight;
+          compositeCtx = compositeCanvas.getContext('2d');
+        }
+        
+        // Clear to transparent (important for proper alpha blending)
+        compositeCtx.clearRect(0, 0, compositeWidth, compositeHeight);
+        
+        // Apply additive blending for each loaded channel
+        for (const [, channelData] of loadedChannels) {
+          const { config, canvas } = channelData;
+          
+          // Apply contrast adjustment and channel color
+          const adjustedCanvas = this.applyChannelAdjustments(canvas, config);
+          
+          // Additive blend with existing composite (preserves alpha)
+          compositeCtx.globalCompositeOperation = 'lighter'; // Additive blending
+          compositeCtx.drawImage(adjustedCanvas, 0, 0);
+        }
+        
+        // Reset composite operation
+        compositeCtx.globalCompositeOperation = 'source-over';
+        
+        return compositeCanvas;
+      };
+      
+      // Load each channel with real-time merging updates
       const channelPromises = enabledChannels.map(async (config) => {
         try {
           const channelRegion = await this.getWellCanvasRegionRealTime(
             centerX, centerY, width_mm, height_mm,
             config.channelName, scaleLevel, timepoint, datasetId, wellId,
             (loadedChunks, totalChunks, partialCanvas) => {
-              // Forward progress updates
-              if (onChunkProgress) {
-                onChunkProgress(loadedChunks, totalChunks, partialCanvas, config.channelName);
+              // Store the partial canvas for this channel
+              if (partialCanvas) {
+                loadedChannels.set(config.channelName, {
+                  config,
+                  canvas: partialCanvas,
+                  width: partialCanvas.width,
+                  height: partialCanvas.height,
+                  actualBounds: null, // Will be updated when complete
+                  actualStageBounds: null
+                });
+                
+                // Update chunk progress tracking for this channel
+                const previousProgress = channelChunkProgress.get(config.channelName) || { loaded: 0, total: 0 };
+                const previousLoaded = previousProgress.loaded;
+                const previousTotal = previousProgress.total;
+                
+                // Update total expected chunks if this is the first time we see this channel's total
+                if (previousTotal === 0 && totalChunks > 0) {
+                  totalChunksExpected += totalChunks;
+                }
+                
+                // Update total loaded chunks (subtract previous progress and add new progress)
+                totalChunksLoaded = totalChunksLoaded - previousLoaded + loadedChunks;
+                
+                // Store current progress for this channel
+                channelChunkProgress.set(config.channelName, { loaded: loadedChunks, total: totalChunks });
+                
+                // 🚀 REAL-TIME MERGED UPDATE: Create merged composite and send progress update
+                const mergedCanvas = updateCompositeCanvas();
+                if (mergedCanvas && onChunkProgress) {
+                  // Report actual chunk progress across all channels
+                  onChunkProgress(totalChunksLoaded, totalChunksExpected, mergedCanvas, config.channelName);
+                }
               }
             }
           );
@@ -208,6 +364,26 @@ class ArtifactZarrLoader {
           if (!channelRegion) {
             console.warn(`Channel ${config.channelName} not available for well ${wellId}`);
             return null;
+          }
+          
+          // Store the complete channel data
+          loadedChannels.set(config.channelName, {
+            config,
+            canvas: channelRegion.canvas,
+            width: channelRegion.width,
+            height: channelRegion.height,
+            actualBounds: channelRegion.actualBounds,
+            actualStageBounds: channelRegion.actualStageBounds
+          });
+          
+          // Update final chunk progress for this channel
+          const finalProgress = channelChunkProgress.get(config.channelName) || { loaded: 0, total: 0 };
+          totalChunksLoaded = totalChunksLoaded - finalProgress.loaded + finalProgress.total;
+          
+          // 🚀 REAL-TIME MERGED UPDATE: Send progress update with merged result
+          const mergedCanvas = updateCompositeCanvas();
+          if (mergedCanvas && onChunkProgress) {
+            onChunkProgress(totalChunksLoaded, totalChunksExpected, mergedCanvas, config.channelName);
           }
           
           return {
@@ -250,47 +426,24 @@ class ArtifactZarrLoader {
         console.log(`⚠️ Failed channels: ${failedChannels.join(', ')}`);
       }
       
-      // Use the first valid result as the reference for dimensions
-      const referenceResult = validResults[0];
-      const compositeWidth = referenceResult.width;
-      const compositeHeight = referenceResult.height;
-      
-      // Create composite canvas for additive blending
-      const compositeCanvas = document.createElement('canvas');
-      compositeCanvas.width = compositeWidth;
-      compositeCanvas.height = compositeHeight;
-      const compositeCtx = compositeCanvas.getContext('2d');
-      
-      // Clear to black (important for additive blending)
-      compositeCtx.fillStyle = 'black';
-      compositeCtx.fillRect(0, 0, compositeWidth, compositeHeight);
-      
-      // Apply additive blending for each channel
-      for (const result of validResults) {
-        const { config, canvas } = result;
-        
-        // Apply contrast adjustment and channel color
-        const adjustedCanvas = this.applyChannelAdjustments(canvas, config);
-        
-        // Additive blend with existing composite
-        compositeCtx.globalCompositeOperation = 'lighter'; // Additive blending
-        compositeCtx.drawImage(adjustedCanvas, 0, 0);
+      // Create final composite canvas with all loaded channels
+      const finalCompositeCanvas = updateCompositeCanvas();
+      if (!finalCompositeCanvas) {
+        console.warn(`Failed to create final composite canvas for well ${wellId}`);
+        return { success: false, message: `Failed to create composite for well ${wellId}` };
       }
       
-      // Reset composite operation
-      compositeCtx.globalCompositeOperation = 'source-over';
-      
-      console.log(`✅ Multi-channel composite created: ${validResults.length} channels, ${compositeWidth}x${compositeHeight}px`);
+      console.log(`✅ Multi-channel composite created: ${validResults.length} channels, ${finalCompositeCanvas.width}x${finalCompositeCanvas.height}px`);
       
       // Convert to requested output format
-      const outputData = await this.normalizeAndEncodeImage({ canvas: compositeCanvas }, null, outputFormat);
+      const outputData = await this.normalizeAndEncodeImage({ canvas: finalCompositeCanvas }, null, outputFormat);
       
       return {
         success: true,
         data: outputData,
         metadata: {
-          width: compositeWidth,
-          height: compositeHeight,
+          width: finalCompositeCanvas.width,
+          height: finalCompositeCanvas.height,
           channelsUsed: validResults.map(r => r.config.channelName),
           scale: scaleLevel,
           timepoint,
@@ -299,8 +452,8 @@ class ArtifactZarrLoader {
           centerY,
           width_mm,
           height_mm,
-          actualBounds: referenceResult.actualBounds,
-          actualStageBounds: referenceResult.actualStageBounds,
+          actualBounds: validResults[0].actualBounds,
+          actualStageBounds: validResults[0].actualStageBounds,
           isMultiChannel: true
         }
       };
@@ -315,10 +468,10 @@ class ArtifactZarrLoader {
   }
 
   /**
-   * Apply channel-specific adjustments (contrast, color, min/max)
+   * Apply channel-specific adjustments (contrast, color, min/max) with alpha preservation
    * @param {HTMLCanvasElement} sourceCanvas - Source channel canvas
    * @param {Object} config - Channel configuration {channelName, enabled, min, max, color}
-   * @returns {HTMLCanvasElement} Adjusted canvas
+   * @returns {HTMLCanvasElement} Adjusted canvas with proper alpha masking
    */
   applyChannelAdjustments(sourceCanvas, config) {
     const adjustedCanvas = document.createElement('canvas');
@@ -347,17 +500,27 @@ class ArtifactZarrLoader {
     const range = max - min;
     
     for (let i = 0; i < sourceData.length; i += 4) {
-      // Get grayscale value (assuming source is grayscale)
+      // Get grayscale value and alpha
       const gray = sourceData[i]; // Red channel as grayscale
+      const alpha = sourceData[i + 3]; // Alpha channel
       
-      // Apply contrast adjustment
-      let adjustedGray = range > 0 ? Math.max(0, Math.min(255, (gray - min) * 255 / range)) : 0;
-      
-      // Apply channel color
-      adjustedData[i] = adjustedGray * r;     // Red
-      adjustedData[i + 1] = adjustedGray * g; // Green
-      adjustedData[i + 2] = adjustedGray * b; // Blue
-      adjustedData[i + 3] = sourceData[i + 3]; // Alpha (preserve)
+      // Only process pixels that have data (alpha > 0)
+      if (alpha > 0) {
+        // Apply contrast adjustment
+        let adjustedGray = range > 0 ? Math.max(0, Math.min(255, (gray - min) * 255 / range)) : 0;
+        
+        // Apply channel color
+        adjustedData[i] = adjustedGray * r;     // Red
+        adjustedData[i + 1] = adjustedGray * g; // Green
+        adjustedData[i + 2] = adjustedGray * b; // Blue
+        adjustedData[i + 3] = alpha;            // Alpha (preserve original alpha)
+      } else {
+        // Transparent pixel - keep it transparent
+        adjustedData[i] = 0;     // Red
+        adjustedData[i + 1] = 0; // Green
+        adjustedData[i + 2] = 0; // Blue
+        adjustedData[i + 3] = 0; // Alpha (transparent)
+      }
     }
     
     // Put adjusted data back to canvas
@@ -709,16 +872,15 @@ class ArtifactZarrLoader {
       console.log(`🎨 MULTI-CHANNEL REAL-TIME: Starting progressive loading for ${wellRequests.length} wells with ${channelConfigs.length} channels`);
       
       // Process each well with multi-channel support
-      const wellPromises = wellRequests.map(async (request, index) => {
+      const wellPromises = wellRequests.map(async (request) => {
         const { wellId, centerX, centerY, width_mm, height_mm, scaleLevel, timepoint, datasetId, outputFormat } = request;
-        const wellRequestId = `${requestBatchId}_well_${index}`;
         
         try {
           const result = await this.getMultiChannelWellRegion(
             wellId, centerX, centerY, width_mm, height_mm,
             channelConfigs, scaleLevel, timepoint, datasetId,
-            (loadedChunks, totalChunks, partialCanvas, channelName) => {
-              // Forward progress updates for this specific well
+            (loadedChunks, totalChunks, partialCanvas) => {
+              // 🚀 REAL-TIME MERGED UPDATES: Forward merged progress updates for this specific well
               if (onChunkProgress) {
                 onChunkProgress(wellId, loadedChunks, totalChunks, partialCanvas);
               }
@@ -743,11 +905,7 @@ class ArtifactZarrLoader {
             height_mm
           };
           
-          // Call completion callback with progress simulation for multi-channel
-          if (onChunkProgress) {
-            onChunkProgress(wellId, channelConfigs.filter(c => c.enabled).length, channelConfigs.filter(c => c.enabled).length, null);
-          }
-          
+          // Call completion callback - no need for progress simulation since we have real progress
           if (onWellComplete) {
             onWellComplete(wellId, finalResult);
           }
@@ -1288,23 +1446,38 @@ class ArtifactZarrLoader {
     }
 
     try {
-      // 🚀 SIMPLE CACHE: Check if we already have zattrs for this dataset
+      // 🚀 IMPROVED CACHE: Use promise-based caching for zattrs to prevent concurrent parsing
       const zattrsUrl = `${baseUrl}.zattrs`;
       const zattrsCacheKey = zattrsUrl;
+      const zattrsPromiseCacheKey = `${zattrsCacheKey}_parse_promise`;
       
       let zattrs;
       if (this.datasetZattrsCache.has(zattrsCacheKey)) {
         console.log(`📋 Using cached zattrs for ${zattrsUrl}`);
         zattrs = this.datasetZattrsCache.get(zattrsCacheKey);
+      } else if (this.requestPromises.has(zattrsPromiseCacheKey)) {
+        console.log(`⏳ Waiting for concurrent zattrs parsing (fetchZarrMetadata): ${zattrsUrl}`);
+        zattrs = await this.requestPromises.get(zattrsPromiseCacheKey);
       } else {
         console.log(`📥 Fetching zattrs for ${zattrsUrl}`);
-        const zattrsResponse = await this.managedFetch(zattrsUrl);
-        if (!zattrsResponse.ok) {
-          throw new Error(`Failed to fetch zattrs: ${zattrsResponse.status}`);
+        
+        const parsePromise = (async () => {
+          const zattrsResponse = await this.managedFetch(zattrsUrl);
+          if (!zattrsResponse.ok) {
+            throw new Error(`Failed to fetch zattrs: ${zattrsResponse.status}`);
+          }
+          const parsedZattrs = await zattrsResponse.json();
+          this.datasetZattrsCache.set(zattrsCacheKey, parsedZattrs);
+          console.log(`✅ Cached zattrs for ${zattrsUrl}`);
+          return parsedZattrs;
+        })();
+        
+        this.requestPromises.set(zattrsPromiseCacheKey, parsePromise);
+        try {
+          zattrs = await parsePromise;
+        } finally {
+          this.requestPromises.delete(zattrsPromiseCacheKey);
         }
-        zattrs = await zattrsResponse.json();
-        this.datasetZattrsCache.set(zattrsCacheKey, zattrs);
-        console.log(`✅ Cached zattrs for ${zattrsUrl}`);
       }
       
       // Fetch zarray
@@ -1339,37 +1512,34 @@ class ArtifactZarrLoader {
     try {
       const zattrsUrl = `${baseUrl}.zattrs`;
       const zattrsCacheKey = zattrsUrl;
+      const zattrsPromiseCacheKey = `${zattrsCacheKey}_parse_promise`;
       
       let zattrs;
       if (this.datasetZattrsCache.has(zattrsCacheKey)) {
         console.log(`📋 Using cached zattrs for active channels: ${zattrsUrl}`);
         zattrs = this.datasetZattrsCache.get(zattrsCacheKey);
+      } else if (this.requestPromises.has(zattrsPromiseCacheKey)) {
+        console.log(`⏳ Waiting for concurrent zattrs parsing (active channels): ${zattrsUrl}`);
+        zattrs = await this.requestPromises.get(zattrsPromiseCacheKey);
       } else {
         console.log(`📥 Fetching zattrs for active channels: ${zattrsUrl}`);
         
-        // Create a unique cache key for the JSON parsing promise to prevent concurrent parsing
-        const jsonCacheKey = `${zattrsCacheKey}_json_promise`;
-        if (this.requestPromises.has(jsonCacheKey)) {
-          console.log(`⏳ Waiting for concurrent zattrs parsing (active channels): ${zattrsUrl}`);
-          zattrs = await this.requestPromises.get(jsonCacheKey);
-        } else {
-          const jsonPromise = (async () => {
-            const response = await this.managedFetch(zattrsUrl);
-            if (!response.ok) {
-              throw new Error(`Failed to fetch zattrs: ${response.status}`);
-            }
-            const parsedZattrs = await response.json();
-            this.datasetZattrsCache.set(zattrsCacheKey, parsedZattrs);
-            console.log(`✅ Cached zattrs for active channels: ${zattrsUrl}`);
-            return parsedZattrs;
-          })();
-          
-          this.requestPromises.set(jsonCacheKey, jsonPromise);
-          try {
-            zattrs = await jsonPromise;
-          } finally {
-            this.requestPromises.delete(jsonCacheKey);
+        const parsePromise = (async () => {
+          const response = await this.managedFetch(zattrsUrl);
+          if (!response.ok) {
+            throw new Error(`Failed to fetch zattrs: ${response.status}`);
           }
+          const parsedZattrs = await response.json();
+          this.datasetZattrsCache.set(zattrsCacheKey, parsedZattrs);
+          console.log(`✅ Cached zattrs for active channels: ${zattrsUrl}`);
+          return parsedZattrs;
+        })();
+        
+        this.requestPromises.set(zattrsPromiseCacheKey, parsePromise);
+        try {
+          zattrs = await parsePromise;
+        } finally {
+          this.requestPromises.delete(zattrsPromiseCacheKey);
         }
       }
       
@@ -1557,6 +1727,7 @@ class ArtifactZarrLoader {
 
   /**
    * Compose image from multiple chunks with optimized parallel loading
+   * PRIORITY LOADING: Cached chunks first, then network chunks
    * @param {string} baseUrl - Base URL for zarr data
    * @param {Array} chunks - Array of chunk coordinates (filtered to available chunks)
    * @param {Object} metadata - Zarr metadata
@@ -1585,47 +1756,50 @@ class ArtifactZarrLoader {
       canvas.height = totalHeight;
       const ctx = canvas.getContext('2d');
       
-      // Fetch chunks individually using the caching system
-      const fetchTimerName = `Individual chunk fetch ${Date.now()}_${Math.random()}`;
-      console.time(fetchTimerName);
+      // 🚀 PHASE 1: Separate cached vs non-cached chunks
+      const cachedChunks = [];
+      const networkChunks = [];
       
-      // Process chunks in parallel: fetch, decode and prepare canvas data
-      const processingTimerName = `Parallel chunk processing ${Date.now()}_${Math.random()}`;
-      console.time(processingTimerName);
-      const chunkPromises = chunks.map(async (chunk, index) => {
+      for (const chunk of chunks) {
+        const [t, c, z, y, x] = chunk.coordinates;
+        const chunkUrl = `${baseUrl}${scaleLevel}/${t}.${c}.${z}.${y}.${x}`;
+        const cacheKey = `${chunkUrl}_${dataType}`;
+        
+        if (this.chunkCache.has(cacheKey)) {
+          cachedChunks.push(chunk);
+        } else {
+          networkChunks.push(chunk);
+        }
+      }
+      
+      console.log(`📊 Cache split: ${cachedChunks.length} cached, ${networkChunks.length} network`);
+      
+      // Helper function to process a chunk
+      const processChunk = async (chunk) => {
         const [t, c, z, y, x] = chunk.coordinates;
         const chunkUrl = `${baseUrl}${scaleLevel}/${t}.${c}.${z}.${y}.${x}`;
         
-        // Use fetchZarrChunk which has proper caching
         const chunkData = await this.fetchZarrChunk(chunkUrl, dataType);
-        if (!chunkData) {
-          console.warn(`Chunk not available: ${chunk.filename}`);
-          return null;
-        }
+        if (!chunkData) return null;
         
         try {
-          // Decode chunk data (chunkData is already ArrayBuffer from fetchZarrChunk)
           const imageData = this.decodeChunk(chunkData, [yChunk, xChunk], dataType);
           
           if (imageData) {
-            // Create temporary canvas for this chunk
             const chunkCanvas = document.createElement('canvas');
             chunkCanvas.width = imageData.width;
             chunkCanvas.height = imageData.height;
             const chunkCtx = chunkCanvas.getContext('2d');
             chunkCtx.putImageData(imageData, 0, 0);
             
-            // Calculate position in composed image relative to region start
             const chunkAbsX = x * xChunk;
             const chunkAbsY = y * yChunk;
             const posX = chunkAbsX - regionStartX;
             const posY = chunkAbsY - regionStartY;
             
-            // Only process if the chunk intersects with our region
             if (posX < totalWidth && posY < totalHeight && 
                 posX + chunkCanvas.width > 0 && posY + chunkCanvas.height > 0) {
               
-              // Calculate source and destination rectangles for partial chunks
               const srcX = Math.max(0, regionStartX - chunkAbsX);
               const srcY = Math.max(0, regionStartY - chunkAbsY);
               const srcWidth = Math.min(chunkCanvas.width - srcX, totalWidth - Math.max(0, posX));
@@ -1651,28 +1825,40 @@ class ArtifactZarrLoader {
         }
         
         return null;
-      });
+      };
       
-      // Wait for all chunks to load in parallel
-      const chunkResults = await Promise.all(chunkPromises);
-      console.timeEnd(fetchTimerName);
-      console.timeEnd(processingTimerName);
+      // 🚀 PHASE 2: Load cached chunks immediately (synchronous from cache)
+      const cachedResults = await Promise.all(cachedChunks.map(processChunk));
       
-      // Draw all loaded chunks onto the main canvas
-      const compositionTimerName = `Canvas composition ${Date.now()}_${Math.random()}`;
-      console.time(compositionTimerName);
+      // Draw cached chunks immediately
       let loadedChunks = 0;
-      const totalChunks = chunks.length;
-      
-      for (const result of chunkResults) {
+      for (const result of cachedResults) {
         if (result) {
           const { chunkCanvas, destX, destY, srcX, srcY, srcWidth, srcHeight } = result;
           ctx.drawImage(chunkCanvas, srcX, srcY, srcWidth, srcHeight, destX, destY, srcWidth, srcHeight);
           loadedChunks++;
         }
       }
-      console.timeEnd(compositionTimerName);
       
+      console.log(`✅ Loaded ${loadedChunks} cached chunks immediately`);
+      
+      // 🚀 PHASE 3: Load network chunks in parallel
+      if (networkChunks.length > 0) {
+        const networkResults = await Promise.all(networkChunks.map(processChunk));
+        
+        // Draw network chunks
+        for (const result of networkResults) {
+          if (result) {
+            const { chunkCanvas, destX, destY, srcX, srcY, srcWidth, srcHeight } = result;
+            ctx.drawImage(chunkCanvas, srcX, srcY, srcWidth, srcHeight, destX, destY, srcWidth, srcHeight);
+            loadedChunks++;
+          }
+        }
+        
+        console.log(`✅ Loaded ${networkChunks.length} network chunks`);
+      }
+      
+      const totalChunks = chunks.length;
       console.log(`✅ Successfully loaded ${loadedChunks}/${totalChunks} chunks for scale ${scaleLevel}`);
       
       return {
@@ -1700,7 +1886,7 @@ class ArtifactZarrLoader {
 
   /**
    * 🚀 REAL-TIME: Compose image from chunks with progressive updates
-   * Provides live feedback as chunks become available
+   * PRIORITY LOADING: Cached chunks first, then network chunks with real-time feedback
    */
   async composeImageFromChunksRealTime(baseUrl, chunks, metadata, scaleLevel, regionStartX, regionStartY, regionWidth, regionHeight, onChunkProgress, batchId = null) {
     const chunkBatchId = batchId || `chunk_batch_${Date.now()}`;
@@ -1722,7 +1908,24 @@ class ArtifactZarrLoader {
       canvas.height = totalHeight;
       const ctx = canvas.getContext('2d');
       
-      // REAL-TIME: Process chunks individually and provide progressive updates
+      // 🚀 PHASE 1: Separate cached vs non-cached chunks
+      const cachedChunks = [];
+      const networkChunks = [];
+      
+      for (const chunk of chunks) {
+        const [t, c, z, y, x] = chunk.coordinates;
+        const chunkUrl = `${baseUrl}${scaleLevel}/${t}.${c}.${z}.${y}.${x}`;
+        const cacheKey = `${chunkUrl}_${dataType}`;
+        
+        if (this.chunkCache.has(cacheKey)) {
+          cachedChunks.push(chunk);
+        } else {
+          networkChunks.push(chunk);
+        }
+      }
+      
+      console.log(`📊 REAL-TIME Cache split: ${cachedChunks.length} cached, ${networkChunks.length} network`);
+      
       let loadedChunks = 0;
       const totalChunks = chunks.length;
       
@@ -1730,48 +1933,34 @@ class ArtifactZarrLoader {
       let lastProgressUpdate = 0;
       const PROGRESS_UPDATE_INTERVAL = 100; // Only update progress every 100ms
       
-      // 🚀 PERFORMANCE OPTIMIZATION: Track partial canvas for progress updates
-      let lastPartialCanvas = null;
-      
-      // Create a map to track processed chunks for efficient updates
-      const processedChunks = new Map();
-      
-      // Process chunks one by one for real-time feedback
-      for (let i = 0; i < chunks.length; i++) {
-        const chunk = chunks[i];
+      // Helper function to process a chunk and return canvas data
+      const processChunk = async (chunk, chunkIndex) => {
         const [, , , y, x] = chunk.coordinates;
         
         try {
-          // Fetch individual chunk with caching support
           const chunkUrl = `${baseUrl}${scaleLevel}/${chunk.coordinates.join('.')}`;
-          const chunkRequestId = `${chunkBatchId}_chunk_${i}`;
+          const chunkRequestId = `${chunkBatchId}_chunk_${chunkIndex}`;
           const chunkData = await this.fetchZarrChunk(chunkUrl, dataType, chunkRequestId);
           
-          if (!chunkData) {
-            console.warn(`Chunk not available: ${chunk.filename}`);
-            continue;
-          }
+          if (!chunkData) return null;
+          
           const imageData = this.decodeChunk(chunkData, [yChunk, xChunk], dataType);
           
           if (imageData) {
-            // Create temporary canvas for this chunk
             const chunkCanvas = document.createElement('canvas');
             chunkCanvas.width = imageData.width;
             chunkCanvas.height = imageData.height;
             const chunkCtx = chunkCanvas.getContext('2d');
             chunkCtx.putImageData(imageData, 0, 0);
             
-            // Calculate position in composed image relative to region start
             const chunkAbsX = x * xChunk;
             const chunkAbsY = y * yChunk;
             const posX = chunkAbsX - regionStartX;
             const posY = chunkAbsY - regionStartY;
             
-            // Only process if the chunk intersects with our region
             if (posX < totalWidth && posY < totalHeight && 
                 posX + chunkCanvas.width > 0 && posY + chunkCanvas.height > 0) {
               
-              // Calculate source and destination rectangles for partial chunks
               const srcX = Math.max(0, regionStartX - chunkAbsX);
               const srcY = Math.max(0, regionStartY - chunkAbsY);
               const srcWidth = Math.min(chunkCanvas.width - srcX, totalWidth - Math.max(0, posX));
@@ -1780,56 +1969,88 @@ class ArtifactZarrLoader {
               const destX = Math.max(0, posX);
               const destY = Math.max(0, posY);
               
-              // Draw this chunk onto the main canvas
-              ctx.drawImage(chunkCanvas, srcX, srcY, srcWidth, srcHeight, destX, destY, srcWidth, srcHeight);
-              
-              // Store processed chunk info
-              processedChunks.set(chunk.filename, {
-                destX, destY, srcWidth, srcHeight
-              });
-              
-              loadedChunks++;
-              
-              // 🚀 PERFORMANCE OPTIMIZATION: Throttled progress updates
-              const now = Date.now();
-              if (onChunkProgress && (now - lastProgressUpdate > PROGRESS_UPDATE_INTERVAL || i === chunks.length - 1)) {
-                // Only create partial canvas when we actually need to provide an update
-                if (!lastPartialCanvas) {
-                  lastPartialCanvas = document.createElement('canvas');
-                  lastPartialCanvas.width = totalWidth;
-                  lastPartialCanvas.height = totalHeight;
-                }
-                
-                // Copy current canvas state to partial canvas
-                const partialCtx = lastPartialCanvas.getContext('2d');
-                partialCtx.clearRect(0, 0, totalWidth, totalHeight);
-                partialCtx.drawImage(canvas, 0, 0);
-                
-                onChunkProgress(loadedChunks, totalChunks, lastPartialCanvas);
-                lastProgressUpdate = now;
-              }
-              
-              console.log(`✅ REAL-TIME: Loaded chunk ${i + 1}/${totalChunks} (${chunk.filename}) - ${loadedChunks}/${totalChunks} total`);
+              return {
+                chunkCanvas,
+                destX,
+                destY,
+                srcX,
+                srcY,
+                srcWidth,
+                srcHeight,
+                chunkId: chunk.filename
+              };
             }
-            
-            // 🚀 MEMORY OPTIMIZATION: Clean up chunk canvas immediately
-            chunkCanvas.width = 0;
-            chunkCanvas.height = 0;
           }
         } catch (error) {
-          if (error.name === 'AbortError') {
-            console.log(`🚫 Chunk ${chunk.filename} loading aborted`);
-            throw error;
-          }
+          if (error.name === 'AbortError') throw error;
           console.warn(`Error processing chunk ${chunk.filename}:`, error);
+        }
+        
+        return null;
+      };
+      
+      // 🚀 PHASE 2: Load cached chunks in parallel (fast from RAM)
+      const cachedResults = await Promise.all(cachedChunks.map((chunk, i) => processChunk(chunk, i)));
+      
+      // Draw cached chunks immediately
+      for (const result of cachedResults) {
+        if (result) {
+          const { chunkCanvas, destX, destY, srcX, srcY, srcWidth, srcHeight } = result;
+          ctx.drawImage(chunkCanvas, srcX, srcY, srcWidth, srcHeight, destX, destY, srcWidth, srcHeight);
+          loadedChunks++;
+          
+          // Clean up
+          chunkCanvas.width = 0;
+          chunkCanvas.height = 0;
         }
       }
       
-      // 🚀 MEMORY OPTIMIZATION: Clean up partial canvas
-      if (lastPartialCanvas) {
-        lastPartialCanvas.width = 0;
-        lastPartialCanvas.height = 0;
-        lastPartialCanvas = null;
+      console.log(`✅ REAL-TIME: Loaded ${loadedChunks} cached chunks immediately`);
+      
+      // Send progress update after cached chunks
+      if (onChunkProgress && loadedChunks > 0) {
+        const partialCanvas = document.createElement('canvas');
+        partialCanvas.width = totalWidth;
+        partialCanvas.height = totalHeight;
+        const partialCtx = partialCanvas.getContext('2d');
+        partialCtx.drawImage(canvas, 0, 0);
+        
+        onChunkProgress(loadedChunks, totalChunks, partialCanvas);
+        lastProgressUpdate = Date.now();
+        
+        // DON'T clean up partial canvas - caller may store reference to it
+      }
+      
+      // 🚀 PHASE 3: Load network chunks progressively with real-time updates
+      for (let i = 0; i < networkChunks.length; i++) {
+        const result = await processChunk(networkChunks[i], cachedChunks.length + i);
+        
+        if (result) {
+          const { chunkCanvas, destX, destY, srcX, srcY, srcWidth, srcHeight } = result;
+          ctx.drawImage(chunkCanvas, srcX, srcY, srcWidth, srcHeight, destX, destY, srcWidth, srcHeight);
+          loadedChunks++;
+          
+          // Clean up
+          chunkCanvas.width = 0;
+          chunkCanvas.height = 0;
+          
+          // Send progress update for network chunks
+          const now = Date.now();
+          if (onChunkProgress && (now - lastProgressUpdate > PROGRESS_UPDATE_INTERVAL || i === networkChunks.length - 1)) {
+            const partialCanvas = document.createElement('canvas');
+            partialCanvas.width = totalWidth;
+            partialCanvas.height = totalHeight;
+            const partialCtx = partialCanvas.getContext('2d');
+            partialCtx.drawImage(canvas, 0, 0);
+            
+            onChunkProgress(loadedChunks, totalChunks, partialCanvas);
+            lastProgressUpdate = now;
+            
+            // DON'T clean up partial canvas - caller may store reference to it
+          }
+          
+          console.log(`✅ REAL-TIME: Network chunk ${i + 1}/${networkChunks.length} - ${loadedChunks}/${totalChunks} total`);
+        }
       }
       
       console.log(`✅ REAL-TIME: Successfully loaded ${loadedChunks}/${totalChunks} chunks for scale ${scaleLevel}`);
@@ -1920,29 +2141,33 @@ class ArtifactZarrLoader {
   }
 
   /**
-   * Decode chunk data to ImageData
+   * Decode chunk data to ImageData with alpha masking
    * @param {ArrayBuffer} chunkData - Raw chunk data
    * @param {Array} chunkShape - Chunk dimensions [height, width]
    * @param {string} dataType - Data type
-   * @returns {ImageData|null} Decoded image data
+   * @returns {ImageData|null} Decoded image data with proper alpha masking
    */
   decodeChunk(chunkData, chunkShape, dataType) {
     try {
       const [height, width] = chunkShape;
       
-             // Convert ArrayBuffer to appropriate data type
-       let array;
-       if (dataType === 'uint8' || dataType === '|u1') {
-         array = new Uint8Array(chunkData);
-       } else if (dataType === 'uint16' || dataType === '|u2') {
-         array = new Uint16Array(chunkData);
-       } else {
-         throw new Error(`Unsupported data type: ${dataType}`);
-       }
+      // Convert ArrayBuffer to appropriate data type
+      let array;
+      if (dataType === 'uint8' || dataType === '|u1') {
+        array = new Uint8Array(chunkData);
+      } else if (dataType === 'uint16' || dataType === '|u2') {
+        array = new Uint16Array(chunkData);
+      } else {
+        throw new Error(`Unsupported data type: ${dataType}`);
+      }
       
       // Create ImageData
       const imageData = new ImageData(width, height);
       const pixels = imageData.data;
+      
+      // Define thresholds for alpha masking
+      const minThreshold = dataType === 'uint8' || dataType === '|u1' ? 1 : 10; // Minimum value to consider as data
+      const maxValue = dataType === 'uint8' || dataType === '|u1' ? 255 : 65535;
       
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
@@ -1952,19 +2177,29 @@ class ArtifactZarrLoader {
           // Get pixel value and normalize
           const value = array[srcIndex];
           let normalizedValue;
+          let alpha = 0; // Default to transparent
           
-          if (dataType === 'uint8' || dataType === '|u1') {
-            normalizedValue = value;
+          // Check if pixel has meaningful data
+          if (value >= minThreshold) {
+            if (dataType === 'uint8' || dataType === '|u1') {
+              normalizedValue = value;
+              alpha = 255; // Fully opaque for valid data
+            } else {
+              // 16-bit data needs normalization
+              normalizedValue = Math.floor((value / maxValue) * 255);
+              alpha = 255; // Fully opaque for valid data
+            }
           } else {
-            // 16-bit data needs normalization
-            normalizedValue = Math.floor((value / 65535) * 255);
+            // No data or very low value - make transparent
+            normalizedValue = 0;
+            alpha = 0; // Transparent
           }
           
-          // Create grayscale image (R=G=B=value, A=255)
+          // Create grayscale image with alpha masking (R=G=B=value, A=alpha)
           pixels[dstIndex] = normalizedValue;     // R
           pixels[dstIndex + 1] = normalizedValue; // G
           pixels[dstIndex + 2] = normalizedValue; // B
-          pixels[dstIndex + 3] = 255;             // A
+          pixels[dstIndex + 3] = alpha;           // A (0 = transparent, 255 = opaque)
         }
       }
       

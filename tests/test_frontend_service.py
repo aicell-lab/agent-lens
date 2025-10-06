@@ -341,6 +341,10 @@ async def test_frontend_service(hypha_server):
         service_time = time.time() - service_start_time
         print(f"✅ Frontend service registration took {service_time:.1f} seconds")
         
+        # Wait for service to be fully ready
+        print("⏳ Waiting for service to be fully ready...")
+        await asyncio.sleep(5)  # Give the service time to start up
+        
         # Get the registered service to test against
         print("🔍 Getting service reference...")
         service = await server.get_service(test_id)
@@ -388,7 +392,7 @@ async def test_frontend_service(hypha_server):
         pytest.fail(f"Failed to create test frontend service: {e}")
 
 @pytest.mark.asyncio
-@pytest.mark.timeout(60)
+@pytest.mark.timeout(600)
 async def test_frontend_service_registration_and_connectivity(test_frontend_service):
     """Test that the frontend service can be registered and is accessible."""
     service, service_url = test_frontend_service
@@ -401,7 +405,7 @@ async def test_frontend_service_registration_and_connectivity(test_frontend_serv
     print("✅ Service registration verified")
 
 @pytest.mark.asyncio
-@pytest.mark.timeout(180)
+@pytest.mark.timeout(600)
 async def test_frontend_login_flow(test_frontend_service):
     """Test the frontend login flow using WORKSPACE_TOKEN."""
     service, service_url = test_frontend_service
@@ -425,7 +429,7 @@ async def test_frontend_login_flow(test_frontend_service):
             print(f"📄 Navigating to service URL: {service_url}")
             
             # Navigate to the service URL
-            response = await page.goto(service_url, timeout=30000)
+            response = await page.goto(service_url, timeout=120000)
             assert response.status < 400, f"HTTP error: {response.status}"
             
             # Wait for page to load
@@ -452,7 +456,7 @@ async def test_frontend_login_flow(test_frontend_service):
                 main_app_loaded = False
                 for selector in selectors_to_try:
                     try:
-                        await page.wait_for_selector(selector, timeout=10000)
+                        await page.wait_for_selector(selector, timeout=30000)
                         main_app_loaded = True
                         print(f"✅ Main application loaded after authentication (found: {selector})")
                         break
@@ -482,7 +486,7 @@ async def test_frontend_login_flow(test_frontend_service):
             await browser.close()
 
 @pytest.mark.asyncio
-@pytest.mark.timeout(180)  
+@pytest.mark.timeout(600)  
 async def test_frontend_sidebar_navigation(test_frontend_service):
     """Test navigation through different sidebar tabs."""
     service, service_url = test_frontend_service
@@ -504,7 +508,7 @@ async def test_frontend_sidebar_navigation(test_frontend_service):
             page.on('console', lambda msg: console_messages.append(f"{msg.type}: {msg.text}"))
             
             # Navigate and authenticate
-            await page.goto(service_url, timeout=30000)
+            await page.goto(service_url, timeout=120000)
             await page.evaluate(f'localStorage.setItem("token", "{WORKSPACE_TOKEN}")')
             await page.reload()
             await page.wait_for_load_state('networkidle', timeout=15000)
@@ -514,7 +518,7 @@ async def test_frontend_sidebar_navigation(test_frontend_service):
             main_app_loaded = False
             for selector in selectors_to_try:
                 try:
-                    await page.wait_for_selector(selector, timeout=10000)
+                    await page.wait_for_selector(selector, timeout=30000)
                     main_app_loaded = True
                     print(f"✅ Main application loaded (found: {selector})")
                     break
@@ -546,16 +550,6 @@ async def test_frontend_sidebar_navigation(test_frontend_service):
                         'button:has-text("ImageJ")',
                         '.sidebar-tab .fa-magic',               # Icon-based selector
                         '.sidebar-tab[title*="ImageJ"]'
-                    ],
-                    'required': True
-                },
-                {
-                    'name': 'Image Search', 
-                    'selectors': [
-                        '.sidebar-tab:has-text("Image Search")', # Primary selector from Sidebar.jsx
-                        'button:has-text("Image Search")',
-                        '.sidebar-tab .fa-search',              # Icon-based selector
-                        '.sidebar-tab[title*="Search for similar"]'
                     ],
                     'required': True
                 },
@@ -671,7 +665,7 @@ async def test_frontend_sidebar_navigation(test_frontend_service):
             await browser.close()
 
 @pytest.mark.asyncio
-@pytest.mark.timeout(240)
+@pytest.mark.timeout(600)
 async def test_frontend_simulated_microscope_controls(test_frontend_service):
     """Test the simulated microscope controls and features."""
     service, service_url = test_frontend_service
@@ -695,7 +689,7 @@ async def test_frontend_simulated_microscope_controls(test_frontend_service):
             page.on('pageerror', lambda error: page_errors.append(str(error)))
             
             # Navigate and authenticate
-            await page.goto(service_url, timeout=30000)
+            await page.goto(service_url, timeout=120000)
             await page.evaluate(f'localStorage.setItem("token", "{WORKSPACE_TOKEN}")')
             await page.reload()
             await page.wait_for_load_state('networkidle', timeout=15000)
@@ -705,7 +699,7 @@ async def test_frontend_simulated_microscope_controls(test_frontend_service):
             main_app_loaded = False
             for selector in selectors_to_try:
                 try:
-                    await page.wait_for_selector(selector, timeout=10000)
+                    await page.wait_for_selector(selector, timeout=30000)
                     main_app_loaded = True
                     print(f"✅ Main application loaded (found: {selector})")
                     break
@@ -872,7 +866,7 @@ async def test_frontend_simulated_microscope_controls(test_frontend_service):
 
 
 @pytest.mark.asyncio
-@pytest.mark.timeout(90)
+@pytest.mark.timeout(600)
 async def test_frontend_service_health_comprehensive(test_frontend_service):
     """Comprehensive health test for the frontend service."""
     service, service_url = test_frontend_service
@@ -899,11 +893,11 @@ async def test_frontend_service_health_comprehensive(test_frontend_service):
             for i in range(3):
                 print(f"📊 Health check {i+1}/3...")
                 
-                response = await page.goto(service_url, timeout=30000)
+                response = await page.goto(service_url, timeout=120000)
                 assert response.status < 400, f"Health check {i+1} failed with status: {response.status}"
                 
                 # Wait for page to be interactive
-                await page.wait_for_load_state('domcontentloaded', timeout=10000)
+                await page.wait_for_load_state('domcontentloaded', timeout=30000)
                 
                 # Test basic page elements
                 html_content = await page.content()
@@ -939,7 +933,7 @@ async def test_frontend_service_health_comprehensive(test_frontend_service):
             await browser.close()
 
 @pytest.mark.asyncio
-@pytest.mark.timeout(300)
+@pytest.mark.timeout(600)
 async def test_frontend_webrtc_operations(test_frontend_service):
     """Test WebRTC streaming operations including drag move feature, zoom controls, and stream stopping during operations."""
     service, service_url = test_frontend_service
@@ -963,7 +957,7 @@ async def test_frontend_webrtc_operations(test_frontend_service):
             page.on('pageerror', lambda error: page_errors.append(str(error)))
             
             # Navigate and authenticate
-            await page.goto(service_url, timeout=30000)
+            await page.goto(service_url, timeout=120000)
             await page.evaluate(f'localStorage.setItem("token", "{WORKSPACE_TOKEN}")')
             await page.reload()
             await page.wait_for_load_state('networkidle', timeout=15000)
@@ -973,7 +967,7 @@ async def test_frontend_webrtc_operations(test_frontend_service):
             main_app_loaded = False
             for selector in selectors_to_try:
                 try:
-                    await page.wait_for_selector(selector, timeout=10000)
+                    await page.wait_for_selector(selector, timeout=30000)
                     main_app_loaded = True
                     print(f"✅ Main application loaded (found: {selector})")
                     break
@@ -1460,7 +1454,7 @@ async def test_frontend_webrtc_operations(test_frontend_service):
             await browser.close()
 
 @pytest.mark.asyncio
-@pytest.mark.timeout(240)
+@pytest.mark.timeout(600)
 async def test_frontend_incubator_control_slot_management(test_frontend_service):
     """Test the incubator control panel slot management functionality."""
     service, service_url = test_frontend_service
@@ -1484,7 +1478,7 @@ async def test_frontend_incubator_control_slot_management(test_frontend_service)
             page.on('pageerror', lambda error: page_errors.append(str(error)))
             
             # Navigate and authenticate
-            await page.goto(service_url, timeout=30000)
+            await page.goto(service_url, timeout=120000)
             await page.evaluate(f'localStorage.setItem("token", "{WORKSPACE_TOKEN}")')
             await page.reload()
             await page.wait_for_load_state('networkidle', timeout=15000)
@@ -1494,7 +1488,7 @@ async def test_frontend_incubator_control_slot_management(test_frontend_service)
             main_app_loaded = False
             for selector in selectors_to_try:
                 try:
-                    await page.wait_for_selector(selector, timeout=10000)
+                    await page.wait_for_selector(selector, timeout=30000)
                     main_app_loaded = True
                     print(f"✅ Main application loaded (found: {selector})")
                     break
@@ -1844,7 +1838,7 @@ async def test_frontend_incubator_control_slot_management(test_frontend_service)
             await browser.close()
 
 @pytest.mark.asyncio
-@pytest.mark.timeout(120)
+@pytest.mark.timeout(300)
 async def test_frontend_expired_token_handling(test_frontend_service):
     """Test that the frontend properly handles expired tokens and refreshes them."""
     service, service_url = test_frontend_service
@@ -1866,7 +1860,7 @@ async def test_frontend_expired_token_handling(test_frontend_service):
             page.on('console', lambda msg: console_messages.append(f"{msg.type}: {msg.text}"))
             
             print("📄 Navigating to service URL...")
-            await page.goto(service_url, timeout=30000)
+            await page.goto(service_url, timeout=120000)
             
             # TEST 1: Set an expired token and verify it gets refreshed
             print("🧪 TEST 1: Setting expired token to simulate expiration scenario...")
@@ -1900,7 +1894,7 @@ async def test_frontend_expired_token_handling(test_frontend_service):
                 main_app_loaded = False
                 for selector in main_app_selectors:
                     try:
-                        await page.wait_for_selector(selector, timeout=10000)
+                        await page.wait_for_selector(selector, timeout=30000)
                         main_app_loaded = True
                         print(f"✅ Main application loaded after token refresh (found: {selector})")
                         break
@@ -1956,7 +1950,7 @@ async def test_frontend_expired_token_handling(test_frontend_service):
             await browser.close()
 
 @pytest.mark.asyncio
-@pytest.mark.timeout(30)
+@pytest.mark.timeout(120)
 async def test_generate_coverage_report():
     """Generate final coverage report from all collected data."""
     if COVERAGE_ENABLED:

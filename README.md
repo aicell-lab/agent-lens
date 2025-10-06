@@ -72,20 +72,23 @@ Built for research laboratories, Agent-Lens combines modern web technologies wit
 
 ### **Backend**
 - **Framework**: FastAPI with Hypha-RPC communication
-- **AI/ML**: Segment Anything Model (SAM), vector embeddings
-- **Data**: Ome-Zarr format with zip endpoints, S3-compatible storage
+- **AI/ML**: Segment Anything Model (SAM), CLIP embeddings, vector similarity search
+- **Data**: OME-Zarr format with zip endpoints, S3-compatible storage (MinIO)
 - **Languages**: Python 3.11+
+- **Key Libraries**: numpy, pillow, scikit-image, zarr, aiohttp, fastapi, torch, clip
 
 ### **Frontend** 
-- **Framework**: React 18 with Vite
-- **UI**: Bootstrap 5 + Tailwind CSS
+- **Framework**: React 18 with Vite build system
+- **UI**: Bootstrap 5 + Tailwind CSS + CSS modules hybrid approach
 - **Communication**: Hypha-RPC client
+- **Key Libraries**: FontAwesome, WinBox, React Color, OpenLayers, Zarr/Zarrita
 
 ### **Infrastructure**
 - **Containerization**: Docker with multi-service compose
-- **CI/CD**: GitHub Actions
-- **Deployment**: Hypha server platform
-- **Storage**: MinIO S3-compatible backend
+- **CI/CD**: GitHub Actions with automatic Docker publishing
+- **Deployment**: Hypha server platform with token-based authentication
+- **Storage**: MinIO S3-compatible backend with artifact management
+- **Testing**: pytest with asyncio support, Playwright for E2E testing
 
 ## Quick Start
 
@@ -185,20 +188,41 @@ The application requires several backend services:
 ```
 agent-lens/
 ├── 📁 agent_lens/              # Python backend package
-│   ├── 📁 tests/               # Test suite
-│   ├── 📄 artifact_manager.py  # Data storage management
-│   ├── 📄 register_*.py        # Service registration modules
+│   ├── 📁 utils/               # Utility modules
+│   │   ├── 📄 artifact_manager.py  # Data storage and Zarr tile management
+│   │   ├── 📄 register_sam_service.py  # SAM segmentation service registration
+│   │   └── 📄 weaviate_search.py     # Similarity search utilities
+│   ├── 📄 register_frontend_service.py  # Frontend ASGI service registration
+│   ├── 📄 register_similarity_search_service.py  # Similarity search service
+│   ├── 📄 log.py               # Logging configuration
 │   └── 📄 __main__.py          # CLI entry point
 ├── 📁 frontend/                # React application
 │   ├── 📁 components/          # Reusable UI components
-│   ├── 📄 main.jsx             # Root component
-│   ├── 📄 utils.jsx            # Utility functions
+│   │   ├── 📁 annotation/      # Image annotation system
+│   │   ├── 📁 microscope/      # Microscope-specific components
+│   │   │   ├── 📁 controls/    # Microscope control interfaces
+│   │   │   └── 📁 map/         # Microscope map and data visualization
+│   │   └── 📄 *.jsx            # Main UI components
+│   ├── 📁 utils/               # Frontend utility modules
+│   │   ├── 📄 artifactZarrLoader.js  # OME-Zarr data loading
+│   │   ├── 📄 annotationEmbeddingService.js  # Annotation embeddings
+│   │   └── 📄 previewImageUtils.js  # Image preview utilities
+│   ├── 📄 main.jsx             # Root React component
+│   ├── 📄 utils.jsx            # Utility functions and validation
 │   └── 📄 main.css             # Global styles
+├── 📁 tests/                   # Test suite (project root level)
+│   ├── 📁 test-frontend-components/  # Frontend component tests
+│   ├── 📄 conftest.py          # Test configuration and fixtures
+│   ├── 📄 test_*.py            # Python test files
+│   └── 📄 test_*.js            # JavaScript test files
 ├── 📁 docker/                  # Containerization
-│   ├── 📄 docker-compose.yml   # Service orchestration
-│   └── 📄 dockerfile           # Application container
-├── 📁 scripts/                 # Development scripts
-├── 📁 docs/                    # Documentation
+│   ├── 📄 docker-compose-*.yml # Multi-service configurations
+│   ├── 📄 dockerfile           # Main application container
+│   └── 📄 healthcheck.sh       # Health monitoring
+├── 📁 scripts/                 # Development and deployment scripts
+│   ├── 📄 run_tests.py         # Comprehensive test runner
+│   ├── 📄 run_frontend_tests.py # Frontend service test runner
+│   └── 📄 setup_dev.sh         # Development setup
 └── 📄 pyproject.toml           # Python project configuration and dependencies
 ```
 
@@ -269,17 +293,34 @@ The stage map is integrated into the main control panel, providing a seamless ex
 
 Agent-Lens has a comprehensive testing setup with:
 
-- **✅ 11+ passing tests** covering core functionality
+- **✅ Multiple test suites** covering core functionality
 - **Vector similarity testing** with CLIP and FAISS
 - **Async microscopy simulation** with mock hardware
-- **React component testing** with Testing Library
+- **Frontend service testing** with Playwright E2E testing
+- **Frontend component testing** with vanilla JavaScript test runners
 - **CI/CD integration** with GitHub Actions
 
 **Test Categories:**
-- `--type fast`: Unit tests (< 2 seconds)
+- `--type fast`: Unit tests (< 2 seconds, recommended for development)
 - `--type integration`: Service integration tests  
 - `--type slow`: AI models and large datasets
+- `--frontend-service`: Frontend service tests with Playwright
 - `--coverage`: Generate coverage reports
+
+**Test Execution:**
+```bash
+# Quick development testing
+python scripts/run_tests.py --type fast
+
+# Run with coverage
+python scripts/run_tests.py --coverage
+
+# Run all tests including AI models
+python scripts/run_tests.py --type slow
+
+# Frontend service tests
+python scripts/run_tests.py --frontend-service
+```
 
 ### Code Standards
 

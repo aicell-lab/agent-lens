@@ -19,7 +19,7 @@ from asyncio import Lock
 import json
 import uuid
 # Configure logging
-from .log import setup_logging
+from ..log import setup_logging
 
 logger = setup_logging("artifact_manager.log")
 
@@ -185,27 +185,23 @@ class AgentLensArtifactManager:
             logger.info(traceback.format_exc())
             return []
 
-    async def list_microscope_galleries(self, microscope_service_id: str):
+    async def list_microscope_galleries(self, microscope_service_id: str = None):
         """
-        List all galleries (collections) available for a given microscope's service ID.
+        List all galleries (collections) available across all microscopes.
         This includes both standard microscope galleries and experiment-based galleries.
-        Returns a list of gallery info dicts.
+        Returns a list of gallery info dicts from all microscopes.
         """
         try:
             # List all collections in the agent-lens workspace (top-level)
             all_collections = await self._svc.list()
-            logger.info(f"Microscope service ID: {microscope_service_id}")
+            logger.info(f"Listing all galleries (microscope_service_id: {microscope_service_id})")
             #logger.info(f"All collections: {all_collections}")
             galleries = []
 
             for coll in all_collections:
                 manifest = coll.get('manifest', {})
-                manifest_microscope_id = manifest.get('microscope_service_id')
-                if manifest_microscope_id:
-                    # Match if manifest id is a substring or suffix of the provided id
-                    if manifest_microscope_id in microscope_service_id or microscope_service_id.endswith(manifest_microscope_id):
-                        galleries.append(coll)
-                        continue
+                # Include all galleries regardless of microscope_service_id
+                galleries.append(coll)
 
             return {
                 "success": True,

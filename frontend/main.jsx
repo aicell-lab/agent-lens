@@ -7,7 +7,6 @@ import LoginPrompt from './components/LoginPrompt';
 import IncubatorControl from './components/IncubatorControl';
 import MicroscopeControlPanel from './components/MicroscopeControlPanel';
 import Sidebar from './components/Sidebar';
-import ImageSearchPanel from './components/ImageSearchPanel';
 import Notification from './components/Notification';
 import ImageJPanel from './components/ImageJPanel';
 import { login, initializeServices, tryGetService, HyphaServerManager } from './utils';
@@ -32,7 +31,6 @@ loadExternalDependencies();
 const MicroscopeControl = () => {    
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [microscopeControlService, setMicroscopeControlService] = useState(null);
-  const [similarityService, setSimilarityService] = useState(null);
   const [log, setLog] = useState('');
   const [segmentService, setSegmentService] = useState(null);
   const [incubatorControlService, setIncubatorControlService] = useState(null);
@@ -200,7 +198,7 @@ const MicroscopeControl = () => {
       
       console.log(`[handleLogin] Calling initializeServices with microscopeIdToUse: ${microscopeIdToUse}`);
       await initializeServices(managerToUse,
-        setMicroscopeControlService, setSimilarityService, setSegmentService,
+        setMicroscopeControlService, setSegmentService,
         setIncubatorControlService, setRoboticArmService, setOrchestratorManagerService,
         (msg) => { console.log(`[initializeServices in Login]: ${msg}`); appendLog(msg); },
         microscopeIdToUse,
@@ -270,14 +268,6 @@ const MicroscopeControl = () => {
 
   const renderContent = () => {
     switch (activeTab) {
-      case 'image-search':
-        return (
-          <ImageSearchPanel
-            similarityService={similarityService}
-            appendLog={appendLog}
-            showNotification={showNotification}
-          />
-        );
       case 'microscope':
         return (
           <MicroscopeControlPanel

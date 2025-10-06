@@ -150,10 +150,6 @@ class LayerPanelTest {
       );
       assert(enabledZarrChannels.length === 2, 'Should have 2 enabled zarr channels');
 
-      // Test blending mode display
-      const blendingMode = '🟢 Additive Blending Mode';
-      assert(blendingMode.includes('Additive Blending'), 'Should display additive blending mode');
-
       this.recordTestResult('Multi-Channel Logic', true, 'Multi-channel logic works correctly');
       console.log('✅ Multi-channel loading logic passed');
     } catch (error) {

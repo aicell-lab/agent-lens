@@ -4,26 +4,23 @@ that serves the frontend application.
 """
 
 import os
+from typing import List
 from fastapi import FastAPI
-from fastapi import UploadFile, File, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi import UploadFile, File, HTTPException, Form
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from agent_lens.artifact_manager import AgentLensArtifactManager
+from agent_lens.utils.artifact_manager import AgentLensArtifactManager
 from hypha_rpc import connect_to_server
-import base64
-import io
 import numpy as np
-from PIL import Image
 # CLIP and Torch for embeddings
 import clip
 import torch
-# Import scikit-image for more professional bioimage processing
-from skimage import exposure, util
 import sys
 from fastapi.middleware.gzip import GZipMiddleware
-import hashlib
-import time
 import uuid
+import traceback
+# Import similarity search utilities
+from agent_lens.utils.weaviate_search import similarity_service
 
 # Configure logging
 from .log import setup_logging
@@ -53,26 +50,6 @@ def _normalize_features(features: np.ndarray) -> np.ndarray:
     norm = np.linalg.norm(features, axis=1, keepdims=True)
     return features / (norm + 1e-12)
 
-async def _generate_image_embedding(image_bytes: bytes) -> np.ndarray:
-    """Generate a unit-normalized CLIP embedding for an image."""
-    model, preprocess = _load_clip_model()
-    image_tensor = None
-    try:
-        with Image.open(io.BytesIO(image_bytes)) as image:
-            image = image.convert("RGB")
-            image.thumbnail((224, 224), Image.Resampling.LANCZOS)
-            image_tensor = preprocess(image).unsqueeze(0).to(device)
-
-        with torch.no_grad():
-            image_features = model.encode_image(image_tensor).cpu().numpy()
-
-        embedding = _normalize_features(image_features)[0].astype(np.float32)
-        return embedding
-    finally:
-        if image_tensor is not None:
-            del image_tensor
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
 
 DEFAULT_CHANNEL = "BF_LED_matrix_full"
 
@@ -111,7 +88,7 @@ def get_frontend_api():
     async def root():
         return FileResponse(os.path.join(dist_dir, "index.html"))
 
-    @app.post("/embedding")
+    @app.post("/embedding/image")
     async def generate_image_embedding(image: UploadFile = File(...)):
         """Generate a CLIP image embedding from an uploaded image.
 
@@ -123,13 +100,42 @@ def get_frontend_api():
             image_bytes = await image.read()
             if not image_bytes:
                 raise HTTPException(status_code=400, detail="Empty image upload")
-            embedding = await _generate_image_embedding(image_bytes)
-            return {"model": "ViT-B/32", "embedding": embedding.tolist()}
+            from agent_lens.utils.weaviate_search import generate_image_embedding
+            embedding = await generate_image_embedding(image_bytes)
+            return {"model": "ViT-B/32", "embedding": embedding, "dimension": len(embedding)}
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"Error generating embedding: {e}")
-            import traceback
+            logger.error(f"Error generating image embedding: {e}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.post("/embedding/text")
+    async def generate_text_embedding_endpoint(text: str):
+        """Generate a CLIP text embedding from a text input.
+
+        Args:
+            text (str): Text input to generate embedding for
+            
+        Returns:
+            dict: JSON object with embedding vector and metadata
+        """
+        try:
+            if not text or not text.strip():
+                raise HTTPException(status_code=400, detail="Text input cannot be empty")
+            
+            from agent_lens.utils.weaviate_search import generate_text_embedding
+            embedding = await generate_text_embedding(text.strip())
+            return {
+                "model": "ViT-B/32", 
+                "embedding": embedding, 
+                "dimension": len(embedding),
+                "text": text.strip()
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error generating text embedding: {e}")
             logger.error(traceback.format_exc())
             raise HTTPException(status_code=500, detail=str(e))
 
@@ -181,7 +187,6 @@ def get_frontend_api():
             return formatted_datasets
         except Exception as e:
             logger.error(f"Error fetching datasets: {e}")
-            import traceback
             logger.error(traceback.format_exc())
             return []
 
@@ -246,7 +251,6 @@ def get_frontend_api():
             
         except Exception as e:
             logger.error(f"Error fetching gallery info: {e}")
-            import traceback
             logger.error(traceback.format_exc())
             return {
                 "error": str(e),
@@ -300,7 +304,6 @@ def get_frontend_api():
             }
         except Exception as e:
             logger.error(f"Error fetching contents: {e}")
-            import traceback
             logger.error(traceback.format_exc())
             return {"items": [], "total": 0, "offset": offset, "limit": limit, "error": str(e)}
 
@@ -322,7 +325,6 @@ def get_frontend_api():
             return {"url": url}
         except Exception as e:
             logger.error(f"Error getting file URL: {e}")
-            import traceback
             logger.error(traceback.format_exc())
             return {"error": str(e)}
 
@@ -345,7 +347,6 @@ def get_frontend_api():
             return RedirectResponse(url=url)
         except Exception as e:
             logger.error(f"Error downloading file: {e}")
-            import traceback
             logger.error(traceback.format_exc())
             from fastapi.responses import JSONResponse
             return JSONResponse(content={"error": str(e)}, status_code=404)
@@ -354,17 +355,16 @@ def get_frontend_api():
     # These endpoints are used by new microscope map display
     #########################################################################################
     @app.get("/list-microscope-galleries")
-    async def list_microscope_galleries_endpoint(microscope_service_id: str):
+    async def list_microscope_galleries_endpoint(microscope_service_id: str = None):
         """
-        Endpoint to list all galleries (collections) for a given microscope's service ID.
-        Returns a list of gallery info dicts.
+        Endpoint to list all galleries (collections) from all microscopes.
+        Returns a list of gallery info dicts from all microscopes.
         """
         try:
             result = await artifact_manager_instance.list_microscope_galleries(microscope_service_id)
             return result
         except Exception as e:
             logger.error(f"Error in /list-microscope-galleries: {e}")
-            import traceback
             logger.error(traceback.format_exc())
             return {"success": False, "error": str(e)}
 
@@ -388,9 +388,501 @@ def get_frontend_api():
             return result
         except Exception as e:
             logger.error(f"Error in /list-gallery-datasets: {e}")
-            import traceback
             logger.error(traceback.format_exc())
             return {"success": False, "error": str(e)}
+
+    #########################################################################################
+    # Similarity Search Endpoints
+    #########################################################################################
+    
+    @app.post("/similarity/collections")
+    async def create_similarity_collection(
+        collection_name: str,
+        description: str = "Microscopy images collection",
+        application_id: str = None
+    ):
+        """
+        Create a new collection for similarity search.
+        
+        Args:
+            collection_name (str): Name of the collection to create
+            description (str): Description of the collection
+            application_id (str, optional): Application ID. If not provided, generates one.
+            
+        Returns:
+            dict: Result of collection creation
+        """
+        try:
+            # Check if similarity service is available
+            try:
+                if not await similarity_service.ensure_connected():
+                    raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            except Exception as e:
+                logger.warning(f"Similarity service not available: {e}")
+                raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            
+            # Convert collection name to valid Weaviate class name (same logic as insert endpoint)
+            # Split by hyphens and capitalize each word, then join
+            words = collection_name.split('-')
+            valid_collection_name = ''.join(word.capitalize() for word in words)
+            
+            # Ensure it starts with uppercase letter
+            if not valid_collection_name[0].isupper():
+                valid_collection_name = 'A' + valid_collection_name[1:]
+            
+            # Generate application ID if not provided
+            if not application_id:
+                application_id = f"app_{uuid.uuid4().hex[:8]}"
+            
+            # Check if collection already exists
+            collection_exists = await similarity_service.collection_exists(valid_collection_name)
+            
+            if not collection_exists:
+                # Create collection with the transformed name
+                try:
+                    collection_result = await similarity_service.create_collection(valid_collection_name, description)
+                except Exception as e:
+                    if "already exists" in str(e) or "class already exists" in str(e):
+                        logger.info(f"Collection {valid_collection_name} already exists - using existing collection")
+                        collection_result = {"message": "Collection already exists"}
+                    else:
+                        raise
+            else:
+                logger.info(f"Collection {valid_collection_name} already exists - using existing collection")
+                collection_result = {"message": "Collection already exists"}
+            
+            # Create application for the collection
+            app_result = await similarity_service.create_application(
+                valid_collection_name, application_id, f"Application for {description}"
+            )
+            
+            return {
+                "success": True,
+                "collection_name": valid_collection_name,  # Return the transformed name
+                "original_name": collection_name,  # Also return original for reference
+                "application_id": application_id,
+                "collection_result": collection_result,
+                "application_result": app_result
+            }
+            
+        except Exception as e:
+            logger.error(f"Error creating similarity collection: {e}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/similarity/collections")
+    async def list_similarity_collections():
+        """
+        List all available similarity search collections.
+        
+        Returns:
+            dict: List of collections
+        """
+        try:
+            try:
+                if not await similarity_service.ensure_connected():
+                    raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            except Exception as e:
+                logger.warning(f"Similarity service not available: {e}")
+                raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            
+            collections = await similarity_service.list_collections()
+            return {"success": True, "collections": collections}
+            
+        except Exception as e:
+            logger.error(f"Error listing similarity collections: {e}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.delete("/similarity/collections/delete/{collection_name}")
+    async def delete_similarity_collection(collection_name: str):
+        """
+        Delete a similarity search collection.
+        
+        Args:
+            collection_name (str): Name of the collection to delete
+            
+        Returns:
+            dict: Result of deletion
+        """
+        try:
+            try:
+                if not await similarity_service.ensure_connected():
+                    raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            except Exception as e:
+                logger.warning(f"Similarity service not available: {e}")
+                raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            
+            result = await similarity_service.delete_collection(collection_name)
+            return {"success": True, "result": result}
+            
+        except Exception as e:
+            logger.error(f"Error deleting similarity collection: {e}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.post("/similarity/insert")
+    async def insert_image_for_similarity(
+        collection_name: str,
+        application_id: str,
+        image_id: str,
+        description: str,
+        metadata: str = "{}",
+        dataset_id: str = None,
+        file_path: str = None,
+        image: UploadFile = File(None),
+        preview_image: str = Form(None),  # Preview image from FormData
+        # NEW: Accept pre-generated image embedding from request body
+        image_embedding: str = Form(None)   # JSON string of image embedding vector from FormData
+    ):
+        """
+        Insert an image into a similarity search collection.
+        
+        Args:
+            collection_name (str): Name of the collection
+            application_id (str): Application ID
+            image_id (str): Unique identifier for the image
+            description (str): Text description of the image
+            metadata (str): JSON string of metadata
+            dataset_id (str, optional): Dataset ID
+            file_path (str, optional): File path
+            image (UploadFile, optional): Image file to generate embedding from
+            
+        Returns:
+            dict: Result of insertion
+        """
+        try:
+            
+            try:
+                if not await similarity_service.ensure_connected():
+                    raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            except Exception as e:
+                logger.warning(f"Similarity service not available: {e}")
+                raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            
+            # Convert collection name to valid Weaviate class name (no hyphens, starts with uppercase)
+            # Split by hyphens and capitalize each word, then join
+            words = collection_name.split('-')
+            valid_collection_name = ''.join(word.capitalize() for word in words)
+            
+            # Ensure it starts with uppercase letter
+            if not valid_collection_name[0].isupper():
+                valid_collection_name = 'A' + valid_collection_name[1:]
+            
+            # Check if collection exists, create if it doesn't
+            try:
+                collection_exists = await similarity_service.collection_exists(valid_collection_name)
+                if not collection_exists:
+                    logger.info(f"Collection {valid_collection_name} does not exist, creating it...")
+                    collection_result = await similarity_service.create_collection(valid_collection_name, f"Collection for {collection_name}")
+                    logger.info(f"Successfully created collection {valid_collection_name}: {collection_result}")
+                else:
+                    logger.info(f"Collection {valid_collection_name} already exists")
+            except Exception as e:
+                logger.error(f"Failed to check/create collection {valid_collection_name}: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to create collection {valid_collection_name}: {str(e)}")
+            
+            # Extract just the dataset ID part (last part after slash)
+            clean_application_id = application_id.split('/')[-1] if '/' in application_id else application_id
+            
+            # Check if application exists, create if it doesn't
+            try:
+                app_exists = await similarity_service.application_exists(valid_collection_name, clean_application_id)
+                if not app_exists:
+                    logger.info(f"Application {clean_application_id} does not exist in collection {valid_collection_name}, creating it...")
+                    app_result = await similarity_service.create_application(
+                        collection_name=valid_collection_name,
+                        application_id=clean_application_id,
+                        description=f"Application for dataset {clean_application_id}"
+                    )
+                    logger.info(f"Successfully created application {clean_application_id}: {app_result}")
+                else:
+                    logger.info(f"Application {clean_application_id} already exists in collection {valid_collection_name}")
+            except Exception as e:
+                logger.error(f"Failed to check/create application {clean_application_id}: {e}")
+                # Don't continue if we can't create the application
+                raise HTTPException(status_code=500, detail=f"Failed to create application {clean_application_id}: {str(e)}")
+            
+            # Parse metadata
+            import json
+            try:
+                metadata_dict = json.loads(metadata) if metadata else {}
+            except json.JSONDecodeError:
+                metadata_dict = {"raw_metadata": metadata}
+            
+            # Use pre-generated image embedding if provided, otherwise generate from uploaded image
+            vector = None
+            
+            # Priority 1: Use pre-generated image embedding if available
+            if image_embedding:
+                try:
+                    import json
+                    vector = json.loads(image_embedding)
+                    logger.info(f"Using pre-generated image embedding for {image_id}")
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Failed to parse image_embedding JSON: {e}")
+                    vector = None
+            
+            # Priority 2: Generate from uploaded image if no pre-generated embedding
+            if vector is None and image and image.content_type and image.content_type.startswith("image/"):
+                image_bytes = await image.read()
+                if image_bytes:
+                    vector = await generate_image_embedding(image_bytes)
+                    logger.info(f"Generated image embedding from uploaded image for {image_id}")
+            
+            # If no vector available, raise an error
+            if vector is None:
+                raise HTTPException(status_code=400, detail="No image embedding available. Provide either image_embedding parameter or upload an image file.")
+            
+            result = await similarity_service.insert_image(
+                collection_name=valid_collection_name,
+                application_id=clean_application_id,
+                image_id=image_id,
+                description=description,
+                metadata=metadata_dict,
+                dataset_id=dataset_id,
+                file_path=file_path,
+                vector=vector,
+                preview_image=preview_image
+            )
+            
+            return {"success": True, "result": result}
+            
+        except Exception as e:
+            logger.error(f"Error inserting image for similarity: {e}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.post("/similarity/search/text")
+    async def search_similar_by_text(
+        collection_name: str,
+        application_id: str,
+        query_text: str,
+        limit: int = 10
+    ):
+        """
+        Search for similar images using text query.
+        
+        Args:
+            collection_name (str): Name of the collection to search
+            application_id (str): Application ID
+            query_text (str): Text query for similarity search
+            limit (int): Maximum number of results to return
+            
+        Returns:
+            dict: Search results
+        """
+        try:
+            try:
+                if not await similarity_service.ensure_connected():
+                    raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            except Exception as e:
+                logger.warning(f"Similarity service not available: {e}")
+                raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            
+            # Convert collection name to valid Weaviate class name (same logic as other endpoints)
+            words = collection_name.split('-')
+            valid_collection_name = ''.join(word.capitalize() for word in words)
+            if not valid_collection_name[0].isupper():
+                valid_collection_name = 'A' + valid_collection_name[1:]
+            
+            # Extract just the dataset ID part (last part after slash)
+            clean_application_id = application_id.split('/')[-1] if '/' in application_id else application_id
+            
+            results = await similarity_service.search_by_text(
+                collection_name=valid_collection_name,
+                application_id=clean_application_id,
+                query_text=query_text,
+                limit=limit
+            )
+            
+            return {"success": True, "results": results, "query": query_text, "count": len(results)}
+            
+        except Exception as e:
+            logger.error(f"Error searching by text: {e}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.post("/similarity/search/image")
+    async def search_similar_by_image(
+        collection_name: str,
+        application_id: str,
+        image: UploadFile = File(...),
+        limit: int = 10
+    ):
+        """
+        Search for similar images using image query.
+        
+        Args:
+            collection_name (str): Name of the collection to search
+            application_id (str): Application ID
+            image (UploadFile): Image file for similarity search
+            limit (int): Maximum number of results to return
+            
+        Returns:
+            dict: Search results
+        """
+        try:
+            if not image.content_type or not image.content_type.startswith("image/"):
+                raise HTTPException(status_code=400, detail="Uploaded file must be an image")
+            
+            try:
+                if not await similarity_service.ensure_connected():
+                    raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            except Exception as e:
+                logger.warning(f"Similarity service not available: {e}")
+                raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            
+            image_bytes = await image.read()
+            if not image_bytes:
+                raise HTTPException(status_code=400, detail="Empty image upload")
+            
+            results = await similarity_service.search_by_image(
+                collection_name=collection_name,
+                application_id=application_id,
+                image_bytes=image_bytes,
+                limit=limit
+            )
+            
+            return {"success": True, "results": results, "count": len(results)}
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error searching by image: {e}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.post("/similarity/search/vector")
+    async def search_similar_by_vector(
+        collection_name: str,
+        application_id: str,
+        query_vector: List[float],
+        limit: int = 10,
+        include_vector: bool = False
+    ):
+        """
+        Search for similar images using vector query.
+        
+        Args:
+            collection_name (str): Name of the collection to search
+            application_id (str): Application ID
+            query_vector (List[float]): Vector for similarity search
+            limit (int): Maximum number of results to return
+            include_vector (bool): Whether to include vectors in results
+            
+        Returns:
+            dict: Search results
+        """
+        try:
+            try:
+                if not await similarity_service.ensure_connected():
+                    raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            except Exception as e:
+                logger.warning(f"Similarity service not available: {e}")
+                raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            
+            # Convert collection name to valid Weaviate class name
+            words = collection_name.split('-')
+            valid_collection_name = ''.join(word.capitalize() for word in words)
+            if not valid_collection_name[0].isupper():
+                valid_collection_name = 'A' + valid_collection_name[1:]
+            
+            # Extract just the dataset ID part (last part after slash)
+            clean_application_id = application_id.split('/')[-1] if '/' in application_id else application_id
+            
+            results = await similarity_service.search_similar_images(
+                collection_name=valid_collection_name,
+                application_id=clean_application_id,
+                query_vector=query_vector,
+                limit=limit,
+                include_vector=include_vector
+            )
+            
+            return {"success": True, "results": results, "count": len(results)}
+            
+        except Exception as e:
+            logger.error(f"Error searching by vector: {e}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/similarity/fetch-all")
+    async def fetch_all_annotations(
+        collection_name: str,
+        application_id: str,
+        limit: int = 1000,
+        include_vector: bool = False
+    ):
+        """
+        Fetch all annotations from a collection for a given application.
+        
+        Args:
+            collection_name (str): Name of the collection
+            application_id (str): Application ID (dataset or experiment name)
+            limit (int): Maximum number of annotations to return
+            include_vector (bool): Whether to include vectors in results
+            
+        Returns:
+            dict: All annotations in the collection
+        """
+        try:
+            try:
+                if not await similarity_service.ensure_connected():
+                    raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            except Exception as e:
+                logger.warning(f"Similarity service not available: {e}")
+                raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            
+            # Convert collection name to valid Weaviate class name
+            words = collection_name.split('-')
+            valid_collection_name = ''.join(word.capitalize() for word in words)
+            if not valid_collection_name[0].isupper():
+                valid_collection_name = 'A' + valid_collection_name[1:]
+            
+            # Extract just the dataset ID part (last part after slash)
+            clean_application_id = application_id.split('/')[-1] if '/' in application_id else application_id
+            
+            results = await similarity_service.fetch_all_annotations(
+                collection_name=valid_collection_name,
+                application_id=clean_application_id,
+                limit=limit,
+                include_vector=include_vector
+            )
+            
+            logger.info(f"Fetched {len(results)} annotations for application {clean_application_id}")
+            return {"success": True, "annotations": results, "total": len(results)}
+            
+        except Exception as e:
+            logger.error(f"Error fetching all annotations: {e}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/similarity/collections/{collection_name}/exists")
+    async def check_collection_exists(collection_name: str):
+        """
+        Check if a collection exists.
+        
+        Args:
+            collection_name (str): Name of the collection to check
+            
+        Returns:
+            dict: Whether the collection exists
+        """
+        try:
+            try:
+                if not await similarity_service.ensure_connected():
+                    raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            except Exception as e:
+                logger.warning(f"Similarity service not available: {e}")
+                raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            
+            exists = await similarity_service.collection_exists(collection_name)
+            return {"success": True, "exists": exists, "collection_name": collection_name}
+            
+        except Exception as e:
+            logger.error(f"Error checking collection existence: {e}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
 
     async def serve_fastapi(args):
         await app(args["scope"], args["receive"], args["send"])
@@ -449,7 +941,6 @@ async def _register_probes(server, probe_service_id):
 
         except Exception as e:
             logger.error(f"Health check failed: {str(e)}")
-            import traceback
             logger.error(traceback.format_exc())
             raise RuntimeError(f"Service health check failed: {str(e)}")
     

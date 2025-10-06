@@ -18,7 +18,7 @@ NODE_VERSION=$(node --version)
 echo "🔧 Node.js version: $NODE_VERSION"
 
 # Check if we're in the right directory
-if [ ! -f "frontend/services/artifactZarrLoader.js" ]; then
+if [ ! -f "frontend/utils/artifactZarrLoader.js" ]; then
     echo "❌ artifactZarrLoader.js not found"
     echo "Please run this script from the project root directory"
     exit 1

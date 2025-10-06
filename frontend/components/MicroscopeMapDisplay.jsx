@@ -1,12 +1,15 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import PropTypes from 'prop-types';
-import { useValidatedNumberInput, getInputValidationClasses } from '../utils'; // Import validation utilities
-import ArtifactZarrLoader from '../services/artifactZarrLoader.js';
+import { useValidatedNumberInput } from '../utils'; // Import validation utilities
+import ArtifactZarrLoader from '../utils/artifactZarrLoader.js';
 import LayerPanel from './microscope/map/LayerPanel';
 import useExperimentZarrManager from './microscope/map/ExperimentZarrManager';
 import TileProcessingManager from './microscope/map/TileProcessingManager';
 import QuickScanConfig from './microscope/controls/QuickScanConfig';
 import NormalScanConfig from './microscope/controls/NormalScanConfig';
+import AnnotationPanel from './annotation/AnnotationPanel';
+import AnnotationCanvas from './annotation/AnnotationCanvas';
+import SimilarAnnotationRenderer from './annotation/SimilarAnnotationRenderer';
 import './MicroscopeMapDisplay.css';
 
 const MicroscopeMapDisplay = ({
@@ -55,6 +58,15 @@ const MicroscopeMapDisplay = ({
   onFreePanAutoCollapse,
   onFitToViewUncollapse,
   sampleLoadStatus,
+  // Panel control props
+  isSamplePanelOpen,
+  setIsSamplePanelOpen,
+  isControlPanelOpen,
+  setIsControlPanelOpen,
+  // Sample selector props
+  incubatorControlService,
+  orchestratorManagerService,
+  onSampleLoadStatusChange,
 }) => {
   const mapContainerRef = useRef(null);
   const canvasRef = useRef(null);
@@ -159,6 +171,23 @@ const MicroscopeMapDisplay = ({
   const [isLayerDropdownOpen, setIsLayerDropdownOpen] = useState(false);
   const layerDropdownRef = useRef(null);
 
+  // Annotation system state
+  const [isAnnotationDropdownOpen, setIsAnnotationDropdownOpen] = useState(false);
+  const [isDrawingMode, setIsDrawingMode] = useState(false);
+  const [currentAnnotationTool, setCurrentAnnotationTool] = useState('select');
+  const [isMapBrowsingMode, setIsMapBrowsingMode] = useState(false);
+  const [annotationStrokeColor, setAnnotationStrokeColor] = useState('#ff0000');
+  const [annotationStrokeWidth, setAnnotationStrokeWidth] = useState(2);
+  const [annotationFillColor, setAnnotationFillColor] = useState('transparent');
+  const [annotationDescription, setAnnotationDescription] = useState('');
+  const [annotations, setAnnotations] = useState([]);
+  const annotationDropdownRef = useRef(null);
+
+  // Similar annotations state
+  const [similarAnnotations, setSimilarAnnotations] = useState([]);
+  const [showSimilarAnnotations, setShowSimilarAnnotations] = useState(false);
+  const [similarAnnotationWellMap, setSimilarAnnotationWellMap] = useState({});
+
   // Layer visibility management (moved early to avoid dependency issues)
   const [visibleLayers, setVisibleLayers] = useState({
     wellPlate: true,
@@ -173,22 +202,107 @@ const MicroscopeMapDisplay = ({
     }
   });
 
+  // Layer management state (moved early to avoid hoisting issues)
+  const [layers, setLayers] = useState([
+    {
+      id: 'well-plate',
+      name: '96-Well Plate Grid',
+      type: 'plate-view',
+      visible: true, // Will be synced with visibleLayers.wellPlate
+      channels: [],
+      readonly: true
+    },
+    {
+      id: 'microscope-control',
+      name: 'Microscope Control',
+      type: 'microscope-control',
+      visible: true, // Default activated
+      channels: [],
+      readonly: true
+    }
+  ]);
+  const [expandedLayers, setExpandedLayers] = useState({});
+  const [activeLayer, setActiveLayer] = useState(null); // Track which layer is currently activated
+
+  // Helper functions for layer-driven data loading (moved early to avoid hoisting issues)
+  const getVisibleLayersByType = useCallback((type) => {
+    return layers.filter(layer => layer.type === type && layer.visible);
+  }, [layers]);
+
+  const isLayerTypeVisible = useCallback((type) => {
+    return layers.some(layer => layer.type === type && layer.visible);
+  }, [layers]);
+
+  const getBrowseDataLayer = useCallback(() => {
+    return layers.find(layer => layer.type === 'load-server' && layer.visible);
+  }, [layers]);
+
+  const getScanDataLayer = useCallback(() => {
+    return layers.find(layer => (layer.type === 'quick-scan' || layer.type === 'normal-scan') && layer.visible);
+  }, [layers]);
+
+  // Sync layers visibility with visibleLayers (moved early to avoid hoisting issues)
+  useEffect(() => {
+    setLayers(prev => prev.map(layer => 
+      layer.id === 'well-plate'
+        ? { ...layer, visible: visibleLayers.wellPlate }
+        : layer
+    ));
+  }, [visibleLayers.wellPlate]);
+
+  // Update hardware locked state when microscope control layer visibility changes
+  useEffect(() => {
+    const microscopeControlLayer = layers.find(layer => layer.id === 'microscope-control');
+    if (microscopeControlLayer) {
+      setIsHardwareLocked(!microscopeControlLayer.visible);
+    }
+  }, [layers]);
+
+
   // Tile-based canvas state (replacing single stitchedCanvasData)
   const [stitchedTiles, setStitchedTiles] = useState([]); // Array of tile objects
   const [isLoadingCanvas, setIsLoadingCanvas] = useState(false);
   const [needsTileReload, setNeedsTileReload] = useState(false); // Flag to trigger tile loading after refresh
   const canvasUpdateTimerRef = useRef(null);
-  const activeTileRequestsRef = useRef(new Set()); // Track active requests to prevent duplicates
+  
+  // Independent request queues for different layer types
+  const browseDataRequestsRef = useRef(new Set()); // Track browse data requests (historical)
+  const scanDataRequestsRef = useRef(new Set()); // Track scan data requests (microscope)
+  const activeTileRequestsRef = useRef(new Set()); // Legacy - for backward compatibility
+  
+  // Separate loading states to prevent cross-blocking
+  const [isBrowseDataLoading, setIsBrowseDataLoading] = useState(false);
+  const [isScanDataLoading, setIsScanDataLoading] = useState(false);
   const chunkProgressUpdateTimes = useRef(new Map()); // Track last update time for each well to throttle progress updates
   const lastTileLoadAttemptRef = useRef(0); // Track last tile load attempt to prevent excessive retries
+  
+  // Helper functions for independent request queue management
+  const getRequestQueueForLayerType = useCallback((layerType) => {
+    if (layerType === 'load-server') return browseDataRequestsRef.current;
+    if (layerType === 'quick-scan' || layerType === 'normal-scan') return scanDataRequestsRef.current;
+    return activeTileRequestsRef.current; // fallback
+  }, []);
+  
+  const getTotalActiveRequests = useCallback(() => {
+    return browseDataRequestsRef.current.size + scanDataRequestsRef.current.size;
+  }, []);
+  
+  // Update overall loading state based on individual loading states
+  useEffect(() => {
+    const overallLoading = isBrowseDataLoading || isScanDataLoading;
+    setIsLoadingCanvas(overallLoading);
+  }, [isBrowseDataLoading, isScanDataLoading]);
 
   // Multi-channel state management for zarr data (defined early to avoid hoisting issues)
   const [zarrChannelConfigs, setZarrChannelConfigs] = useState({});
   const [availableZarrChannels, setAvailableZarrChannels] = useState([]);
   const [isMultiChannelMode, setIsMultiChannelMode] = useState(false);
 
-  // Real microscope channel configs for min/max contrast
+  // Real microscope channel configs for min/max contrast - now per-layer
   const [realMicroscopeChannelConfigs, setRealMicroscopeChannelConfigs] = useState({});
+  
+  // Per-layer contrast settings - each layer maintains its own contrast independently
+  const [layerContrastSettings, setLayerContrastSettings] = useState({});
 
   // Add state for historical data mode
   const [isHistoricalDataMode, setIsHistoricalDataMode] = useState(false);
@@ -198,23 +312,23 @@ const MicroscopeMapDisplay = ({
   const [realTimeWellProgress, setRealTimeWellProgress] = useState(new Map());
   const [isRealTimeLoading, setIsRealTimeLoading] = useState(false);
 
+  // Hardware locked state - when microscope control layer is deactivated
+  const [isHardwareLocked, setIsHardwareLocked] = useState(false);
+
   // Function to refresh scan results (moved early to avoid dependency issues)
   const refreshScanResults = useCallback(() => {
     if (visibleLayers.scanResults && !isSimulatedMicroscope) {
-      // Clear active requests
+      // Clear only legacy active requests 
       activeTileRequestsRef.current.clear();
       
-      // Clear all existing tiles to force reload of fresh data
-      setStitchedTiles([]);
-      
       if (appendLog) {
-        appendLog('Refreshing scan results display - cleared cache');
+        appendLog('Refreshing scan results display - direct replacement');
       }
       
-      // Set a flag to trigger tile loading after tiles are cleared
+      // Set flag to trigger tile loading - loadStitchedTiles will be called by the effect
       setNeedsTileReload(true);
     }
-  }, [visibleLayers.scanResults, appendLog, isSimulatedMicroscope]);
+  }, [appendLog, isSimulatedMicroscope]); // Removed visibleLayers.scanResults to prevent triggering on layer toggles
 
   // Initialize experiment zarr manager hook
   const experimentManager = useExperimentZarrManager({
@@ -237,6 +351,8 @@ const MicroscopeMapDisplay = ({
     onExperimentReset: (experimentName) => {
       // Handle experiment reset - clear stitched tiles and active requests
       setStitchedTiles([]);
+      browseDataRequestsRef.current.clear();
+      scanDataRequestsRef.current.clear();
       activeTileRequestsRef.current.clear();
     }
   });
@@ -299,6 +415,7 @@ const MicroscopeMapDisplay = ({
       .map(([channelName, config]) => ({ channelName, ...config }));
   }, [zarrChannelConfigs]);
 
+
   const updateZarrChannelConfig = useCallback((channelName, updates) => {
     setZarrChannelConfigs(prev => ({
       ...prev,
@@ -309,30 +426,43 @@ const MicroscopeMapDisplay = ({
     }));
   }, []);
 
-  // Effect to refresh tiles when zarr channel contrast settings change in HISTORICAL mode
+  // Effect to refresh tiles when zarr channel contrast settings change in browse data layer
   useEffect(() => {
-    if (isHistoricalDataMode && mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
-      console.log('🎨 HISTORICAL: Zarr channel configs changed, triggering tile refresh');
+    const browseDataLayer = getBrowseDataLayer();
+    if (browseDataLayer && mapViewMode === 'FREE_PAN') {
+      console.log('🎨 BROWSE DATA: Zarr channel configs changed, triggering tile refresh');
       
       // Don't clear tiles if real-time loading is in progress
       const hasActiveRequests = activeTileRequestsRef.current.size > 0;
       if (currentOperation === null && !hasActiveRequests) {
-        // Clear existing tiles to force reload with new contrast settings
-        setStitchedTiles([]);
+        // 🚫 CANCEL ABANDONED CHANNEL REQUESTS: Actually cancel ongoing HTTP requests for disabled channels
+        if (currentCancellableRequest) {
+          const cancelledCount = currentCancellableRequest.cancel();
+          console.log(`🚫 [Zarr Config Change] Cancelled ${cancelledCount} pending requests for disabled channels`);
+          setCurrentCancellableRequest(null);
+        }
+        
+        if (artifactZarrLoaderRef.current) {
+          const artifactCancelledCount = artifactZarrLoaderRef.current.cancelAllRequests();
+          console.log(`🚫 [Zarr Config Change] Cancelled ${artifactCancelledCount} artifact requests for disabled channels`);
+        }
+        
+        // Clear active request tracking refs
+        browseDataRequestsRef.current.clear();
+        scanDataRequestsRef.current.clear();
         activeTileRequestsRef.current.clear();
         
-        // Schedule tile loading after a longer delay to ensure state is fully updated
-        setTimeout(() => {
-          console.log('🎨 HISTORICAL: Refreshing tiles with updated contrast settings');
-          console.log('🎨 HISTORICAL: Current zarrChannelConfigs:', zarrChannelConfigs);
-          console.log('🎨 HISTORICAL: Enabled channels:', getEnabledZarrChannels());
-          loadStitchedTiles();
-        }, 200); // Increased delay to ensure state update is complete
+        console.log('🎨 BROWSE DATA: Refreshing tiles with updated contrast settings');
+        console.log('🎨 BROWSE DATA: Current zarrChannelConfigs:', zarrChannelConfigs);
+        console.log('🎨 BROWSE DATA: Enabled channels:', getEnabledZarrChannels());
+        
+        // Set flag to trigger tile loading - loadStitchedTiles will be called by the effect
+        setNeedsTileReload(true);
       } else {
-        console.log('🎨 HISTORICAL: Skipping tile refresh - real-time loading in progress or operation active');
+        console.log('🎨 BROWSE DATA: Skipping tile refresh - real-time loading in progress or operation active');
       }
     }
-  }, [zarrChannelConfigs, isHistoricalDataMode, mapViewMode, visibleLayers.scanResults, currentOperation]);
+  }, [zarrChannelConfigs, getBrowseDataLayer, mapViewMode, currentOperation]);
 
   const updateRealMicroscopeChannelConfig = useCallback((channelName, updates) => {
     console.log(`🎨 MicroscopeMapDisplay: updateRealMicroscopeChannelConfig called for ${channelName} with updates:`, updates);
@@ -351,6 +481,22 @@ const MicroscopeMapDisplay = ({
       return newConfig;
     });
   }, []);
+
+  // Per-layer contrast management functions
+  const updateLayerContrastSettings = useCallback((layerId, updates) => {
+    console.log(`🎨 MicroscopeMapDisplay: updateLayerContrastSettings called for layer ${layerId} with updates:`, updates);
+    setLayerContrastSettings(prev => ({
+      ...prev,
+      [layerId]: {
+        ...prev[layerId],
+        ...updates
+      }
+    }));
+  }, []);
+
+  const getLayerContrastSettings = useCallback((layerId) => {
+    return layerContrastSettings[layerId] || { min: 0, max: 255 };
+  }, [layerContrastSettings]);
 
   const initializeZarrChannelsFromMetadata = useCallback((channelMetadata) => {
     if (!channelMetadata || !channelMetadata.activeChannels) return;
@@ -375,16 +521,18 @@ const MicroscopeMapDisplay = ({
   }, []);
 
   const shouldUseMultiChannelLoading = useCallback(() => {
-    // For historical mode only: use zarr channels
-    if (isHistoricalDataMode) {
+    // For browse data layer: use zarr channels
+    const browseDataLayer = getBrowseDataLayer();
+    if (browseDataLayer) {
       return availableZarrChannels.length > 0 && 
              Object.values(zarrChannelConfigs).some(config => config.enabled);
     }
-    // For real microscope (including FOV_FITTED mode): use visibleLayers.channels
+    // For scan data layer: use visibleLayers.channels
     // Let the microscope service handle channel merging
-    return !isSimulatedMicroscope && 
+    const scanDataLayer = getScanDataLayer();
+    return scanDataLayer && !isSimulatedMicroscope && 
            Object.values(visibleLayers.channels).some(isVisible => isVisible);
-  }, [isHistoricalDataMode, availableZarrChannels.length, zarrChannelConfigs, isSimulatedMicroscope, visibleLayers.channels]);
+  }, [getBrowseDataLayer, getScanDataLayer, availableZarrChannels.length, zarrChannelConfigs, isSimulatedMicroscope, visibleLayers.channels]);
 
   // State to track the well being selected during drag operations
   const [dragSelectedWell, setDragSelectedWell] = useState(null);
@@ -392,6 +540,13 @@ const MicroscopeMapDisplay = ({
   // 🚀 REQUEST CANCELLATION: Track cancellable requests
   const [currentCancellableRequest, setCurrentCancellableRequest] = useState(null);
   const [lastRequestKey, setLastRequestKey] = useState(null);
+
+  // Well information mapping for annotations
+  const [annotationWellMap, setAnnotationWellMap] = useState({});
+  
+  // Embedding status tracking
+  const [embeddingStatus, setEmbeddingStatus] = useState({}); // Track embedding status per annotation
+
 
   // Helper function to render real-time loading progress
   const renderRealTimeProgress = useCallback(() => {
@@ -480,6 +635,217 @@ const MicroscopeMapDisplay = ({
     return closestWell;
   }, [getWellPlateConfig, getWellPlateLayout, wellPaddingMm]);
 
+  // Detect well for annotation and update mapping
+  const detectWellForAnnotation = useCallback((annotation) => {
+    // Use the first point to determine which well the annotation belongs to
+    if (annotation.points && annotation.points.length > 0) {
+      const firstPoint = annotation.points[0];
+      const wellInfo = detectWellFromStageCoords(firstPoint.x, firstPoint.y);
+      
+      if (wellInfo) {
+        setAnnotationWellMap(prev => ({
+          ...prev,
+          [annotation.id]: wellInfo
+        }));
+        
+        if (appendLog) {
+          appendLog(`Annotation ${annotation.type} assigned to well ${wellInfo.id}`);
+        }
+      } else {
+        console.warn(`Could not detect well for annotation at (${firstPoint.x}, ${firstPoint.y})`);
+      }
+    }
+  }, [detectWellFromStageCoords, appendLog]);
+
+  // Annotation handlers
+  const handleAnnotationAdd = useCallback(async (annotation) => {
+    setAnnotations(prev => [...prev, annotation]);
+    
+    // Detect well for the new annotation
+    detectWellForAnnotation(annotation);
+    
+    if (appendLog) {
+      appendLog(`Added ${annotation.type} annotation at (${annotation.points[0].x.toFixed(2)}, ${annotation.points[0].y.toFixed(2)}) mm`);
+    }
+
+    // Note: Embeddings will be generated when the preview image is successfully loaded
+    // This ensures the embedding uses the same processed image data as the preview
+  }, [appendLog, detectWellForAnnotation, mapPan, canvasRef]);
+
+  // Handle embedding generation from AnnotationPanel
+  const handleEmbeddingsGenerated = useCallback((annotationId, embeddings) => {
+    // Set embedding status to completed
+    setEmbeddingStatus(prev => ({
+      ...prev,
+      [annotationId]: { status: 'completed', error: null }
+    }));
+
+    // Update annotation with embeddings
+    setAnnotations(prev => 
+      prev.map(ann => 
+        ann.id === annotationId 
+          ? { ...ann, embeddings }
+          : ann
+      )
+    );
+
+    if (appendLog) {
+      appendLog(`Embeddings generated successfully for annotation ${annotationId}`);
+    }
+  }, [appendLog]);
+
+  const handleAnnotationUpdate = useCallback((id, updates) => {
+    setAnnotations(prev => 
+      prev.map(ann => ann.id === id ? { ...ann, ...updates } : ann)
+    );
+    
+    // Re-detect well if annotation was moved
+    if (updates.points) {
+      const updatedAnnotation = annotations.find(ann => ann.id === id);
+      if (updatedAnnotation) {
+        const updatedWithNewPoints = { ...updatedAnnotation, ...updates };
+        detectWellForAnnotation(updatedWithNewPoints);
+      }
+    }
+  }, [annotations, detectWellForAnnotation]);
+
+  const handleAnnotationDelete = useCallback((id) => {
+    setAnnotations(prev => prev.filter(ann => ann.id !== id));
+    
+    // Remove from well mapping
+    setAnnotationWellMap(prev => {
+      const newMap = { ...prev };
+      delete newMap[id];
+      return newMap;
+    });
+    
+    if (appendLog) {
+      appendLog(`Deleted annotation`);
+    }
+  }, [appendLog]);
+
+  const handleClearAllAnnotations = useCallback(() => {
+    setAnnotations([]);
+    setAnnotationWellMap({});
+    if (appendLog) {
+      appendLog(`Cleared all annotations (${annotations.length} removed)`);
+    }
+  }, [appendLog, annotations.length]);
+
+  // Helper function to get well info by well ID
+  const getWellInfoById = useCallback((wellId) => {
+    const wellConfig = getWellPlateConfig();
+    if (!wellConfig) return null;
+    
+    const { well_size_mm, well_spacing_mm, a1_x_mm, a1_y_mm } = wellConfig;
+    const layout = getWellPlateLayout();
+    const { rows, cols } = layout;
+    
+    // Find the well by ID
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+      for (let colIndex = 0; colIndex < cols.length; colIndex++) {
+        const currentWellId = `${rows[rowIndex]}${cols[colIndex]}`;
+        if (currentWellId === wellId) {
+          const wellCenterX = a1_x_mm + colIndex * well_spacing_mm;
+          const wellCenterY = a1_y_mm + rowIndex * well_spacing_mm;
+          
+          return {
+            id: wellId,
+            centerX: wellCenterX,
+            centerY: wellCenterY,
+            rowIndex,
+            colIndex,
+            radius: (well_size_mm / 2) + wellPaddingMm
+          };
+        }
+      }
+    }
+    
+    return null;
+  }, [getWellPlateConfig, getWellPlateLayout, wellPaddingMm]);
+
+  // Similar annotation handlers
+  const handleSimilarAnnotationsUpdate = useCallback((newSimilarAnnotations) => {
+    setSimilarAnnotations(newSimilarAnnotations);
+    
+    // Build well map for similar annotations
+    const wellMap = {};
+    newSimilarAnnotations.forEach((similarAnnotation, index) => {
+      const props = similarAnnotation.properties || similarAnnotation;
+      const metadata = props.metadata || '';
+      
+      let parsedMetadata = {};
+      if (typeof metadata === 'string') {
+        try {
+          parsedMetadata = JSON.parse(metadata);
+        } catch {
+          try {
+            const jsonString = metadata
+              .replace(/'/g, '"')
+              .replace(/True/g, 'true')
+              .replace(/False/g, 'false')
+              .replace(/None/g, 'null');
+            parsedMetadata = JSON.parse(jsonString);
+          } catch (error) {
+            console.error('Error parsing similar annotation metadata:', error);
+            parsedMetadata = { raw: metadata };
+          }
+        }
+      } else {
+        parsedMetadata = metadata;
+      }
+
+      const wellId = parsedMetadata.well_id;
+      if (wellId) {
+        const wellInfo = getWellInfoById(wellId);
+        if (wellInfo) {
+          // Store well info with well ID as key for easy lookup
+          wellMap[wellId] = wellInfo;
+        } else {
+          console.warn(`Could not find well info for well ID: ${wellId}`);
+        }
+      }
+    });
+    
+    setSimilarAnnotationWellMap(wellMap);
+    setShowSimilarAnnotations(true);
+    
+    console.log('🔍 Built well map for similar annotations:', wellMap);
+    console.log('🔍 Available well IDs:', Object.keys(wellMap));
+    
+    if (appendLog) {
+      appendLog(`Showing ${newSimilarAnnotations.length} similar annotations on map`);
+    }
+  }, [getWellInfoById, appendLog]);
+
+  // Cleanup similar annotations when window is closed
+  const handleSimilarAnnotationsCleanup = useCallback(() => {
+    setSimilarAnnotations([]);
+    setSimilarAnnotationWellMap({});
+    setShowSimilarAnnotations(false);
+    
+    if (appendLog) {
+      appendLog('Cleared similar annotations from map');
+    }
+  }, [appendLog]);
+
+  // Note: handleClearSimilarAnnotations is available for future use
+  // const handleClearSimilarAnnotations = useCallback(() => {
+  //   setSimilarAnnotations([]);
+  //   setSimilarAnnotationWellMap({});
+  //   setShowSimilarAnnotations(false);
+  //   
+  //   if (appendLog) {
+  //     appendLog('Cleared similar annotations from map');
+  //   }
+  // }, [appendLog]);
+
+  const handleExportAnnotations = useCallback(() => {
+    if (appendLog) {
+      appendLog(`Exported ${annotations.length} annotations`);
+    }
+  }, [appendLog, annotations.length]);
+
   // Helper function to get well boundaries in stage coordinates
   const getWellBoundaries = useCallback((wellInfo) => {
     if (!wellInfo) return null;
@@ -542,6 +908,51 @@ const MicroscopeMapDisplay = ({
     handleDeleteExperiment,
     renderDialogs,
   } = experimentManager;
+
+  // Multi-layer experiment visibility state
+  const [visibleExperiments, setVisibleExperiments] = useState([]);
+
+  // Auto-show active experiment when it changes (backwards compatibility)
+  // Only triggers when activeExperiment changes, not when visibleExperiments changes
+  useEffect(() => {
+    if (activeExperiment) {
+      setVisibleExperiments(prev => {
+        // Only add if not already visible
+        if (!prev.includes(activeExperiment)) {
+          console.log(`[Auto-show] Adding active experiment to visible list: ${activeExperiment}`);
+          return [...prev, activeExperiment];
+        }
+        return prev;
+      });
+    }
+  }, [activeExperiment]); // Removed visibleExperiments dependency to prevent auto-re-showing
+
+  // Clean up visibleExperiments when experiments are deleted
+  useEffect(() => {
+    if (experiments && experiments.length > 0) {
+      const validExperimentNames = experiments.map(exp => exp.name);
+      setVisibleExperiments(prev => {
+        const filtered = prev.filter(expName => validExperimentNames.includes(expName));
+        if (filtered.length !== prev.length) {
+          const removed = prev.filter(expName => !validExperimentNames.includes(expName));
+          console.log(`[Experiment Cleanup] Removed deleted experiments from visible list: ${removed.join(', ')}`);
+          
+          // Clear tiles for deleted experiments
+          setStitchedTiles(prevTiles => {
+            const filteredTiles = prevTiles.filter(tile => 
+              !removed.includes(tile.experimentName)
+            );
+            if (filteredTiles.length !== prevTiles.length) {
+              console.log(`[Experiment Cleanup] Cleared ${prevTiles.length - filteredTiles.length} tiles for deleted experiments`);
+            }
+            return filteredTiles;
+          });
+        }
+        return filtered;
+      });
+    }
+  }, [experiments]);
+
 
   // Calculate stage dimensions from configuration (moved early to avoid dependency issues)
   const stageDimensions = useMemo(() => {
@@ -910,8 +1321,8 @@ const MicroscopeMapDisplay = ({
   }, [containerDimensions, mapViewMode, currentStagePosition, stageDimensions, mapScale, effectivePan, fovSize, pixelsPerMm]);
 
   // Split interaction controls: hardware vs map browsing, exclude simulated microscope in historical mode
-  const isHardwareInteractionDisabled = (isHistoricalDataMode && !(isSimulatedMicroscope && isHistoricalDataMode)) || microscopeBusy || currentOperation !== null || isScanInProgress || isQuickScanInProgress;
-  const isMapBrowsingDisabled = false; // Allow map browsing during all operations for real-time scan result viewing
+  const isHardwareInteractionDisabled = (isHistoricalDataMode && !(isSimulatedMicroscope && isHistoricalDataMode)) || microscopeBusy || currentOperation !== null || isScanInProgress || isQuickScanInProgress || isDrawingMode || isHardwareLocked;
+  const isMapBrowsingDisabled = isDrawingMode && !isMapBrowsingMode; // Disable map browsing when in drawing mode unless map browsing is explicitly enabled
   
   // Legacy compatibility - some UI elements still use the general disabled state
   const isInteractionDisabled = isHardwareInteractionDisabled;
@@ -990,21 +1401,21 @@ const MicroscopeMapDisplay = ({
       let initialScaleLevel = 1; // Default to scale 1
       let initialZoomLevel;
       
-      // MAXIMUM bias towards higher scale levels (lower resolution) - extremely hard to reach scale 0 and scale 1
-      if (baseEffectiveScale < 2.0) { // Very zoomed out - scale 4 (much larger threshold)
+      // Very aggressive thresholds for maximum resolution access - users can see high resolution much more easily
+      if (baseEffectiveScale < 1.2) { // Very zoomed out - scale 4
         initialScaleLevel = 4; // Use lowest resolution
         initialZoomLevel = baseEffectiveScale * Math.pow(4, 4);
-      } else if (baseEffectiveScale < 8.0) { // Zoomed out - scale 3 (much larger threshold)
+      } else if (baseEffectiveScale < 2.5) { // Zoomed out - scale 3
         initialScaleLevel = 3; // Use low resolution  
         initialZoomLevel = baseEffectiveScale * Math.pow(4, 3);
-      } else if (baseEffectiveScale < 32.0) { // Medium zoom - scale 2 (much larger threshold)
+      } else if (baseEffectiveScale < 6.0) { // Medium zoom - scale 2 (much more aggressive)
         initialScaleLevel = 2; // Use medium resolution
         initialZoomLevel = baseEffectiveScale * Math.pow(4, 2);
-      } else if (baseEffectiveScale < 128.0) { // Close zoom - scale 1 (much larger threshold)
+      } else if (baseEffectiveScale < 16.0) { // Close zoom - scale 1 (much more aggressive)
         initialScaleLevel = 1; // Use higher resolution (but not highest)
         initialZoomLevel = baseEffectiveScale * Math.pow(4, 1);
-      } else { // Very close zoom - scale 0 (extremely hard to reach)
-        initialScaleLevel = 0; // Use highest resolution only when extremely close
+      } else { // Very close zoom - scale 0 (very easy to reach now)
+        initialScaleLevel = 0; // Use highest resolution
         initialZoomLevel = baseEffectiveScale;
       }
       
@@ -1058,15 +1469,15 @@ const MicroscopeMapDisplay = ({
     setMapViewMode('FOV_FITTED');
     setScaleLevel(0); // FOV_FITTED mode always uses scale 0 (highest resolution)
     setZoomLevel(1.0); // Reset to 100% zoom
+    setMapPan({ x: 0, y: 0 }); // Reset pan to center for clean FOV_FITTED view
+    
+    // Reset video zoom to 100% for clean FOV_FITTED view
+    if (setVideoZoom) {
+      setVideoZoom(1.0);
+    }
     
     // For simulated microscope, quit historical mode when switching to FOV_FITTED
-    if (isSimulatedMicroscope && isHistoricalDataMode) {
-      console.log('[Simulated Microscope] Quitting historical data mode when switching to FOV_FITTED');
-      setIsHistoricalDataMode(false);
-      setSelectedHistoricalDataset(null);
-      setSelectedGallery(null);
-      setStitchedTiles([]); // Clear historical tiles
-    }
+    // Note: Data loading is now handled by layer visibility, not mode switching
     
     if (appendLog) {
       appendLog('Switched to fitted video view');
@@ -1075,7 +1486,7 @@ const MicroscopeMapDisplay = ({
     // Container dimensions will be automatically updated by ResizeObserver
     // No need for setTimeout hack - memoized calculations will recalculate
     // when containerDimensions state updates
-  }, [onFitToViewUncollapse, appendLog, isSimulatedMicroscope, isHistoricalDataMode, setStitchedTiles]);
+  }, [onFitToViewUncollapse, appendLog, isSimulatedMicroscope, isHistoricalDataMode, setStitchedTiles, setVideoZoom]);
 
   const handleDoubleClick = async (e) => {
     if (!microscopeControlService || !microscopeConfiguration || !stageDimensions || isHardwareInteractionDisabled) {
@@ -1199,15 +1610,15 @@ const MicroscopeMapDisplay = ({
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
     
-    // Check if we should change scale level - MAXIMUM bias towards higher scale levels (lower resolution)
-    if (newZoomLevel > 32.0 && scaleLevel > 0) {
+    // Check if we should change scale level - very aggressive thresholds for maximum resolution access
+    if (newZoomLevel > 8.0 && scaleLevel > 0) {
       // Zoom in to higher resolution (lower scale number = less zoomed out)
-      // Extremely restrictive threshold (32.0) to avoid loading high resolution unless really needed
+      // Very aggressive threshold (8.0) to make higher resolution very accessible
       const equivalentZoom = (newZoomLevel * (1 / Math.pow(4, scaleLevel))) / (1 / Math.pow(4, scaleLevel - 1));
       zoomToPoint(Math.min(64.0, equivalentZoom), scaleLevel - 1, mouseX, mouseY);
-    } else if (newZoomLevel < 8.0 && scaleLevel < 4) {
+    } else if (newZoomLevel < 2.5 && scaleLevel < 4) {
       // Zoom out to lower resolution (higher scale number = more zoomed out)
-      // Much more aggressive threshold (8.0) to push users to lower resolution much sooner
+      // Very aggressive threshold (2.5) for very smooth transitions
       const equivalentZoom = (newZoomLevel * (1 / Math.pow(4, scaleLevel))) / (1 / Math.pow(4, scaleLevel + 1));
       zoomToPoint(Math.max(0.25, equivalentZoom), scaleLevel + 1, mouseX, mouseY);
     } else {
@@ -1277,54 +1688,89 @@ const MicroscopeMapDisplay = ({
   }, [mapViewMode]);
 
   // Helper functions for tile management
-  const getTileKey = useCallback((bounds, scale, channel) => {
+  const getTileKey = useCallback((bounds, scale, channel, experimentName = null) => {
     // For merged channels, use the sorted channel string to ensure consistent keys
     const normalizedChannel = channel.includes(',') ? channel.split(',').sort().join(',') : channel;
-    return `${bounds.topLeft.x.toFixed(1)}_${bounds.topLeft.y.toFixed(1)}_${bounds.bottomRight.x.toFixed(1)}_${bounds.bottomRight.y.toFixed(1)}_${scale}_${normalizedChannel}`;
+    const expName = experimentName || 'default';
+    return `${bounds.topLeft.x.toFixed(1)}_${bounds.topLeft.y.toFixed(1)}_${bounds.bottomRight.x.toFixed(1)}_${bounds.bottomRight.y.toFixed(1)}_${scale}_${normalizedChannel}_${expName}`;
   }, []);
 
-  // Memoize visible tiles with smart cleanup strategy
+  // Memoize visible tiles with smart cleanup strategy  
   const visibleTiles = useMemo(() => {
-    if (!visibleLayers.scanResults) return [];
+    const browseDataLayer = getBrowseDataLayer();
+    const scanDataLayer = getScanDataLayer();
+    const hasScanResults = visibleLayers.scanResults && visibleExperiments.length > 0;
+    
+    if (!browseDataLayer && !scanDataLayer && !hasScanResults) return [];
     
     // Determine current channel configuration
     const useMultiChannel = shouldUseMultiChannelLoading();
-    const channelString = useMultiChannel && isHistoricalDataMode ? 
+    
+    // For multi-layer support, we need different channel strings for different tile types
+    const browseChannelString = useMultiChannel && browseDataLayer ? 
       getEnabledZarrChannels().map(ch => ch.channelName).sort().join(',') : 
       getChannelString();
+    const scanChannelString = getChannelString(); // Always use microscope channels for scan data
     
-    console.log(`🔍 [visibleTiles] Filtering logic:`, {
-      useMultiChannel,
-      isHistoricalDataMode,
-      channelString,
-      scaleLevel,
-      totalTiles: stitchedTiles.length,
-      tilesWithMatchingChannel: stitchedTiles.filter(tile => tile.channel === channelString).length,
-      enabledZarrChannels: getEnabledZarrChannels().map(ch => ch.channelName),
-      tilesData: stitchedTiles.map(tile => ({
+    
+    // 🚀 REDUCED LOGGING: Only log when NOT interacting to prevent infinite loops
+    const shouldLogDetails = !isZooming && !isPanning; // Only log when not interacting
+    if (shouldLogDetails) {
+      console.log(`🔍 [visibleTiles] Multi-layer filtering logic:`, {
+        useMultiChannel,
+        isHistoricalDataMode,
+        browseChannelString,
+        scanChannelString,
+        scaleLevel,
+        totalTiles: stitchedTiles.length,
+        visibleExperiments: visibleExperiments,
+        activeExperiment: activeExperiment,
+        browseDataMatching: stitchedTiles.filter(tile => tile.channel === browseChannelString).length,
+        scanDataMatching: stitchedTiles.filter(tile => tile.channel === scanChannelString).length
+      });
+      
+      // DEBUG: Show all tile channels and experiment names
+      console.log(`🔍 [visibleTiles] All tiles details:`, stitchedTiles.map(tile => ({
+        experiment: tile.experimentName,
         channel: tile.channel,
-        isMultiChannel: tile.metadata?.isMultiChannel,
-        channelsUsed: tile.metadata?.channelsUsed,
-        scale: tile.scale
-      }))
-    });
+        scale: tile.scale,
+        isMultiChannel: tile.metadata?.isMultiChannel
+      })));
+    }
     
-    
-    // Get tiles for current scale and channel selection
+    // SIMPLIFIED: Just show all tiles for current scale - no complex filtering
     const currentScaleTiles = stitchedTiles.filter(tile => {
-      // For historical mode multi-channel tiles - show all tiles (no filtering needed)
-      if (useMultiChannel && isHistoricalDataMode && tile.metadata?.isMultiChannel) {
-        return tile.scale === scaleLevel;
+      // Only filter by scale level - let all tiles coexist
+      const scaleMatch = tile.scale === scaleLevel;
+      
+      if (shouldLogDetails) {
+        console.log(`🔍 [visibleTiles] Simple filtering:`, {
+          scaleMatch,
+          tileScale: tile.scale,
+          targetScale: scaleLevel,
+          tileChannel: tile.channel,
+          experiment: tile.experimentName,
+          result: scaleMatch
+        });
       }
-      // For real microscope tiles (single or multi-channel), use channel string matching
-      return tile.scale === scaleLevel && tile.channel === channelString;
+      
+      return scaleMatch;
     });
     
-    console.log(`🔍 [visibleTiles] Current scale tiles found:`, currentScaleTiles.length);
+    // 🚀 REDUCED LOGGING: Only log if detailed logging is enabled
+    if (shouldLogDetails) {
+      console.log(`🔍 [visibleTiles] Current scale tiles found:`, currentScaleTiles.length);
+    }
     
     if (currentScaleTiles.length > 0) {
       // If we have current scale tiles, only show current scale
       return currentScaleTiles;
+    }
+    
+    // SIMPLIFIED: If no current scale tiles, show any available tiles to prevent blackout
+    if (stitchedTiles.length > 0) {
+      console.log(`[visibleTiles] No tiles for scale ${scaleLevel}, showing ${stitchedTiles.length} fallback tiles to prevent blackout`);
+      return stitchedTiles;
     }
     
     // If no current scale tiles, show lower resolution (higher scale number) tiles as fallback
@@ -1334,28 +1780,21 @@ const MicroscopeMapDisplay = ({
       .sort((a, b) => a - b); // Sort ascending (lower numbers = higher resolution)
     
     for (const scale of availableScales) {
-      const scaleTiles = stitchedTiles.filter(tile => {
-        // For historical mode multi-channel tiles
-        if (useMultiChannel && isHistoricalDataMode && tile.metadata?.isMultiChannel) {
-          return tile.scale === scale && 
-                 JSON.stringify(tile.metadata.channelsUsed?.sort()) === JSON.stringify(getEnabledZarrChannels().map(ch => ch.channelName).sort());
-        }
-        // For real microscope tiles (single or multi-channel), use channel string matching
-        return tile.scale === scale && tile.channel === channelString;
-      });
+      // SIMPLIFIED: Just filter by scale - no complex channel/experiment filtering
+      const scaleTiles = stitchedTiles.filter(tile => tile.scale === scale);
       if (scaleTiles.length > 0) {
         return scaleTiles;
       }
     }
     
     return [];
-  }, [stitchedTiles, scaleLevel, visibleLayers.channels, visibleLayers.scanResults, shouldUseMultiChannelLoading, getEnabledZarrChannels, getSelectedChannels, getChannelString]);
+  }, [stitchedTiles, scaleLevel, visibleLayers.channels, visibleLayers.scanResults, shouldUseMultiChannelLoading, getEnabledZarrChannels, getSelectedChannels, getChannelString, visibleExperiments, activeExperiment, isZooming, isPanning, getBrowseDataLayer, getScanDataLayer]); // Added interaction state dependencies for proper logging control
 
   const addOrUpdateTile = useCallback((newTile) => {
     setStitchedTiles(prevTiles => {
-      const tileKey = getTileKey(newTile.bounds, newTile.scale, newTile.channel);
+      const tileKey = getTileKey(newTile.bounds, newTile.scale, newTile.channel, newTile.experimentName);
       const existingIndex = prevTiles.findIndex(tile => 
-        getTileKey(tile.bounds, tile.scale, tile.channel) === tileKey
+        getTileKey(tile.bounds, tile.scale, tile.channel, tile.experimentName) === tileKey
       );
       
       if (existingIndex >= 0) {
@@ -1372,37 +1811,33 @@ const MicroscopeMapDisplay = ({
 
   const cleanupOldTiles = useCallback((currentScale, activeChannel, maxTilesPerScale = 20) => {
     setStitchedTiles(prevTiles => {
-      // Keep all tiles for current scale and channel
-      const currentTiles = prevTiles.filter(tile => 
-        tile.scale === currentScale && tile.channel === activeChannel
-      );
+      // SIMPLIFIED: Only filter by scale to allow different layer types to coexist
+      const currentTiles = prevTiles.filter(tile => tile.scale === currentScale);
       
       // For historical mode, be more conservative with cleanup to prevent map clearing during zoom
       if (isHistoricalDataMode) {
         // In historical mode, if there are no tiles for current scale, keep all existing tiles
         // to prevent the map from clearing during zoom operations
         if (currentTiles.length === 0) {
-          console.log('[cleanupOldTiles] Historical mode: No tiles for current scale, preserving all existing tiles');
+          console.log('[cleanupOldTiles] Historical mode: No tiles for current scale, preserving all existing tiles to prevent blackout');
           return prevTiles; // Keep all existing tiles
+        }
+        
+        // Also preserve tiles if we're in the middle of a scale change (zoom in or out)
+        const isScaleChanging = scaleLevel !== lastTileRequestRef.current.scaleLevel;
+        if (isScaleChanging) {
+          console.log(`[cleanupOldTiles] Historical mode: Scale level changing from ${lastTileRequestRef.current.scaleLevel} to ${scaleLevel}, preserving all existing tiles to prevent blackout`);
+          return prevTiles; // Keep all existing tiles during scale changes
         }
       }
       
-      // Smart cleanup: when zooming out (to higher scale numbers), aggressively clean high-res tiles
-      // When zooming in (to lower scale numbers), keep lower-res tiles as background
-      const otherTiles = prevTiles.filter(tile => 
-        !(tile.scale === currentScale && tile.channel === activeChannel)
-      ).filter(tile => {
-        // If zooming out (currentScale > tile.scale), remove high-resolution tiles
-        if (currentScale > tile.scale) {
-          return false; // Remove higher resolution tiles to save memory
-        }
-        // If zooming in (currentScale < tile.scale), keep lower resolution tiles
-        return tile.channel === activeChannel; // Only keep same channel
-      }).slice(-maxTilesPerScale); // Limit total tiles
+      // SIMPLIFIED: Keep tiles from other scales regardless of channel to allow coexistence
+      const otherTiles = prevTiles.filter(tile => tile.scale !== currentScale)
+        .slice(-maxTilesPerScale); // Just limit total number of tiles
       
       return [...currentTiles, ...otherTiles];
     });
-  }, [isHistoricalDataMode]);
+  }, [isHistoricalDataMode, scaleLevel]);
 
   // Effect to clean up old tiles when channel changes  
   useEffect(() => {
@@ -1410,7 +1845,7 @@ const MicroscopeMapDisplay = ({
       // Trigger cleanup of old tiles after a delay to allow new ones to load
       const cleanupTimer = setTimeout(() => {
         cleanupOldTiles(scaleLevel, getChannelString());
-      }, 1000);
+      }, 300);
       
       return () => clearTimeout(cleanupTimer);
     }
@@ -1498,28 +1933,74 @@ const MicroscopeMapDisplay = ({
     // Set canvas size to match container
     const container = mapContainerRef.current;
     if (container) {
-      canvas.width = container.clientWidth;
-      canvas.height = container.clientHeight;
+      const newWidth = container.clientWidth;
+      const newHeight = container.clientHeight;
+      
+      // Only resize if dimensions actually changed to avoid unnecessary clearing
+      if (canvas.width !== newWidth || canvas.height !== newHeight) {
+        // Store current image data before resize
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        
+        // Resize canvas
+        canvas.width = newWidth;
+        canvas.height = newHeight;
+        
+        // Restore image data after resize
+        if (imageData.width > 0 && imageData.height > 0) {
+          ctx.putImageData(imageData, 0, 0);
+        } else {
+          // Only clear with black if no existing data
+          ctx.fillStyle = '#000000';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+      }
     }
     
-    // Clear canvas
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // Only redraw stage boundaries and grid if no existing image data
+    // This prevents clearing the map during zoom/pan operations
+    const hasExistingData = stitchedTiles.length > 0 || realTimeChunkProgress.size > 0;
+    const isCurrentlyZooming = isZooming || currentOperation === 'zooming';
     
-    // Draw stage boundaries and grid
-    ctx.save();
-    ctx.translate(effectivePan.x, effectivePan.y);
-    ctx.scale(mapScale, mapScale);
+    // In historical mode, preserve existing tiles during scale changes to prevent blackout
+    // Check if we're zooming (any direction) or if scale level has changed
+    const isScaleChanging = scaleLevel !== lastTileRequestRef.current.scaleLevel;
     
-    // Calculate stage position in pixels (origin at upper-left)
-    const stagePixelX = 0;
-    const stagePixelY = 0;
-    const stagePixelWidth = stageDimensions.width * pixelsPerMm;
-    const stagePixelHeight = stageDimensions.height * pixelsPerMm;
-        
+    // More aggressive preservation in historical mode:
+    // 1. Always preserve during zooming
+    // 2. Always preserve during scale changes
+    // 3. Always preserve if we have any tiles at all (even from different scales)
+    const hasAnyTiles = stitchedTiles.length > 0;
+    const shouldPreserveTiles = isHistoricalDataMode && (
+      isCurrentlyZooming || 
+      isScaleChanging || 
+      hasAnyTiles  // Preserve any existing tiles in historical mode
+    );
     
-    ctx.restore();
-  }, [isOpen, stageDimensions, mapScale, effectivePan, visibleLayers.wellPlate, containerSize]);
+    // Debug logging for scale changes
+    if (isHistoricalDataMode && isScaleChanging) {
+      console.log(`[Canvas] Scale change detected: ${lastTileRequestRef.current.scaleLevel} → ${scaleLevel}, hasAnyTiles: ${hasAnyTiles}, shouldPreserve: ${shouldPreserveTiles}`);
+    }
+    
+    if (!hasExistingData && !isCurrentlyZooming && !shouldPreserveTiles) {
+      // Clear canvas only if no existing data and not preserving tiles
+      console.log(`[Canvas] Clearing canvas - hasExistingData: ${hasExistingData}, isCurrentlyZooming: ${isCurrentlyZooming}, shouldPreserveTiles: ${shouldPreserveTiles}`);
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      // Draw stage boundaries and grid
+      ctx.save();
+      ctx.translate(effectivePan.x, effectivePan.y);
+      ctx.scale(mapScale, mapScale);
+      
+      // Calculate stage position in pixels (origin at upper-left)
+      const stagePixelX = 0;
+      const stagePixelY = 0;
+      const stagePixelWidth = stageDimensions.width * pixelsPerMm;
+      const stagePixelHeight = stageDimensions.height * pixelsPerMm;
+      
+      ctx.restore();
+    }
+  }, [isOpen, stageDimensions, mapScale, effectivePan, containerSize, stitchedTiles.length, realTimeChunkProgress.size, isZooming, currentOperation]); // Note: visibleLayers.wellPlate removed - well plate is rendered as SVG overlay, not on canvas
 
   // Handle well click for selection
   const handleWellClick = useCallback((wellId) => {
@@ -1806,6 +2287,14 @@ const MicroscopeMapDisplay = ({
     return { x: displayX, y: displayY };
   }, [mapViewMode, stageDimensions, pixelsPerMm, mapScale, effectivePan]);
 
+  // Note: wellRelativeToStageCoords is implemented in SimilarAnnotationRenderer
+  // const wellRelativeToStageCoords = useCallback((wellRelativeX, wellRelativeY, wellInfo) => {
+  //   return {
+  //     x: wellInfo.centerX + wellRelativeX,
+  //     y: wellInfo.centerY + wellRelativeY
+  //   };
+  // }, []);
+
   // Calculate FOV positions for scan preview
   const calculateFOVPositions = useCallback(() => {
     if (!scanParameters || !fovSize || !pixelsPerMm || !mapScale) return [];
@@ -1847,6 +2336,82 @@ const MicroscopeMapDisplay = ({
     return positions;
   }, [scanParameters, fovSize, pixelsPerMm, mapScale, stageToDisplayCoords, dragSelectedWell]);
   
+  // Navigation functions for similarity search results
+  const [previousMapState, setPreviousMapState] = useState(null);
+
+  // Function to navigate to specific stage coordinates
+  const navigateToCoordinates = useCallback((stageX_mm, stageY_mm, newZoomLevel = 8.0, newScaleLevel = 2) => {
+    if (!stageDimensions || !pixelsPerMm) {
+      if (showNotification) {
+        showNotification('Cannot navigate: stage dimensions not available', 'warning');
+      }
+      return;
+    }
+
+    // Save current map state for go back functionality (IMPORTANT: save CURRENT state, not new parameters)
+    setPreviousMapState({
+      mapPan: { ...mapPan },
+      scaleLevel: scaleLevel,  // Current scaleLevel from state
+      zoomLevel: zoomLevel,    // Current zoomLevel from state
+      mapViewMode: mapViewMode
+    });
+
+    // Switch to FREE_PAN mode if not already
+    if (mapViewMode !== 'FREE_PAN') {
+      setMapViewMode('FREE_PAN');
+    }
+
+    // Convert stage coordinates to display coordinates
+    const mapX = (stageX_mm - stageDimensions.xMin) * pixelsPerMm;
+    const mapY = (stageY_mm - stageDimensions.yMin) * pixelsPerMm;
+    
+    // Calculate the center of the container
+    const containerRect = mapContainerRef.current?.getBoundingClientRect();
+    if (!containerRect) return;
+    
+    const centerX = containerRect.width / 2;
+    const centerY = containerRect.height / 2;
+    
+    // Calculate new map scale using the NEW zoom and scale levels
+    const newMapScale = (1 / Math.pow(4, newScaleLevel)) * newZoomLevel;
+    
+    // Calculate pan position to center the target coordinates
+    const newPanX = centerX - mapX * newMapScale;
+    const newPanY = centerY - mapY * newMapScale;
+    
+    // Update map state to NEW values
+    setScaleLevel(newScaleLevel);
+    setZoomLevel(newZoomLevel);
+    setMapPan({ x: newPanX, y: newPanY });
+
+    if (appendLog) {
+      appendLog(`Navigated to coordinates: (${stageX_mm.toFixed(3)}, ${stageY_mm.toFixed(3)})`);
+    }
+  }, [stageDimensions, pixelsPerMm, mapPan, mapScale, scaleLevel, zoomLevel, mapViewMode, showNotification, appendLog]);
+
+  // Function to go back to previous map position
+  const goBackToPreviousPosition = useCallback(() => {
+    if (!previousMapState) {
+      if (showNotification) {
+        showNotification('No previous position to go back to', 'info');
+      }
+      return;
+    }
+
+    // Restore previous map state
+    setMapViewMode(previousMapState.mapViewMode);
+    setScaleLevel(previousMapState.scaleLevel);
+    setZoomLevel(previousMapState.zoomLevel);
+    setMapPan(previousMapState.mapPan);
+
+    // Clear the previous state
+    setPreviousMapState(null);
+
+    if (appendLog) {
+      appendLog('Returned to previous map position');
+    }
+  }, [previousMapState, showNotification, appendLog]);
+
   // Helper function to get intensity/exposure pair from status object (similar to MicroscopeControlPanel)
   const getIntensityExposurePairFromStatus = (status, channel) => {
     if (!status || channel === null || channel === undefined) return null;
@@ -1930,29 +2495,112 @@ const MicroscopeMapDisplay = ({
     }
   }, [visibleLayers.channels, loadCurrentMicroscopeSettings, microscopeControlService, isSimulatedMicroscope]);
 
+  // Track previous channel selection to prevent unnecessary tile clearing
+  const previousChannelSelectionRef = useRef('');
+  
   // Effect to refresh tiles when channel selection changes
   useEffect(() => {
     if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && !isSimulatedMicroscope) {
-      // Clear existing tiles to force reload with new channel selection
-      setStitchedTiles([]);
-      activeTileRequestsRef.current.clear();
+      // Only clear tiles if we actually have a meaningful channel change
+      const selectedChannels = Object.entries(visibleLayers.channels)
+        .filter(([, isVisible]) => isVisible)
+        .map(([channelName]) => channelName);
+      const channelList = selectedChannels.length > 0 ? selectedChannels : ['BF LED matrix full'];
+      const currentChannelString = channelList.sort().join(',');
       
-      // Schedule tile loading after a short delay
-      const refreshTimer = setTimeout(() => {
+      // Check if this is a real channel change vs just LayerPanel opening/closing
+      if (currentChannelString !== previousChannelSelectionRef.current) {
+        console.log(`[Channel Change] Detected real channel change: ${previousChannelSelectionRef.current} → ${currentChannelString}`);
+        
+        // Update the ref to track current selection
+        previousChannelSelectionRef.current = currentChannelString;
+        
+        // 🚫 CANCEL ABANDONED CHANNEL REQUESTS: Actually cancel ongoing HTTP requests for old channels
+        if (currentCancellableRequest) {
+          const cancelledCount = currentCancellableRequest.cancel();
+          console.log(`🚫 [Channel Change] Cancelled ${cancelledCount} pending requests for abandoned channels`);
+          setCurrentCancellableRequest(null);
+        }
+        
+        if (artifactZarrLoaderRef.current) {
+          const artifactCancelledCount = artifactZarrLoaderRef.current.cancelAllRequests();
+          console.log(`🚫 [Channel Change] Cancelled ${artifactCancelledCount} artifact requests for abandoned channels`);
+        }
+        
+        // Clear active request tracking refs
+        browseDataRequestsRef.current.clear();
+        scanDataRequestsRef.current.clear();
+        activeTileRequestsRef.current.clear();
+        
         if (appendLog) {
-          const selectedChannels = Object.entries(visibleLayers.channels)
-            .filter(([, isVisible]) => isVisible)
-            .map(([channelName]) => channelName);
-          const channelList = selectedChannels.length > 0 ? selectedChannels : ['BF LED matrix full'];
           appendLog(`Channel selection changed to: ${channelList.join(', ')} - refreshing tiles`);
         }
-        // We'll trigger the tile update through a state change rather than calling scheduleTileUpdate directly
+        
+        // Set flag to trigger tile loading - loadStitchedTiles will be called by the effect
         setNeedsTileReload(true);
-      }, 500);
-      
-      return () => clearTimeout(refreshTimer);
+      } else {
+        console.log(`[Channel Change] No real channel change detected - LayerPanel UI update only`);
+      }
     }
-  }, [visibleLayers.channels, mapViewMode, visibleLayers.scanResults, isSimulatedMicroscope, appendLog]);
+  }, [visibleLayers.channels, mapViewMode, isSimulatedMicroscope, appendLog]); // Removed visibleLayers.scanResults to prevent triggering on layer toggles
+
+  // Effect to handle historical layer cleanup when layers are toggled off or deleted
+  useEffect(() => {
+    // Check if any Browse Data (historical) layers were toggled off or deleted
+    const currentBrowseDataLayers = layers.filter(layer => layer.type === 'load-server');
+    const activeBrowseDataLayers = currentBrowseDataLayers.filter(layer => layer.visible);
+    
+    // If no active Browse Data layers, cancel all historical data requests and clear tiles
+    if (currentBrowseDataLayers.length === 0 || activeBrowseDataLayers.length === 0) {
+      console.log('[Layer Cleanup] No active Browse Data layers - cancelling historical requests and clearing tiles');
+      
+      // Cancel all artifact loader requests and clear caches
+      if (artifactZarrLoaderRef.current) {
+        const cancelledCount = artifactZarrLoaderRef.current.cancelAllRequests();
+        console.log(`🚫 [Layer Cleanup] Cancelled ${cancelledCount} artifact requests`);
+        
+        // Clear all caches to prevent stale data
+        artifactZarrLoaderRef.current.clearCaches();
+        console.log(`🧹 [Layer Cleanup] Cleared artifact loader caches`);
+      }
+      
+      // Clear historical data tiles
+      setStitchedTiles(prevTiles => {
+        const scanTiles = prevTiles.filter(tile => tile.sourceType === 'scan');
+        if (scanTiles.length !== prevTiles.length) {
+          console.log(`🧹 [Layer Cleanup] Cleared ${prevTiles.length - scanTiles.length} historical tiles`);
+        }
+        return scanTiles;
+      });
+      
+      // Clear browse data loading state
+      browseDataRequestsRef.current.clear();
+      setIsBrowseDataLoading(false);
+      
+      // Clear any active cancellable requests for historical data
+      if (currentCancellableRequest) {
+        console.log(`🚫 [Layer Cleanup] Cancelling current cancellable request`);
+        currentCancellableRequest.cancel();
+        setCurrentCancellableRequest(null);
+      }
+      
+      // Exit historical data mode if no Browse Data layers are active
+      if (activeBrowseDataLayers.length === 0 && isHistoricalDataMode) {
+        console.log('[Layer Cleanup] Exiting historical data mode - no active Browse Data layers');
+        setIsHistoricalDataMode(false);
+        
+        // Clear dataset selection state to prevent stale data from being loaded
+        console.log('[Layer Cleanup] Clearing selected dataset and gallery state');
+        setSelectedHistoricalDataset(null);
+        setSelectedGallery(null);
+        
+        // Clear zarr channel configurations to prevent stale channel data
+        console.log('[Layer Cleanup] Clearing zarr channel configurations');
+        setZarrChannelConfigs({});
+        setAvailableZarrChannels([]);
+      }
+    }
+  }, [layers, isHistoricalDataMode, setIsHistoricalDataMode, currentCancellableRequest, setCurrentCancellableRequest]);
 
   // Effect to listen for contrast settings changes and refresh tiles
   useEffect(() => {
@@ -1963,20 +2611,18 @@ const MicroscopeMapDisplay = ({
       if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && !isSimulatedMicroscope) {
         console.log(`🎨 MicroscopeMapDisplay: Processing contrast settings change event`);
         
-        // Clear existing tiles to force reload with new contrast settings
-        setStitchedTiles([]);
-        activeTileRequestsRef.current.clear();
+        // Clear active requests to prevent conflicts
+        browseDataRequestsRef.current.clear();
+      scanDataRequestsRef.current.clear();
+      activeTileRequestsRef.current.clear();
         
-        // Schedule tile loading after a longer delay to ensure state is updated
-        const refreshTimer = setTimeout(() => {
-          console.log(`🎨 MicroscopeMapDisplay: Refreshing tiles after contrast change, current configs:`, realMicroscopeChannelConfigs);
-          if (appendLog) {
-            appendLog(`Contrast settings changed for ${event.detail.channelName} - refreshing tiles`);
-          }
-          setNeedsTileReload(true);
-        }, 500); // Increased delay to ensure state update
+        console.log(`🎨 MicroscopeMapDisplay: Refreshing tiles after contrast change, current configs:`, realMicroscopeChannelConfigs);
+        if (appendLog) {
+          appendLog(`Contrast settings changed for ${event.detail.channelName} - refreshing tiles`);
+        }
         
-        return () => clearTimeout(refreshTimer);
+        // Set flag to trigger tile loading - loadStitchedTiles will be called by the effect
+        setNeedsTileReload(true);
       } else {
         console.log(`🎨 MicroscopeMapDisplay: Ignoring contrast settings change event - conditions not met`);
       }
@@ -1989,11 +2635,12 @@ const MicroscopeMapDisplay = ({
     return () => {
       window.removeEventListener('contrastSettingsChanged', handleContrastSettingsChanged);
     };
-  }, [mapViewMode, visibleLayers.scanResults, isSimulatedMicroscope, appendLog]);
+  }, [mapViewMode, isSimulatedMicroscope, appendLog]); // Removed visibleLayers.scanResults to prevent triggering on layer toggles
 
   // Initialize real microscope channel configs for visible channels
   useEffect(() => {
-    if (!isHistoricalDataMode && !isSimulatedMicroscope && mapViewMode === 'FREE_PAN') {
+    const scanDataLayer = getScanDataLayer();
+    if (scanDataLayer && !isSimulatedMicroscope && mapViewMode === 'FREE_PAN') {
       const visibleChannels = Object.entries(visibleLayers.channels)
         .filter(([_, isVisible]) => isVisible)
         .map(([channelName]) => channelName);
@@ -2020,35 +2667,8 @@ const MicroscopeMapDisplay = ({
         }));
       }
     }
-  }, [visibleLayers.channels, isHistoricalDataMode, isSimulatedMicroscope, mapViewMode, realMicroscopeChannelConfigs]);
+  }, [visibleLayers.channels, getScanDataLayer, isSimulatedMicroscope, mapViewMode, realMicroscopeChannelConfigs]);
 
-  // Helper function to check if a region is covered by existing tiles
-  const isRegionCovered = useCallback((bounds, scale, channel, existingTiles) => {
-    const tilesForScaleAndChannel = existingTiles.filter(tile => 
-      tile.scale === scale && tile.channel === channel
-    );
-    
-    // Check if the requested region is fully covered by existing tiles
-    for (const tile of tilesForScaleAndChannel) {
-      if (tile.bounds.topLeft.x <= bounds.topLeft.x &&
-          tile.bounds.topLeft.y <= bounds.topLeft.y &&
-          tile.bounds.bottomRight.x >= bounds.bottomRight.x &&
-          tile.bounds.bottomRight.y >= bounds.bottomRight.y) {
-        
-        // Check if tile is potentially stale (older than 10 seconds)
-        const tileAge = Date.now() - (tile.timestamp || 0);
-        const maxTileAge = 10000; // 10 seconds
-        
-        if (tileAge > maxTileAge) {
-          // Tile is stale, don't consider region as covered
-          return false;
-        }
-        
-        return true;
-      }
-    }
-    return false;
-  }, []);
 
 
   
@@ -2153,33 +2773,186 @@ const MicroscopeMapDisplay = ({
 
 
 
-  // Click outside handler for layer dropdown
+  // Click outside handler for layer dropdown - DISABLED to prevent auto-collapse
+  // useEffect(() => {
+  //   const handleClickOutside = (event) => {
+  //     if (layerDropdownRef.current && !layerDropdownRef.current.contains(event.target)) {
+  //       setIsLayerDropdownOpen(false);
+  //     }
+  //   };
+
+  //   if (isLayerDropdownOpen) {
+  //     document.addEventListener('mousedown', handleClickOutside);
+  //     return () => {
+  //       document.removeEventListener('mousedown', handleClickOutside);
+  //     };
+  //   }
+  // }, [isLayerDropdownOpen]);
+
+  // Click outside handler for annotation dropdown
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (layerDropdownRef.current && !layerDropdownRef.current.contains(event.target)) {
-        setIsLayerDropdownOpen(false);
+      if (annotationDropdownRef.current && !annotationDropdownRef.current.contains(event.target)) {
+        // Don't close dropdown if we're in drawing mode - user needs to see the tools
+        if (!isDrawingMode) {
+          setIsAnnotationDropdownOpen(false);
+        }
       }
     };
 
-    if (isLayerDropdownOpen) {
+    if (isAnnotationDropdownOpen) {
       document.addEventListener('mousedown', handleClickOutside);
       return () => {
         document.removeEventListener('mousedown', handleClickOutside);
       };
     }
-  }, [isLayerDropdownOpen]);
+  }, [isAnnotationDropdownOpen, isDrawingMode]);
 
-  // Load experiments when layer dropdown is opened
+  // Disable conflicting interactions when entering drawing mode (but keep dropdown open)
   useEffect(() => {
-    if (isLayerDropdownOpen && !isSimulatedMicroscope) {
+    if (isDrawingMode) {
+      // Disable rectangle selection when entering drawing mode to prevent conflicts
+      setIsRectangleSelection(false);
+      setRectangleStart(null);
+      setRectangleEnd(null);
+      setDragSelectedWell(null);
+      if (appendLog) {
+        appendLog('Entered annotation drawing mode - map interactions disabled');
+      }
+    } else if (!isDrawingMode && appendLog) {
+      appendLog('Exited annotation drawing mode - map interactions enabled');
+    }
+  }, [isDrawingMode, appendLog]);
+
+  // Handle annotation layer activation events from LayerPanel
+  useEffect(() => {
+    const handleAnnotationLayerActivated = (event) => {
+      const { layerId, layerType } = event.detail;
+      console.log(`[MicroscopeMapDisplay] Annotation layer activated: ${layerId} (${layerType})`);
+      
+      // Set the active layer
+      setActiveLayer(layerId);
+      
+      // Open the annotation dropdown
+      setIsAnnotationDropdownOpen(true);
+      
+      // Automatically enable drawing mode
+      setIsDrawingMode(true);
+      
+      // Show notification
+      showNotification('Annotation layer activated. You can now draw annotations.', 'success');
+    };
+
+    const handleExperimentAnnotationToggled = (event) => {
+      const { experimentName, annotationVisible } = event.detail;
+      console.log(`[MicroscopeMapDisplay] Experiment annotation toggled: ${experimentName} = ${annotationVisible}`);
+      
+      // If annotation layer is being disabled, close annotation panel and exit drawing mode
+      if (!annotationVisible) {
+        setIsAnnotationDropdownOpen(false);
+        setIsDrawingMode(false);
+        showNotification('Annotation layer disabled. Exiting annotation mode.', 'info');
+      }
+      
+      // Update experiment annotation visibility in experiments state
+      // This will be handled by the parent component that manages experiments
+    };
+
+    const handleAnnotationLayerDeactivated = (event) => {
+      const { layerId, layerType } = event.detail;
+      console.log(`[MicroscopeMapDisplay] Annotation layer deactivated: ${layerId} (${layerType})`);
+      
+      // Close annotation panel and exit drawing mode
+      setIsAnnotationDropdownOpen(false);
+      setIsDrawingMode(false);
+      showNotification('Annotation layer disabled. Exiting annotation mode.', 'info');
+    };
+
+    // Add event listeners
+    window.addEventListener('annotationLayerActivated', handleAnnotationLayerActivated);
+    window.addEventListener('experimentAnnotationToggled', handleExperimentAnnotationToggled);
+    window.addEventListener('annotationLayerDeactivated', handleAnnotationLayerDeactivated);
+
+    return () => {
+      window.removeEventListener('annotationLayerActivated', handleAnnotationLayerActivated);
+      window.removeEventListener('experimentAnnotationToggled', handleExperimentAnnotationToggled);
+      window.removeEventListener('annotationLayerDeactivated', handleAnnotationLayerDeactivated);
+    };
+  }, [setActiveLayer, showNotification]);
+
+  // Auto-disable other layers when annotation panel is opened for better annotation accuracy
+  useEffect(() => {
+    if (isAnnotationDropdownOpen && activeLayer) {
+      // Check if activeLayer is an experiment (not in layers array)
+      const isExperimentLayer = experiments.some(exp => exp.name === activeLayer);
+      
+      if (isExperimentLayer) {
+        // For experiment layers, don't modify layer visibility since experiments are managed separately
+        if (appendLog) {
+          appendLog(`Annotation mode: Using experiment layer ${activeLayer} - no layer visibility changes needed`);
+        }
+        return;
+      }
+      
+      // For regular layers, store current layer visibility state before disabling
+      const currentLayerStates = {};
+      layers.forEach(layer => {
+        if (layer.id !== activeLayer) {
+          currentLayerStates[layer.id] = layer.visible;
+        }
+      });
+      
+      // Disable all other layers except the active one
+      setLayers(prev => prev.map(layer => 
+        layer.id === activeLayer ? layer : { ...layer, visible: false }
+      ));
+      
+      if (appendLog) {
+        appendLog(`Annotation mode: Disabled other layers, keeping only active layer: ${activeLayer}`);
+      }
+      
+      // Store the previous states for restoration
+      return () => {
+        // Restore previous layer visibility when annotation panel closes
+        setLayers(prev => prev.map(layer => ({
+          ...layer,
+          visible: currentLayerStates[layer.id] !== undefined ? currentLayerStates[layer.id] : layer.visible
+        })));
+        if (appendLog) {
+          appendLog('Annotation mode: Restored previous layer visibility states');
+        }
+      };
+    }
+  }, [isAnnotationDropdownOpen, activeLayer, setLayers, experiments, appendLog]); // Removed layers dependency to prevent infinite loop
+
+  // Load experiments when microscope service becomes available
+  useEffect(() => {
+    if (microscopeControlService && !isSimulatedMicroscope) {
+      console.log('[Experiment Loading] Microscope service available - loading experiments');
+      loadExperiments();
+    }
+  }, [microscopeControlService, isSimulatedMicroscope]); // Removed loadExperiments to prevent infinite loops
+
+  // Only load experiments when layer dropdown is opened AND we don't have experiments yet
+  const hasExperimentsRef = useRef(false);
+  useEffect(() => {
+    if (experiments && experiments.length > 0) {
+      hasExperimentsRef.current = true;
+    }
+  }, [experiments]);
+
+  useEffect(() => {
+    if (isLayerDropdownOpen && !isSimulatedMicroscope && !hasExperimentsRef.current) {
+      console.log('[Layer Dropdown] Loading experiments for first time');
       loadExperiments();
       // Also get experiment info for the active experiment
       if (activeExperiment) {
         getExperimentInfo(activeExperiment);
       }
+    } else if (isLayerDropdownOpen && !isSimulatedMicroscope && hasExperimentsRef.current) {
+      console.log('[Layer Dropdown] Experiments already loaded, skipping refresh');
     }
   }, [isLayerDropdownOpen, isSimulatedMicroscope]); // Removed function dependencies to prevent infinite loops
-
 
   // Cleanup timeouts on unmount
   useEffect(() => {
@@ -2276,7 +3049,9 @@ const MicroscopeMapDisplay = ({
 
   // Add state for browse data modal
   const [showBrowseDataModal, setShowBrowseDataModal] = useState(false);
-
+  
+  // Layer management state and helper functions already moved early to avoid hoisting issues
+ 
   // Add state for gallery and dataset browsing
   const [galleries, setGalleries] = useState([]);
   const [galleriesLoading, setGalleriesLoading] = useState(false);
@@ -2286,9 +3061,9 @@ const MicroscopeMapDisplay = ({
   const [datasetsLoading, setDatasetsLoading] = useState(false);
   const [datasetsError, setDatasetsError] = useState(null);
 
-  // Fetch galleries when modal opens or microscope changes
+  // Fetch galleries when modal opens (no microscope isolation - show all galleries)
   useEffect(() => {
-    if (!showBrowseDataModal || !selectedMicroscopeId) return;
+    if (!showBrowseDataModal) return;
     setGalleriesLoading(true);
     setGalleriesError(null);
     setGalleries([]);
@@ -2296,7 +3071,7 @@ const MicroscopeMapDisplay = ({
     setDatasets([]);
     setDatasetsError(null);
     const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
-    fetch(`/agent-lens/apps/${serviceId}/list-microscope-galleries?microscope_service_id=${encodeURIComponent(selectedMicroscopeId)}`)
+    fetch(`/agent-lens/apps/${serviceId}/list-microscope-galleries`)
       .then(res => res.json())
       .then(data => {
         if (data.success) {
@@ -2308,7 +3083,7 @@ const MicroscopeMapDisplay = ({
       })
       .catch(e => setGalleriesError(e.message))
       .finally(() => setGalleriesLoading(false));
-  }, [showBrowseDataModal, selectedMicroscopeId]);
+  }, [showBrowseDataModal]);
 
   // Fetch datasets when a gallery is selected
   useEffect(() => {
@@ -2337,37 +3112,85 @@ const MicroscopeMapDisplay = ({
   // Add state for selected dataset in historical mode
   const [selectedHistoricalDataset, setSelectedHistoricalDataset] = useState(null);
   
-  // Auto-enable historical data mode for simulated microscope when switching to FREE_PAN mode
-  useEffect(() => {
-    if (isSimulatedMicroscope && mapViewMode === 'FREE_PAN' && !isHistoricalDataMode) {
-      console.log('[Simulated Microscope] Auto-enabling historical data mode in FREE_PAN mode');
-      setIsHistoricalDataMode(true);
-      setStitchedTiles([]); // Clear existing tiles
-      
-      // Auto-load default dataset for simulated microscope
-      const defaultDatasetId = 'agent-lens/20250824-example-data-20250824-221822';
-      console.log('[Simulated Microscope] Auto-loading default dataset:', defaultDatasetId);
-      
-      // Create a mock dataset object for the default dataset
-      const mockDataset = {
-        id: defaultDatasetId,
-        name: 'Simulated Sample Data',
-        created_at: new Date().toISOString(),
-        metadata: {
-          microscope_service_id: selectedMicroscopeId,
-          sample_id: 'simulated-sample-1'
-        }
-      };
-      
-      // Set the dataset and gallery for immediate use
-      setSelectedHistoricalDataset(mockDataset);
-      setSelectedGallery({
-        id: 'agent-lens/1-20250824-example-data',
-        name: 'Simulated Microscope Gallery',
-        microscope_service_id: selectedMicroscopeId
+  // Helper function to get current channel information for annotations
+  const getCurrentChannelInfo = useCallback(() => {
+    const channels = [];
+    const processSettings = {};
+    
+    if (isHistoricalDataMode) {
+      // For historical mode, use zarr channel configs
+      const enabledChannels = getEnabledZarrChannels();
+      enabledChannels.forEach(channel => {
+        channels.push(channel.channelName);
+        processSettings[channel.channelName] = {
+          min: channel.min,
+          max: channel.max
+        };
+      });
+    } else {
+      // For real microscope mode, use visible layers
+      const selectedChannels = getSelectedChannels();
+      selectedChannels.forEach(channelName => {
+        channels.push(channelName);
+        const config = realMicroscopeChannelConfigs[channelName];
+        processSettings[channelName] = {
+          min: config?.min || 0,
+          max: config?.max || 255
+        };
       });
     }
-  }, [isSimulatedMicroscope, mapViewMode, isHistoricalDataMode, selectedMicroscopeId, setStitchedTiles, setSelectedGallery]);
+    
+    return {
+      channels,
+      process_settings: processSettings,
+      // Add dataset information for historical mode
+      ...(isHistoricalDataMode && selectedHistoricalDataset && {
+        datasetId: selectedHistoricalDataset.id,
+        datasetName: selectedHistoricalDataset.name || selectedHistoricalDataset.id
+      })
+    };
+  }, [isHistoricalDataMode, getEnabledZarrChannels, getSelectedChannels, realMicroscopeChannelConfigs, selectedHistoricalDataset]);
+  
+  // Handle simulated sample switching - update dataset when sample changes
+  useEffect(() => {
+    if (isSimulatedMicroscope && sampleLoadStatus?.isSampleLoaded && sampleLoadStatus?.selectedSampleId) {
+      // Map sample IDs to their data aliases (same as in SampleSelector)
+      const sampleDataAliases = {
+        'simulated-sample-1': 'agent-lens/20250824-example-data-20250824-221822',
+        'hpa-sample': 'agent-lens/hpa-example-sample-20250114-150051'
+      };
+      
+      const dataAlias = sampleDataAliases[sampleLoadStatus.selectedSampleId];
+      if (dataAlias) {
+        console.log('[Simulated Microscope] Sample switched, updating dataset to:', dataAlias);
+        
+        // Clear existing tiles to force reload with new data
+        setStitchedTiles([]);
+        browseDataRequestsRef.current.clear();
+      scanDataRequestsRef.current.clear();
+      activeTileRequestsRef.current.clear();
+        
+        // Create new mock dataset with the selected sample's data alias
+        const mockDataset = {
+          id: dataAlias,
+          name: `Simulated Sample Data (${sampleLoadStatus.selectedSampleId})`,
+          created_at: new Date().toISOString(),
+          metadata: {
+            microscope_service_id: selectedMicroscopeId,
+            sample_id: sampleLoadStatus.selectedSampleId
+          }
+        };
+        
+        // Update the dataset and gallery
+        setSelectedHistoricalDataset(mockDataset);
+        setSelectedGallery({
+          id: dataAlias, // Use the actual dataset ID as gallery ID
+          name: `Simulated Microscope Gallery (${sampleLoadStatus.selectedSampleId})`,
+          microscope_service_id: selectedMicroscopeId
+        });
+      }
+    }
+  }, [isSimulatedMicroscope, sampleLoadStatus?.isSampleLoaded, sampleLoadStatus?.selectedSampleId, selectedMicroscopeId, setStitchedTiles, setSelectedGallery]);
   
   // Auto-select first dataset when datasets are loaded in historical mode
   useEffect(() => {
@@ -2541,6 +3364,57 @@ const MicroscopeMapDisplay = ({
   // Intelligent tile-based loading function (moved here after all dependencies are defined)
   const loadStitchedTiles = useCallback(async () => {
     console.log('[loadStitchedTiles] Called - checking conditions');
+    
+    // 🚀 REQUEST CANCELLATION: Only cancel if we're starting a significantly different request
+    // Calculate bounds first to generate consistent request key
+    if (!canvasRef.current) {
+      console.log('[loadStitchedTiles] Canvas not ready, skipping');
+      return;
+    }
+    
+    const earlyScaleLevel = Math.max(0, Math.min(4, Math.round(Math.log2(mapScale / 0.25))));
+    const earlyActiveChannel = getSelectedChannels()[0] || 'BF LED matrix full';
+    const currentViewBounds = {
+      topLeft: { x: mapPan.x - canvasRef.current.width / (2 * mapScale), y: mapPan.y - canvasRef.current.height / (2 * mapScale) },
+      bottomRight: { x: mapPan.x + canvasRef.current.width / (2 * mapScale), y: mapPan.y + canvasRef.current.height / (2 * mapScale) }
+    };
+    const currentRequestKey = getTileKey(currentViewBounds, earlyScaleLevel, earlyActiveChannel, selectedHistoricalDataset?.name || 'historical');
+    const shouldCancelPrevious = lastRequestKey && lastRequestKey !== currentRequestKey;
+    
+    if (shouldCancelPrevious && currentCancellableRequest) {
+      const cancelledCount = currentCancellableRequest.cancel();
+      console.log(`🚫 loadStitchedTiles: Cancelled ${cancelledCount} pending requests (new area)`);
+      setCurrentCancellableRequest(null);
+      
+      // 🚀 CRITICAL FIX: Also cancel ALL active requests in the artifact loader when moving to new area
+      if (artifactZarrLoaderRef.current) {
+        const artifactCancelledCount = artifactZarrLoaderRef.current.cancelAllRequests();
+        console.log(`🚫 loadStitchedTiles: Cancelled ${artifactCancelledCount} active artifact requests (new area)`);
+      }
+    } else if (!shouldCancelPrevious && currentCancellableRequest) {
+      console.log(`🔄 loadStitchedTiles: Request for same area already in progress, checking if it should be cancelled anyway`);
+      // Cancel anyway if the request is very old (over 30 seconds)
+      if (currentCancellableRequest.startTime && (Date.now() - currentCancellableRequest.startTime > 30000)) {
+        console.log(`🚫 loadStitchedTiles: Cancelling old request (over 30s old)`);
+        const cancelledCount = currentCancellableRequest.cancel();
+        console.log(`🚫 loadStitchedTiles: Cancelled ${cancelledCount} old requests`);
+        setCurrentCancellableRequest(null);
+        
+        if (artifactZarrLoaderRef.current) {
+          const artifactCancelledCount = artifactZarrLoaderRef.current.cancelAllRequests();
+          console.log(`🚫 loadStitchedTiles: Cancelled ${artifactCancelledCount} old artifact requests`);
+        }
+      } else {
+        return; // Don't start duplicate requests for the same area
+      }
+    }
+    
+    // Update request tracking at the start to prevent duplicate requests
+    setLastRequestKey(currentRequestKey);
+    
+    // Clear active requests to prevent conflicts - only clear legacy for compatibility
+    activeTileRequestsRef.current.clear();
+    
     console.log(`🔍 [loadStitchedTiles] Channel analysis:`, {
       visibleChannels: visibleLayers.channels,
       selectedChannels: getSelectedChannels(),
@@ -2557,18 +3431,45 @@ const MicroscopeMapDisplay = ({
     }
     lastTileLoadAttemptRef.current = now;
     
-    if (!visibleLayers.scanResults || mapViewMode !== 'FREE_PAN') {
-      console.log('[loadStitchedTiles] Skipping - scan results not visible or not in FREE_PAN mode');
+    if (mapViewMode !== 'FREE_PAN') {
+      console.log('[loadStitchedTiles] Skipping - not in FREE_PAN mode');
+      return;
+    }
+
+    // Check for visible data layers
+    const browseDataLayer = getBrowseDataLayer();
+    const scanDataLayer = getScanDataLayer();
+    
+    // Also check if scan results are enabled (completed scan data)
+    const hasScanResults = visibleLayers.scanResults && visibleExperiments.length > 0;
+    
+    console.log('[loadStitchedTiles] Layer check:', {
+      browseDataLayer: browseDataLayer ? browseDataLayer.name : 'none',
+      scanDataLayer: scanDataLayer ? scanDataLayer.name : 'none',
+      hasScanResults,
+      scanResultsEnabled: visibleLayers.scanResults,
+      visibleExperiments: visibleExperiments.length,
+      totalLayers: layers.length,
+      layerTypes: layers.map(l => `${l.name}(${l.type})`).join(', ')
+    });
+    
+    // Also check if there are actual experiments available even if not "visible" yet
+    const hasExperiments = experiments && experiments.length > 0;
+    const hasAnyData = browseDataLayer || scanDataLayer || hasScanResults || (hasExperiments && visibleLayers.scanResults);
+    
+    if (!hasAnyData) {
+      console.log('[loadStitchedTiles] Skipping - no visible data layers, scan results, or available experiments');
+      console.log('[loadStitchedTiles] Debug: browseDataLayer=', !!browseDataLayer, 'scanDataLayer=', !!scanDataLayer, 'hasScanResults=', hasScanResults, 'hasExperiments=', hasExperiments, 'scanResultsEnabled=', visibleLayers.scanResults);
       return;
     }
     
-    // Handle historical data mode
-    if (isHistoricalDataMode) {
-      console.log('[loadStitchedTiles] Historical data mode - checking requirements');
+    // Handle both browse data and scan data in parallel to prevent blocking
+    const browseDataPromise = browseDataLayer ? (async () => {
+      console.log('[loadStitchedTiles] Browse data layer - checking requirements');
       if (!artifactZarrLoaderRef.current || !selectedHistoricalDataset || !selectedGallery) {
-        console.log('[loadStitchedTiles] Skipping historical mode - missing requirements');
-        return;
-      }
+        console.log('[loadStitchedTiles] Skipping browse data - missing requirements');
+        // Don't return early - continue to check scan data layer
+      } else {
       
       const container = mapContainerRef.current;
       if (!container || !stageDimensions || !pixelsPerMm) return;
@@ -2602,26 +3503,21 @@ const MicroscopeMapDisplay = ({
       
       const bounds = { topLeft: clampedTopLeft, bottomRight: clampedBottomRight };
       
-      // Check if this region is already covered by existing tiles
-      if (isRegionCovered(bounds, scaleLevel, activeChannel, stitchedTiles)) {
-        // Region is already loaded, no need to fetch
-        return;
-      }
       
       const width_mm = clampedBottomRight.x - clampedTopLeft.x;
       const height_mm = clampedBottomRight.y - clampedTopLeft.y;
       
       // Create a unique request key to prevent duplicate requests
-      const requestKey = getTileKey(bounds, scaleLevel, activeChannel);
+      const requestKey = getTileKey(bounds, scaleLevel, activeChannel, selectedHistoricalDataset?.name || 'historical');
       
       // Check if we're already loading this tile
-      if (activeTileRequestsRef.current.has(requestKey)) {
+      if (browseDataRequestsRef.current.has(requestKey)) {
         return;
       }
       
-      // Mark this request as active
-      activeTileRequestsRef.current.add(requestKey);
-      setIsLoadingCanvas(true);
+      // Mark this request as active for browse data
+      browseDataRequestsRef.current.add(requestKey);
+      setIsBrowseDataLoading(true);
       
       try {
         // Get all possible intersecting wells using well plate configuration
@@ -2679,13 +3575,30 @@ const MicroscopeMapDisplay = ({
             return null;
           }
           
-          // Convert channel name to index (needed for chunk check)
-          const channelIndex = 0; // Single channel for now
-          
           // Use artifactZarrLoader's proper coordinate conversion instead of simple conversion
           // First, get the metadata to understand the image dimensions and pixel size
           const correctDatasetId = artifactZarrLoaderRef.current.extractDatasetId(selectedHistoricalDataset.id);
           const baseUrl = `${artifactZarrLoaderRef.current.baseUrl}/${correctDatasetId}/zip-files/well_${wellInfo.id}_96.zip/~/data.zarr/`;
+          
+          // Convert channel name to index (needed for chunk check)
+          // For historical data, we need to determine the correct channel index
+          // First, try to get available chunks to see what channels are available
+          const tempAvailableChunks = await artifactZarrLoaderRef.current.getAvailableChunks(baseUrl, scaleLevel);
+          let channelIndex = 0; // Default fallback
+          
+          if (tempAvailableChunks && tempAvailableChunks.length > 0) {
+            // Extract unique channel indices from available chunks
+            const channelIndices = [...new Set(tempAvailableChunks.map(chunk => {
+              const parts = chunk.split('.');
+              return parseInt(parts[1], 10); // Second part is channel index
+            }))].sort((a, b) => a - b);
+            
+            console.log(`🔍 Available channel indices for well ${wellInfo.id}: ${channelIndices.join(', ')}`);
+            
+            // Use the first available channel (usually the most common one)
+            channelIndex = channelIndices[0];
+            console.log(`🔍 Using channel index ${channelIndex} for well ${wellInfo.id}`);
+          }
           const metadata = await artifactZarrLoaderRef.current.fetchZarrMetadata(baseUrl, scaleLevel);
           
           if (!metadata) {
@@ -2778,13 +3691,13 @@ const MicroscopeMapDisplay = ({
         // Track completed wells for final processing
         const completedWells = new Map();
         
-        // Real-time chunk progress callback
+        // Real-time chunk progress callback with merged channel support
         const onChunkProgress = (wellId, loadedChunks, totalChunks, partialCanvas) => {
-          console.log(`🔄 REAL-TIME: Well ${wellId} progress: ${loadedChunks}/${totalChunks} chunks loaded`);
+          console.log(`🔄 REAL-TIME: Well ${wellId} progress: ${loadedChunks}/${totalChunks} chunks loaded (merged channels)`);
           
 
           
-          // 🚀 REAL-TIME TILE UPDATES: Allow frequent updates for smooth progress visualization
+          // 🚀 REAL-TIME MERGED TILE UPDATES: Show progressively merged channels during loading
           const now = Date.now();
           const lastUpdate = chunkProgressUpdateTimes.current.get(wellId) || 0;
           const UPDATE_INTERVAL = 200; // Only update state every 200ms per well
@@ -2827,7 +3740,7 @@ const MicroscopeMapDisplay = ({
               }
             };
             
-            // Create temporary tile with partial data
+            // Create temporary tile with merged channel data
             const tempTile = {
               data: partialDataUrl,
               bounds: wellBounds,
@@ -2845,7 +3758,9 @@ const MicroscopeMapDisplay = ({
               progress: `${loadedChunks}/${totalChunks}`,
               metadata: {
                 isMultiChannel: useMultiChannel,
-                channelsUsed: useMultiChannel ? enabledChannels.map(ch => ch.channelName) : [activeChannel]
+                channelsUsed: useMultiChannel ? enabledChannels.map(ch => ch.channelName) : [activeChannel],
+                isMerged: useMultiChannel, // Indicate this is a merged result
+                loadingProgress: `${loadedChunks}/${totalChunks}`
               }
             };
             
@@ -2910,7 +3825,7 @@ const MicroscopeMapDisplay = ({
           const centerY = (wellBounds.topLeft.y + wellBounds.bottomRight.y) / 2;
           console.log(`📍 ${wellId}: rel(${wellRequest.centerX.toFixed(2)}, ${wellRequest.centerY.toFixed(2)}) → center(${centerX.toFixed(1)}, ${centerY.toFixed(1)}) ${finalResult.metadata.width_mm.toFixed(1)}×${finalResult.metadata.height_mm.toFixed(1)}mm`);
           
-          // Create final tile with complete data
+          // Create final tile with complete merged data
           const finalTile = {
             data: `data:image/png;base64,${finalResult.data}`,
             bounds: wellBounds,
@@ -2928,7 +3843,9 @@ const MicroscopeMapDisplay = ({
             metadata: {
               ...finalResult.metadata,
               isMultiChannel: useMultiChannel,
-              channelsUsed: finalResult.metadata.channelsUsed || (useMultiChannel ? enabledChannels.map(ch => ch.channelName) : [activeChannel])
+              channelsUsed: finalResult.metadata.channelsUsed || (useMultiChannel ? enabledChannels.map(ch => ch.channelName) : [activeChannel]),
+              isMerged: useMultiChannel, // Indicate this is a merged result
+              loadingProgress: 'complete'
             }
           };
           
@@ -2937,7 +3854,7 @@ const MicroscopeMapDisplay = ({
         };
         
         // 🚀 REQUEST CANCELLATION: Check if we need to cancel previous request
-        const currentRequestKey = getTileKey(bounds, scaleLevel, activeChannel);
+        const currentRequestKey = getTileKey(bounds, scaleLevel, activeChannel, selectedHistoricalDataset?.name || 'historical');
         if (lastRequestKey && lastRequestKey !== currentRequestKey) {
           console.log(`🔄 User moved to new position, cancelling previous request: ${lastRequestKey} → ${currentRequestKey}`);
           if (currentCancellableRequest) {
@@ -2946,21 +3863,30 @@ const MicroscopeMapDisplay = ({
           }
         }
         
-        // Update request tracking
+        // Update request tracking  
         setLastRequestKey(currentRequestKey);
         
-        // Start real-time loading with cancellation support
+        // Start real-time loading with cancellation support - run in separate thread to prevent blocking
         const { promise: wellResultsPromise, cancel: cancelWellRequests } = 
-          artifactZarrLoaderRef.current.getMultipleWellRegionsRealTimeCancellable(
-            wellRequests, 
-            onChunkProgress, 
-            onWellComplete,
-            useMultiChannel,
-            enabledChannels
-          );
+          await new Promise((resolve) => {
+            setTimeout(() => {
+              const result = artifactZarrLoaderRef.current.getMultipleWellRegionsRealTimeCancellable(
+                wellRequests, 
+                onChunkProgress, 
+                onWellComplete,
+                useMultiChannel,
+                enabledChannels
+              );
+              resolve(result);
+            }, 0); // Run in next tick to prevent blocking
+          });
         
         // Store cancellation function for potential future cancellation
-        setCurrentCancellableRequest({ cancel: cancelWellRequests, requestKey: currentRequestKey });
+        setCurrentCancellableRequest({ 
+          cancel: cancelWellRequests, 
+          requestKey: currentRequestKey,
+          startTime: Date.now()
+        });
         
         const wellResults = await wellResultsPromise;
         
@@ -3002,26 +3928,25 @@ const MicroscopeMapDisplay = ({
         console.error('Failed to load historical tiles:', error);
         if (appendLog) appendLog(`Failed to load historical tiles: ${error.message}`);
       } finally {
-        // Remove from active requests
-        activeTileRequestsRef.current.delete(requestKey);
+        // Remove from browse data requests
+        browseDataRequestsRef.current.delete(requestKey);
         
-        // Update loading state - check if any requests are still active
-        if (activeTileRequestsRef.current.size === 0) {
-          setIsLoadingCanvas(false);
+        // Update browse data loading state
+        if (browseDataRequestsRef.current.size === 0) {
+          setIsBrowseDataLoading(false);
         }
       }
-      return;
     }
+    })() : Promise.resolve();
     
-    // Handle live microscope mode
-    if (!microscopeControlService || (isSimulatedMicroscope && !isHistoricalDataMode)) {
-      console.log('[loadStitchedTiles] Skipping - no microscope service or simulated mode (not in historical data mode)');
-      // 🚀 PERFORMANCE OPTIMIZATION: Clear loading state when no service available
-      if (activeTileRequestsRef.current.size === 0) {
-        setIsLoadingCanvas(false);
-      }
-      return;
-    }
+    // Handle scan data layer (real microscope mode) or scan results  
+    const scanDataPromise = (scanDataLayer || hasScanResults) ? (async () => {
+      console.log('[loadStitchedTiles] Processing scan data:', scanDataLayer ? `layer: ${scanDataLayer.name}` : 'scan results');
+      if (!microscopeControlService || isSimulatedMicroscope) {
+        console.log('[loadStitchedTiles] Skipping scan data - no microscope service or simulated mode');
+        // Don't return early - browse data might have been loaded
+      } else {
+        console.log('[loadStitchedTiles] Scan data layer conditions met, proceeding with scan data loading');
     
     // 🚀 PERFORMANCE OPTIMIZATION: Additional check for microscope service availability
     try {
@@ -3029,8 +3954,8 @@ const MicroscopeMapDisplay = ({
       await microscopeControlService.get_status();
     } catch (error) {
       console.log('[loadStitchedTiles] Microscope service not responsive - skipping tile loading');
-      if (activeTileRequestsRef.current.size === 0) {
-        setIsLoadingCanvas(false);
+      if (scanDataRequestsRef.current.size === 0) {
+        setIsScanDataLoading(false);
       }
       return;
     }
@@ -3067,27 +3992,22 @@ const MicroscopeMapDisplay = ({
     
     const bounds = { topLeft: clampedTopLeft, bottomRight: clampedBottomRight };
     
-    // Check if this region is already covered by existing tiles
-    if (isRegionCovered(bounds, scaleLevel, activeChannel, stitchedTiles)) {
-      console.log('[loadStitchedTiles] Region already covered by existing tiles - skipping');
-      return;
-    }
     
     const width_mm = clampedBottomRight.x - clampedTopLeft.x;
     const height_mm = clampedBottomRight.y - clampedTopLeft.y;
     
     // Create a unique request key to prevent duplicate requests
-    const requestKey = getTileKey(bounds, scaleLevel, activeChannel);
+    const requestKey = getTileKey(bounds, scaleLevel, activeChannel, 'all-experiments');
     
-    // Check if we're already loading this tile
-    if (activeTileRequestsRef.current.has(requestKey)) {
-      console.log('[loadStitchedTiles] Tile request already in progress - skipping');
+    // Check if we're already loading this tile  
+    if (scanDataRequestsRef.current.has(requestKey)) {
+      console.log('[loadStitchedTiles] Scan tile request already in progress - skipping');
       return;
     }
     
-    // Mark this request as active
-    activeTileRequestsRef.current.add(requestKey);
-    setIsLoadingCanvas(true);
+    // Mark this request as active for scan data
+    scanDataRequestsRef.current.add(requestKey);
+    setIsScanDataLoading(true);
     console.log('[loadStitchedTiles] Starting tile fetch for request key:', requestKey);
     
     try {
@@ -3095,8 +4015,21 @@ const MicroscopeMapDisplay = ({
       const centerX = clampedTopLeft.x + (width_mm / 2);
       const centerY = clampedTopLeft.y + (height_mm / 2);
       
-      // 🎨 SIMPLIFIED TILE PROCESSING: Use TileProcessingManager for FREE_PAN mode
-      console.log(`🎨 FREE_PAN: Using TileProcessingManager for channels: "${getChannelString()}"`);
+      // 🎨 MULTI-LAYER TILE PROCESSING: Load tiles for each visible experiment
+      console.log(`🎨 FREE_PAN: Loading tiles for visible experiments: ${visibleExperiments.join(', ')}`);
+      console.log(`🎨 FREE_PAN: Current state - visibleExperiments:`, visibleExperiments, 'activeExperiment:', activeExperiment);
+      
+      // Get experiments to load tiles for
+      // If no experiments are specified, load tiles without experiment filter (pass null to API)
+      const experimentsToLoad = visibleExperiments.length > 0 ? visibleExperiments : (activeExperiment ? [activeExperiment] : [null]);
+      
+      if (experimentsToLoad.length === 0) {
+        console.warn('🎨 FREE_PAN: No experiments to load tiles for');
+        if (appendLog) {
+          appendLog('No experiments selected for tile loading');
+        }
+        return;
+      }
       
       // Get enabled channels for FREE_PAN mode
       const enabledChannels = getSelectedChannels().map(channelName => ({
@@ -3104,88 +4037,229 @@ const MicroscopeMapDisplay = ({
         channelName: channelName
       }));
       
-      // Prepare tile request for TileProcessingManager
-      const tileRequest = {
-        centerX,
-        centerY,
-        width_mm,
-        height_mm,
-        wellPlateType,
-        scaleLevel,
-        timepoint: 0,
-        wellPaddingMm,
-        bounds
-      };
-      
       // Prepare services for TileProcessingManager
       const services = {
         microscopeControlService,
         artifactZarrLoader: null // Not needed for FREE_PAN mode
       };
       
-      // Process tiles using TileProcessingManager
-      const processedTile = await TileProcessingManager.processTileChannels(
-        enabledChannels,
-        tileRequest,
-        'FREE_PAN',
-        realMicroscopeChannelConfigs,
-        services
-      );
-      
-      if (processedTile && processedTile.data) {
-        console.log(`🎨 FREE_PAN: Successfully processed tile with ${processedTile.channelsUsed?.length || 0} channels`);
-        const newTile = {
-          data: processedTile.data,
-          bounds: processedTile.bounds,
-          width_mm: processedTile.width_mm,
-          height_mm: processedTile.height_mm,
-          scale: processedTile.scale,
-          channel: processedTile.channel,
-          timestamp: Date.now(),
-          isMerged: processedTile.isMerged,
-          channelsUsed: processedTile.channelsUsed
-        };
-        
-        addOrUpdateTile(newTile);
-        
-        // Clean up old tiles for this scale/channel combination to prevent memory bloat
-        cleanupOldTiles(scaleLevel, getChannelString());
-        
-        if (appendLog) {
-          appendLog(`Loaded tile for scale ${scaleLevel}, region (${clampedTopLeft.x.toFixed(1)}, ${clampedTopLeft.y.toFixed(1)}) to (${clampedBottomRight.x.toFixed(1)}, ${clampedBottomRight.y.toFixed(1)})`);
-        }
-      } else {
-        console.warn(`🎨 FREE_PAN: TileProcessingManager returned empty tile for channels: "${getChannelString()}"`);
-        if (appendLog) {
-          appendLog(`Failed to process tile: No data returned`);
+      // Load tiles for each experiment
+      for (const experimentName of experimentsToLoad) {
+        try {
+          console.log(`🎨 FREE_PAN: Loading tiles for experiment: ${experimentName}`);
+          
+          // Prepare tile request for this specific experiment
+          const tileRequest = {
+            centerX,
+            centerY,
+            width_mm,
+            height_mm,
+            wellPlateType,
+            scaleLevel,
+            timepoint: 0,
+            wellPaddingMm,
+            bounds,
+            experimentName: experimentName // Add experiment name for get_stitched_region API
+          };
+          
+          // Process tiles using TileProcessingManager with per-layer contrast settings
+          // Create layer-specific contrast configs for this experiment
+          const layerContrastConfigs = {};
+          enabledChannels.forEach(channel => {
+            const layerId = `${experimentName}-${channel.channelName}`;
+            const layerContrast = getLayerContrastSettings(layerId);
+            layerContrastConfigs[channel.channelName] = layerContrast;
+          });
+          
+          const processedTile = await TileProcessingManager.processTileChannels(
+            enabledChannels,
+            tileRequest,
+            'FREE_PAN',
+            layerContrastConfigs,
+            services
+          );
+          
+          if (processedTile && processedTile.data) {
+            console.log(`🎨 FREE_PAN: Successfully processed tile for experiment ${experimentName} with ${processedTile.channelsUsed?.length || 0} channels`);
+            const newTile = {
+              data: processedTile.data,
+              bounds: processedTile.bounds,
+              width_mm: processedTile.width_mm,
+              height_mm: processedTile.height_mm,
+              scale: processedTile.scale,
+              channel: processedTile.channel,
+              timestamp: Date.now(),
+              isMerged: processedTile.isMerged,
+              channelsUsed: processedTile.channelsUsed,
+              experimentName: experimentName || null // Add experiment name to real microscope tiles (null if no experiment)
+            };
+            
+            addOrUpdateTile(newTile);
+          } else {
+            console.warn(`🎨 FREE_PAN: TileProcessingManager returned empty tile for experiment ${experimentName}, channels: "${getChannelString()}"`);
+          }
+        } catch (error) {
+          console.error(`🎨 FREE_PAN: Failed to load tile for experiment ${experimentName}:`, error);
+          if (appendLog) {
+            appendLog(`Failed to load tile for experiment ${experimentName}: ${error.message}`);
+          }
         }
       }
+      
+      // Clean up old tiles for this scale/channel combination to prevent memory bloat
+      cleanupOldTiles(scaleLevel, getChannelString());
+      
+      if (appendLog) {
+        appendLog(`Loaded tiles for ${experimentsToLoad.length} experiments at scale ${scaleLevel}, region (${clampedTopLeft.x.toFixed(1)}, ${clampedTopLeft.y.toFixed(1)}) to (${clampedBottomRight.x.toFixed(1)}, ${clampedBottomRight.y.toFixed(1)})`);
+      }
+      
+      console.log('[loadStitchedTiles] ✅ Scan data loading completed successfully');
     } catch (error) {
       console.error('Failed to load stitched tile:', error);
       if (appendLog) appendLog(`Failed to load scan tile: ${error.message}`);
     } finally {
-      // Remove from active requests
-      activeTileRequestsRef.current.delete(requestKey);
+      // Remove from scan data requests
+      scanDataRequestsRef.current.delete(requestKey);
       
-      // Update loading state - check if any requests are still active
-      if (activeTileRequestsRef.current.size === 0) {
-        setIsLoadingCanvas(false);
+      // Update scan data loading state
+      if (scanDataRequestsRef.current.size === 0) {
+        setIsScanDataLoading(false);
       }
     }
-  }, [isHistoricalDataMode, microscopeControlService, visibleLayers.scanResults, visibleLayers.channels, mapViewMode, scaleLevel, displayToStageCoords, stageDimensions, pixelsPerMm, isRegionCovered, getTileKey, addOrUpdateTile, appendLog, isSimulatedMicroscope, selectedHistoricalDataset, selectedGallery, getIntersectingWells, calculateWellRegion, wellPlateType, realMicroscopeChannelConfigs, zarrChannelConfigs, getEnabledZarrChannels, shouldUseMultiChannelLoading]);
+    }
+    })() : Promise.resolve();
+    
+    // Run both browse data and scan data loading in parallel
+    await Promise.all([browseDataPromise, scanDataPromise]);
+  }, [getBrowseDataLayer, getScanDataLayer, microscopeControlService, visibleLayers.channels, mapViewMode, scaleLevel, displayToStageCoords, stageDimensions, pixelsPerMm, getTileKey, addOrUpdateTile, appendLog, isSimulatedMicroscope, selectedHistoricalDataset, selectedGallery, getIntersectingWells, calculateWellRegion, wellPlateType, realMicroscopeChannelConfigs, zarrChannelConfigs, getEnabledZarrChannels, shouldUseMultiChannelLoading, visibleExperiments, activeExperiment, getLayerContrastSettings, experiments]);
+
+  // Add a ref to track previous experiment selection to avoid unnecessary reloads
+  const previousExperimentSelectionRef = useRef(null);
+
+  // Effect to clean up tiles when experiments become invisible
+  useEffect(() => {
+    setStitchedTiles(prevTiles => {
+      const filteredTiles = prevTiles.filter(tile => {
+        // Keep tiles with no experiment name (e.g., from browse data layers)
+        if (tile.experimentName === null || tile.experimentName === undefined) {
+          return true;
+        }
+        // Keep tiles from visible experiments only
+        return visibleExperiments.includes(tile.experimentName);
+      });
+      
+      if (filteredTiles.length !== prevTiles.length) {
+        console.log(`[Tile Cleanup] Removed ${prevTiles.length - filteredTiles.length} tiles for hidden experiments. Visible experiments: [${visibleExperiments.join(', ')}]`);
+      }
+      
+      return filteredTiles;
+    });
+  }, [visibleExperiments]);
+
+  // Effect to load tiles when visible experiments change
+  useEffect(() => {
+    const scanDataLayer = getScanDataLayer();
+    const hasScanResults = visibleLayers.scanResults && visibleExperiments.length > 0;
+    if (mapViewMode === 'FREE_PAN' && (scanDataLayer || hasScanResults)) {
+      const activeChannel = getChannelString();
+      
+      // Check if microscope service is available
+      if (!microscopeControlService || isSimulatedMicroscope) {
+        console.log('[Visible Experiments] Skipping - no microscope service or simulated mode');
+        return;
+      }
+      
+      // Don't load tiles while user is actively interacting
+      if (isPanning || isZooming) {
+        console.log('[Visible Experiments] Skipping - user is actively interacting (panning:', isPanning, 'zooming:', isZooming, ')');
+        return;
+      }
+      
+      // Get current experiment selection string for comparison
+      const currentExperimentString = visibleExperiments.sort().join(',');
+      
+      console.log(`[Experiment Change] Checking: previous='${previousExperimentSelectionRef.current}' current='${currentExperimentString}' visibleExperiments=[${visibleExperiments.join(', ')}]`);
+      
+      // Check if this is a real experiment change vs just UI update
+      // First time (when ref is null), initialize it without triggering reload
+      if (previousExperimentSelectionRef.current === null) {
+        console.log(`[Experiment Change] First initialization - setting tracking ref to: ${currentExperimentString}`);
+        previousExperimentSelectionRef.current = currentExperimentString;
+        return;
+      }
+      
+      if (currentExperimentString !== previousExperimentSelectionRef.current) {
+        console.log(`[Experiment Change] Detected real experiment change: '${previousExperimentSelectionRef.current}' → '${currentExperimentString}'`);
+        
+        // Update the ref to track current selection
+        previousExperimentSelectionRef.current = currentExperimentString;
+        
+        // Get experiments to check - same logic as tile loading
+        const experimentsToCheck = visibleExperiments.length > 0 ? visibleExperiments : (activeExperiment ? [activeExperiment] : [null]);
+        
+        // Check if we have tiles for all experiments at current scale/channel
+        const missingExperiments = experimentsToCheck.filter(expName => {
+          const hasTiles = stitchedTiles.some(tile => 
+            tile.scale === scaleLevel && 
+            tile.channel === activeChannel &&
+            (expName === null ? tile.experimentName === null : tile.experimentName === expName)
+          );
+          return !hasTiles;
+        });
+        
+        if (missingExperiments.length > 0) {
+          const experimentNames = missingExperiments.map(exp => exp === null ? 'no-experiment' : exp);
+          console.log(`[Visible Experiments] Missing tiles for experiments: ${experimentNames.join(', ')} - triggering tile load`);
+          
+          // Set flag to trigger tile loading - loadStitchedTiles will be called by the effect
+          // This prevents blackout while preserving visible data
+          
+          if (appendLog) {
+            appendLog(`Experiment visibility changed - loading tiles for: ${experimentNames.join(', ')}`);
+          }
+          
+          // Set flag to trigger tile loading - no need for delays
+          setNeedsTileReload(true);
+        } else {
+          console.log(`[Visible Experiments] All required experiments have tiles: ${experimentsToCheck.join(', ')}`);
+        }
+      } else {
+        console.log(`[Experiment Change] No real experiment change detected - UI update only`);
+      }
+    }
+  }, [visibleExperiments, activeExperiment, mapViewMode, getScanDataLayer, visibleLayers.scanResults, microscopeControlService, isSimulatedMicroscope, scaleLevel, stitchedTiles, getChannelString, isPanning, isZooming, appendLog, setNeedsTileReload]); // Updated to use layer-based logic
 
   // Debounce tile loading - only load after user stops interacting for 1 second
-  const scheduleTileUpdate = useCallback(() => {
-    console.log('[scheduleTileUpdate] Called - clearing existing timer and scheduling new one');
+  const scheduleTileUpdate = useCallback((source = 'unknown') => {
+    // 🚀 IMMEDIATE CANCELLATION: Cancel any ongoing requests when scheduling new ones
+    if (currentCancellableRequest) {
+      const cancelledCount = currentCancellableRequest.cancel();
+      console.log(`🚫 scheduleTileUpdate (${source}): Cancelled ${cancelledCount} pending requests`);
+      setCurrentCancellableRequest(null);
+    }
+    
+    if (artifactZarrLoaderRef.current) {
+      const artifactCancelledCount = artifactZarrLoaderRef.current.cancelAllRequests();
+      console.log(`🚫 scheduleTileUpdate (${source}): Cancelled ${artifactCancelledCount} active artifact requests`);
+    }
+    
+    // Clear all active requests (keep for global refreshes)
+    browseDataRequestsRef.current.clear();
+    scanDataRequestsRef.current.clear();
+    activeTileRequestsRef.current.clear();
+    setIsBrowseDataLoading(false);
+    setIsScanDataLoading(false);
+    
+    console.log(`[scheduleTileUpdate] Called from ${source} - clearing existing timer and scheduling new one`);
     if (canvasUpdateTimerRef.current) {
       console.log('[scheduleTileUpdate] Clearing existing timer');
       clearTimeout(canvasUpdateTimerRef.current);
     }
     canvasUpdateTimerRef.current = setTimeout(() => {
-      console.log('[scheduleTileUpdate] Timer fired - calling loadStitchedTiles');
+      console.log(`[scheduleTileUpdate] Timer fired from ${source} - calling loadStitchedTiles`);
       loadStitchedTiles();
-    }, 1000); // Wait 1 second after user stops
-    console.log('[scheduleTileUpdate] New timer scheduled for 1000ms');
+    }, 300); // Wait 0.3 second after user stops
+    console.log(`[scheduleTileUpdate] New timer scheduled for 300ms (source: ${source})`);
   }, [loadStitchedTiles]);
 
   // Function to refresh canvas view (can be used by timepoint operations)
@@ -3198,16 +4272,18 @@ const MicroscopeMapDisplay = ({
         setCurrentCancellableRequest(null);
       }
       
-      // Clear active requests
+      // 🚀 CRITICAL FIX: Also cancel ALL active requests in the artifact loader
+      if (artifactZarrLoaderRef.current) {
+        const artifactCancelledCount = artifactZarrLoaderRef.current.cancelAllRequests();
+        console.log(`🚫 Refresh: Cancelled ${artifactCancelledCount} active artifact requests`);
+      }
+      
+      // Clear only legacy active requests 
       activeTileRequestsRef.current.clear();
       
-      // Clear all existing tiles to force reload of fresh data
-      setStitchedTiles([]);
-      
-      // Force immediate tile loading after clearing tiles
-      setTimeout(() => {
-        loadStitchedTiles();
-      }, 100); // Small delay to ensure state is updated
+      // Directly load new tiles - they will replace old ones automatically
+      // This prevents blackout during refresh operations
+      loadStitchedTiles();
       
       if (appendLog) {
         appendLog('Refreshing canvas view');
@@ -3216,7 +4292,7 @@ const MicroscopeMapDisplay = ({
   }, [loadStitchedTiles, appendLog, isSimulatedMicroscope, currentCancellableRequest]);
 
   // Consolidated tile loading effect - replaces multiple overlapping effects
-  const lastTileRequestRef = useRef({ panX: 0, panY: 0, scale: 0, timestamp: 0 });
+  const lastTileRequestRef = useRef({ panX: 0, panY: 0, scale: 0, scaleLevel: 0, timestamp: 0 });
   
   useEffect(() => {
     if (mapViewMode !== 'FREE_PAN' || !visibleLayers.scanResults) {
@@ -3230,11 +4306,8 @@ const MicroscopeMapDisplay = ({
       return;
     }
 
-    // Don't trigger tile loading if tiles are currently loading
-    if (isLoadingCanvas || activeTileRequestsRef.current.size > 0) {
-      console.log('[Tile Loading] Skipping - tiles are currently loading (isLoadingCanvas:', isLoadingCanvas, 'activeRequests:', activeTileRequestsRef.current.size, ')');
-      return;
-    }
+    // REMOVED: Don't prevent cancellation when tiles are loading - this creates deadlock!
+    // The scheduleTileUpdate function now handles cancellation properly
 
     const container = mapContainerRef.current;
     if (!container) {
@@ -3277,11 +4350,12 @@ const MicroscopeMapDisplay = ({
         panX: mapPan.x,
         panY: mapPan.y,
         scale: mapScale,
+        scaleLevel: scaleLevel,
         timestamp: Date.now()
       };
       
       // Schedule tile update
-      scheduleTileUpdate();
+      scheduleTileUpdate('tile-loading-effect');
     } else {
       console.log('[Tile Loading] Skipping - no significant change or too soon since last request');
     }
@@ -3296,123 +4370,88 @@ const MicroscopeMapDisplay = ({
     scheduleTileUpdate
   ]);
 
-  // 🚀 REQUEST CANCELLATION: Cleanup effect for cancellable requests
+  // 🚀 REQUEST CANCELLATION: Cleanup effect for cancellable requests (only on actual unmount)
   useEffect(() => {
     return () => {
-      // Cancel any pending cancellable requests when component unmounts
+      // Only cancel on actual component unmount, not on re-renders
+      console.log(`🚫 Component cleanup triggered`);
       if (currentCancellableRequest) {
         const cancelledCount = currentCancellableRequest.cancel();
         console.log(`🚫 Component unmount: Cancelled ${cancelledCount} pending requests`);
       }
       
-      // 🚫 IMPROVED: Only cancel artifact loader requests if we're not in historical mode
-      // This prevents aggressive cancellation during normal navigation
-      if (artifactZarrLoaderRef.current && !isHistoricalDataMode) {
-        const cancelledCount = artifactZarrLoaderRef.current.cancelAllRequests();
-        console.log(`🚫 Component unmount: Cancelled ${cancelledCount} artifact loader requests`);
+      // 🚀 CRITICAL FIX: Also cancel ALL active requests in the artifact loader
+      if (artifactZarrLoaderRef.current) {
+        const artifactCancelledCount = artifactZarrLoaderRef.current.cancelAllRequests();
+        console.log(`🚫 Component unmount: Cancelled ${artifactCancelledCount} active artifact requests`);
       }
     };
-  }, [currentCancellableRequest, isHistoricalDataMode]);
+  }, []); // Remove dependencies to only run on actual unmount
 
-  // Initial tile loading when the map becomes visible
+  // 🚀 ENHANCED: Initial tile loading - when map opens AND when data becomes available
+  const hasInitialLoadedRef = useRef(false);
   useEffect(() => {
-    if (isOpen && mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
-      console.log('[Initial Tile Loading] Triggering initial tile loading');
-      // Trigger initial tile loading through debounced function
-      scheduleTileUpdate();
+    const scanDataLayer = getScanDataLayer();
+    const hasScanResults = visibleLayers.scanResults && visibleExperiments.length > 0;
+    const hasExperiments = experiments && experiments.length > 0;
+    // Check for any available data source
+    const hasData = scanDataLayer || hasScanResults || (hasExperiments && visibleLayers.scanResults);
+    
+    // Trigger initial load when map is open AND we have data available AND haven't loaded yet
+    if (isOpen && hasData && !hasInitialLoadedRef.current && mapViewMode === 'FREE_PAN' && !isZooming && !isPanning) {
+      hasInitialLoadedRef.current = true;
+      
+      console.log('[Initial Tile Loading] Triggering initial tile loading - data is available');
+      console.log('[Initial Tile Loading] Data sources: scanDataLayer=', !!scanDataLayer, 'hasScanResults=', hasScanResults, 'hasExperiments=', hasExperiments, 'scanResultsEnabled=', visibleLayers.scanResults);
+      // Use a shorter delay since data is confirmed available
+      setTimeout(() => {
+        scheduleTileUpdate('initial-loading');
+      }, 200);
     }
-  }, [isOpen, mapViewMode, visibleLayers.scanResults, scheduleTileUpdate]);
+    
+    // Reset when map closes
+    if (!isOpen) {
+      hasInitialLoadedRef.current = false;
+    }
+  }, [isOpen, mapViewMode, isZooming, isPanning, scheduleTileUpdate, getScanDataLayer, visibleLayers.scanResults, visibleExperiments, experiments]); // Added experiments dependency
 
   // Effect to trigger tile loading when needsTileReload is set
   useEffect(() => {
-    if (needsTileReload && mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
-      // Check if tiles are currently loading
-      if (isLoadingCanvas || activeTileRequestsRef.current.size > 0) {
-        console.log('[needsTileReload] Skipping - tiles are currently loading (isLoadingCanvas:', isLoadingCanvas, 'activeRequests:', activeTileRequestsRef.current.size, ')');
+    const browseDataLayer = getBrowseDataLayer();
+    const scanDataLayer = getScanDataLayer();
+    const hasScanResults = visibleLayers.scanResults && visibleExperiments.length > 0;
+    if (needsTileReload && mapViewMode === 'FREE_PAN' && (browseDataLayer || scanDataLayer || hasScanResults) && !isZooming && !isPanning) {
+      // Check if tiles are currently loading - only check relevant layer types
+      const isBrowseLoading = browseDataLayer && isBrowseDataLoading;
+      const isScanLoading = (scanDataLayer || hasScanResults) && isScanDataLoading;
+      
+      if (isBrowseLoading || isScanLoading) {
+        console.log('[needsTileReload] Skipping - relevant tiles are currently loading (browse:', isBrowseLoading, 'scan:', isScanLoading, ')');
         setNeedsTileReload(false); // Reset flag but don't trigger new loading
         return;
       }
       
-      console.log('[needsTileReload] Triggering tile reload');
+      console.log('[needsTileReload] Triggering direct tile reload - no scheduling to prevent duplicates');
       // Reset the flag
       setNeedsTileReload(false);
       
-      // Trigger tile loading after a short delay to ensure tiles are cleared
-      setTimeout(() => {
-        scheduleTileUpdate();
-      }, 100);
+      // Call loadStitchedTiles directly instead of scheduling to prevent duplicate calls
+      loadStitchedTiles();
     }
-  }, [needsTileReload, mapViewMode, visibleLayers.scanResults, scheduleTileUpdate]);
+  }, [needsTileReload, mapViewMode, getBrowseDataLayer, getScanDataLayer, visibleLayers.scanResults, visibleExperiments, loadStitchedTiles, isZooming, isPanning, isBrowseDataLoading, isScanDataLoading]);
 
-  // Effect to cleanup high-resolution tiles when zooming out (but don't immediately load during active zoom)
+  // 🚀 SIMPLIFIED: Only cleanup tiles when scale changes, don't trigger new tile loading
+  // This prevents the endless loop while still cleaning up memory
   useEffect(() => {
-    if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
-      console.log('[scaleLevel cleanup] Triggering cleanup and potential tile load');
+    const scanDataLayer = getScanDataLayer();
+    if (mapViewMode === 'FREE_PAN' && scanDataLayer) {
       const activeChannel = getChannelString();
-      
-      // For historical mode, be more conservative with cleanup during zoom operations
-      if (isHistoricalDataMode && isZooming) {
-        console.log('[scaleLevel cleanup] Historical mode + zooming - skipping aggressive cleanup');
-        // Don't cleanup during zoom in historical mode to prevent map clearing
-        return;
-      }
-      
-      // Always cleanup immediately when scale changes to save memory
+      console.log('[scaleLevel cleanup] Cleaning up old tiles for memory management');
       cleanupOldTiles(scaleLevel, activeChannel);
-      
-      // 🚀 PERFORMANCE OPTIMIZATION: Only trigger tile load if microscope service is available
-      if (!isZooming && microscopeControlService && !isSimulatedMicroscope) {
-        // Check if tiles are currently loading
-        if (isLoadingCanvas || activeTileRequestsRef.current.size > 0) {
-          console.log('[scaleLevel cleanup] Skipping - tiles are currently loading');
-        } else {
-          console.log('[scaleLevel cleanup] User not zooming - scheduling tile load');
-          setTimeout(() => {
-            scheduleTileUpdate(); // Use scheduleTileUpdate instead of direct call
-          }, 800); // Increased delay to 800ms for less aggressive loading
-        }
-      } else {
-        console.log('[scaleLevel cleanup] User is zooming or no microscope service - skipping tile load');
-      }
+      // Tiles will be loaded only when user pans/zooms significantly
     }
-  }, [scaleLevel, mapViewMode, visibleLayers.scanResults, visibleLayers.channels, isZooming, scheduleTileUpdate, cleanupOldTiles, microscopeControlService, isSimulatedMicroscope, isHistoricalDataMode]);
+  }, [scaleLevel, mapViewMode, getScanDataLayer, cleanupOldTiles, getChannelString]); // Updated to use layer-based logic
 
-  // Effect to ensure tiles are loaded for current scale level
-  // EXCLUDES historical mode - no automatic tile loading needed for historical data
-  useEffect(() => {
-    if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && !isZooming && !isHistoricalDataMode) {
-      const activeChannel = getChannelString();
-      
-      // 🚀 PERFORMANCE OPTIMIZATION: Check if microscope service is available before attempting tile loading
-      if (!microscopeControlService || isSimulatedMicroscope) {
-        console.log('[Scale Level Check] Skipping - no microscope service or simulated mode');
-        return;
-      }
-      
-      // Check if we have tiles for the current scale level
-      const currentScaleTiles = stitchedTiles.filter(tile => 
-        tile.scale === scaleLevel && 
-        tile.channel === activeChannel
-      );
-      
-      // If no tiles exist for current scale level, trigger loading
-      if (currentScaleTiles.length === 0) {
-        console.log(`[Scale Level Check] No tiles found for scale ${scaleLevel}, channel ${activeChannel} - triggering tile load`);
-        
-        // Check if tiles are currently loading
-        if (isLoadingCanvas || activeTileRequestsRef.current.size > 0) {
-          console.log('[Scale Level Check] Skipping - tiles are currently loading');
-        } else {
-          console.log('[Scale Level Check] Triggering tile load for missing scale level');
-          setTimeout(() => {
-            scheduleTileUpdate();
-          }, 300); // Small delay to ensure other operations are complete
-        }
-      } else {
-        console.log(`[Scale Level Check] Found ${currentScaleTiles.length} tiles for scale ${scaleLevel}, channel ${activeChannel}`);
-      }
-    }
-  }, [scaleLevel, mapViewMode, visibleLayers.scanResults, visibleLayers.channels, stitchedTiles, isZooming, isLoadingCanvas, isHistoricalDataMode, scheduleTileUpdate, microscopeControlService, isSimulatedMicroscope]);
 
   if (!isOpen) return null;
 
@@ -3421,9 +4460,33 @@ const MicroscopeMapDisplay = ({
       {/* Header controls */}
       <div className="absolute top-0 left-0 right-0 bg-black bg-opacity-80 p-2 flex justify-between items-center z-10">
         <div className="flex items-center space-x-4">
-          <h3 className="text-white text-lg font-medium">
-            {mapViewMode === 'FOV_FITTED' ? 'Video View' : 'Stage Map'}
-          </h3>
+          {/* Samples and Controls buttons */}
+          <div className="flex items-center space-x-2">
+            {/* Sample Selection Button */}
+            <button 
+              onClick={() => setIsSamplePanelOpen(!isSamplePanelOpen)}
+              className={`px-3 py-1 text-xs text-white rounded flex items-center ${
+                isSamplePanelOpen ? 'bg-green-600 hover:bg-green-500' : 'bg-green-700 hover:bg-green-600'
+              }`}
+              title={isSamplePanelOpen ? "Close Sample Panel" : "Open Sample Panel"}
+            >
+              <i className="fas fa-flask mr-1"></i>
+              Samples
+            </button>
+
+            {/* Control Panel Button */}
+            <button 
+              onClick={() => setIsControlPanelOpen(!isControlPanelOpen)}
+              className={`px-3 py-1 text-xs text-white rounded flex items-center ${
+                isControlPanelOpen ? 'bg-blue-600 hover:bg-blue-500' : 'bg-blue-700 hover:bg-blue-600'
+              }`}
+              title={isControlPanelOpen ? "Close Control Panel" : "Open Control Panel"}
+            >
+              <i className="fas fa-cogs mr-1"></i>
+              Controls
+            </button>
+
+          </div>
           
           {mapViewMode === 'FREE_PAN' && (
             <>
@@ -3511,108 +4574,7 @@ const MicroscopeMapDisplay = ({
                   <i className="fas fa-crosshairs mr-1"></i>
                   Fit to View
                 </button>
-                
-                {/* Scan Area Button */}
-                <button
-                  onClick={() => {
-                    if (isSimulatedMicroscope) return;
-                    if (showScanConfig) {
-                      // Close scan panel and cancel selection
-                      setShowScanConfig(false);
-                      setIsRectangleSelection(false);
-                      setRectangleStart(null);
-                      setRectangleEnd(null);
-                      setDragSelectedWell(null);
-                    } else {
-                      // Automatically switch to FREE_PAN mode if in FOV_FITTED mode
-                      if (mapViewMode === 'FOV_FITTED') {
-                        transitionToFreePan();
-                        if (appendLog) {
-                          appendLog('Switched to stage map view for scan area selection');
-                        }
-                      }
-                      // Open scan panel and load current microscope settings (only if not scanning)
-                      if (!isScanInProgress) {
-                        loadCurrentMicroscopeSettings();
-                        // Automatically enable rectangle selection when opening scan panel (only if not scanning)
-                        // Clear any existing selection first
-                        setRectangleStart(null);
-                        setRectangleEnd(null);
-                        setDragSelectedWell(null);
-                        setIsRectangleSelection(true);
-                      }
-                      setShowScanConfig(true);
-                    }
-                  }}
-                  className={`px-2 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed ${
-                    showScanConfig ? 'bg-blue-600 hover:bg-blue-500' : 
-                    isScanInProgress ? 'bg-orange-600 hover:bg-orange-500' : 'bg-gray-700 hover:bg-gray-600'
-                  }`}
-                  title={isSimulatedMicroscope ? "Scanning not supported for simulated microscope" : 
-                         isScanInProgress ? "View/stop current scan" : "Configure scan and select area (automatically switches to stage map view)"}
-                  disabled={!microscopeControlService || isSimulatedMicroscope || isHistoricalDataMode || (isInteractionDisabled && !isScanInProgress)}
-                >
-                  <i className="fas fa-vector-square mr-1"></i>
-                  {isScanInProgress ? (showScanConfig ? 'Close Scan Panel' : 'View Scan Progress') : 
-                   (showScanConfig ? 'Close Scan Setup' : 'Scan Area')}
-                </button>
-                
-                {/* Quick Scan Button */}
-                <button
-                  onClick={() => {
-                    if (isSimulatedMicroscope) return;
-                    if (showQuickScanConfig) {
-                      // Close quick scan panel
-                      setShowQuickScanConfig(false);
-                    } else {
-                      // Close normal scan panel if open
-                      setShowScanConfig(false);
-                      setIsRectangleSelection(false);
-                      setRectangleStart(null);
-                      setRectangleEnd(null);
-                      setDragSelectedWell(null);
-                      // Clean up grid drawing states
-                      setGridDragStart(null);
-                      setGridDragEnd(null);
-                      setIsGridDragging(false);
-                      // Open quick scan panel (always allow opening, even during scanning)
-                      setShowQuickScanConfig(true);
-                    }
-                  }}
-                  className={`px-2 py-1 text-xs text-white rounded disabled:opacity-50 disabled:cursor-not-allowed ${
-                    showQuickScanConfig ? 'bg-green-600 hover:bg-green-500' : 
-                    isQuickScanInProgress ? 'bg-orange-600 hover:bg-orange-500' : 'bg-gray-700 hover:bg-gray-600'
-                  }`}
-                  title={isSimulatedMicroscope ? "Quick scanning not supported for simulated microscope" : 
-                         isQuickScanInProgress ? "View/stop current quick scan" : "Quick scan entire well plate with high-speed acquisition"}
-                  disabled={!microscopeControlService || isSimulatedMicroscope || isHistoricalDataMode || (isInteractionDisabled && !isQuickScanInProgress)}
-                >
-                  <i className="fas fa-bolt mr-1"></i>
-                  {isQuickScanInProgress ? (showQuickScanConfig ? 'Close Quick Scan Panel' : 'View Quick Scan Progress') : 
-                   (showQuickScanConfig ? 'Cancel Quick Scan' : 'Quick Scan')}
-                </button>
-                
-                {/* Browse Data Button */}
-                <button
-                  onClick={() => {
-                    if (isHistoricalDataMode) {
-                      setIsHistoricalDataMode(false); // Exit historical data mode
-                      setStitchedTiles([]); // Optionally clear tiles to force reload
-                    } else {
-                      setShowBrowseDataModal(true);
-                    }
-                  }}
-                  className={`px-2 py-1 text-xs rounded disabled:opacity-50 disabled:cursor-not-allowed ${
-                    isHistoricalDataMode
-                      ? 'bg-yellow-700 hover:bg-yellow-600 text-white border-2 border-yellow-400' // Style for exit mode
-                      : 'bg-blue-700 hover:bg-blue-600 text-white'
-                  }`}
-                  title={isHistoricalDataMode ? 'Exit historical data map mode' : 'Browse imaging data for this microscope'}
-                  disabled={!microscopeControlService || isSimulatedMicroscope || (!isHistoricalDataMode && isInteractionDisabled)}
-                >
-                  <i className={`fas ${isHistoricalDataMode ? 'fa-sign-out-alt' : 'fa-database'} mr-1`}></i>
-                  {isHistoricalDataMode ? 'Exit Data Map' : 'Browse Data'}
-                </button>
+                                
               </div>
               
               {/* Layer selector dropdown */}
@@ -3635,7 +4597,6 @@ const MicroscopeMapDisplay = ({
                       setVisibleLayers={setVisibleLayers}
                       
                       // Experiments props
-                      isHistoricalDataMode={isHistoricalDataMode}
                       isSimulatedMicroscope={isSimulatedMicroscope}
                       isLoadingExperiments={isLoadingExperiments}
                       activeExperiment={activeExperiment}
@@ -3648,6 +4609,10 @@ const MicroscopeMapDisplay = ({
                       setExperimentToDelete={setExperimentToDelete}
                       setShowDeleteConfirmation={setShowDeleteConfirmation}
                       
+                      // Multi-Layer Experiments props
+                      visibleExperiments={visibleExperiments}
+                      setVisibleExperiments={setVisibleExperiments}
+                      
                       // Multi-Channel props
                       shouldUseMultiChannelLoading={shouldUseMultiChannelLoading}
                       mapViewMode={mapViewMode}
@@ -3658,28 +4623,64 @@ const MicroscopeMapDisplay = ({
                       realMicroscopeChannelConfigs={realMicroscopeChannelConfigs}
                       updateRealMicroscopeChannelConfig={updateRealMicroscopeChannelConfig}
                       
+                      // Per-layer contrast settings
+                      layerContrastSettings={layerContrastSettings}
+                      updateLayerContrastSettings={updateLayerContrastSettings}
+                      getLayerContrastSettings={getLayerContrastSettings}
+                      
+                      // Experiment creation props
+                      microscopeControlService={microscopeControlService}
+                      createExperiment={createExperiment}
+                      showNotification={showNotification}
+                      appendLog={appendLog}
+                      
+                      // Incubator service for fetching sample info
+                      incubatorControlService={incubatorControlService}
+                      
                       // Layout props
                       isFovFittedMode={mapViewMode === 'FOV_FITTED'}
+                      
+                      // Scan configuration props
+                      showScanConfig={showScanConfig}
+                      setShowScanConfig={setShowScanConfig}
+                      showQuickScanConfig={showQuickScanConfig}
+                      setShowQuickScanConfig={setShowQuickScanConfig}
+                      
+                      // Browse data modal props
+                      setShowBrowseDataModal={setShowBrowseDataModal}
+                      
+                      // Historical data mode props
+                      isHistoricalDataMode={isHistoricalDataMode}
+                      setIsHistoricalDataMode={setIsHistoricalDataMode}
+                      
+                      // Layer management props
+                      layers={layers}
+                      setLayers={setLayers}
+                      expandedLayers={expandedLayers}
+                      setExpandedLayers={setExpandedLayers}
+                      
+                      // Dropdown control props
+                      setIsLayerDropdownOpen={setIsLayerDropdownOpen}
+                      
+                      // Microscope control props
+                      isControlPanelOpen={isControlPanelOpen}
+                      setIsControlPanelOpen={setIsControlPanelOpen}
+                      
+                      // Live video props
+                      isWebRtcActive={isWebRtcActive}
+                      toggleWebRtcStream={toggleWebRtcStream}
+                      currentOperation={currentOperation}
+                      microscopeBusy={microscopeBusy}
+                      
+                      // Historical dataset props
+                      selectedHistoricalDataset={selectedHistoricalDataset}
+                      
+                      // Layer activation props
+                      activeLayer={activeLayer}
+                      setActiveLayer={setActiveLayer}
                     />
                   </div>
                 )}
-              </div>
-              
-              {/* Well Selection Controls */}
-              <div className="flex items-center space-x-2">
-                {/* Well Plate Type Selector */}
-                <div className="flex items-center space-x-1">
-                  <label className="text-white text-xs">Plate:</label>
-                  <select
-                    value={wellPlateType}
-                    onChange={(e) => setWellPlateType(e.target.value)}
-                    className="px-1 py-0.5 text-xs bg-gray-700 border border-gray-600 rounded text-white"
-                    disabled={isSimulatedMicroscope}
-                  >
-                    <option value="96">96-well</option>
-                    <option value="96">only 96-well for now</option>
-                  </select>
-                </div>
               </div>
             </>
           )}
@@ -3691,19 +4692,91 @@ const MicroscopeMapDisplay = ({
             </div>
           )}
         </div>
+        
+        {/* Right side controls */}
+        <div className="flex items-center space-x-2">
+          {mapViewMode === 'FREE_PAN' && (
+            <>
+              {/* Annotation panel - now controlled by layer panel */}
+              <div className="relative mr-4" ref={annotationDropdownRef}>
+                <div className={`absolute top-full right-0 mt-1 z-20 ${isAnnotationDropdownOpen ? 'block' : 'hidden'}`}>
+                  <AnnotationPanel
+                      isDrawingMode={isDrawingMode}
+                      setIsDrawingMode={setIsDrawingMode}
+                      currentTool={currentAnnotationTool}
+                      setCurrentTool={setCurrentAnnotationTool}
+                      isMapBrowsingMode={isMapBrowsingMode}
+                      setIsMapBrowsingMode={setIsMapBrowsingMode}
+                      strokeColor={annotationStrokeColor}
+                      setStrokeColor={setAnnotationStrokeColor}
+                      strokeWidth={annotationStrokeWidth}
+                      setStrokeWidth={setAnnotationStrokeWidth}
+                      fillColor={annotationFillColor}
+                      setFillColor={setAnnotationFillColor}
+                      description={annotationDescription}
+                      setDescription={setAnnotationDescription}
+                      annotations={annotations}
+                      onAnnotationDelete={handleAnnotationDelete}
+                      onClearAllAnnotations={handleClearAllAnnotations}
+                      onExportAnnotations={handleExportAnnotations}
+                      wellInfoMap={annotationWellMap}
+                      similarAnnotationWellMap={similarAnnotationWellMap}
+                      getWellInfoById={getWellInfoById}
+                      embeddingStatus={embeddingStatus}
+                      mapScale={mapScale}
+                      mapPan={mapPan}
+                      stageDimensions={stageDimensions}
+                      pixelsPerMm={pixelsPerMm}
+                      // New props for advanced extraction
+                      isHistoricalDataMode={isHistoricalDataMode}
+                      microscopeControlService={microscopeControlService}
+                      artifactZarrLoader={artifactZarrLoaderRef.current}
+                      zarrChannelConfigs={zarrChannelConfigs}
+                      realMicroscopeChannelConfigs={realMicroscopeChannelConfigs}
+                      enabledZarrChannels={getEnabledZarrChannels()}
+                      visibleChannelsConfig={visibleLayers.channels}
+                      selectedHistoricalDataset={selectedHistoricalDataset}
+                      wellPlateType={wellPlateType}
+                      timepoint={0}
+                      onEmbeddingsGenerated={handleEmbeddingsGenerated}
+                      onSimilarAnnotationsUpdate={handleSimilarAnnotationsUpdate}
+                      // Similar annotations state and controls
+                      similarAnnotations={similarAnnotations}
+                      showSimilarAnnotations={showSimilarAnnotations}
+                      setShowSimilarAnnotations={setShowSimilarAnnotations}
+                      onSimilarAnnotationsCleanup={handleSimilarAnnotationsCleanup}
+                      // Navigation functions
+                      navigateToCoordinates={navigateToCoordinates}
+                      goBackToPreviousPosition={goBackToPreviousPosition}
+                      hasPreviousPosition={previousMapState !== null}
+                      currentZoomLevel={zoomLevel}
+                      currentScaleLevel={scaleLevel}
+                      // Layer activation props
+                      activeLayer={activeLayer}
+                      layers={layers}
+                      experiments={experiments}
+                    />
+                </div>
+              </div>
+              
+            </>
+          )}
+        </div>
       </div>
 
       {/* Main display container */}
       <div
         ref={mapContainerRef}
         className={`absolute inset-0 top-12 overflow-hidden ${
-          isMapBrowsingDisabled 
-            ? 'cursor-not-allowed microscope-map-disabled' 
-            : mapViewMode === 'FOV_FITTED' 
-              ? (isHardwareInteractionDisabled ? 'cursor-not-allowed' : 'cursor-grab')
-              : (isRectangleSelection && !isScanInProgress && !isQuickScanInProgress)
-                ? (isHardwareInteractionDisabled ? 'cursor-not-allowed' : 'cursor-crosshair')
-                : 'cursor-move'
+          isDrawingMode && !isMapBrowsingMode
+            ? 'cursor-crosshair' 
+            : isMapBrowsingMode
+              ? (isDragging || isPanning ? 'cursor-grabbing' : 'cursor-grab')
+              : mapViewMode === 'FOV_FITTED' 
+                ? (isHardwareInteractionDisabled ? 'cursor-not-allowed' : 'cursor-grab')
+                : (isRectangleSelection && !isScanInProgress && !isQuickScanInProgress)
+                  ? (isHardwareInteractionDisabled ? 'cursor-not-allowed' : 'cursor-crosshair')
+                  : 'cursor-move'
         } ${isDragging || isPanning ? 'cursor-grabbing' : ''}`}
         onMouseDown={isMapBrowsingDisabled ? undefined : (mapViewMode === 'FOV_FITTED' ? (isHardwareInteractionDisabled ? undefined : onMouseDown) : handleMapPanning)}
         onMouseMove={isMapBrowsingDisabled ? undefined : (mapViewMode === 'FOV_FITTED' ? (isHardwareInteractionDisabled ? undefined : onMouseMove) : handleMapPanMove)}
@@ -3713,8 +4786,9 @@ const MicroscopeMapDisplay = ({
                   style={{
             userSelect: 'none',
             transition: isDragging || isPanning ? 'none' : 'transform 0.3s ease-out',
-            opacity: isMapBrowsingDisabled ? 0.75 : 1,
-            cursor: (isRectangleSelection && !isScanInProgress && !isQuickScanInProgress) && mapViewMode === 'FREE_PAN' && !isHardwareInteractionDisabled ? 'crosshair' : undefined
+            opacity: isDrawingMode ? 0.9 : 1,
+            cursor: (isRectangleSelection && !isScanInProgress && !isQuickScanInProgress) && mapViewMode === 'FREE_PAN' && !isHardwareInteractionDisabled ? 'crosshair' : undefined,
+            zIndex: 1 // Ensure map container stays below other UI elements
           }}
       >
         {/* Map canvas for FREE_PAN mode */}
@@ -3724,16 +4798,23 @@ const MicroscopeMapDisplay = ({
         
         {/* Stitched scan results tiles layer (below other elements) */}
         {mapViewMode === 'FREE_PAN' && visibleTiles.map((tile, index) => {
+          // Calculate z-index for multi-layer experiments
+          // Experiments shown later have higher z-index (appear on top)
+          const experimentsToShow = visibleExperiments.length > 0 ? visibleExperiments : (activeExperiment ? [activeExperiment] : []);
+          const experimentIndex = tile.experimentName ? experimentsToShow.indexOf(tile.experimentName) : -1;
+          const baseZIndex = 1;
+          const experimentZIndex = experimentIndex >= 0 ? experimentIndex + baseZIndex : baseZIndex;
+          
           return (
             <div
-              key={`${getTileKey(tile.bounds, tile.scale, tile.channel)}_${index}`}
+              key={`${getTileKey(tile.bounds, tile.scale, tile.channel, tile.experimentName)}_${index}`}
               className="absolute pointer-events-none scan-results-container"
               style={{
                 left: `${stageToDisplayCoords(tile.bounds.topLeft.x, tile.bounds.topLeft.y).x}px`,
                 top: `${stageToDisplayCoords(tile.bounds.topLeft.x, tile.bounds.topLeft.y).y}px`,
                 width: `${tile.width_mm * pixelsPerMm * mapScale}px`,
                 height: `${tile.height_mm * pixelsPerMm * mapScale}px`,
-                zIndex: 1 // All scan result tiles at same level
+                zIndex: experimentZIndex // Multi-layer z-index based on experiment order
               }}
             >
               <img
@@ -3751,6 +4832,11 @@ const MicroscopeMapDisplay = ({
               {process.env.NODE_ENV === 'development' && (
                 <div className="absolute top-0 left-0 bg-black bg-opacity-50 text-white text-xs p-1">
                   S{tile.scale} {tile.isMerged ? 'MERGED' : tile.channel.substring(0, 3)}
+                  {tile.experimentName && (
+                    <div className="text-xs opacity-75">
+                      Exp: {tile.experimentName.substring(0, 8)}
+                    </div>
+                  )}
                   {tile.isMerged && tile.channelsUsed && (
                     <div className="text-xs opacity-75">
                       {tile.channelsUsed.map(ch => ch.substring(0, 3)).join('+')}
@@ -3771,6 +4857,40 @@ const MicroscopeMapDisplay = ({
         
         {/* Well plate overlay for FREE_PAN mode */}
         {mapViewMode === 'FREE_PAN' && render96WellPlate()}
+        
+         {/* Annotation Canvas Overlay */}
+         <AnnotationCanvas
+           containerRef={mapContainerRef}
+           isDrawingMode={isDrawingMode && !isMapBrowsingMode}
+           currentTool={currentAnnotationTool}
+           strokeColor={annotationStrokeColor}
+           strokeWidth={annotationStrokeWidth}
+           fillColor={annotationFillColor}
+           description={annotationDescription}
+           mapScale={mapScale}
+           mapPan={effectivePan}
+           annotations={annotations}
+           onAnnotationAdd={handleAnnotationAdd}
+           onAnnotationUpdate={handleAnnotationUpdate}
+           onAnnotationDelete={handleAnnotationDelete}
+           stageDimensions={stageDimensions}
+           pixelsPerMm={pixelsPerMm}
+           channelInfo={getCurrentChannelInfo()}
+         />
+         
+         {/* Similar Annotations Renderer - only in FREE_PAN mode */}
+         {mapViewMode === 'FREE_PAN' && (
+           <SimilarAnnotationRenderer
+             containerRef={mapContainerRef}
+             similarAnnotations={similarAnnotations}
+             isVisible={showSimilarAnnotations}
+             mapScale={mapScale}
+             mapPan={effectivePan}
+             stageDimensions={stageDimensions}
+             pixelsPerMm={pixelsPerMm}
+             wellInfoMap={similarAnnotationWellMap}
+           />
+         )}
         
         {/* Rectangle selection active indicator */}
         {mapViewMode === 'FREE_PAN' && isRectangleSelection && !rectangleStart && !isScanInProgress && !isQuickScanInProgress && (
@@ -3972,7 +5092,7 @@ const MicroscopeMapDisplay = ({
         })()}
         
         {/* Current video frame position indicator */}
-        {videoFramePosition && (!isHistoricalDataMode || (isSimulatedMicroscope && isHistoricalDataMode)) && (
+        {videoFramePosition && (!isHistoricalDataMode || (isSimulatedMicroscope && isHistoricalDataMode)) && !isHardwareLocked && (
           <div
             className="absolute border-2 border-yellow-400 pointer-events-none"
             style={{
@@ -4311,34 +5431,56 @@ const MicroscopeMapDisplay = ({
             {/* Modal Body: Two columns */}
             <div className="flex flex-row divide-x divide-gray-700" style={{ minHeight: '350px' }}>
               {/* Experiments/Galleries List (Left) */}
-              <div className="flex-1 p-4 overflow-y-auto">
-                <div className="text-gray-300 font-medium mb-2">Experiment Galleries</div>
-                {galleriesLoading && <div className="text-xs text-gray-400">Loading galleries...</div>}
-                {galleriesError && <div className="text-xs text-red-400">{galleriesError}</div>}
-                {!galleriesLoading && !galleriesError && galleries.length === 0 && (
-                  <div className="text-xs text-gray-400">No galleries found for this microscope.</div>
-                )}
-                <ul className="space-y-1">
-                  {galleries.map(gal => (
-                    <li key={gal.id}>
-                      <button
-                        className={`w-full text-left px-2 py-1 rounded ${selectedGallery && selectedGallery.id === gal.id ? 'bg-blue-700 text-white' : 'bg-gray-700 text-gray-200 hover:bg-blue-800'}`}
-                        onClick={() => setSelectedGallery(gal)}
-                      >
-                        {gal.manifest?.name || gal.alias || gal.id}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
+              <div className="flex-1 flex flex-col">
+                <div className="p-4 border-b border-gray-600">
+                  <div className="text-gray-300 font-medium mb-2">All Experiment Galleries</div>
+                  {galleriesLoading && <div className="text-xs text-gray-400">Loading galleries...</div>}
+                  {galleriesError && <div className="text-xs text-red-400">{galleriesError}</div>}
+                  {!galleriesLoading && !galleriesError && galleries.length === 0 && (
+                    <div className="text-xs text-gray-400">No galleries found.</div>
+                  )}
+                </div>
+                {/* Scrollable Galleries List */}
+                <div className="flex-1 overflow-y-auto p-4" style={{ maxHeight: '250px' }}>
+                  <ul className="space-y-1">
+                    {galleries.map(gal => (
+                      <li key={gal.id}>
+                        <button
+                          className={`w-full text-left px-2 py-1 rounded text-sm ${selectedGallery && selectedGallery.id === gal.id ? 'bg-blue-700 text-white' : 'bg-gray-700 text-gray-200 hover:bg-blue-800'}`}
+                          onClick={() => setSelectedGallery(gal)}
+                        >
+                          {gal.manifest?.name || gal.alias || gal.id}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
                 {/* View Gallery in Map Button */}
-                <div className="mt-4 flex justify-end">
+                <div className="p-4 border-t border-gray-600">
                   <button
-                    className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                     disabled={!selectedGallery}
                     onClick={() => {
                       setShowBrowseDataModal(false);
                       setIsHistoricalDataMode(true);
                       setStitchedTiles([]); // Clear all loaded tiles
+                      
+                      // Create a Browse Data layer if it doesn't exist
+                      setLayers(prev => {
+                        const existingBrowseLayer = prev.find(layer => layer.type === 'load-server');
+                        if (!existingBrowseLayer) {
+                          const browseDataLayer = {
+                            id: `browse-data-${Date.now()}`,
+                            name: 'Browse Data',
+                            type: 'load-server',
+                            visible: true,
+                            channels: [],
+                            readonly: false
+                          };
+                          return [...prev, browseDataLayer];
+                        }
+                        return prev;
+                      });
                     }}
                   >
                     <i className="fas fa-map-marked-alt mr-1"></i>
@@ -4347,23 +5489,28 @@ const MicroscopeMapDisplay = ({
                 </div>
               </div>
               {/* Datasets List (Right) */}
-              <div className="flex-1 p-4 overflow-y-auto">
-                <div className="text-gray-300 font-medium mb-2">Datasets</div>
-                {!selectedGallery && <div className="text-xs text-gray-400">Select a gallery to view datasets.</div>}
-                {datasetsLoading && <div className="text-xs text-gray-400">Loading datasets...</div>}
-                {datasetsError && <div className="text-xs text-red-400">{datasetsError}</div>}
-                {!datasetsLoading && !datasetsError && selectedGallery && datasets.length === 0 && (
-                  <div className="text-xs text-gray-400">No datasets found in this gallery.</div>
-                )}
-                <ul className="space-y-1">
-                  {datasets.map(ds => (
-                    <li key={ds.id}>
-                      <div className="px-2 py-1 rounded bg-gray-700 text-gray-200">
-                        {ds.manifest?.name || ds.alias || ds.id}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
+              <div className="flex-1 flex flex-col">
+                <div className="p-4 border-b border-gray-600">
+                  <div className="text-gray-300 font-medium mb-2">Datasets</div>
+                  {!selectedGallery && <div className="text-xs text-gray-400">Select a gallery to view datasets.</div>}
+                  {datasetsLoading && <div className="text-xs text-gray-400">Loading datasets...</div>}
+                  {datasetsError && <div className="text-xs text-red-400">{datasetsError}</div>}
+                  {!datasetsLoading && !datasetsError && selectedGallery && datasets.length === 0 && (
+                    <div className="text-xs text-gray-400">No datasets found in this gallery.</div>
+                  )}
+                </div>
+                {/* Scrollable Datasets List */}
+                <div className="flex-1 overflow-y-auto p-4" style={{ maxHeight: '250px' }}>
+                  <ul className="space-y-1">
+                    {datasets.map(ds => (
+                      <li key={ds.id}>
+                        <div className="px-2 py-1 rounded bg-gray-700 text-gray-200 text-sm">
+                          {ds.manifest?.name || ds.alias || ds.id}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               </div>
             </div>
           </div>
@@ -4466,6 +5613,16 @@ MicroscopeMapDisplay.propTypes = {
   onFreePanAutoCollapse: PropTypes.func,
   onFitToViewUncollapse: PropTypes.func,
   sampleLoadStatus: PropTypes.object,
+  // Panel control props
+  isSamplePanelOpen: PropTypes.bool,
+  setIsSamplePanelOpen: PropTypes.func,
+  isControlPanelOpen: PropTypes.bool,
+  setIsControlPanelOpen: PropTypes.func,
+  // Sample selector props
+  incubatorControlService: PropTypes.object,
+  orchestratorManagerService: PropTypes.object,
+  onSampleLoadStatusChange: PropTypes.func,
 };
 
 export default MicroscopeMapDisplay; 
+
