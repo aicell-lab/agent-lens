@@ -73,6 +73,14 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-pip-
     
+    - name: Cache CLIP models
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/clip
+        key: ${{ runner.os }}-clip-models-${{ hashFiles('**/pyproject.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-clip-models-
+    
     - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
@@ -81,6 +89,22 @@ jobs:
     - name: Verify package installation
       run: |
         python -c "import agent_lens; print('agent_lens package installed successfully')"
+    
+    - name: Pre-download CLIP model
+      run: |
+        echo "📥 Pre-downloading CLIP model to avoid download issues during tests..."
+        python -c "
+        import clip
+        import torch
+        try:
+            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            print(f'Downloading CLIP model to device: {device}')
+            model, preprocess = clip.load('ViT-B/32', device=device)
+            print('✅ CLIP model downloaded successfully')
+        except Exception as e:
+            print(f'⚠️ CLIP model download failed: {e}')
+            print('Tests will use mock vectors if needed')
+        "
     
     - name: Install Playwright browsers with dependencies
       run: |
