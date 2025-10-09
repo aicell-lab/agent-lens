@@ -1834,14 +1834,6 @@ const MicroscopeControlPanel = ({
                     >
                       Next <i className="fas fa-chevron-right ml-1"></i>
                     </button>
-                    <button
-                      onClick={homeFilterWheel}
-                      disabled={!microscopeControlService || currentOperation !== null || microscopeBusy}
-                      className="control-button bg-green-500 text-white hover:bg-green-600 px-1.5 py-0.5 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed flex-1"
-                      title="Home filter wheel (position 1)"
-                    >
-                      <i className="fas fa-home"></i>
-                    </button>
                   </div>
                 </div>
 
