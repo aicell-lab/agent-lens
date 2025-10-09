@@ -364,7 +364,9 @@ const MicroscopeMapDisplay = ({
 
   // Helper function to get well plate configuration
   const getWellPlateConfig = useCallback(() => {
-    if (!microscopeConfiguration?.wellplate?.formats) return null;
+    if (!microscopeConfiguration?.wellplate?.formats) {
+      return null;
+    }
     
     const formatKey = wellPlateType === '96' ? '96_well' : 
                      wellPlateType === '48' ? '48_well' : 
@@ -1503,8 +1505,9 @@ const MicroscopeMapDisplay = ({
       const clickY = e.clientY - rect.top;
 
       // Convert click coordinates to map coordinates (accounting for pan and scale)
-      const mapX = (clickX - mapPan.x) / mapScale;
-      const mapY = (clickY - mapPan.y) / mapScale;
+      // Use the same coordinate system as well plate rendering
+      const mapX = (clickX - effectivePan.x) / mapScale;
+      const mapY = (clickY - effectivePan.y) / mapScale;
 
       // Convert from map pixels to stage coordinates (mm)
       const stageX_mm = (mapX / pixelsPerMm) + stageDimensions.xMin;

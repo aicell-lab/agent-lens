@@ -439,6 +439,60 @@ const MicroscopeControlPanel = ({
     }
   }, [microscopeControlService, illuminationChannel]); // Re-run if service or channel changes to re-sync
 
+  // Function to load microscope configuration (defined before the effect that uses it)
+  const loadMicroscopeConfiguration = useCallback(async () => {
+    if (!microscopeControlService) {
+      const errorMsg = "Microscope control service not available.";
+      setConfigurationError(errorMsg);
+      setIsConfigurationLoaded(false);
+      if (showNotification) showNotification(errorMsg, 'warning');
+      return;
+    }
+
+    // Check if the current microscope service supports configuration loading
+    if (typeof microscopeControlService.get_microscope_configuration !== 'function') {
+      const errorMsg = "Configuration not supported for this microscope.";
+      setConfigurationError(errorMsg);
+      setIsConfigurationLoaded(false);
+      appendLog(`Configuration loading not supported for microscope: ${selectedMicroscopeId}`);
+      return;
+    }
+
+    setIsConfigurationLoading(true);
+    setConfigurationError(null);
+    
+    try {
+      appendLog(`Loading microscope configuration for ${selectedMicroscopeId}...`);
+      const response = await microscopeControlService.get_microscope_configuration();
+      
+      if (response.success) {
+        // Store configuration without metadata
+        const configWithoutMetadata = { ...response.configuration };
+        delete configWithoutMetadata.metadata;
+        
+        setMicroscopeConfiguration(configWithoutMetadata);
+        setIsConfigurationLoaded(true);
+        appendLog(`Microscope configuration loaded successfully for ${selectedMicroscopeId}.`);
+        appendLog(`[Config] Pixel size: ${configWithoutMetadata?.optics?.calculated_pixel_size_mm}, Crop width: ${configWithoutMetadata?.acquisition?.crop_width}`);
+      } else {
+        const errorMsg = "Failed to load microscope configuration.";
+        setConfigurationError(errorMsg);
+        setIsConfigurationLoaded(false);
+        appendLog(errorMsg);
+        if (showNotification) showNotification(errorMsg, 'error');
+      }
+    } catch (error) {
+      const errorMsg = `Error loading microscope configuration: ${error.message}`;
+      setConfigurationError(errorMsg);
+      setIsConfigurationLoaded(false);
+      appendLog(errorMsg);
+      if (showNotification) showNotification(errorMsg, 'error');
+      console.error("[MicroscopeControlPanel] Error loading microscope configuration:", error);
+    } finally {
+      setIsConfigurationLoading(false);
+    }
+  }, [microscopeControlService, selectedMicroscopeId, appendLog, showNotification]);
+
   // Effect to automatically load microscope configuration when service changes
   useEffect(() => {
     if (microscopeControlService && selectedMicroscopeId) {
@@ -461,7 +515,7 @@ const MicroscopeControlPanel = ({
       setIsConfigurationLoaded(false);
       setConfigurationError("No microscope selected.");
     }
-  }, [microscopeControlService, selectedMicroscopeId]);
+  }, [microscopeControlService, selectedMicroscopeId, loadMicroscopeConfiguration, appendLog, showNotification]);
 
   // Effect to initialize Squid+ features when the microscope is selected
   useEffect(() => {
@@ -1152,61 +1206,6 @@ const MicroscopeControlPanel = ({
     // fetchImagingTasks(); // if orchestratorManagerService.get_all_imaging_tasks was called inside modal.
   };
 
-
-
-  // Function to load microscope configuration
-  const loadMicroscopeConfiguration = async () => {
-    if (!microscopeControlService) {
-      const errorMsg = "Microscope control service not available.";
-      setConfigurationError(errorMsg);
-      setIsConfigurationLoaded(false);
-      if (showNotification) showNotification(errorMsg, 'warning');
-      return;
-    }
-
-    // Check if the current microscope service supports configuration loading
-    if (typeof microscopeControlService.get_microscope_configuration !== 'function') {
-      const errorMsg = "Configuration not supported for this microscope.";
-      setConfigurationError(errorMsg);
-      setIsConfigurationLoaded(false);
-      appendLog(`Configuration loading not supported for microscope: ${selectedMicroscopeId}`);
-      return;
-    }
-
-    setIsConfigurationLoading(true);
-    setConfigurationError(null);
-    
-    try {
-      appendLog(`Loading microscope configuration for ${selectedMicroscopeId}...`);
-      const response = await microscopeControlService.get_microscope_configuration();
-      
-      if (response.success) {
-        // Store configuration without metadata
-        const configWithoutMetadata = { ...response.configuration };
-        delete configWithoutMetadata.metadata;
-        
-        setMicroscopeConfiguration(configWithoutMetadata);
-        setIsConfigurationLoaded(true);
-        appendLog(`Microscope configuration loaded successfully for ${selectedMicroscopeId}.`);
-      } else {
-        const errorMsg = "Failed to load microscope configuration.";
-        setConfigurationError(errorMsg);
-        setIsConfigurationLoaded(false);
-        appendLog(errorMsg);
-        if (showNotification) showNotification(errorMsg, 'error');
-      }
-    } catch (error) {
-      const errorMsg = `Error loading microscope configuration: ${error.message}`;
-      setConfigurationError(errorMsg);
-      setIsConfigurationLoaded(false);
-      appendLog(errorMsg);
-      if (showNotification) showNotification(errorMsg, 'error');
-      console.error("[MicroscopeControlPanel] Error loading microscope configuration:", error);
-    } finally {
-      setIsConfigurationLoading(false);
-    }
-  };
-
   // Function to open configuration display window
   const openConfigurationWindow = () => {
     if (!microscopeConfiguration) {
@@ -1240,20 +1239,48 @@ const MicroscopeControlPanel = ({
     return { width_mm: fovSize, height_mm: fovSize };
   }, [microscopeConfiguration]);
 
-  // Helper function to convert drag pixels to stage movement in mm
-  const convertDragToStageMovement = useCallback((dragPixels, displaySize) => {
-    const fovSize = calculateFOVSize();
+  // Helper function to get pixels per mm for the current display
+  // This matches the calculation used in MicroscopeMapDisplay.jsx
+  const getPixelsPerMm = useCallback(() => {
+    if (!microscopeConfiguration?.optics?.calculated_pixel_size_mm || !microscopeConfiguration?.acquisition?.crop_width) {
+      return null; // No fallback - return null if configuration not available
+    }
+
+    const calculatedPixelSizeMm = microscopeConfiguration.optics.calculated_pixel_size_mm;
+    const cropWidth = microscopeConfiguration.acquisition.crop_width;
+    const displayWidth = 750; // Video frame display size
     
-    // Calculate movement in mm based on FOV and display size
-    const movementX_mm = (dragPixels.x / displaySize.width) * fovSize.width_mm;
-    const movementY_mm = (dragPixels.y / displaySize.height) * fovSize.height_mm;
+    // Calculate actual pixel size for display
+    const actualPixelSizeMm = calculatedPixelSizeMm * (cropWidth / displayWidth);
+    
+    // Convert to pixels per mm
+    const pixelsPerMm = 1 / actualPixelSizeMm;
+    
+    return pixelsPerMm;
+  }, [microscopeConfiguration]);
+
+  // Helper function to convert drag pixels to stage movement in mm
+  const convertDragToStageMovement = useCallback((dragPixels) => {
+    // Get the pixels per mm for the current microscope configuration
+    const pixelsPerMm = getPixelsPerMm();
+    
+    // If no configuration available, return zero movement
+    if (!pixelsPerMm) {
+      console.warn(`[Drag Movement] No pixel size configuration available - returning zero movement`);
+      return { x: 0, y: 0 };
+    }
+    
+    // Calculate movement in mm based on pixels per mm
+    // This matches the coordinate conversion logic used in MicroscopeMapDisplay
+    const movementX_mm = dragPixels.x / pixelsPerMm;
+    const movementY_mm = dragPixels.y / pixelsPerMm;
     
     // Apply direction mapping: drag right = stage left (negative x), drag down = stage up (negative y)
     return {
       x: -movementX_mm, // Invert X direction
       y: -movementY_mm  // Invert Y direction
     };
-  }, [calculateFOVSize]);
+  }, [getPixelsPerMm]);
 
   // Mouse event handlers for drag move functionality
   const handleMouseDown = useCallback((e) => {
@@ -1315,12 +1342,8 @@ const MicroscopeControlPanel = ({
       y: dragCurrentPosition.y - dragStartPosition.y
     };
     
-    // Get display size for conversion calculations
-    const rect = e.currentTarget.getBoundingClientRect();
-    const displaySize = { width: rect.width, height: rect.height };
-    
     // Convert drag distance to stage movement
-    const stageMovement = convertDragToStageMovement(dragDistance, displaySize);
+    const stageMovement = convertDragToStageMovement(dragDistance);
     
     // Reset visual transform
     setDragTransform({ x: 0, y: 0 });
