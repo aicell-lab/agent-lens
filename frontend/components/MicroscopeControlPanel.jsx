@@ -1133,6 +1133,8 @@ const MicroscopeControlPanel = ({
       // Extract microscope identifier from the full service ID
       const microscopeIdentifier = selectedMicroscopeId.includes('microscope-control-squid') 
         ? `microscope-control-squid-${selectedMicroscopeId.endsWith('1') ? '1' : '2'}`
+        : selectedMicroscopeId.includes('squid-plus-1')
+        ? 'microscope-squid-plus-1'
         : null;
       
       const relevantTasks = tasks.filter(task => 
