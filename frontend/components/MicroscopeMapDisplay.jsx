@@ -100,7 +100,12 @@ const MicroscopeMapDisplay = ({
     };
   }, []);
 
-  // Set default quick scan parameters for specific microscope types
+  // Helper function to detect squid plus microscope
+  const isSquidPlusMicroscope = (microscopeId) => {
+    return microscopeId && microscopeId.includes('squid-plus');
+  };
+
+  // Set default scan parameters for specific microscope types
   useEffect(() => {
     if (selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1') {
       // Set default values for Real Microscope 1
@@ -108,6 +113,17 @@ const MicroscopeMapDisplay = ({
         ...prev,
         intensity: 70,
         exposure_time: 2
+      }));
+    } else if (isSquidPlusMicroscope(selectedMicroscopeId)) {
+      // Set default values for Squid Plus microscope
+      setQuickScanParameters(prev => ({
+        ...prev,
+        dy_mm: 0.7
+      }));
+      setScanParameters(prev => ({
+        ...prev,
+        dx_mm: 0.7,
+        dy_mm: 0.7
       }));
     }
   }, [selectedMicroscopeId]);
