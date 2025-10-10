@@ -1299,6 +1299,34 @@ const MicroscopeMapDisplay = ({
     };
   }, [containerDimensions, currentStagePosition, stageDimensions, pixelsPerMm, autoFittedScale]);
   
+  // Effect to adjust mapPan when pixelsPerMm changes (e.g., after objective switch in FREE_PAN mode)
+  const prevPixelsPerMmRef = useRef(pixelsPerMm);
+  useEffect(() => {
+    // Only adjust in FREE_PAN mode and when pixelsPerMm actually changes
+    if (mapViewMode === 'FREE_PAN' && prevPixelsPerMmRef.current !== pixelsPerMm && prevPixelsPerMmRef.current > 0 && pixelsPerMm > 0) {
+      // Calculate the scale ratio change
+      const scaleRatio = pixelsPerMm / prevPixelsPerMmRef.current;
+      
+      // Adjust mapPan to maintain the same visual center point
+      // The FOV position relative to stage boundaries changes with pixel scale
+      if (currentStagePosition && stageDimensions && containerDimensions.width > 0) {
+        // Recalculate pan to keep the same stage position centered
+        const stagePosX = (currentStagePosition.x - stageDimensions.xMin) * pixelsPerMm * calculatedMapScale;
+        const stagePosY = (currentStagePosition.y - stageDimensions.yMin) * pixelsPerMm * calculatedMapScale;
+        
+        setMapPan({
+          x: containerDimensions.width / 2 - stagePosX,
+          y: containerDimensions.height / 2 - stagePosY
+        });
+        
+        console.log(`[Objective Switch] Adjusted mapPan for pixelsPerMm change: ${prevPixelsPerMmRef.current.toFixed(3)} → ${pixelsPerMm.toFixed(3)} (ratio: ${scaleRatio.toFixed(3)})`);
+      }
+    }
+    
+    // Update the ref for next comparison
+    prevPixelsPerMmRef.current = pixelsPerMm;
+  }, [pixelsPerMm, mapViewMode, currentStagePosition, stageDimensions, containerDimensions, calculatedMapScale]);
+
   // Use fitted values in FOV_FITTED mode, manual values in FREE_PAN mode
   const mapScale = mapViewMode === 'FOV_FITTED' ? autoFittedScale : calculatedMapScale;
   const effectivePan = mapViewMode === 'FOV_FITTED' ? autoFittedPan : mapPan;

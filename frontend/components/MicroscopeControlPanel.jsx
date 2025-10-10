@@ -517,6 +517,14 @@ const MicroscopeControlPanel = ({
     }
   }, [microscopeControlService, selectedMicroscopeId, loadMicroscopeConfiguration, appendLog, showNotification]);
 
+  // Effect to reload configuration when objective changes (for updated pixel size and FOV)
+  useEffect(() => {
+    if (currentObjective && microscopeControlService && isSquidPlusMicroscope(selectedMicroscopeId)) {
+      appendLog(`Objective changed to ${currentObjective}, reloading configuration for updated pixel size...`);
+      loadMicroscopeConfiguration();
+    }
+  }, [currentObjective, microscopeControlService, selectedMicroscopeId, loadMicroscopeConfiguration, appendLog]);
+
   // Effect to initialize Squid+ features when the microscope is selected
   useEffect(() => {
     const initSquidPlusFeatures = async () => {
