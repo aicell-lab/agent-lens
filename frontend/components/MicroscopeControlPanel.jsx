@@ -1458,25 +1458,6 @@ const MicroscopeControlPanel = ({
     }
   };
 
-  const homeFilterWheel = async () => {
-    if (!microscopeControlService || !isSquidPlusMicroscope(selectedMicroscopeId)) return;
-    try {
-      setMicroscopeBusy(true);
-      appendLog('Homing filter wheel...');
-      const result = await microscopeControlService.home_filter_wheel();
-      if (result.success) {
-        setFilterWheelPosition(1);
-        appendLog(result.message || 'Filter wheel homed');
-        if (showNotification) showNotification('Filter wheel homed', 'success');
-      } else {
-        appendLog(`Failed to home filter: ${result.message}`);
-      }
-    } catch (error) {
-      appendLog(`Error homing filter: ${error.message}`);
-    } finally {
-      setMicroscopeBusy(false);
-    }
-  };
 
   // Squid+ Objective Switcher Handlers
   const switchObjective = async (objectiveName) => {
@@ -1845,7 +1826,7 @@ const MicroscopeControlPanel = ({
                           setFilterPosition(pos);
                         }
                       }}
-                      className="w-16 p-1 border border-gray-300 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
+                      className="w-16 p-1 border border-gray-300 rounded text-xs text-gray-900 bg-white disabled:opacity-75 disabled:cursor-not-allowed"
                       disabled={!microscopeControlService || currentOperation !== null || microscopeBusy}
                     />
                     <span className="text-xs text-gray-600">(1-8)</span>
@@ -1883,7 +1864,7 @@ const MicroscopeControlPanel = ({
                           switchObjective(e.target.value);
                         }
                       }}
-                      className="w-full p-1 border border-gray-300 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
+                      className="w-full p-1 border border-gray-300 rounded text-xs text-gray-900 bg-white disabled:opacity-75 disabled:cursor-not-allowed"
                       disabled={!microscopeControlService || currentOperation !== null || microscopeBusy || availableObjectives.length === 0}
                     >
                       <option value="">Select Objective...</option>
