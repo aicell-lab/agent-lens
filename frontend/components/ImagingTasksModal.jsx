@@ -541,6 +541,8 @@ const ImagingTasksModal = ({
         incubator_slot: parseInt(incubatorSlot, 10),
         allocated_microscope: selectedMicroscopeId.includes('microscope-control-squid')
           ? `microscope-control-squid-${selectedMicroscopeId.endsWith('1') ? '1' : '2'}`
+          : selectedMicroscopeId.includes('squid-plus-1')
+          ? 'microscope-squid-plus-1'
           : null,
         pending_time_points: timePointsArray,
         imaged_time_points: [],
