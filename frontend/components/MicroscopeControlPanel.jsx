@@ -1533,7 +1533,6 @@ const MicroscopeControlPanel = ({
             autoContrastMinAdjust={autoContrastMinAdjust}
             setAutoContrastMinAdjust={setAutoContrastMinAdjust}
             autoContrastMaxAdjust={autoContrastMaxAdjust}
-            onSnapImage={snapImage}
             setAutoContrastMaxAdjust={setAutoContrastMaxAdjust}
             isDataChannelConnected={isDataChannelConnected}
             isContrastControlsCollapsed={isContrastControlsCollapsed}

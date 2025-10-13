@@ -67,8 +67,6 @@ const MicroscopeMapDisplay = ({
   incubatorControlService,
   orchestratorManagerService,
   onSampleLoadStatusChange,
-  // Image capture props
-  onSnapImage,
 }) => {
   const mapContainerRef = useRef(null);
   const canvasRef = useRef(null);
@@ -1588,16 +1586,6 @@ const MicroscopeMapDisplay = ({
         }
         if (showNotification) {
           showNotification(`Stage moved to (${result.final_position.x.toFixed(3)}, ${result.final_position.y.toFixed(3)})`, 'success');
-        }
-        
-        // Snap an image after moving the stage to show current sample in FOV_BOX
-        if (onSnapImage) {
-          if (appendLog) {
-            appendLog('Capturing image at new position...');
-          }
-          // Wait a brief moment for stage to fully settle before snapping
-          await new Promise(resolve => setTimeout(resolve, 100));
-          await onSnapImage();
         }
       } else {
         if (appendLog) {
@@ -5681,8 +5669,6 @@ MicroscopeMapDisplay.propTypes = {
   incubatorControlService: PropTypes.object,
   orchestratorManagerService: PropTypes.object,
   onSampleLoadStatusChange: PropTypes.func,
-  // Image capture props
-  onSnapImage: PropTypes.func,
 };
 
 export default MicroscopeMapDisplay; 
