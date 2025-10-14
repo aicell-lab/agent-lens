@@ -1591,13 +1591,18 @@ const MicroscopeMapDisplay = ({
         }
         
         // Snap an image after moving the stage to show current sample in FOV_BOX
-        if (onSnapImage) {
+        // Only snap if video is not currently streaming to avoid terminating the video stream
+        if (onSnapImage && !isWebRtcActive) {
           if (appendLog) {
             appendLog('Capturing image at new position...');
           }
           // Wait a brief moment for stage to fully settle before snapping
           await new Promise(resolve => setTimeout(resolve, 100));
           await onSnapImage();
+        } else if (onSnapImage && isWebRtcActive) {
+          if (appendLog) {
+            appendLog('Skipping image capture to preserve video stream');
+          }
         }
       } else {
         if (appendLog) {
