@@ -126,6 +126,17 @@ const Sidebar = React.forwardRef(({
                 <i className="fas fa-microscope"></i>
                 <span>Real Microscope 2</span>
               </button>
+              <button
+                className={`sidebar-submenu-tab ${selectedMicroscopeId === 'reef-imaging/mirror-microscope-squid-plus-1' ? 'active' : ''}`}
+                onClick={() => {
+                  onMicroscopeSelect('reef-imaging/mirror-microscope-squid-plus-1');
+                  // setIsMicroscopeDropdownOpen(false); // Optional: close dropdown on selection
+                }}
+                disabled={!!currentOperation}
+              >
+                <i className="fas fa-microscope"></i>
+                <span>Squid+ 1</span>
+              </button>
             </div>
           )}
           <button 

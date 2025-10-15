@@ -191,7 +191,8 @@ const IncubatorControl = ({
 
     const microscopeServiceIds = {
       1: "reef-imaging/mirror-microscope-control-squid-1",
-      2: "reef-imaging/mirror-microscope-control-squid-2"
+      2: "reef-imaging/mirror-microscope-control-squid-2",
+      3: "reef-imaging/mirror-microscope-squid-plus-1"
     };
 
     const targetMicroscopeId = microscopeServiceIds[microscopeNumber];
@@ -423,8 +424,9 @@ const IncubatorControl = ({
       return;
     }
 
-    if (sampleForm.status === 'microscope1' || sampleForm.status === 'microscope2') {
-      const microscopeNumber = sampleForm.status === 'microscope1' ? 1 : 2;
+    if (sampleForm.status === 'microscope1' || sampleForm.status === 'microscope2' || sampleForm.status === 'microscope3') {
+      const microscopeNumber = sampleForm.status === 'microscope1' ? 1 : 
+                              sampleForm.status === 'microscope2' ? 2 : 3;
       
       try {
         // Check for conflicts on the target microscope
@@ -745,6 +747,7 @@ const IncubatorControl = ({
                     <option value="incubator_transfer_station">From Incubator Transfer Station</option>
                     <option value="microscope1">From Microscope 1 (⚠️ Safety verified transfer)</option>
                     <option value="microscope2">From Microscope 2 (⚠️ Safety verified transfer)</option>
+                    <option value="microscope3">From Squid+ Microscope 1 (⚠️ Safety verified transfer)</option>
                   </select>
                 </div>
                 <div>
@@ -887,6 +890,7 @@ const IncubatorControl = ({
                         <option value="incubator_transfer_station">From Incubator Transfer Station</option>
                         <option value="microscope1">From Microscope 1 (⚠️ Safety verified transfer)</option>
                         <option value="microscope2">From Microscope 2 (⚠️ Safety verified transfer)</option>
+                        <option value="microscope3">From Squid+ Microscope 1 (⚠️ Safety verified transfer)</option>
                       </select>
                     </div>
                     <div>

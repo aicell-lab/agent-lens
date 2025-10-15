@@ -67,6 +67,8 @@ const MicroscopeMapDisplay = ({
   incubatorControlService,
   orchestratorManagerService,
   onSampleLoadStatusChange,
+  // Image capture props
+  onSnapImage,
 }) => {
   const mapContainerRef = useRef(null);
   const canvasRef = useRef(null);
@@ -100,7 +102,12 @@ const MicroscopeMapDisplay = ({
     };
   }, []);
 
-  // Set default quick scan parameters for specific microscope types
+  // Helper function to detect squid plus microscope
+  const isSquidPlusMicroscope = (microscopeId) => {
+    return microscopeId && microscopeId.includes('squid-plus');
+  };
+
+  // Set default scan parameters for specific microscope types
   useEffect(() => {
     if (selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1') {
       // Set default values for Real Microscope 1
@@ -108,6 +115,17 @@ const MicroscopeMapDisplay = ({
         ...prev,
         intensity: 70,
         exposure_time: 2
+      }));
+    } else if (isSquidPlusMicroscope(selectedMicroscopeId)) {
+      // Set default values for Squid Plus microscope
+      setQuickScanParameters(prev => ({
+        ...prev,
+        dy_mm: 0.7
+      }));
+      setScanParameters(prev => ({
+        ...prev,
+        dx_mm: 0.7,
+        dy_mm: 0.7
       }));
     }
   }, [selectedMicroscopeId]);
@@ -364,7 +382,9 @@ const MicroscopeMapDisplay = ({
 
   // Helper function to get well plate configuration
   const getWellPlateConfig = useCallback(() => {
-    if (!microscopeConfiguration?.wellplate?.formats) return null;
+    if (!microscopeConfiguration?.wellplate?.formats) {
+      return null;
+    }
     
     const formatKey = wellPlateType === '96' ? '96_well' : 
                      wellPlateType === '48' ? '48_well' : 
@@ -1281,6 +1301,34 @@ const MicroscopeMapDisplay = ({
     };
   }, [containerDimensions, currentStagePosition, stageDimensions, pixelsPerMm, autoFittedScale]);
   
+  // Effect to adjust mapPan when pixelsPerMm changes (e.g., after objective switch in FREE_PAN mode)
+  const prevPixelsPerMmRef = useRef(pixelsPerMm);
+  useEffect(() => {
+    // Only adjust in FREE_PAN mode and when pixelsPerMm actually changes
+    if (mapViewMode === 'FREE_PAN' && prevPixelsPerMmRef.current !== pixelsPerMm && prevPixelsPerMmRef.current > 0 && pixelsPerMm > 0) {
+      // Calculate the scale ratio change
+      const scaleRatio = pixelsPerMm / prevPixelsPerMmRef.current;
+      
+      // Adjust mapPan to maintain the same visual center point
+      // The FOV position relative to stage boundaries changes with pixel scale
+      if (currentStagePosition && stageDimensions && containerDimensions.width > 0) {
+        // Recalculate pan to keep the same stage position centered
+        const stagePosX = (currentStagePosition.x - stageDimensions.xMin) * pixelsPerMm * calculatedMapScale;
+        const stagePosY = (currentStagePosition.y - stageDimensions.yMin) * pixelsPerMm * calculatedMapScale;
+        
+        setMapPan({
+          x: containerDimensions.width / 2 - stagePosX,
+          y: containerDimensions.height / 2 - stagePosY
+        });
+        
+        console.log(`[Objective Switch] Adjusted mapPan for pixelsPerMm change: ${prevPixelsPerMmRef.current.toFixed(3)} → ${pixelsPerMm.toFixed(3)} (ratio: ${scaleRatio.toFixed(3)})`);
+      }
+    }
+    
+    // Update the ref for next comparison
+    prevPixelsPerMmRef.current = pixelsPerMm;
+  }, [pixelsPerMm, mapViewMode, currentStagePosition, stageDimensions, containerDimensions, calculatedMapScale]);
+
   // Use fitted values in FOV_FITTED mode, manual values in FREE_PAN mode
   const mapScale = mapViewMode === 'FOV_FITTED' ? autoFittedScale : calculatedMapScale;
   const effectivePan = mapViewMode === 'FOV_FITTED' ? autoFittedPan : mapPan;
@@ -1503,8 +1551,9 @@ const MicroscopeMapDisplay = ({
       const clickY = e.clientY - rect.top;
 
       // Convert click coordinates to map coordinates (accounting for pan and scale)
-      const mapX = (clickX - mapPan.x) / mapScale;
-      const mapY = (clickY - mapPan.y) / mapScale;
+      // Use the same coordinate system as well plate rendering
+      const mapX = (clickX - effectivePan.x) / mapScale;
+      const mapY = (clickY - effectivePan.y) / mapScale;
 
       // Convert from map pixels to stage coordinates (mm)
       const stageX_mm = (mapX / pixelsPerMm) + stageDimensions.xMin;
@@ -1539,6 +1588,21 @@ const MicroscopeMapDisplay = ({
         }
         if (showNotification) {
           showNotification(`Stage moved to (${result.final_position.x.toFixed(3)}, ${result.final_position.y.toFixed(3)})`, 'success');
+        }
+        
+        // Snap an image after moving the stage to show current sample in FOV_BOX
+        // Only snap if video is not currently streaming to avoid terminating the video stream
+        if (onSnapImage && !isWebRtcActive) {
+          if (appendLog) {
+            appendLog('Capturing image at new position...');
+          }
+          // Wait a brief moment for stage to fully settle before snapping
+          await new Promise(resolve => setTimeout(resolve, 100));
+          await onSnapImage();
+        } else if (onSnapImage && isWebRtcActive) {
+          if (appendLog) {
+            appendLog('Skipping image capture to preserve video stream');
+          }
         }
       } else {
         if (appendLog) {
@@ -1767,24 +1831,20 @@ const MicroscopeMapDisplay = ({
       return currentScaleTiles;
     }
     
-    // SIMPLIFIED: If no current scale tiles, show any available tiles to prevent blackout
-    if (stitchedTiles.length > 0) {
-      console.log(`[visibleTiles] No tiles for scale ${scaleLevel}, showing ${stitchedTiles.length} fallback tiles to prevent blackout`);
-      return stitchedTiles;
-    }
-    
-    // If no current scale tiles, show lower resolution (higher scale number) tiles as fallback
-    // This prevents showing high-res tiles when zoomed out (which would be wasteful)
+    // If no tiles at current scale, find the closest available scale (lower resolution preferred)
+    // This prevents showing tiles from multiple scales simultaneously
     const availableScales = [...new Set(stitchedTiles.map(tile => tile.scale))]
-      .filter(scale => scale >= scaleLevel) // Only show equal or lower resolution
-      .sort((a, b) => a - b); // Sort ascending (lower numbers = higher resolution)
+      .sort((a, b) => Math.abs(a - scaleLevel) - Math.abs(b - scaleLevel)); // Sort by distance from target scale
     
-    for (const scale of availableScales) {
-      // SIMPLIFIED: Just filter by scale - no complex channel/experiment filtering
-      const scaleTiles = stitchedTiles.filter(tile => tile.scale === scale);
-      if (scaleTiles.length > 0) {
-        return scaleTiles;
+    if (availableScales.length > 0) {
+      const closestScale = availableScales[0];
+      const fallbackTiles = stitchedTiles.filter(tile => tile.scale === closestScale);
+      
+      if (shouldLogDetails && fallbackTiles.length > 0) {
+        console.log(`[visibleTiles] No tiles for scale ${scaleLevel}, using ${fallbackTiles.length} tiles from closest scale ${closestScale}`);
       }
+      
+      return fallbackTiles;
     }
     
     return [];
@@ -5622,6 +5682,8 @@ MicroscopeMapDisplay.propTypes = {
   incubatorControlService: PropTypes.object,
   orchestratorManagerService: PropTypes.object,
   onSampleLoadStatusChange: PropTypes.func,
+  // Image capture props
+  onSnapImage: PropTypes.func,
 };
 
 export default MicroscopeMapDisplay; 
