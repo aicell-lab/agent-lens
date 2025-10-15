@@ -547,7 +547,7 @@ const NormalScanConfig = ({
                 onChange={(e) => setScanParameters(prev => ({ ...prev, uploading: e.target.checked }))}
                 disabled={isScanInProgress}
               />
-              <span>Upload during scanning</span>
+              <span>Upload after scanning</span>
               <i className="fas fa-question-circle normal-scan-config-help" title="Enable background upload of scan data to artifact manager during scanning"></i>
             </label>
           </div>

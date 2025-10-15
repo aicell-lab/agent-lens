@@ -283,7 +283,7 @@ const QuickScanConfig = ({
                 onChange={(e) => setQuickScanParameters(prev => ({ ...prev, uploading: e.target.checked }))}
                 disabled={isQuickScanInProgress}
               />
-              <span>Upload during scanning</span>
+              <span>Upload after scanning</span>
               <i className="fas fa-question-circle quick-scan-config-help" title="Enable background upload of scan data to artifact manager during scanning"></i>
             </label>
           </div>

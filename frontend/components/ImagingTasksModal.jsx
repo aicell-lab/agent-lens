@@ -95,6 +95,13 @@ const ImagingTasksModal = ({
   incubatorControlService, // New prop
   microscopeControlService, // New prop
 }) => {
+  // Helper function to get default dx/dy values based on microscope type
+  const getDefaultSpacing = () => {
+    if (selectedMicroscopeId && selectedMicroscopeId.includes('squid-plus')) {
+      return { dx: '0.7', dy: '0.7' }; // Squid plus microscopes use 0.7mm
+    }
+    return { dx: '0.8', dy: '0.8' }; // Default for other microscopes
+  };
   // State for new task form fields
   const [taskName, setTaskName] = useState('');
   const [incubatorSlot, setIncubatorSlot] = useState(''); // Default to empty, will be populated
@@ -115,6 +122,9 @@ const ImagingTasksModal = ({
   const [isDragging, setIsDragging] = useState(false);
   const [nx, setNx] = useState('3'); // Default Nx for FOV grid
   const [ny, setNy] = useState('3'); // Default Ny for FOV grid
+  const defaultSpacing = getDefaultSpacing();
+  const [dx, setDx] = useState(defaultSpacing.dx); // Default dx for FOV spacing in mm
+  const [dy, setDy] = useState(defaultSpacing.dy); // Default dy for FOV spacing in mm
 
   // State for time point generation
   const [minDateTime, setMinDateTime] = useState('');
@@ -156,6 +166,30 @@ const ImagingTasksModal = ({
       max: 1440, // Max 24 hours in minutes
       allowFloat: false,
       defaultValue: 30
+    },
+    showNotification
+  );
+
+  const dxInput = useValidatedNumberInput(
+    parseFloat(dx) || parseFloat(defaultSpacing.dx),
+    (value) => setDx(value.toString()),
+    {
+      min: 0.1,
+      max: 5.0,
+      allowFloat: true,
+      defaultValue: parseFloat(defaultSpacing.dx)
+    },
+    showNotification
+  );
+
+  const dyInput = useValidatedNumberInput(
+    parseFloat(dy) || parseFloat(defaultSpacing.dy),
+    (value) => setDy(value.toString()),
+    {
+      min: 0.1,
+      max: 5.0,
+      allowFloat: true,
+      defaultValue: parseFloat(defaultSpacing.dy)
     },
     showNotification
   );
@@ -319,6 +353,9 @@ const ImagingTasksModal = ({
       setIsDragging(false);
       setNx('3'); // Reset Nx for new task
       setNy('3'); // Reset Ny for new task
+      const resetSpacing = getDefaultSpacing();
+      setDx(resetSpacing.dx); // Reset dx for new task based on microscope type
+      setDy(resetSpacing.dy); // Reset dy for new task based on microscope type
 
       // Fetch current illumination settings from microscope
       const loadIlluminationSettings = async () => {
@@ -499,6 +536,14 @@ const ImagingTasksModal = ({
         showNotification('Ny is required.', 'warning');
         return;
     }
+    if (!dx.trim()){
+        showNotification('dx is required.', 'warning');
+        return;
+    }
+    if (!dy.trim()){
+        showNotification('dy is required.', 'warning');
+        return;
+    }
     
     const enabledIlluminationSettings = illuminationSettings.filter(setting => setting.enabled);
     if (enabledIlluminationSettings.length === 0) { 
@@ -541,6 +586,8 @@ const ImagingTasksModal = ({
         incubator_slot: parseInt(incubatorSlot, 10),
         allocated_microscope: selectedMicroscopeId.includes('microscope-control-squid')
           ? `microscope-control-squid-${selectedMicroscopeId.endsWith('1') ? '1' : '2'}`
+          : selectedMicroscopeId.includes('squid-plus-1')
+          ? 'microscope-squid-plus-1'
           : null,
         pending_time_points: timePointsArray,
         imaged_time_points: [],
@@ -551,6 +598,8 @@ const ImagingTasksModal = ({
         imaging_zone: parsedScanningZone,
         Nx: parseInt(nx, 10),
         Ny: parseInt(ny, 10),
+        dx: parseFloat(dx),
+        dy: parseFloat(dy),
         action_ID: taskName.trim(),
       },
     };
@@ -656,6 +705,7 @@ const ImagingTasksModal = ({
               <p><strong>Imaging Completed:</strong> {task.settings?.imaging_completed ? 'Yes' : 'No'}</p>
               <p><strong>Illumination Settings:</strong> {task.settings?.illumination_settings ? JSON.stringify(task.settings.illumination_settings) : 'N/A'}</p>
               <p><strong>Nx, Ny:</strong> {task.settings?.Nx}, {task.settings?.Ny}</p>
+              <p><strong>dx, dy:</strong> {task.settings?.dx || 'N/A'}, {task.settings?.dy || 'N/A'} mm</p>
               <p><strong>Imaging Zone:</strong> {JSON.stringify(task.settings?.imaging_zone || task.settings?.scanning_zone)}</p>
               <p><strong>Contrast AF:</strong> {task.settings?.do_contrast_autofocus ? 'Yes' : 'No'}</p>
               <p><strong>Reflection AF:</strong> {task.settings?.do_reflection_af ? 'Yes' : 'No'}</p>
@@ -792,7 +842,7 @@ const ImagingTasksModal = ({
                       <div className="form-group">
                           <label htmlFor="nx" className="form-label">
                               Nx (FOVs per well)
-                              <TutorialTooltip text="Number of Fields of View (FOVs) to capture along the X-axis within each selected well. E.g., 3 for a 3xM grid. Current default dx is ~0.9mm with ~10% overlap." />
+                              <TutorialTooltip text="Number of Fields of View (FOVs) to capture along the X-axis within each selected well. E.g., 3 for a 3xM grid." />
                           </label>
                           <div className="input-container">
                             <input
@@ -818,7 +868,7 @@ const ImagingTasksModal = ({
                       <div className="form-group">
                           <label htmlFor="ny" className="form-label">
                               Ny (FOVs per well)
-                              <TutorialTooltip text="Number of Fields of View (FOVs) to capture along the Y-axis within each selected well. E.g., M for an Mx3 grid. Current default dy is ~0.9mm with ~10% overlap." />
+                              <TutorialTooltip text="Number of Fields of View (FOVs) to capture along the Y-axis within each selected well. E.g., M for an Mx3 grid." />
                           </label>
                           <div className="input-container">
                             <input
@@ -842,9 +892,66 @@ const ImagingTasksModal = ({
                           </div>
                       </div>
                   </div>
+
+                  <div className="form-grid mt-3">
+                      <div className="form-group">
+                          <label htmlFor="dx" className="form-label">
+                              dx (X spacing in mm)
+                              <TutorialTooltip text={`Distance between Fields of View along the X-axis in millimeters. Smaller values provide more overlap, larger values provide wider coverage. Default is ${defaultSpacing.dx}mm with ~10% overlap for this microscope type.`} />
+                          </label>
+                          <div className="input-container">
+                            <input
+                                id="dx"
+                                type="number"
+                                className={`modal-input ${getInputValidationClasses(
+                                  dxInput.isValid,
+                                  dxInput.hasUnsavedChanges,
+                                  ''
+                                )}`}
+                                value={dxInput.inputValue}
+                                onChange={dxInput.handleInputChange}
+                                onKeyDown={dxInput.handleKeyDown}
+                                onBlur={dxInput.handleBlur}
+                                min="0.1"
+                                max="5.0"
+                                step="0.1"
+                                required
+                                disabled={slotsLoading || illuminationLoading}
+                                placeholder="0.1-5.0"
+                            />
+                          </div>
+                      </div>
+                      <div className="form-group">
+                          <label htmlFor="dy" className="form-label">
+                              dy (Y spacing in mm)
+                              <TutorialTooltip text={`Distance between Fields of View along the Y-axis in millimeters. Smaller values provide more overlap, larger values provide wider coverage. Default is ${defaultSpacing.dy}mm with ~10% overlap for this microscope type.`} />
+                          </label>
+                          <div className="input-container">
+                            <input
+                                id="dy"
+                                type="number"
+                                className={`modal-input ${getInputValidationClasses(
+                                  dyInput.isValid,
+                                  dyInput.hasUnsavedChanges,
+                                  ''
+                                )}`}
+                                value={dyInput.inputValue}
+                                onChange={dyInput.handleInputChange}
+                                onKeyDown={dyInput.handleKeyDown}
+                                onBlur={dyInput.handleBlur}
+                                min="0.1"
+                                max="5.0"
+                                step="0.1"
+                                required
+                                disabled={slotsLoading || illuminationLoading}
+                                placeholder="0.1-5.0"
+                            />
+                          </div>
+                      </div>
+                  </div>
                    <p className="text-xs mt-1 form-label">
-                      FOV dx, dy is default 0.9mm, with ~10% overlap.
-                      <TutorialTooltip text="The distance (dx, dy) between adjacent Fields of View (FOVs) is automatically set to 0.9mm. This typically provides about 10% overlap between FOVs, ensuring complete coverage of the target area within the well." />
+                      FOV dx, dy defaults to {defaultSpacing.dx}mm, with ~10% overlap.
+                      <TutorialTooltip text={`The distance (dx, dy) between adjacent Fields of View (FOVs) defaults to ${defaultSpacing.dx}mm for this microscope type. This typically provides about 10% overlap between FOVs, ensuring complete coverage of the target area within the well. You can adjust these values above for different overlap requirements.`} />
                   </p>
               </fieldset>
               

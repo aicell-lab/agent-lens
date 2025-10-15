@@ -48,7 +48,13 @@ const numpyArrayToDataURL = (numpyArray) => {
 const WEBRTC_SERVICE_IDS = {
   "agent-lens/squid-control-reef": "agent-lens/video-track-squid-control-reef",
   "reef-imaging/mirror-microscope-control-squid-1": "reef-imaging/video-track-microscope-control-squid-1",
-  "reef-imaging/mirror-microscope-control-squid-2": "reef-imaging/video-track-microscope-control-squid-2", // Assuming typo correction
+  "reef-imaging/mirror-microscope-control-squid-2": "reef-imaging/video-track-microscope-control-squid-2",
+  "reef-imaging/mirror-microscope-squid-plus-1": "reef-imaging/video-track-microscope-squid-plus-1",
+};
+
+// Helper function to check if a microscope is Squid+ model
+const isSquidPlusMicroscope = (microscopeId) => {
+  return microscopeId && microscopeId.includes('squid-plus');
 };
 
 
@@ -180,6 +186,13 @@ const MicroscopeControlPanel = ({
   // New state for floating panels
   const [isSamplePanelOpen, setIsSamplePanelOpen] = useState(false);
   const [isControlPanelOpen, setIsControlPanelOpen] = useState(false);
+  
+  // Squid+ specific states
+  const [filterWheelPosition, setFilterWheelPosition] = useState(1);
+  const [availableObjectives, setAvailableObjectives] = useState([]);
+  const [currentObjective, setCurrentObjective] = useState(null);
+  const [objectiveSwitcherSpeed, setObjectiveSwitcherSpeed] = useState(1.0);
+  const [moveZOnObjectiveSwitch, setMoveZOnObjectiveSwitch] = useState(true);
   
 
       // Function to handle right panel auto-collapse (now for chat panel)
@@ -426,6 +439,60 @@ const MicroscopeControlPanel = ({
     }
   }, [microscopeControlService, illuminationChannel]); // Re-run if service or channel changes to re-sync
 
+  // Function to load microscope configuration (defined before the effect that uses it)
+  const loadMicroscopeConfiguration = useCallback(async () => {
+    if (!microscopeControlService) {
+      const errorMsg = "Microscope control service not available.";
+      setConfigurationError(errorMsg);
+      setIsConfigurationLoaded(false);
+      if (showNotification) showNotification(errorMsg, 'warning');
+      return;
+    }
+
+    // Check if the current microscope service supports configuration loading
+    if (typeof microscopeControlService.get_microscope_configuration !== 'function') {
+      const errorMsg = "Configuration not supported for this microscope.";
+      setConfigurationError(errorMsg);
+      setIsConfigurationLoaded(false);
+      appendLog(`Configuration loading not supported for microscope: ${selectedMicroscopeId}`);
+      return;
+    }
+
+    setIsConfigurationLoading(true);
+    setConfigurationError(null);
+    
+    try {
+      appendLog(`Loading microscope configuration for ${selectedMicroscopeId}...`);
+      const response = await microscopeControlService.get_microscope_configuration();
+      
+      if (response.success) {
+        // Store configuration without metadata
+        const configWithoutMetadata = { ...response.configuration };
+        delete configWithoutMetadata.metadata;
+        
+        setMicroscopeConfiguration(configWithoutMetadata);
+        setIsConfigurationLoaded(true);
+        appendLog(`Microscope configuration loaded successfully for ${selectedMicroscopeId}.`);
+        appendLog(`[Config] Pixel size: ${configWithoutMetadata?.optics?.calculated_pixel_size_mm}, Crop width: ${configWithoutMetadata?.acquisition?.crop_width}`);
+      } else {
+        const errorMsg = "Failed to load microscope configuration.";
+        setConfigurationError(errorMsg);
+        setIsConfigurationLoaded(false);
+        appendLog(errorMsg);
+        if (showNotification) showNotification(errorMsg, 'error');
+      }
+    } catch (error) {
+      const errorMsg = `Error loading microscope configuration: ${error.message}`;
+      setConfigurationError(errorMsg);
+      setIsConfigurationLoaded(false);
+      appendLog(errorMsg);
+      if (showNotification) showNotification(errorMsg, 'error');
+      console.error("[MicroscopeControlPanel] Error loading microscope configuration:", error);
+    } finally {
+      setIsConfigurationLoading(false);
+    }
+  }, [microscopeControlService, selectedMicroscopeId, appendLog, showNotification]);
+
   // Effect to automatically load microscope configuration when service changes
   useEffect(() => {
     if (microscopeControlService && selectedMicroscopeId) {
@@ -448,7 +515,62 @@ const MicroscopeControlPanel = ({
       setIsConfigurationLoaded(false);
       setConfigurationError("No microscope selected.");
     }
-  }, [microscopeControlService, selectedMicroscopeId]);
+  }, [microscopeControlService, selectedMicroscopeId, loadMicroscopeConfiguration, appendLog, showNotification]);
+
+  // Effect to reload configuration when objective changes (for updated pixel size and FOV)
+  useEffect(() => {
+    if (currentObjective && microscopeControlService && isSquidPlusMicroscope(selectedMicroscopeId)) {
+      appendLog(`Objective changed to ${currentObjective}, reloading configuration for updated pixel size...`);
+      loadMicroscopeConfiguration();
+    }
+  }, [currentObjective, microscopeControlService, selectedMicroscopeId, loadMicroscopeConfiguration, appendLog]);
+
+  // Effect to initialize Squid+ features when the microscope is selected
+  useEffect(() => {
+    const initSquidPlusFeatures = async () => {
+      if (!microscopeControlService || !isSquidPlusMicroscope(selectedMicroscopeId)) {
+        // Reset Squid+ states for non-Squid+ microscopes
+        setFilterWheelPosition(1);
+        setAvailableObjectives([]);
+        setCurrentObjective(null);
+        return;
+      }
+      
+      try {
+        // Fetch filter wheel position
+        if (typeof microscopeControlService.get_filter_wheel_position === 'function') {
+          const filterResult = await microscopeControlService.get_filter_wheel_position();
+          if (filterResult.success) {
+            setFilterWheelPosition(filterResult.position);
+            appendLog(`Filter wheel at position: ${filterResult.position}`);
+          }
+        }
+        
+        // Fetch available objectives
+        if (typeof microscopeControlService.get_available_objectives === 'function') {
+          const objResult = await microscopeControlService.get_available_objectives();
+          if (objResult.success) {
+            setAvailableObjectives(objResult.objective_names || []);
+            appendLog(`Available objectives: ${objResult.objective_names?.join(', ')}`);
+          }
+        }
+        
+        // Fetch current objective
+        if (typeof microscopeControlService.get_current_objective === 'function') {
+          const currentObjResult = await microscopeControlService.get_current_objective();
+          if (currentObjResult.success) {
+            setCurrentObjective(currentObjResult.current_objective);
+            appendLog(`Current objective: ${currentObjResult.current_objective}`);
+          }
+        }
+      } catch (error) {
+        appendLog(`Error initializing Squid+ features: ${error.message}`);
+        console.error("[MicroscopeControlPanel] Error initializing Squid+ features:", error);
+      }
+    };
+    
+    initSquidPlusFeatures();
+  }, [microscopeControlService, selectedMicroscopeId, appendLog]);
 
   // Effect to update illumination when desiredIlluminationIntensity or illuminationChannel changes
   useEffect(() => {
@@ -1011,6 +1133,8 @@ const MicroscopeControlPanel = ({
       // Extract microscope identifier from the full service ID
       const microscopeIdentifier = selectedMicroscopeId.includes('microscope-control-squid') 
         ? `microscope-control-squid-${selectedMicroscopeId.endsWith('1') ? '1' : '2'}`
+        : selectedMicroscopeId.includes('squid-plus-1')
+        ? 'microscope-squid-plus-1'
         : null;
       
       const relevantTasks = tasks.filter(task => 
@@ -1092,61 +1216,6 @@ const MicroscopeControlPanel = ({
     // fetchImagingTasks(); // if orchestratorManagerService.get_all_imaging_tasks was called inside modal.
   };
 
-
-
-  // Function to load microscope configuration
-  const loadMicroscopeConfiguration = async () => {
-    if (!microscopeControlService) {
-      const errorMsg = "Microscope control service not available.";
-      setConfigurationError(errorMsg);
-      setIsConfigurationLoaded(false);
-      if (showNotification) showNotification(errorMsg, 'warning');
-      return;
-    }
-
-    // Check if the current microscope service supports configuration loading
-    if (typeof microscopeControlService.get_microscope_configuration !== 'function') {
-      const errorMsg = "Configuration not supported for this microscope.";
-      setConfigurationError(errorMsg);
-      setIsConfigurationLoaded(false);
-      appendLog(`Configuration loading not supported for microscope: ${selectedMicroscopeId}`);
-      return;
-    }
-
-    setIsConfigurationLoading(true);
-    setConfigurationError(null);
-    
-    try {
-      appendLog(`Loading microscope configuration for ${selectedMicroscopeId}...`);
-      const response = await microscopeControlService.get_microscope_configuration();
-      
-      if (response.success) {
-        // Store configuration without metadata
-        const configWithoutMetadata = { ...response.configuration };
-        delete configWithoutMetadata.metadata;
-        
-        setMicroscopeConfiguration(configWithoutMetadata);
-        setIsConfigurationLoaded(true);
-        appendLog(`Microscope configuration loaded successfully for ${selectedMicroscopeId}.`);
-      } else {
-        const errorMsg = "Failed to load microscope configuration.";
-        setConfigurationError(errorMsg);
-        setIsConfigurationLoaded(false);
-        appendLog(errorMsg);
-        if (showNotification) showNotification(errorMsg, 'error');
-      }
-    } catch (error) {
-      const errorMsg = `Error loading microscope configuration: ${error.message}`;
-      setConfigurationError(errorMsg);
-      setIsConfigurationLoaded(false);
-      appendLog(errorMsg);
-      if (showNotification) showNotification(errorMsg, 'error');
-      console.error("[MicroscopeControlPanel] Error loading microscope configuration:", error);
-    } finally {
-      setIsConfigurationLoading(false);
-    }
-  };
-
   // Function to open configuration display window
   const openConfigurationWindow = () => {
     if (!microscopeConfiguration) {
@@ -1180,20 +1249,48 @@ const MicroscopeControlPanel = ({
     return { width_mm: fovSize, height_mm: fovSize };
   }, [microscopeConfiguration]);
 
-  // Helper function to convert drag pixels to stage movement in mm
-  const convertDragToStageMovement = useCallback((dragPixels, displaySize) => {
-    const fovSize = calculateFOVSize();
+  // Helper function to get pixels per mm for the current display
+  // This matches the calculation used in MicroscopeMapDisplay.jsx
+  const getPixelsPerMm = useCallback(() => {
+    if (!microscopeConfiguration?.optics?.calculated_pixel_size_mm || !microscopeConfiguration?.acquisition?.crop_width) {
+      return null; // No fallback - return null if configuration not available
+    }
+
+    const calculatedPixelSizeMm = microscopeConfiguration.optics.calculated_pixel_size_mm;
+    const cropWidth = microscopeConfiguration.acquisition.crop_width;
+    const displayWidth = 750; // Video frame display size
     
-    // Calculate movement in mm based on FOV and display size
-    const movementX_mm = (dragPixels.x / displaySize.width) * fovSize.width_mm;
-    const movementY_mm = (dragPixels.y / displaySize.height) * fovSize.height_mm;
+    // Calculate actual pixel size for display
+    const actualPixelSizeMm = calculatedPixelSizeMm * (cropWidth / displayWidth);
+    
+    // Convert to pixels per mm
+    const pixelsPerMm = 1 / actualPixelSizeMm;
+    
+    return pixelsPerMm;
+  }, [microscopeConfiguration]);
+
+  // Helper function to convert drag pixels to stage movement in mm
+  const convertDragToStageMovement = useCallback((dragPixels) => {
+    // Get the pixels per mm for the current microscope configuration
+    const pixelsPerMm = getPixelsPerMm();
+    
+    // If no configuration available, return zero movement
+    if (!pixelsPerMm) {
+      console.warn(`[Drag Movement] No pixel size configuration available - returning zero movement`);
+      return { x: 0, y: 0 };
+    }
+    
+    // Calculate movement in mm based on pixels per mm
+    // This matches the coordinate conversion logic used in MicroscopeMapDisplay
+    const movementX_mm = dragPixels.x / pixelsPerMm;
+    const movementY_mm = dragPixels.y / pixelsPerMm;
     
     // Apply direction mapping: drag right = stage left (negative x), drag down = stage up (negative y)
     return {
       x: -movementX_mm, // Invert X direction
       y: -movementY_mm  // Invert Y direction
     };
-  }, [calculateFOVSize]);
+  }, [getPixelsPerMm]);
 
   // Mouse event handlers for drag move functionality
   const handleMouseDown = useCallback((e) => {
@@ -1255,12 +1352,8 @@ const MicroscopeControlPanel = ({
       y: dragCurrentPosition.y - dragStartPosition.y
     };
     
-    // Get display size for conversion calculations
-    const rect = e.currentTarget.getBoundingClientRect();
-    const displaySize = { width: rect.width, height: rect.height };
-    
     // Convert drag distance to stage movement
-    const stageMovement = convertDragToStageMovement(dragDistance, displaySize);
+    const stageMovement = convertDragToStageMovement(dragDistance);
     
     // Reset visual transform
     setDragTransform({ x: 0, y: 0 });
@@ -1305,6 +1398,94 @@ const MicroscopeControlPanel = ({
       appendLog('Drag move canceled: mouse left display area');
     }
   }, [isDragging, appendLog]);
+
+  // Squid+ Filter Wheel Handlers
+  const setFilterPosition = async (position) => {
+    if (!microscopeControlService || !isSquidPlusMicroscope(selectedMicroscopeId)) return;
+    try {
+      setMicroscopeBusy(true);
+      appendLog(`Setting filter wheel to position ${position}...`);
+      const result = await microscopeControlService.set_filter_wheel_position({ position });
+      if (result.success) {
+        setFilterWheelPosition(result.position);
+        appendLog(result.message || `Filter wheel set to position ${result.position}`);
+        if (showNotification) showNotification(`Filter wheel: ${result.message}`, 'success');
+      } else {
+        appendLog(`Failed to set filter position: ${result.message}`);
+        if (showNotification) showNotification(`Filter wheel error: ${result.message}`, 'error');
+      }
+    } catch (error) {
+      appendLog(`Error setting filter position: ${error.message}`);
+      if (showNotification) showNotification(`Error: ${error.message}`, 'error');
+    } finally {
+      setMicroscopeBusy(false);
+    }
+  };
+
+  const nextFilterPosition = async () => {
+    if (!microscopeControlService || !isSquidPlusMicroscope(selectedMicroscopeId)) return;
+    try {
+      setMicroscopeBusy(true);
+      appendLog('Moving to next filter position...');
+      const result = await microscopeControlService.next_filter_position();
+      if (result.success) {
+        setFilterWheelPosition(result.position);
+        appendLog(result.message || `Moved to filter position ${result.position}`);
+      } else {
+        appendLog(`Failed to move filter: ${result.message}`);
+      }
+    } catch (error) {
+      appendLog(`Error moving filter: ${error.message}`);
+    } finally {
+      setMicroscopeBusy(false);
+    }
+  };
+
+  const previousFilterPosition = async () => {
+    if (!microscopeControlService || !isSquidPlusMicroscope(selectedMicroscopeId)) return;
+    try {
+      setMicroscopeBusy(true);
+      appendLog('Moving to previous filter position...');
+      const result = await microscopeControlService.previous_filter_position();
+      if (result.success) {
+        setFilterWheelPosition(result.position);
+        appendLog(result.message || `Moved to filter position ${result.position}`);
+      } else {
+        appendLog(`Failed to move filter: ${result.message}`);
+      }
+    } catch (error) {
+      appendLog(`Error moving filter: ${error.message}`);
+    } finally {
+      setMicroscopeBusy(false);
+    }
+  };
+
+
+  // Squid+ Objective Switcher Handlers
+  const switchObjective = async (objectiveName) => {
+    if (!microscopeControlService || !isSquidPlusMicroscope(selectedMicroscopeId)) return;
+    try {
+      setMicroscopeBusy(true);
+      appendLog(`Switching to objective: ${objectiveName}...`);
+      const result = await microscopeControlService.switch_objective({
+        objective_name: objectiveName,
+        move_z: moveZOnObjectiveSwitch
+      });
+      if (result.success) {
+        setCurrentObjective(result.objective_name);
+        appendLog(result.message || `Switched to ${result.objective_name}`);
+        if (showNotification) showNotification(`Objective switched to ${result.objective_name}`, 'success');
+      } else {
+        appendLog(`Failed to switch objective: ${result.message}`);
+        if (showNotification) showNotification(`Objective switch failed: ${result.message}`, 'error');
+      }
+    } catch (error) {
+      appendLog(`Error switching objective: ${error.message}`);
+      if (showNotification) showNotification(`Error: ${error.message}`, 'error');
+    } finally {
+      setMicroscopeBusy(false);
+    }
+  };
 
   return (
     <div className="control-view microscope-control-panel-container new-mcp-layout">
@@ -1352,6 +1533,7 @@ const MicroscopeControlPanel = ({
             autoContrastMinAdjust={autoContrastMinAdjust}
             setAutoContrastMinAdjust={setAutoContrastMinAdjust}
             autoContrastMaxAdjust={autoContrastMaxAdjust}
+            onSnapImage={snapImage}
             setAutoContrastMaxAdjust={setAutoContrastMaxAdjust}
             isDataChannelConnected={isDataChannelConnected}
             isContrastControlsCollapsed={isContrastControlsCollapsed}
@@ -1625,6 +1807,90 @@ const MicroscopeControlPanel = ({
 
 
 
+            {/* Squid+ Specific Controls - Only shown for Squid+ microscopes */}
+            {isSquidPlusMicroscope(selectedMicroscopeId) && (
+              <>
+                {/* Filter Wheel Section */}
+                <div className="squid-plus-section mb-3 p-1 border border-gray-300 rounded-lg">
+                  <h4 className="text-sm font-medium mb-2 flex items-center">
+                    <i className="fas fa-circle-notch mr-2 text-blue-600"></i>
+                    Filter Wheel
+                  </h4>
+                  <div className="flex items-center space-x-2 mb-2">
+                    <label className="text-xs">Position:</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="8"
+                      value={filterWheelPosition}
+                      onChange={(e) => {
+                        const pos = parseInt(e.target.value, 10);
+                        if (pos >= 1 && pos <= 8) {
+                          setFilterPosition(pos);
+                        }
+                      }}
+                      className="w-16 p-1 border border-gray-300 rounded text-xs text-gray-900 bg-white disabled:opacity-75 disabled:cursor-not-allowed"
+                      disabled={!microscopeControlService || currentOperation !== null || microscopeBusy}
+                    />
+                    <span className="text-xs text-gray-600">(1-8)</span>
+                  </div>
+                  <div className="flex justify-between space-x-1">
+                    <button
+                      onClick={previousFilterPosition}
+                      disabled={!microscopeControlService || currentOperation !== null || microscopeBusy}
+                      className="control-button bg-blue-500 text-white hover:bg-blue-600 px-1.5 py-0.5 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed flex-1"
+                    >
+                      <i className="fas fa-chevron-left mr-1"></i> Prev
+                    </button>
+                    <button
+                      onClick={nextFilterPosition}
+                      disabled={!microscopeControlService || currentOperation !== null || microscopeBusy}
+                      className="control-button bg-blue-500 text-white hover:bg-blue-600 px-1.5 py-0.5 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed flex-1"
+                    >
+                      Next <i className="fas fa-chevron-right ml-1"></i>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Objective Switcher Section */}
+                <div className="squid-plus-section mb-3 p-1 border border-gray-300 rounded-lg">
+                  <h4 className="text-sm font-medium mb-2 flex items-center">
+                    <i className="fas fa-exchange-alt mr-2 text-purple-600"></i>
+                    Objective Switcher
+                  </h4>
+                  <div className="mb-2">
+                    <label className="text-xs block mb-1">Current: <strong>{currentObjective || 'Unknown'}</strong></label>
+                    <select
+                      value={currentObjective || ''}
+                      onChange={(e) => {
+                        if (e.target.value && e.target.value !== currentObjective) {
+                          switchObjective(e.target.value);
+                        }
+                      }}
+                      className="w-full p-1 border border-gray-300 rounded text-xs text-gray-900 bg-white disabled:opacity-75 disabled:cursor-not-allowed"
+                      disabled={!microscopeControlService || currentOperation !== null || microscopeBusy || availableObjectives.length === 0}
+                    >
+                      <option value="">Select Objective...</option>
+                      {availableObjectives.map(obj => (
+                        <option key={obj} value={obj}>{obj}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex items-center text-xs">
+                    <input
+                      type="checkbox"
+                      id="moveZCheckbox"
+                      checked={moveZOnObjectiveSwitch}
+                      onChange={(e) => setMoveZOnObjectiveSwitch(e.target.checked)}
+                      className="mr-2"
+                      disabled={!microscopeControlService || currentOperation !== null || microscopeBusy}
+                    />
+                    <label htmlFor="moveZCheckbox">Auto-adjust Z stage</label>
+                  </div>
+                </div>
+              </>
+            )}
+
             {/* Imaging Tasks Section */}
             <div className="imaging-tasks-section mb-3 p-3 border border-gray-300 rounded-lg">
               <div className="flex justify-between items-center mb-2">
@@ -1734,7 +2000,11 @@ const MicroscopeControlPanel = ({
                     ({selectedMicroscopeId === 'agent-lens/squid-control-reef' ? 'Simulated' :
                       selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 'Real Microscope 1' :
                       selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2' ? 'Real Microscope 2' :
+                      selectedMicroscopeId === 'reef-imaging/mirror-microscope-squid-plus-1' ? 'Squid+ Microscope 1' :
                       selectedMicroscopeId})
+                    {isSquidPlusMicroscope(selectedMicroscopeId) && (
+                      <i className="fas fa-plus-circle ml-1 text-purple-500" title="Squid+ Model"></i>
+                    )}
                   </span>
                 )}
               </h2>
