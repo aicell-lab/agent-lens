@@ -2,6 +2,8 @@ services:
   agent-lens:
     image: ghcr.io/aicell-lab/agent-lens:sha-fcee2e8
     container_name: agent-lens
+    # Optimize image pulling
+    pull_policy: if_not_present
     environment:
       - WORKSPACE_TOKEN=${WORKSPACE_TOKEN}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
@@ -35,6 +37,8 @@ services:
   squid-control:
     image: ghcr.io/aicell-lab/squid-control:sha-9140ec1
     container_name: squid-control
+    # Optimize image pulling
+    pull_policy: if_not_present
     network_mode: "host"
     ports:
       - "10000-10050:10000-10050/udp"
@@ -72,6 +76,8 @@ services:
   autoheal:
     image: willfarrell/autoheal
     container_name: autoheal
+    # Optimize image pulling
+    pull_policy: if_not_present
     restart: always
     environment:
       - AUTOHEAL_CONTAINER_LABEL=autoheal.enable
