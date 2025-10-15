@@ -1,6 +1,6 @@
 services:
   agent-lens:
-    image: ghcr.io/aicell-lab/agent-lens:sha-6404c3c
+    image: ghcr.io/aicell-lab/agent-lens:sha-fcee2e8
     container_name: agent-lens
     environment:
       - WORKSPACE_TOKEN=${WORKSPACE_TOKEN}
@@ -33,7 +33,7 @@ services:
       - ALL
 
   squid-control:
-    image: ghcr.io/aicell-lab/squid-control:sha-2bdaff4
+    image: ghcr.io/aicell-lab/squid-control:sha-9140ec1
     container_name: squid-control
     network_mode: "host"
     ports:
