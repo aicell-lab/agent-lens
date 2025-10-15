@@ -1831,24 +1831,20 @@ const MicroscopeMapDisplay = ({
       return currentScaleTiles;
     }
     
-    // SIMPLIFIED: If no current scale tiles, show any available tiles to prevent blackout
-    if (stitchedTiles.length > 0) {
-      console.log(`[visibleTiles] No tiles for scale ${scaleLevel}, showing ${stitchedTiles.length} fallback tiles to prevent blackout`);
-      return stitchedTiles;
-    }
-    
-    // If no current scale tiles, show lower resolution (higher scale number) tiles as fallback
-    // This prevents showing high-res tiles when zoomed out (which would be wasteful)
+    // If no tiles at current scale, find the closest available scale (lower resolution preferred)
+    // This prevents showing tiles from multiple scales simultaneously
     const availableScales = [...new Set(stitchedTiles.map(tile => tile.scale))]
-      .filter(scale => scale >= scaleLevel) // Only show equal or lower resolution
-      .sort((a, b) => a - b); // Sort ascending (lower numbers = higher resolution)
+      .sort((a, b) => Math.abs(a - scaleLevel) - Math.abs(b - scaleLevel)); // Sort by distance from target scale
     
-    for (const scale of availableScales) {
-      // SIMPLIFIED: Just filter by scale - no complex channel/experiment filtering
-      const scaleTiles = stitchedTiles.filter(tile => tile.scale === scale);
-      if (scaleTiles.length > 0) {
-        return scaleTiles;
+    if (availableScales.length > 0) {
+      const closestScale = availableScales[0];
+      const fallbackTiles = stitchedTiles.filter(tile => tile.scale === closestScale);
+      
+      if (shouldLogDetails && fallbackTiles.length > 0) {
+        console.log(`[visibleTiles] No tiles for scale ${scaleLevel}, using ${fallbackTiles.length} tiles from closest scale ${closestScale}`);
       }
+      
+      return fallbackTiles;
     }
     
     return [];
