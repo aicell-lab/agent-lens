@@ -77,6 +77,23 @@ const MicroscopeMapDisplay = ({
   // Check if using simulated microscope - disable scanning features
   const isSimulatedMicroscope = selectedMicroscopeId === 'agent-lens/squid-control-reef';
   
+  // Laser autofocus handler for FOV controls
+  const handleLaserAutoFocus = useCallback(async () => {
+    if (!microscopeControlService || microscopeBusy || currentOperation !== null) return;
+    
+    try {
+      setMicroscopeBusy(true);
+      if (appendLog) appendLog('Performing laser autofocus...');
+      await microscopeControlService.do_laser_autofocus();
+      if (appendLog) appendLog('Laser autofocus completed');
+    } catch (error) {
+      if (appendLog) appendLog(`Error in laser autofocus: ${error.message}`);
+      console.error('[MicroscopeMapDisplay] Laser autofocus error:', error);
+    } finally {
+      setMicroscopeBusy(false);
+    }
+  }, [microscopeControlService, microscopeBusy, currentOperation, setMicroscopeBusy, appendLog]);
+  
   // Close scan configurations when switching to simulated microscope (basic cleanup only)
   useEffect(() => {
     if (isSimulatedMicroscope) {
@@ -5150,18 +5167,77 @@ const MicroscopeMapDisplay = ({
         
         {/* Current video frame position indicator */}
         {videoFramePosition && (!isHistoricalDataMode || (isSimulatedMicroscope && isHistoricalDataMode)) && !isHardwareLocked && (
-          <div
-            className="absolute border-2 border-yellow-400 pointer-events-none"
-            style={{
-              left: `${videoFramePosition.x - videoFramePosition.width / 2}px`,
-              top: `${videoFramePosition.y - videoFramePosition.height / 2}px`,
-              width: `${videoFramePosition.width}px`,
-              height: `${videoFramePosition.height}px`,
-              zIndex: isSimulatedMicroscope ? 100 : 10 // Much higher z-index for simulated microscope
-            }}
-          >
-            {/* Show video content based on mode */}
-            {mapViewMode === 'FOV_FITTED' ? (
+          <>
+            {/* Control buttons above FOV box for FREE_PAN mode */}
+            {mapViewMode === 'FREE_PAN' && microscopeControlService && (
+              <div
+                className="absolute pointer-events-auto flex gap-1 bg-black bg-opacity-80 rounded p-1"
+                style={{
+                  left: `${videoFramePosition.x - videoFramePosition.width / 2}px`,
+                  top: `${videoFramePosition.y - videoFramePosition.height / 2 - 40}px`,
+                  zIndex: 20
+                }}
+              >
+                {/* Laser Autofocus Button */}
+                <button
+                  onClick={handleLaserAutoFocus}
+                  className="bg-blue-500 text-white hover:bg-blue-600 px-2 py-1 rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+                  disabled={!microscopeControlService || currentOperation !== null || microscopeBusy}
+                  title="Perform laser autofocus"
+                >
+                  <i className="fas fa-bullseye mr-1"></i> Laser AF
+                </button>
+                
+                {/* Start/Stop Live Button */}
+                <button
+                  onClick={toggleWebRtcStream}
+                  className={`${isWebRtcActive ? 'bg-red-500 hover:bg-red-600' : 'bg-purple-500 hover:bg-purple-600'} text-white px-2 py-1 rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200`}
+                  disabled={!microscopeControlService || currentOperation !== null || microscopeBusy}
+                  title={isWebRtcActive ? "Stop live stream" : "Start live stream"}
+                >
+                  <i className="fas fa-video mr-1"></i> {isWebRtcActive ? 'Stop Live' : 'Start Live'}
+                </button>
+                
+                {/* Snap Image Button */}
+                <button
+                  onClick={onSnapImage}
+                  className="bg-green-500 text-white hover:bg-green-600 px-2 py-1 rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+                  disabled={!microscopeControlService || currentOperation !== null || microscopeBusy}
+                  title="Capture snapshot"
+                >
+                  <i className="fas fa-camera mr-1"></i> Snap
+                </button>
+                
+                {/* ImageJ.js Button */}
+                {onOpenImageJ && snappedImageData?.numpy && (
+                  <button
+                    onClick={() => onOpenImageJ(snappedImageData.numpy)}
+                    className="bg-transparent hover:bg-white hover:bg-opacity-20 px-2 py-1 rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center gap-1"
+                    disabled={!imjoyApi}
+                    title={imjoyApi ? "Open in ImageJ.js" : "ImageJ.js integration is loading..."}
+                  >
+                    <img 
+                      src="https://ij.imjoy.io/assets/badge/open-in-imagej-js-badge.svg" 
+                      alt="Open in ImageJ.js" 
+                      className="h-3"
+                    />
+                  </button>
+                )}
+              </div>
+            )}
+            
+            <div
+              className="absolute border-2 border-yellow-400 pointer-events-none"
+              style={{
+                left: `${videoFramePosition.x - videoFramePosition.width / 2}px`,
+                top: `${videoFramePosition.y - videoFramePosition.height / 2}px`,
+                width: `${videoFramePosition.width}px`,
+                height: `${videoFramePosition.height}px`,
+                zIndex: isSimulatedMicroscope ? 100 : 10 // Much higher z-index for simulated microscope
+              }}
+            >
+              {/* Show video content based on mode */}
+              {mapViewMode === 'FOV_FITTED' ? (
               // FOV_FITTED mode: Show full-screen video/image
               <div className="w-full h-full flex items-center justify-center">
                 {isWebRtcActive && !webRtcError ? (
@@ -5232,33 +5308,15 @@ const MicroscopeMapDisplay = ({
                     }}
                   />
                 ) : snappedImageData?.url ? (
-                  <>
-                    <img
-                      src={snappedImageData.url}
-                      alt="Microscope Snapshot"
-                      className="w-full h-full object-cover"
-                      style={{
-                        backgroundColor: 'transparent',
-                        border: '1px solid rgba(255, 255, 0, 0.3)',
-                      }}
-                    />
-                    {/* ImageJ.js Badge for FREE_PAN mode */}
-                    {onOpenImageJ && (
-                      <button
-                        onClick={() => onOpenImageJ(snappedImageData.numpy)}
-                        className="imagej-badge absolute top-1 right-1 p-1 bg-white bg-opacity-90 hover:bg-opacity-100 rounded shadow-md transition-all duration-200 flex items-center gap-1 text-xs font-medium text-gray-700 hover:text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed z-10"
-                        title={imjoyApi ? "Open in ImageJ.js" : "ImageJ.js integration is loading..."}
-                        disabled={!imjoyApi}
-                        style={{ pointerEvents: 'auto' }}
-                      >
-                        <img 
-                          src="https://ij.imjoy.io/assets/badge/open-in-imagej-js-badge.svg" 
-                          alt="Open in ImageJ.js" 
-                          className="h-3"
-                        />
-                      </button>
-                    )}
-                  </>
+                  <img
+                    src={snappedImageData.url}
+                    alt="Microscope Snapshot"
+                    className="w-full h-full object-cover"
+                    style={{
+                      backgroundColor: 'transparent',
+                      border: '1px solid rgba(255, 255, 0, 0.3)',
+                    }}
+                  />
                 ) : null
               )
             )}
@@ -5270,6 +5328,7 @@ const MicroscopeMapDisplay = ({
               </div>
             )}
           </div>
+        </>
         )}
         
         {/* Drag move instructions overlay for FOV_FITTED mode */}
