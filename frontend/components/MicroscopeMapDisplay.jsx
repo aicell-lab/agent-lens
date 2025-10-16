@@ -1586,9 +1586,6 @@ const MicroscopeMapDisplay = ({
           appendLog(`Successfully moved to position: ${result.message}`);
           appendLog(`Moved from (${result.initial_position.x.toFixed(3)}, ${result.initial_position.y.toFixed(3)}) to (${result.final_position.x.toFixed(3)}, ${result.final_position.y.toFixed(3)})`);
         }
-        if (showNotification) {
-          showNotification(`Stage moved to (${result.final_position.x.toFixed(3)}, ${result.final_position.y.toFixed(3)})`, 'success');
-        }
         
         // Snap an image after moving the stage to show current sample in FOV_BOX
         // Only snap if video is not currently streaming to avoid terminating the video stream
