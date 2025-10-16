@@ -559,7 +559,7 @@ async def setup_service(server, server_id="service-name"):
     await server.register_service({
         "id": server_id,
         "name": "Service Name",
-        "type": "echo",  # or "asgi" for frontend services
+        "type": "service",  # or "asgi" for frontend services
         "config": {"visibility": "public"},
         # Service methods and endpoints
     })

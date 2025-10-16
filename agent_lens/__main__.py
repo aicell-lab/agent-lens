@@ -82,8 +82,10 @@ async def connect_server(args):
             "client_id": f"agent-lens-frontend-{uuid.uuid4()}",
             "server_url": args.server_url,
             "token": token,
-            "method_timeout": 500,
+            "method_timeout": 30000,
             "workspace": args.workspace_name,
+            "ping_interval": 90000,  # Send ping every 90 seconds to prevent idle timeout
+            "ping_timeout": 45000,   # Wait 45 seconds for pong response
         }
     )
 
