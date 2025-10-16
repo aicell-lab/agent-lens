@@ -5,10 +5,11 @@ services:
     environment:
       - WORKSPACE_TOKEN=${WORKSPACE_TOKEN}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - CLIP_CACHE=/app/.cache
+      - CLIP_CACHE=/app/.cache  # CLIP models are cached here for faster startup
       - JWT_SECRET=${JWT_SECRET}
       - REEF_WORKSPACE_TOKEN=${REEF_WORKSPACE_TOKEN}
       - HYPHA_AGENTS_TOKEN=${HYPHA_AGENTS_TOKEN}
+      # CLIP models are automatically preloaded in Docker mode for faster similarity search
     labels:
       - "autoheal.enable=true"
     volumes:
