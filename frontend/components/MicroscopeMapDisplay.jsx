@@ -1816,24 +1816,8 @@ const MicroscopeMapDisplay = ({
       })));
     }
     
-    // SIMPLIFIED: Just show all tiles for current scale - no complex filtering
-    const currentScaleTiles = stitchedTiles.filter(tile => {
-      // Only filter by scale level - let all tiles coexist
-      const scaleMatch = tile.scale === scaleLevel;
-      
-      if (shouldLogDetails) {
-        console.log(`🔍 [visibleTiles] Simple filtering:`, {
-          scaleMatch,
-          tileScale: tile.scale,
-          targetScale: scaleLevel,
-          tileChannel: tile.channel,
-          experiment: tile.experimentName,
-          result: scaleMatch
-        });
-      }
-      
-      return scaleMatch;
-    });
+    // 🎨 MULTI-SCALE RENDERING: Show both old and new scale tiles during loading transitions
+    const currentScaleTiles = stitchedTiles.filter(tile => tile.scale === scaleLevel);
     
     // 🚀 REDUCED LOGGING: Only log if detailed logging is enabled
     if (shouldLogDetails) {
@@ -1841,14 +1825,42 @@ const MicroscopeMapDisplay = ({
     }
     
     if (currentScaleTiles.length > 0) {
-      // If we have current scale tiles, only show current scale
+      // Check if current scale tiles are still loading (have partial tiles)
+      const partialTiles = currentScaleTiles.filter(tile => tile.isPartial);
+      
+      // Calculate average loading progress
+      const avgProgress = partialTiles.length > 0 ?
+        partialTiles.reduce((sum, tile) => sum + (tile.loadingProgress || 0), 0) / partialTiles.length :
+        1.0;
+      
+      // 🎨 GRADUAL REPLACEMENT: If new tiles are still loading (<80% complete), show old scale tiles too
+      if (partialTiles.length > 0 && avgProgress < 0.8) {
+        // Find the closest other scale (usually the previous scale before zoom)
+        const otherScales = [...new Set(stitchedTiles.map(tile => tile.scale))]
+          .filter(s => s !== scaleLevel)
+          .sort((a, b) => Math.abs(a - scaleLevel) - Math.abs(b - scaleLevel));
+        
+        if (otherScales.length > 0) {
+          const fallbackScale = otherScales[0];
+          const fallbackTiles = stitchedTiles.filter(tile => tile.scale === fallbackScale);
+          
+          if (shouldLogDetails && fallbackTiles.length > 0) {
+            console.log(`🎨 [visibleTiles] Showing ${fallbackTiles.length} scale ${fallbackScale} tiles under ${currentScaleTiles.length} loading scale ${scaleLevel} tiles (${Math.round(avgProgress * 100)}% complete)`);
+          }
+          
+          // Return both old tiles (background) and new tiles (foreground with alpha)
+          // Z-index will ensure proper layering
+          return [...fallbackTiles, ...currentScaleTiles];
+        }
+      }
+      
+      // If tiles are mostly complete or no fallback available, only show current scale
       return currentScaleTiles;
     }
     
     // If no tiles at current scale, find the closest available scale (lower resolution preferred)
-    // This prevents showing tiles from multiple scales simultaneously
     const availableScales = [...new Set(stitchedTiles.map(tile => tile.scale))]
-      .sort((a, b) => Math.abs(a - scaleLevel) - Math.abs(b - scaleLevel)); // Sort by distance from target scale
+      .sort((a, b) => Math.abs(a - scaleLevel) - Math.abs(b - scaleLevel));
     
     if (availableScales.length > 0) {
       const closestScale = availableScales[0];
@@ -1895,6 +1907,22 @@ const MicroscopeMapDisplay = ({
         if (currentTiles.length === 0) {
           console.log('[cleanupOldTiles] Historical mode: No tiles for current scale, preserving all existing tiles to prevent blackout');
           return prevTiles; // Keep all existing tiles
+        }
+        
+        // 🎨 DELAYED CLEANUP: Only remove old tiles if new tiles are substantially loaded
+        // Check if current scale tiles are mostly complete (>50% progress on average)
+        const partialTiles = currentTiles.filter(tile => tile.isPartial);
+        const completeTiles = currentTiles.filter(tile => !tile.isPartial);
+        
+        // Calculate average loading progress for partial tiles
+        const avgProgress = partialTiles.length > 0 ?
+          partialTiles.reduce((sum, tile) => sum + (tile.loadingProgress || 0), 0) / partialTiles.length :
+          1.0;
+        
+        // If we have mostly incomplete tiles (< 50% progress), keep old scale tiles visible
+        if (partialTiles.length > completeTiles.length && avgProgress < 0.5) {
+          console.log(`[cleanupOldTiles] Historical mode: New tiles loading (${Math.round(avgProgress * 100)}%), preserving old scale tiles`);
+          return prevTiles; // Keep all tiles including old scales during loading
         }
         
         // Also preserve tiles if we're in the middle of a scale change (zoom in or out)
@@ -3814,9 +3842,17 @@ const MicroscopeMapDisplay = ({
               }
             };
             
+            // 🎨 GRADUAL REPLACEMENT: Use PNG format to preserve alpha transparency for unloaded areas
+            // This allows old lower-resolution tiles to show through transparently
+            const loadingProgress = loadedChunks / totalChunks;
+            const usePNG = loadedChunks < totalChunks; // Use PNG for partial tiles to preserve alpha
+            const partialDataUrlWithAlpha = usePNG ? 
+              partialCanvas.toDataURL('image/png') : // PNG preserves alpha transparency
+              partialDataUrl; // Use JPEG for completed tiles (smaller file size)
+            
             // Create temporary tile with merged channel data
             const tempTile = {
-              data: partialDataUrl,
+              data: partialDataUrlWithAlpha,
               bounds: wellBounds,
               width_mm: wellRequest.width_mm,
               height_mm: wellRequest.height_mm,
@@ -3830,6 +3866,7 @@ const MicroscopeMapDisplay = ({
               wellId: wellId,
               isPartial: loadedChunks < totalChunks, // Mark as partial for potential cleanup
               progress: `${loadedChunks}/${totalChunks}`,
+              loadingProgress, // Normalized 0-1 progress for z-index calculation
               metadata: {
                 isMultiChannel: useMultiChannel,
                 channelsUsed: useMultiChannel ? enabledChannels.map(ch => ch.channelName) : [activeChannel],
@@ -3914,6 +3951,7 @@ const MicroscopeMapDisplay = ({
             datasetId: selectedHistoricalDataset.id,
             wellId: wellId,
             isPartial: false, // Mark as complete
+            loadingProgress: 1.0, // 100% complete for cleanup logic
             metadata: {
               ...finalResult.metadata,
               isMultiChannel: useMultiChannel,
@@ -4872,12 +4910,19 @@ const MicroscopeMapDisplay = ({
         
         {/* Stitched scan results tiles layer (below other elements) */}
         {mapViewMode === 'FREE_PAN' && visibleTiles.map((tile, index) => {
-          // Calculate z-index for multi-layer experiments
-          // Experiments shown later have higher z-index (appear on top)
+          // Calculate z-index for multi-layer experiments and scale-based layering
+          // Strategy: Higher resolution (lower scale number) appears on top
+          // This allows old lower-resolution tiles to show through transparent areas
           const experimentsToShow = visibleExperiments.length > 0 ? visibleExperiments : (activeExperiment ? [activeExperiment] : []);
           const experimentIndex = tile.experimentName ? experimentsToShow.indexOf(tile.experimentName) : -1;
           const baseZIndex = 1;
           const experimentZIndex = experimentIndex >= 0 ? experimentIndex + baseZIndex : baseZIndex;
+          
+          // 🎨 SCALE-BASED Z-INDEX: Higher resolution (scale 0) > Lower resolution (scale 4)
+          // Each scale level gets 10 z-index units to allow for experiment layering
+          const maxScale = 5; // Assuming scale levels 0-5
+          const scaleZIndexOffset = (maxScale - tile.scale) * 10; // Scale 0 gets +50, scale 5 gets 0
+          const finalZIndex = baseZIndex + scaleZIndexOffset + experimentZIndex;
           
           return (
             <div
@@ -4888,7 +4933,7 @@ const MicroscopeMapDisplay = ({
                 top: `${stageToDisplayCoords(tile.bounds.topLeft.x, tile.bounds.topLeft.y).y}px`,
                 width: `${tile.width_mm * pixelsPerMm * mapScale}px`,
                 height: `${tile.height_mm * pixelsPerMm * mapScale}px`,
-                zIndex: experimentZIndex // Multi-layer z-index based on experiment order
+                zIndex: finalZIndex // Scale-based z-index: higher resolution on top
               }}
             >
               <img

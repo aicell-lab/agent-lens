@@ -2046,10 +2046,8 @@ class ArtifactZarrLoader {
             onChunkProgress(loadedChunks, totalChunks, partialCanvas);
             lastProgressUpdate = now;
             
-            // DON'T clean up partial canvas - caller may store reference to it
-          }
-          
-          console.log(`✅ REAL-TIME: Network chunk ${i + 1}/${networkChunks.length} - ${loadedChunks}/${totalChunks} total`);
+          // DON'T clean up partial canvas - caller may store reference to it
+        }
         }
       }
       
