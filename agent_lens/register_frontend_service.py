@@ -958,6 +958,31 @@ async def _register_probes(server, probe_service_id):
     })
     logger.info("Health probes registered successfully")
 
+async def preload_clip_model():
+    """
+    Preload CLIP model during service startup to avoid delays during first use.
+    This function loads both the CLIP model and the similarity service CLIP model.
+    """
+    logger.info("Preloading CLIP models for faster startup...")
+    
+    try:
+        # Preload CLIP model for frontend service
+        logger.info("Loading CLIP model for frontend service...")
+        _load_clip_model()
+        logger.info("✓ Frontend CLIP model loaded successfully")
+        
+        # Preload CLIP model for similarity service
+        logger.info("Loading CLIP model for similarity service...")
+        from agent_lens.utils.weaviate_search import _load_clip_model as load_similarity_clip
+        load_similarity_clip()
+        logger.info("✓ Similarity service CLIP model loaded successfully")
+        
+        logger.info("All CLIP models preloaded successfully - similarity search will be faster!")
+        
+    except Exception as e:
+        logger.warning(f"Failed to preload CLIP models: {e}")
+        logger.warning("CLIP will be loaded on first use (may cause delays)")
+
 async def setup_service(server, server_id="agent-lens"):
     """
     Set up the frontend service.
@@ -975,6 +1000,19 @@ async def setup_service(server, server_id="agent-lens"):
     # Use 'agent-lens-test' as service_id only when using connect-server in VSCode (not in docker)
     if is_connect_server and not is_docker:
         server_id = "agent-lens-test"
+    
+    # Preload CLIP models for faster startup (especially important in Docker)
+    # Also preload in development if CLIP_PRELOAD environment variable is set
+    should_preload = is_docker or os.getenv("CLIP_PRELOAD", "").lower() in ("true", "1", "yes")
+    
+    if should_preload:
+        if is_docker:
+            logger.info("Docker mode detected - preloading CLIP models...")
+        else:
+            logger.info("CLIP_PRELOAD environment variable set - preloading CLIP models...")
+        await preload_clip_model()
+    else:
+        logger.info("CLIP models will be loaded on first use (set CLIP_PRELOAD=true to preload)")
     
     # Ensure artifact_manager_instance is connected
     if artifact_manager_instance.server is None:
