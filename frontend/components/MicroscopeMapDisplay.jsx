@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, useImperativeHandle, forwardRef } from 'react';
 import PropTypes from 'prop-types';
 import { useValidatedNumberInput } from '../utils'; // Import validation utilities
 import ArtifactZarrLoader from '../utils/artifactZarrLoader.js';
@@ -12,7 +12,7 @@ import AnnotationCanvas from './annotation/AnnotationCanvas';
 import SimilarAnnotationRenderer from './annotation/SimilarAnnotationRenderer';
 import './MicroscopeMapDisplay.css';
 
-const MicroscopeMapDisplay = ({
+const MicroscopeMapDisplay = forwardRef(({
   isOpen,
   microscopeConfiguration,
   isWebRtcActive,
@@ -69,7 +69,7 @@ const MicroscopeMapDisplay = ({
   onSampleLoadStatusChange,
   // Image capture props
   onSnapImage,
-}) => {
+}, ref) => {
   const mapContainerRef = useRef(null);
   const canvasRef = useRef(null);
   const mapVideoRef = useRef(null);
@@ -364,6 +364,54 @@ const MicroscopeMapDisplay = ({
       setNeedsTileReload(true);
     }
   }, [appendLog, isSimulatedMicroscope]); // Removed visibleLayers.scanResults to prevent triggering on layer toggles
+
+  // Callback for handling scan status updates from MicroscopeControlPanel
+  const handleScanStatusUpdate = useCallback((scanStatus) => {
+    const { state, saved_data_type, error_message, scanJustCompleted } = scanStatus;
+    
+    // Update scan progress states based on state and data type
+    if (state === 'running') {
+      if (saved_data_type === 'full_zarr') {
+        setIsScanInProgress(true);
+        setIsQuickScanInProgress(false);
+      } else if (saved_data_type === 'quick_zarr') {
+        setIsQuickScanInProgress(true);
+        setIsScanInProgress(false);
+      }
+    } else if (state === 'completed' || state === 'failed' || state === 'idle') {
+      // Clear both scan states when not running
+      setIsScanInProgress(false);
+      setIsQuickScanInProgress(false);
+      
+      // If scan just completed successfully, refresh results and show notification
+      if (scanJustCompleted) {
+        if (state === 'completed') {
+          if (showNotification) {
+            showNotification('Scan completed successfully', 'success');
+          }
+          if (appendLog) {
+            appendLog('Scan completed successfully');
+          }
+          // Refresh scan results after a short delay
+          setTimeout(() => {
+            refreshScanResults();
+          }, 1000);
+        } else if (state === 'failed') {
+          if (showNotification) {
+            showNotification(`Scan failed: ${error_message || 'Unknown error'}`, 'error');
+          }
+          if (appendLog) {
+            appendLog(`Scan failed: ${error_message || 'Unknown error'}`);
+          }
+        }
+      }
+    }
+  }, [refreshScanResults, showNotification, appendLog]);
+
+  // Expose handleScanStatusUpdate to parent component via ref
+  useImperativeHandle(ref, () => ({
+    handleScanStatusUpdate
+  }), [handleScanStatusUpdate]);
 
   // Initialize experiment zarr manager hook
   const experimentManager = useExperimentZarrManager({
@@ -5726,7 +5774,9 @@ const MicroscopeMapDisplay = ({
       
     </div>
   );
-};
+});
+
+MicroscopeMapDisplay.displayName = 'MicroscopeMapDisplay';
 
 MicroscopeMapDisplay.propTypes = {
   isOpen: PropTypes.bool.isRequired,

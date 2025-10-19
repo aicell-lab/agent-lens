@@ -91,6 +91,9 @@ const MicroscopeControlPanel = ({
   const [yMove, setYMove] = useState(0.1);
   const [zMove, setZMove] = useState(0.01);
   const [microscopeBusy, setMicroscopeBusy] = useState(false);
+  
+  // Ref for accessing MicroscopeMapDisplay methods
+  const microscopeMapDisplayRef = useRef(null);
 
 
   // State for the snapped image, storing both raw numpy and display URL
@@ -372,6 +375,9 @@ const MicroscopeControlPanel = ({
     }
   };
 
+  // Track previous scan state to detect transitions
+  const prevScanStateRef = useRef({ state: 'idle', saved_data_type: null });
+
   const fetchStatusAndUpdateActuals = async () => {
     if (!microscopeControlService) {
       // Return current desired values if no service, as initAndSyncValues uses these to set desired states
@@ -413,6 +419,29 @@ const MicroscopeControlPanel = ({
       if (pairForUIScheduledChannel) {
         intensityForDesiredSync = pairForUIScheduledChannel[0];
         exposureForDesiredSync = pairForUIScheduledChannel[1];
+      }
+
+      // Handle scan status updates
+      if (status.scan_status && microscopeMapDisplayRef.current) {
+        const currentScanState = status.scan_status.state || 'idle';
+        const currentDataType = status.scan_status.saved_data_type;
+        const prevScanState = prevScanStateRef.current.state;
+        
+        // Detect transition from running to completed/failed
+        const scanJustCompleted = prevScanState === 'running' && (currentScanState === 'completed' || currentScanState === 'failed');
+        
+        // Update scan status via ref to MicroscopeMapDisplay
+        if (microscopeMapDisplayRef.current.handleScanStatusUpdate) {
+          microscopeMapDisplayRef.current.handleScanStatusUpdate({
+            state: currentScanState,
+            saved_data_type: currentDataType,
+            error_message: status.scan_status.error_message,
+            scanJustCompleted: scanJustCompleted
+          });
+        }
+        
+        // Update previous state tracker
+        prevScanStateRef.current = { state: currentScanState, saved_data_type: currentDataType };
       }
 
       return { intensity: intensityForDesiredSync, exposure: exposureForDesiredSync };
@@ -1500,6 +1529,7 @@ const MicroscopeControlPanel = ({
           }}
         >
           <MicroscopeMapDisplay
+            ref={microscopeMapDisplayRef}
             isOpen={true}
             onClose={() => {}}
             microscopeConfiguration={microscopeConfiguration}
