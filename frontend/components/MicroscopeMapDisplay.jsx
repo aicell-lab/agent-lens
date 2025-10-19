@@ -189,7 +189,7 @@ const MicroscopeMapDisplay = forwardRef(({
   const [showQuickScanConfig, setShowQuickScanConfig] = useState(false);
   const [isQuickScanInProgress, setIsQuickScanInProgress] = useState(false);
   const [quickScanParameters, setQuickScanParameters] = useState({
-    wellplate_type: '96',
+    well_plate_type: '96',
     exposure_time: 4,
     intensity: 100,
     fps_target: 5,

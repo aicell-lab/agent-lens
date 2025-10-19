@@ -51,8 +51,8 @@ const QuickScanConfig = ({
           <div className="quick-scan-config-section">
             <label className="quick-scan-config-label">Well Plate Type</label>
             <select
-              value={quickScanParameters.wellplate_type}
-              onChange={(e) => setQuickScanParameters(prev => ({ ...prev, wellplate_type: e.target.value }))}
+              value={quickScanParameters.well_plate_type}
+              onChange={(e) => setQuickScanParameters(prev => ({ ...prev, well_plate_type: e.target.value }))}
               className="quick-scan-config-select"
               disabled={isQuickScanInProgress}
             >
@@ -298,10 +298,10 @@ const QuickScanConfig = ({
               <div>• Brightfield channel only</div>
               <div>• {quickScanParameters.n_stripes}-stripe × {quickScanParameters.stripe_width_mm}mm serpentine pattern per well</div>
               <div>• Maximum exposure: 30ms</div>
-              <div>• Scans entire {quickScanParameters.wellplate_type}-well plate</div>
+              <div>• Scans entire {quickScanParameters.well_plate_type}-well plate</div>
               <div>• Estimated scan time: {(() => {
                 const wellplateSizes = {'96': 96};
-                const wells = wellplateSizes[quickScanParameters.wellplate_type] || 96;
+                const wells = wellplateSizes[quickScanParameters.well_plate_type] || 96;
                 const stripesPerWell = quickScanParameters.n_stripes;
                 const timePerStripe = quickScanParameters.stripe_width_mm / quickScanParameters.velocity_scan_mm_per_s;
                 const estimatedTimeSeconds = wells * stripesPerWell * timePerStripe * 1.5; // 1.5x factor for movement overhead
@@ -346,7 +346,7 @@ const QuickScanConfig = ({
                   const result = await microscopeControlService.scan_start({
                     saved_data_type: "quick_zarr",
                     action_ID: 'quick_scan_' + Date.now(),
-                    well_plate_type: quickScanParameters.wellplate_type,
+                    well_plate_type: quickScanParameters.well_plate_type,
                     well_padding_mm: wellPaddingMm,
                     dy_mm: quickScanParameters.dy_mm,
                     exposure_time: quickScanParameters.exposure_time,

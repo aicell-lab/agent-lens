@@ -676,7 +676,7 @@ const NormalScanConfig = ({
                   dy_mm: scanParameters.dy_mm,
                   illumination_settings: scanParameters.illumination_settings,
                   wells_to_scan: selectedWells,
-                  wellplate_type: wellPlateType,
+                  well_plate_type: wellPlateType,
                   well_padding_mm: wellPaddingMm,
                   experiment_name: activeExperiment,
                   uploading: scanParameters.uploading,

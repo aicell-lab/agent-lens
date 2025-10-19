@@ -66,7 +66,7 @@ async function testFrontendIntegration() {
           0, // centerY_mm
           10, // width_mm
           10, // height_mm
-          '96', // wellplate_type
+          '96', // well_plate_type
           0, // scale_level
           'BF LED matrix full', // channel
           0, // timepoint_index
