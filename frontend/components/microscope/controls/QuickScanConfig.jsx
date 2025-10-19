@@ -344,7 +344,7 @@ const QuickScanConfig = ({
                   // Set scanning state immediately to update UI
                   setIsQuickScanInProgress(true);
                   
-                  const result = await microscopeControlService.quick_scan_with_stitching(
+                  const result = await microscopeControlService.quick_scan_brightfield_to_zarr(
                     quickScanParameters.wellplate_type,
                     quickScanParameters.exposure_time,
                     quickScanParameters.intensity,

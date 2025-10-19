@@ -664,7 +664,7 @@ const NormalScanConfig = ({
                   appendLog(`Channels: ${channelNames}`);
                 }
                 
-                const result = await microscopeControlService.normal_scan_with_stitching(
+                const result = await microscopeControlService.scan_region_to_zarr(
                   scanParameters.start_x_mm,
                   scanParameters.start_y_mm,
                   scanParameters.Nx,

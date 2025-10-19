@@ -1041,7 +1041,7 @@ const MicroscopeControlPanel = ({
     try {
       setMicroscopeBusy(true);
       appendLog('Performing contrast autofocus...');
-      await microscopeControlService.auto_focus();
+      await microscopeControlService.contrast_autofocus();
     } catch (error) {
       appendLog(`Error in contrast autofocus: ${error.message}`);
     } finally {
@@ -1054,7 +1054,7 @@ const MicroscopeControlPanel = ({
     try {
       setMicroscopeBusy(true);
       appendLog('Performing laser autofocus...');
-      await microscopeControlService.do_laser_autofocus();
+      await microscopeControlService.reflection_autofocus();
     } catch (error) {
       appendLog(`Error in laser autofocus: ${error.message}`);
     } finally {
@@ -1071,7 +1071,7 @@ const MicroscopeControlPanel = ({
     try {
       setMicroscopeBusy(true);
       appendLog('Setting laser reference...');
-      await microscopeControlService.set_laser_reference(); 
+      await microscopeControlService.autofocus_set_reflection_reference(); 
       appendLog('Laser reference set successfully.');
       if (showNotification) showNotification('Laser reference set successfully.', 'success');
     } catch (error) {

@@ -84,7 +84,7 @@ const MicroscopeMapDisplay = ({
     try {
       setMicroscopeBusy(true);
       if (appendLog) appendLog('Performing laser autofocus...');
-      await microscopeControlService.do_laser_autofocus();
+      await microscopeControlService.reflection_autofocus();
       if (appendLog) appendLog('Laser autofocus completed');
     } catch (error) {
       if (appendLog) appendLog(`Error in laser autofocus: ${error.message}`);
@@ -3121,7 +3121,7 @@ const MicroscopeMapDisplay = ({
   // Mouse handlers for grid selection
   // Grid selection handlers are handled in NormalScanConfig component
 
-  // In scan start button handler, pass selectedWells to normal_scan_with_stitching
+  // In scan start button handler, pass selectedWells to scan_region_to_zarr
 
   // Helper: calculate FOV positions for a given well center
   const calculateFOVPositionsForWell = useCallback((wellInfo) => {
