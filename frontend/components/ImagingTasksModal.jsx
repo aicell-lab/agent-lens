@@ -631,7 +631,7 @@ const ImagingTasksModal = ({
         // Extract experiment_id from task name (assuming task name contains experiment_id)
         const experiment_id = task.name;
         
-        const result = await orchestratorManagerService.offline_stitch_and_upload_timelapse(
+        const result = await orchestratorManagerService.process_timelapse_offline(
           experiment_id,
           true,  // upload_immediately
           true   // cleanup_temp_files
