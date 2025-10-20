@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
 import './Sidebar.css';
-import SampleSelector from './SampleSelector';
+import { isRealMicroscope, isSimulatedMicroscope } from '../utils';
 
 const Sidebar = React.forwardRef(({ 
   activeTab, 
@@ -42,11 +42,9 @@ const Sidebar = React.forwardRef(({
 
 
 
-
-
-  const isRealMicroscopeSelected = selectedMicroscopeId === 'reef-imaging/microscope-control-squid-1' ||
-                                 selectedMicroscopeId === 'reef-imaging/microscope-control-squid-2';
-  const isSimulatedMicroscopeSelected = selectedMicroscopeId === 'agent-lens/squid-control-reef';
+  // Use centralized config utility functions
+  const isRealMicroscopeSelected = isRealMicroscope(selectedMicroscopeId);
+  const isSimulatedMicroscopeSelected = isSimulatedMicroscope(selectedMicroscopeId);
 
   // Toggle function for main sidebar collapse
   const toggleMainSidebarCollapse = () => {

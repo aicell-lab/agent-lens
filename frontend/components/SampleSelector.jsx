@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
+import { isRealMicroscope, isSimulatedMicroscope, getMicroscopeNumber } from '../utils';
 
 // NOTE: Ensure corresponding CSS for .sample-selector-dropdown and .hidden is added.
 // .sample-selector-dropdown { position: absolute; top: 50px; /* Adjust as needed */ left: 20px; z-index: 1000; background: white; border: 1px solid #ccc; box-shadow: 0 2px 10px rgba(0,0,0,0.1); padding: 15px; border-radius: 5px; width: 300px; /* Or max-content */ }
@@ -30,13 +31,10 @@ const SampleSelector = ({
     'hpa-sample': 'agent-lens/hpa-example-sample-20250114-150051'
   };
   
-  const isRealMicroscopeSelected = selectedMicroscopeId === 'reef-imaging/microscope-control-squid-1' ||
-                                selectedMicroscopeId === 'reef-imaging/microscope-control-squid-2' ||
-                                selectedMicroscopeId === 'reef-imaging/microscope-squid-plus-1';
-  const isSimulatedMicroscopeSelected = selectedMicroscopeId === 'agent-lens/squid-control-reef';
-  const currentMicroscopeNumber = selectedMicroscopeId === 'reef-imaging/microscope-control-squid-1' ? 1 : 
-                                 selectedMicroscopeId === 'reef-imaging/microscope-control-squid-2' ? 2 :
-                                 selectedMicroscopeId === 'reef-imaging/microscope-squid-plus-1' ? 3 : 0;
+  // Use centralized config utility functions
+  const isRealMicroscopeSelected = isRealMicroscope(selectedMicroscopeId);
+  const isSimulatedMicroscopeSelected = isSimulatedMicroscope(selectedMicroscopeId);
+  const currentMicroscopeNumber = getMicroscopeNumber(selectedMicroscopeId) || 0;
 
   // Notify parent when sample load status changes
   useEffect(() => {

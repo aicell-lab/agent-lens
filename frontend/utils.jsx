@@ -1,5 +1,192 @@
 import { useState, useEffect, useCallback } from 'react';
 
+// ============================================================================
+// Centralized Microscope Configuration
+// ============================================================================
+// This configuration object centralizes all microscope service information,
+// eliminating hardcoded service IDs scattered across multiple components.
+export const MICROSCOPE_CONFIG = {
+  'agent-lens/squid-control-reef': {
+    id: 'agent-lens/squid-control-reef',
+    type: 'simulated',
+    model: 'squid',
+    displayName: 'Simulated',
+    videoTrackServiceId: 'agent-lens/video-track-squid-control-reef',
+    orchestratorId: null, // Not supported for time-lapse
+    microscopeNumber: null, // Not a real microscope
+  },
+  'reef-imaging/microscope-control-squid-1': {
+    id: 'reef-imaging/microscope-control-squid-1',
+    type: 'real',
+    model: 'squid',
+    displayName: 'Real Microscope 1',
+    videoTrackServiceId: 'reef-imaging/video-track-microscope-control-squid-1',
+    orchestratorId: 'microscope-control-squid-1',
+    microscopeNumber: 1,
+  },
+  'reef-imaging/microscope-control-squid-2': {
+    id: 'reef-imaging/microscope-control-squid-2',
+    type: 'real',
+    model: 'squid',
+    displayName: 'Real Microscope 2',
+    videoTrackServiceId: 'reef-imaging/video-track-microscope-control-squid-2',
+    orchestratorId: 'microscope-control-squid-2',
+    microscopeNumber: 2,
+  },
+  'reef-imaging/microscope-squid-plus-1': {
+    id: 'reef-imaging/microscope-squid-plus-1',
+    type: 'real',
+    model: 'squid+',
+    displayName: 'Squid+ Microscope 1',
+    videoTrackServiceId: 'reef-imaging/video-track-microscope-squid-plus-1',
+    orchestratorId: 'microscope-squid-plus-1',
+    microscopeNumber: 3,
+  },
+};
+
+// Related service IDs for hardware control
+export const INCUBATOR_SERVICE_ID = 'reef-imaging/incubator-control';
+export const ROBOTIC_ARM_SERVICE_ID = 'reef-imaging/robotic-arm-control';
+
+// Microscope number to service ID mapping (for sample transfer operations)
+export const MICROSCOPE_NUMBER_TO_SERVICE = {
+  1: 'reef-imaging/microscope-control-squid-1',
+  2: 'reef-imaging/microscope-control-squid-2',
+  3: 'reef-imaging/microscope-squid-plus-1',
+};
+
+// ============================================================================
+// Microscope Configuration Utility Functions
+// ============================================================================
+// These functions provide a clean API for querying microscope properties,
+// replacing hardcoded if/else chains throughout the codebase.
+
+/**
+ * Get the complete configuration object for a microscope.
+ * @param {string} microscopeId - The full service ID of the microscope
+ * @returns {object|null} Configuration object or null if not found
+ */
+export const getMicroscopeConfig = (microscopeId) => {
+  return MICROSCOPE_CONFIG[microscopeId] || null;
+};
+
+/**
+ * Get the type of microscope ('simulated' or 'real').
+ * @param {string} microscopeId - The full service ID of the microscope
+ * @returns {string|null} 'simulated', 'real', or null if not found
+ */
+export const getMicroscopeType = (microscopeId) => {
+  const config = getMicroscopeConfig(microscopeId);
+  return config ? config.type : null;
+};
+
+/**
+ * Get the model of microscope ('squid' or 'squid+').
+ * @param {string} microscopeId - The full service ID of the microscope
+ * @returns {string|null} 'squid', 'squid+', or null if not found
+ */
+export const getMicroscopeModel = (microscopeId) => {
+  const config = getMicroscopeConfig(microscopeId);
+  return config ? config.model : null;
+};
+
+/**
+ * Get the display name for UI rendering.
+ * @param {string} microscopeId - The full service ID of the microscope
+ * @returns {string} Human-readable display name or the microscopeId if not found
+ */
+export const getMicroscopeDisplayName = (microscopeId) => {
+  const config = getMicroscopeConfig(microscopeId);
+  return config ? config.displayName : microscopeId;
+};
+
+/**
+ * Check if a microscope is simulated.
+ * @param {string} microscopeId - The full service ID of the microscope
+ * @returns {boolean} True if simulated
+ */
+export const isSimulatedMicroscope = (microscopeId) => {
+  return getMicroscopeType(microscopeId) === 'simulated';
+};
+
+/**
+ * Check if a microscope is real (not simulated).
+ * @param {string} microscopeId - The full service ID of the microscope
+ * @returns {boolean} True if real
+ */
+export const isRealMicroscope = (microscopeId) => {
+  return getMicroscopeType(microscopeId) === 'real';
+};
+
+/**
+ * Check if a microscope is Squid+ model.
+ * @param {string} microscopeId - The full service ID of the microscope
+ * @returns {boolean} True if Squid+ model
+ */
+export const isSquidPlusMicroscope = (microscopeId) => {
+  return getMicroscopeModel(microscopeId) === 'squid+';
+};
+
+/**
+ * Get the video track service ID for WebRTC streaming.
+ * @param {string} microscopeId - The full service ID of the microscope
+ * @returns {string|null} Video track service ID or null if not found
+ */
+export const getVideoTrackServiceId = (microscopeId) => {
+  const config = getMicroscopeConfig(microscopeId);
+  return config ? config.videoTrackServiceId : null;
+};
+
+/**
+ * Get the microscope number (1, 2, 3) for hardware operations.
+ * @param {string} microscopeId - The full service ID of the microscope
+ * @returns {number|null} Microscope number or null if simulated/not found
+ */
+export const getMicroscopeNumber = (microscopeId) => {
+  const config = getMicroscopeConfig(microscopeId);
+  return config ? config.microscopeNumber : null;
+};
+
+/**
+ * Get the service ID for a given microscope number.
+ * @param {number} microscopeNumber - The microscope number (1, 2, or 3)
+ * @returns {string|null} Service ID or null if not found
+ */
+export const getMicroscopeServiceIdForNumber = (microscopeNumber) => {
+  return MICROSCOPE_NUMBER_TO_SERVICE[microscopeNumber] || null;
+};
+
+/**
+ * Get the orchestrator microscope identifier for time-lapse tasks.
+ * @param {string} microscopeId - The full service ID of the microscope
+ * @returns {string|null} Orchestrator ID or null if not supported
+ */
+export const getOrchestratorMicroscopeId = (microscopeId) => {
+  const config = getMicroscopeConfig(microscopeId);
+  return config ? config.orchestratorId : null;
+};
+
+/**
+ * Check if a microscope supports time-lapse imaging.
+ * @param {string} microscopeId - The full service ID of the microscope
+ * @returns {boolean} True if time-lapse is supported
+ */
+export const supportsTimeLapse = (microscopeId) => {
+  return isRealMicroscope(microscopeId);
+};
+
+/**
+ * Get all available microscope service IDs.
+ * @returns {string[]} Array of all microscope service IDs
+ */
+export const getAllMicroscopeIds = () => {
+  return Object.keys(MICROSCOPE_CONFIG);
+};
+
+// ============================================================================
+// Server and Service Management
+// ============================================================================
+
 const getServerUrl = () => {
   return getUrlParam("server") || window.location.origin;
 }
@@ -172,22 +359,21 @@ export const initializeServices = async (
   setMicroscopeControlService(microscopeControlService);
 
   
-  const incubatorServiceIdFull = "reef-imaging/incubator-control";
+  // Use centralized service ID constants
   const incubatorControlService = await tryGetService(
     hyphaManager,
     "Incubator Control",
-    incubatorServiceIdFull,
+    INCUBATOR_SERVICE_ID,
     null, // Assuming no special local ID for incubator, always remote via manager
     appendLog,
     showNotification
   );
   setIncubatorControlService(incubatorControlService);
 
-  const roboticArmServiceIdFull = "reef-imaging/robotic-arm-control";
   const roboticArmService = await tryGetService(
     hyphaManager,
     "Robotic Arm Control",
-    roboticArmServiceIdFull,
+    ROBOTIC_ARM_SERVICE_ID,
     null, // Assuming no special local ID for arm, always remote via manager
     appendLog,
     showNotification

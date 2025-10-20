@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, useImperativeHandle, forwardRef } from 'react';
 import PropTypes from 'prop-types';
-import { useValidatedNumberInput } from '../utils'; // Import validation utilities
+import { useValidatedNumberInput, isSquidPlusMicroscope } from '../utils'; // Import validation utilities
 import ArtifactZarrLoader from '../utils/artifactZarrLoader.js';
 import LayerPanel from './microscope/map/LayerPanel';
 import useExperimentZarrManager from './microscope/map/ExperimentZarrManager';
@@ -118,11 +118,6 @@ const MicroscopeMapDisplay = forwardRef(({
       chunkProgressUpdateTimes.current.clear();
     };
   }, []);
-
-  // Helper function to detect squid plus microscope
-  const isSquidPlusMicroscope = (microscopeId) => {
-    return microscopeId && microscopeId.includes('squid-plus');
-  };
 
   // Set default scan parameters for specific microscope types
   useEffect(() => {

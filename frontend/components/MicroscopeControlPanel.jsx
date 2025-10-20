@@ -4,7 +4,16 @@ import ChatbotButton from './ChatbotButton';
 import SampleSelector from './SampleSelector';
 import ImagingTasksModal from './ImagingTasksModal';
 import MicroscopeMapDisplay from './MicroscopeMapDisplay';
-import { useValidatedNumberInput, getInputValidationClasses } from '../utils';
+import { 
+  useValidatedNumberInput, 
+  getInputValidationClasses,
+  isSimulatedMicroscope,
+  isRealMicroscope,
+  isSquidPlusMicroscope,
+  getVideoTrackServiceId,
+  getMicroscopeDisplayName,
+  getOrchestratorMicroscopeId,
+} from '../utils';
 import './ImagingTasksModal.css';
 
 // Helper function to convert a uint8 hypha-rpc numpy array to a displayable Data URL
@@ -44,20 +53,6 @@ const numpyArrayToDataURL = (numpyArray) => {
   ctx.putImageData(imageData, 0, 0);
   return canvas.toDataURL('image/png');
 };
-
-const WEBRTC_SERVICE_IDS = {
-  "agent-lens/squid-control-reef": "agent-lens/video-track-squid-control-reef",
-  "reef-imaging/microscope-control-squid-1": "reef-imaging/video-track-microscope-control-squid-1",
-  "reef-imaging/microscope-control-squid-2": "reef-imaging/video-track-microscope-control-squid-2",
-  "reef-imaging/microscope-squid-plus-1": "reef-imaging/video-track-microscope-squid-plus-1",
-};
-
-// Helper function to check if a microscope is Squid+ model
-const isSquidPlusMicroscope = (microscopeId) => {
-  return microscopeId && microscopeId.includes('squid-plus');
-};
-
-
 
 const MicroscopeControlPanel = ({
   map,
@@ -698,7 +693,7 @@ const MicroscopeControlPanel = ({
       return;
     }
 
-    const fullWebRtcServiceId = WEBRTC_SERVICE_IDS[selectedMicroscopeId];
+    const fullWebRtcServiceId = getVideoTrackServiceId(selectedMicroscopeId);
     if (!selectedMicroscopeId || !fullWebRtcServiceId) {
       appendLog(`WebRTC Error: No WebRTC service ID configured for ${selectedMicroscopeId}`);
       setWebRtcError(`No WebRTC service ID configured for ${selectedMicroscopeId}`);
@@ -1152,13 +1147,13 @@ const MicroscopeControlPanel = ({
     if (!orchestratorManagerService || !selectedMicroscopeId) {
       setImagingTasks([]);
       // For simulated or unmanaged scopes, ensure task-related busy state is cleared if no service/id.
-      if (selectedMicroscopeId === "agent-lens/squid-control-reef" || !orchestratorManagerService) {
+      if (isSimulatedMicroscope(selectedMicroscopeId) || !orchestratorManagerService) {
         setMicroscopeBusy(false);
       }
       return;
     }
 
-    if (selectedMicroscopeId === "agent-lens/squid-control-reef") {
+    if (isSimulatedMicroscope(selectedMicroscopeId)) {
       appendLog("Time-lapse imaging not supported for simulated microscope.");
       setImagingTasks([]);
       setMicroscopeBusy(false); // Simulated microscope is not busy due to tasks
@@ -1172,12 +1167,8 @@ const MicroscopeControlPanel = ({
       const tasks = await orchestratorManagerService.get_all_imaging_tasks();
       appendLog(`Fetched ${tasks.length} imaging tasks.`);
       
-      // Extract microscope identifier from the full service ID
-      const microscopeIdentifier = selectedMicroscopeId.includes('microscope-control-squid') 
-        ? `microscope-control-squid-${selectedMicroscopeId.endsWith('1') ? '1' : '2'}`
-        : selectedMicroscopeId.includes('squid-plus-1')
-        ? 'microscope-squid-plus-1'
-        : null;
+      // Get orchestrator microscope identifier from centralized config
+      const microscopeIdentifier = getOrchestratorMicroscopeId(selectedMicroscopeId);
       
       const relevantTasks = tasks.filter(task => 
         task.settings && task.settings.allocated_microscope === microscopeIdentifier
@@ -1201,7 +1192,7 @@ const MicroscopeControlPanel = ({
       } else {
         // If no active task is found for this REAL microscope, it's not busy due to tasks.
         // (Simulated scope and no orchestrator handled at the start of the function)
-        if (selectedMicroscopeId !== "agent-lens/squid-control-reef" && orchestratorManagerService) {
+        if (isRealMicroscope(selectedMicroscopeId) && orchestratorManagerService) {
             appendLog(`No active imaging tasks found for ${selectedMicroscopeId}. Setting microscope to not busy.`);
             setMicroscopeBusy(false);
         }
@@ -1222,7 +1213,7 @@ const MicroscopeControlPanel = ({
   }, [fetchImagingTasks]); // Depend on the memoized fetchImagingTasks
 
   const openImagingTaskModal = (task) => {
-    if (selectedMicroscopeId === "agent-lens/squid-control-reef") {
+    if (isSimulatedMicroscope(selectedMicroscopeId)) {
       appendLog("Time-lapse imaging management not supported for simulated microscope.");
       if(showNotification) showNotification("Time-lapse imaging not supported for simulated microscope.", "info");
       return;
@@ -1621,7 +1612,7 @@ const MicroscopeControlPanel = ({
             <SampleSelector 
               isVisible={true}
               selectedMicroscopeId={selectedMicroscopeId}
-              microscopeControlService={selectedMicroscopeId === 'agent-lens/squid-control-reef' ? microscopeControlService : null}
+              microscopeControlService={isSimulatedMicroscope(selectedMicroscopeId) ? microscopeControlService : null}
               incubatorControlService={incubatorControlService}
               orchestratorManagerService={orchestratorManagerService}
               currentOperation={currentOperation}
@@ -1942,14 +1933,14 @@ const MicroscopeControlPanel = ({
                   className="control-button bg-green-500 text-white hover:bg-green-600 px-2 py-1 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
                   onClick={() => openImagingTaskModal(null)}
                   disabled={
-                    selectedMicroscopeId === "agent-lens/squid-control-reef" || 
+                    isSimulatedMicroscope(selectedMicroscopeId) || 
                     !orchestratorManagerService || 
                     currentOperation !== null || 
                     microscopeBusy || 
                     imagingTasks.some(t => t.operational_state?.status !== 'completed' && t.operational_state?.status !== 'failed')
                   }
                   title={
-                    selectedMicroscopeId === "agent-lens/squid-control-reef" 
+                    isSimulatedMicroscope(selectedMicroscopeId) 
                       ? "Time-lapse imaging not supported on simulated microscope"
                       : !orchestratorManagerService 
                         ? "Orchestrator service not available (check reef-imaging workspace access)"
@@ -1964,7 +1955,7 @@ const MicroscopeControlPanel = ({
                 </button>
               </div>
               
-              {selectedMicroscopeId === "agent-lens/squid-control-reef" ? (
+              {isSimulatedMicroscope(selectedMicroscopeId) ? (
                 <p className="text-xs text-gray-500 italic">Time-lapse imaging is not supported on the simulated microscope.</p>
               ) : !orchestratorManagerService ? (
                 <p className="text-xs text-gray-500 italic">Time-lapse imaging not available (orchestrator service not accessible - check reef-imaging workspace access).</p>
@@ -2040,11 +2031,7 @@ const MicroscopeControlPanel = ({
                 Microscope Configuration
                 {selectedMicroscopeId && (
                   <span className="text-sm text-gray-600 ml-2">
-                    ({selectedMicroscopeId === 'agent-lens/squid-control-reef' ? 'Simulated' :
-                      selectedMicroscopeId === 'reef-imaging/microscope-control-squid-1' ? 'Real Microscope 1' :
-                      selectedMicroscopeId === 'reef-imaging/microscope-control-squid-2' ? 'Real Microscope 2' :
-                      selectedMicroscopeId === 'reef-imaging/microscope-squid-plus-1' ? 'Squid+ Microscope 1' :
-                      selectedMicroscopeId})
+                    ({getMicroscopeDisplayName(selectedMicroscopeId)})
                     {isSquidPlusMicroscope(selectedMicroscopeId) && (
                       <i className="fas fa-plus-circle ml-1 text-purple-500" title="Squid+ Model"></i>
                     )}
