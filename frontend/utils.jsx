@@ -172,7 +172,7 @@ export const initializeServices = async (
   setMicroscopeControlService(microscopeControlService);
 
   
-  const incubatorServiceIdFull = "reef-imaging/mirror-incubator-control";
+  const incubatorServiceIdFull = "reef-imaging/incubator-control";
   const incubatorControlService = await tryGetService(
     hyphaManager,
     "Incubator Control",
@@ -183,7 +183,7 @@ export const initializeServices = async (
   );
   setIncubatorControlService(incubatorControlService);
 
-  const roboticArmServiceIdFull = "reef-imaging/mirror-robotic-arm-control";
+  const roboticArmServiceIdFull = "reef-imaging/robotic-arm-control";
   const roboticArmService = await tryGetService(
     hyphaManager,
     "Robotic Arm Control",

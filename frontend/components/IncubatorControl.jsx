@@ -190,9 +190,9 @@ const IncubatorControl = ({
     }
 
     const microscopeServiceIds = {
-      1: "reef-imaging/mirror-microscope-control-squid-1",
-      2: "reef-imaging/mirror-microscope-control-squid-2",
-      3: "reef-imaging/mirror-microscope-squid-plus-1"
+      1: "reef-imaging/microscope-control-squid-1",
+      2: "reef-imaging/microscope-control-squid-2",
+      3: "reef-imaging/microscope-squid-plus-1"
     };
 
     const targetMicroscopeId = microscopeServiceIds[microscopeNumber];

@@ -30,13 +30,13 @@ const SampleSelector = ({
     'hpa-sample': 'agent-lens/hpa-example-sample-20250114-150051'
   };
   
-  const isRealMicroscopeSelected = selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ||
-                                selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2' ||
-                                selectedMicroscopeId === 'reef-imaging/mirror-microscope-squid-plus-1';
+  const isRealMicroscopeSelected = selectedMicroscopeId === 'reef-imaging/microscope-control-squid-1' ||
+                                selectedMicroscopeId === 'reef-imaging/microscope-control-squid-2' ||
+                                selectedMicroscopeId === 'reef-imaging/microscope-squid-plus-1';
   const isSimulatedMicroscopeSelected = selectedMicroscopeId === 'agent-lens/squid-control-reef';
-  const currentMicroscopeNumber = selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 1 : 
-                                 selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2' ? 2 :
-                                 selectedMicroscopeId === 'reef-imaging/mirror-microscope-squid-plus-1' ? 3 : 0;
+  const currentMicroscopeNumber = selectedMicroscopeId === 'reef-imaging/microscope-control-squid-1' ? 1 : 
+                                 selectedMicroscopeId === 'reef-imaging/microscope-control-squid-2' ? 2 :
+                                 selectedMicroscopeId === 'reef-imaging/microscope-squid-plus-1' ? 3 : 0;
 
   // Notify parent when sample load status changes
   useEffect(() => {

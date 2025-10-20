@@ -44,8 +44,8 @@ const Sidebar = React.forwardRef(({
 
 
 
-  const isRealMicroscopeSelected = selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ||
-                                 selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2';
+  const isRealMicroscopeSelected = selectedMicroscopeId === 'reef-imaging/microscope-control-squid-1' ||
+                                 selectedMicroscopeId === 'reef-imaging/microscope-control-squid-2';
   const isSimulatedMicroscopeSelected = selectedMicroscopeId === 'agent-lens/squid-control-reef';
 
   // Toggle function for main sidebar collapse
@@ -105,9 +105,9 @@ const Sidebar = React.forwardRef(({
                 <span>Simulated Microscope</span>
               </button>
               <button
-                className={`sidebar-submenu-tab ${selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 'active' : ''}`}
+                className={`sidebar-submenu-tab ${selectedMicroscopeId === 'reef-imaging/microscope-control-squid-1' ? 'active' : ''}`}
                 onClick={() => {
-                  onMicroscopeSelect('reef-imaging/mirror-microscope-control-squid-1');
+                  onMicroscopeSelect('reef-imaging/microscope-control-squid-1');
                   // setIsMicroscopeDropdownOpen(false); // Optional: close dropdown on selection
                 }}
                 disabled={!!currentOperation}
@@ -116,9 +116,9 @@ const Sidebar = React.forwardRef(({
                 <span>Real Microscope 1</span>
               </button>
               <button
-                className={`sidebar-submenu-tab ${selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2' ? 'active' : ''}`}
+                className={`sidebar-submenu-tab ${selectedMicroscopeId === 'reef-imaging/microscope-control-squid-2' ? 'active' : ''}`}
                 onClick={() => {
-                  onMicroscopeSelect('reef-imaging/mirror-microscope-control-squid-2');
+                  onMicroscopeSelect('reef-imaging/microscope-control-squid-2');
                   // setIsMicroscopeDropdownOpen(false); // Optional: close dropdown on selection
                 }}
                 disabled={!!currentOperation}
@@ -127,9 +127,9 @@ const Sidebar = React.forwardRef(({
                 <span>Real Microscope 2</span>
               </button>
               <button
-                className={`sidebar-submenu-tab ${selectedMicroscopeId === 'reef-imaging/mirror-microscope-squid-plus-1' ? 'active' : ''}`}
+                className={`sidebar-submenu-tab ${selectedMicroscopeId === 'reef-imaging/microscope-squid-plus-1' ? 'active' : ''}`}
                 onClick={() => {
-                  onMicroscopeSelect('reef-imaging/mirror-microscope-squid-plus-1');
+                  onMicroscopeSelect('reef-imaging/microscope-squid-plus-1');
                   // setIsMicroscopeDropdownOpen(false); // Optional: close dropdown on selection
                 }}
                 disabled={!!currentOperation}

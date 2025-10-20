@@ -47,9 +47,9 @@ const numpyArrayToDataURL = (numpyArray) => {
 
 const WEBRTC_SERVICE_IDS = {
   "agent-lens/squid-control-reef": "agent-lens/video-track-squid-control-reef",
-  "reef-imaging/mirror-microscope-control-squid-1": "reef-imaging/video-track-microscope-control-squid-1",
-  "reef-imaging/mirror-microscope-control-squid-2": "reef-imaging/video-track-microscope-control-squid-2",
-  "reef-imaging/mirror-microscope-squid-plus-1": "reef-imaging/video-track-microscope-squid-plus-1",
+  "reef-imaging/microscope-control-squid-1": "reef-imaging/video-track-microscope-control-squid-1",
+  "reef-imaging/microscope-control-squid-2": "reef-imaging/video-track-microscope-control-squid-2",
+  "reef-imaging/microscope-squid-plus-1": "reef-imaging/video-track-microscope-squid-plus-1",
 };
 
 // Helper function to check if a microscope is Squid+ model
@@ -2041,9 +2041,9 @@ const MicroscopeControlPanel = ({
                 {selectedMicroscopeId && (
                   <span className="text-sm text-gray-600 ml-2">
                     ({selectedMicroscopeId === 'agent-lens/squid-control-reef' ? 'Simulated' :
-                      selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 'Real Microscope 1' :
-                      selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2' ? 'Real Microscope 2' :
-                      selectedMicroscopeId === 'reef-imaging/mirror-microscope-squid-plus-1' ? 'Squid+ Microscope 1' :
+                      selectedMicroscopeId === 'reef-imaging/microscope-control-squid-1' ? 'Real Microscope 1' :
+                      selectedMicroscopeId === 'reef-imaging/microscope-control-squid-2' ? 'Real Microscope 2' :
+                      selectedMicroscopeId === 'reef-imaging/microscope-squid-plus-1' ? 'Squid+ Microscope 1' :
                       selectedMicroscopeId})
                     {isSquidPlusMicroscope(selectedMicroscopeId) && (
                       <i className="fas fa-plus-circle ml-1 text-purple-500" title="Squid+ Model"></i>
