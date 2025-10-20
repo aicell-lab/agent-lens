@@ -18,6 +18,10 @@ const QuickScanConfig = ({
   appendLog,
   showNotification,
   
+  // Busy state props
+  setMicroscopeBusy,
+  setCurrentOperation,
+  
   // Input validation hooks
   quickStripesInput,
   quickStripeWidthInput,
@@ -341,7 +345,9 @@ const QuickScanConfig = ({
                 try {
                   if (appendLog) appendLog('Starting quick scan...');
                   
-                  // Note: scan state will be managed by status polling
+                  // Note: scan state will be managed by status polling, but we set busy states immediately
+                  if (setMicroscopeBusy) setMicroscopeBusy(true); // Set global busy state
+                  if (setCurrentOperation) setCurrentOperation('scanning'); // Disable sidebar during scanning
                   
                   const result = await microscopeControlService.scan_start({
                     saved_data_type: "quick_zarr",
@@ -367,15 +373,21 @@ const QuickScanConfig = ({
                     if (showNotification) showNotification('Quick scan started successfully', 'success');
                     if (appendLog) appendLog('Quick scan started - monitoring progress via status polling');
                   } else {
-                    // If scan failed to start, show error
+                    // If scan failed to start, show error and reset busy states
                     if (showNotification) showNotification(`Failed to start quick scan: ${result?.error_message || result?.message || 'Unknown error'}`, 'error');
                     if (appendLog) appendLog(`Quick scan start failed: ${result?.error_message || result?.message || 'No result returned'}`);
+                    // Reset busy states since scan didn't start
+                    if (setMicroscopeBusy) setMicroscopeBusy(false);
+                    if (setCurrentOperation) setCurrentOperation(null);
                   }
                 } catch (error) {
-                  // If error occurred, show error
+                  // If error occurred, show error and reset busy states
                   if (showNotification) showNotification(`Error starting quick scan: ${error.message}`, 'error');
                   if (appendLog) appendLog(`Quick scan start error: ${error.message}`);
                   console.error('Quick scan error:', error);
+                  // Reset busy states since scan didn't start
+                  if (setMicroscopeBusy) setMicroscopeBusy(false);
+                  if (setCurrentOperation) setCurrentOperation(null);
                 }
               }
             }}

@@ -383,6 +383,14 @@ const MicroscopeMapDisplay = forwardRef(({
       setIsScanInProgress(false);
       setIsQuickScanInProgress(false);
       
+      // Clear microscope busy state and current operation when scan completes or fails
+      if (setMicroscopeBusy) {
+        setMicroscopeBusy(false);
+      }
+      if (setCurrentOperation) {
+        setCurrentOperation(null);
+      }
+      
       // If scan just completed successfully, refresh results and show notification
       if (scanJustCompleted) {
         if (state === 'completed') {
@@ -406,7 +414,7 @@ const MicroscopeMapDisplay = forwardRef(({
         }
       }
     }
-  }, [refreshScanResults, showNotification, appendLog]);
+  }, [refreshScanResults, showNotification, appendLog, setMicroscopeBusy, setCurrentOperation]);
 
   // Expose handleScanStatusUpdate to parent component via ref
   useImperativeHandle(ref, () => ({
@@ -5547,6 +5555,10 @@ const MicroscopeMapDisplay = forwardRef(({
         microscopeControlService={microscopeControlService}
         appendLog={appendLog}
         showNotification={showNotification}
+        
+        // Busy state props
+        setMicroscopeBusy={setMicroscopeBusy}
+        setCurrentOperation={setCurrentOperation}
         
         // Input validation hooks
         quickStripesInput={quickStripesInput}
