@@ -92,9 +92,9 @@ const Sidebar = React.forwardRef(({
               className={`sidebar-submenu microscope-options-dropdown ${isMicroscopeDropdownOpen ? 'open' : ''}`}
             >
               <button
-                className={`sidebar-submenu-tab ${selectedMicroscopeId === 'agent-lens/squid-control-reef' ? 'active' : ''}`}
+                className={`sidebar-submenu-tab ${selectedMicroscopeId === 'agent-lens/squid-control-simulation' ? 'active' : ''}`}
                 onClick={() => {
-                  onMicroscopeSelect('agent-lens/squid-control-reef');
+                  onMicroscopeSelect('agent-lens/squid-control-simulation');
                   // setIsMicroscopeDropdownOpen(false); // Optional: close dropdown on selection
                 }}
                 disabled={!!currentOperation}

@@ -75,7 +75,7 @@ const MicroscopeMapDisplay = forwardRef(({
   const mapVideoRef = useRef(null);
   
   // Check if using simulated microscope - disable scanning features
-  const isSimulatedMicroscope = selectedMicroscopeId === 'agent-lens/squid-control-reef';
+  const isSimulatedMicroscope = selectedMicroscopeId === 'agent-lens/squid-control-simulation';
   
   // Laser autofocus handler for FOV controls
   const handleLaserAutoFocus = useCallback(async () => {

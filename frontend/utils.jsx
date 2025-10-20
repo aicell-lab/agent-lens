@@ -6,12 +6,12 @@ import { useState, useEffect, useCallback } from 'react';
 // This configuration object centralizes all microscope service information,
 // eliminating hardcoded service IDs scattered across multiple components.
 export const MICROSCOPE_CONFIG = {
-  'agent-lens/squid-control-reef': {
-    id: 'agent-lens/squid-control-reef',
+  'agent-lens/squid-control-simulation': {
+    id: 'agent-lens/squid-control-simulation',
     type: 'simulated',
     model: 'squid',
     displayName: 'Simulated',
-    videoTrackServiceId: 'agent-lens/video-track-squid-control-reef',
+    videoTrackServiceId: 'agent-lens/video-track-squid-control-simulation',
     orchestratorId: null, // Not supported for time-lapse
     microscopeNumber: null, // Not a real microscope
   },
