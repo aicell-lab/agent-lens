@@ -719,8 +719,11 @@ const MicroscopeControlPanel = ({
 
     appendLog(`Starting WebRTC stream for ${selectedMicroscopeId} (Target Workspace: ${targetWorkspace}, Service: ${simpleWebRtcServiceName})...`);
     setWebRtcError(null);
+    console.log('[WebRTC] Setting microscopeBusy to TRUE before WebRTC setup');
     setMicroscopeBusy(true);
+    console.log('[WebRTC] microscopeBusy should now be TRUE');
 
+    let pc = null; // Declare pc outside try block so it's accessible in catch block
     try {
       // Get server for the target workspace from the manager
       const serverForRtc = await hyphaManager.getServer(targetWorkspace);
@@ -742,7 +745,7 @@ const MicroscopeControlPanel = ({
         appendLog(`Error fetching ICE servers: ${error.message}. Using fallback STUN server.`);
       }
 
-      const pc = await window.hyphaWebsocketClient.getRTCService(
+      pc = await window.hyphaWebsocketClient.getRTCService(
         serverForRtc, // Use the server from HyphaManager
         fullWebRtcServiceId, // Use full service ID instead of simple name
         {
@@ -826,6 +829,14 @@ const MicroscopeControlPanel = ({
 
             peerConnection.addEventListener('connectionstatechange', () => {
               appendLog(`WebRTC connection state: ${peerConnection.connectionState}`);
+              
+              // Release busy state when connection is established
+              if (peerConnection.connectionState === 'connected') {
+                appendLog('WebRTC connection established - releasing busy state');
+                console.log('[WebRTC] Setting microscopeBusy to FALSE - connection established');
+                setMicroscopeBusy(false);
+              }
+              
               if (['closed', 'failed', 'disconnected'].includes(peerConnection.connectionState)) {
                 appendLog('WebRTC connection closed or failed. Stopping stream.');
                 // Calling stopWebRtcStream directly here can cause issues if pc is not yet set in state
@@ -904,10 +915,12 @@ const MicroscopeControlPanel = ({
       if (showNotification && error.message && error.message.includes('Permission denied for workspace')) {
         showNotification(error.message, 'error');
       }
-      // No need to manually disconnect serverForRtc, manager handles it
-    } finally {
+      // Reset busy state on error
+      console.log('[WebRTC] Setting microscopeBusy to FALSE - error occurred');
       setMicroscopeBusy(false);
+      // No need to manually disconnect serverForRtc, manager handles it
     }
+    // Note: On success, busy state will be released by the connectionstatechange event listener when state becomes 'connected'
   };
 
   const stopWebRtcStream = memoizedStopWebRtcStream;
