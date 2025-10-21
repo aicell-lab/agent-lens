@@ -4,7 +4,16 @@ import ChatbotButton from './ChatbotButton';
 import SampleSelector from './SampleSelector';
 import ImagingTasksModal from './ImagingTasksModal';
 import MicroscopeMapDisplay from './MicroscopeMapDisplay';
-import { useValidatedNumberInput, getInputValidationClasses } from '../utils';
+import { 
+  useValidatedNumberInput, 
+  getInputValidationClasses,
+  isSimulatedMicroscope,
+  isRealMicroscope,
+  isSquidPlusMicroscope,
+  getVideoTrackServiceId,
+  getMicroscopeDisplayName,
+  getOrchestratorMicroscopeId,
+} from '../utils';
 import './ImagingTasksModal.css';
 
 // Helper function to convert a uint8 hypha-rpc numpy array to a displayable Data URL
@@ -45,20 +54,6 @@ const numpyArrayToDataURL = (numpyArray) => {
   return canvas.toDataURL('image/png');
 };
 
-const WEBRTC_SERVICE_IDS = {
-  "agent-lens/squid-control-reef": "agent-lens/video-track-squid-control-reef",
-  "reef-imaging/mirror-microscope-control-squid-1": "reef-imaging/video-track-microscope-control-squid-1",
-  "reef-imaging/mirror-microscope-control-squid-2": "reef-imaging/video-track-microscope-control-squid-2",
-  "reef-imaging/mirror-microscope-squid-plus-1": "reef-imaging/video-track-microscope-squid-plus-1",
-};
-
-// Helper function to check if a microscope is Squid+ model
-const isSquidPlusMicroscope = (microscopeId) => {
-  return microscopeId && microscopeId.includes('squid-plus');
-};
-
-
-
 const MicroscopeControlPanel = ({
   map,
   setSnapshotImage,
@@ -91,6 +86,9 @@ const MicroscopeControlPanel = ({
   const [yMove, setYMove] = useState(0.1);
   const [zMove, setZMove] = useState(0.01);
   const [microscopeBusy, setMicroscopeBusy] = useState(false);
+  
+  // Ref for accessing MicroscopeMapDisplay methods
+  const microscopeMapDisplayRef = useRef(null);
 
 
   // State for the snapped image, storing both raw numpy and display URL
@@ -372,6 +370,9 @@ const MicroscopeControlPanel = ({
     }
   };
 
+  // Track previous scan state to detect transitions
+  const prevScanStateRef = useRef({ state: 'idle', saved_data_type: null });
+
   const fetchStatusAndUpdateActuals = async () => {
     if (!microscopeControlService) {
       // Return current desired values if no service, as initAndSyncValues uses these to set desired states
@@ -413,6 +414,29 @@ const MicroscopeControlPanel = ({
       if (pairForUIScheduledChannel) {
         intensityForDesiredSync = pairForUIScheduledChannel[0];
         exposureForDesiredSync = pairForUIScheduledChannel[1];
+      }
+
+      // Handle scan status updates
+      if (status.scan_status && microscopeMapDisplayRef.current) {
+        const currentScanState = status.scan_status.state || 'idle';
+        const currentDataType = status.scan_status.saved_data_type;
+        const prevScanState = prevScanStateRef.current.state;
+        
+        // Detect transition from running to completed/failed
+        const scanJustCompleted = prevScanState === 'running' && (currentScanState === 'completed' || currentScanState === 'failed');
+        
+        // Update scan status via ref to MicroscopeMapDisplay
+        if (microscopeMapDisplayRef.current.handleScanStatusUpdate) {
+          microscopeMapDisplayRef.current.handleScanStatusUpdate({
+            state: currentScanState,
+            saved_data_type: currentDataType,
+            error_message: status.scan_status.error_message,
+            scanJustCompleted: scanJustCompleted
+          });
+        }
+        
+        // Update previous state tracker
+        prevScanStateRef.current = { state: currentScanState, saved_data_type: currentDataType };
       }
 
       return { intensity: intensityForDesiredSync, exposure: exposureForDesiredSync };
@@ -669,7 +693,7 @@ const MicroscopeControlPanel = ({
       return;
     }
 
-    const fullWebRtcServiceId = WEBRTC_SERVICE_IDS[selectedMicroscopeId];
+    const fullWebRtcServiceId = getVideoTrackServiceId(selectedMicroscopeId);
     if (!selectedMicroscopeId || !fullWebRtcServiceId) {
       appendLog(`WebRTC Error: No WebRTC service ID configured for ${selectedMicroscopeId}`);
       setWebRtcError(`No WebRTC service ID configured for ${selectedMicroscopeId}`);
@@ -690,8 +714,11 @@ const MicroscopeControlPanel = ({
 
     appendLog(`Starting WebRTC stream for ${selectedMicroscopeId} (Target Workspace: ${targetWorkspace}, Service: ${simpleWebRtcServiceName})...`);
     setWebRtcError(null);
+    console.log('[WebRTC] Setting microscopeBusy to TRUE before WebRTC setup');
     setMicroscopeBusy(true);
+    console.log('[WebRTC] microscopeBusy should now be TRUE');
 
+    let pc = null; // Declare pc outside try block so it's accessible in catch block
     try {
       // Get server for the target workspace from the manager
       const serverForRtc = await hyphaManager.getServer(targetWorkspace);
@@ -713,7 +740,7 @@ const MicroscopeControlPanel = ({
         appendLog(`Error fetching ICE servers: ${error.message}. Using fallback STUN server.`);
       }
 
-      const pc = await window.hyphaWebsocketClient.getRTCService(
+      pc = await window.hyphaWebsocketClient.getRTCService(
         serverForRtc, // Use the server from HyphaManager
         fullWebRtcServiceId, // Use full service ID instead of simple name
         {
@@ -797,6 +824,14 @@ const MicroscopeControlPanel = ({
 
             peerConnection.addEventListener('connectionstatechange', () => {
               appendLog(`WebRTC connection state: ${peerConnection.connectionState}`);
+              
+              // Release busy state when connection is established
+              if (peerConnection.connectionState === 'connected') {
+                appendLog('WebRTC connection established - releasing busy state');
+                console.log('[WebRTC] Setting microscopeBusy to FALSE - connection established');
+                setMicroscopeBusy(false);
+              }
+              
               if (['closed', 'failed', 'disconnected'].includes(peerConnection.connectionState)) {
                 appendLog('WebRTC connection closed or failed. Stopping stream.');
                 // Calling stopWebRtcStream directly here can cause issues if pc is not yet set in state
@@ -875,10 +910,12 @@ const MicroscopeControlPanel = ({
       if (showNotification && error.message && error.message.includes('Permission denied for workspace')) {
         showNotification(error.message, 'error');
       }
-      // No need to manually disconnect serverForRtc, manager handles it
-    } finally {
+      // Reset busy state on error
+      console.log('[WebRTC] Setting microscopeBusy to FALSE - error occurred');
       setMicroscopeBusy(false);
+      // No need to manually disconnect serverForRtc, manager handles it
     }
+    // Note: On success, busy state will be released by the connectionstatechange event listener when state becomes 'connected'
   };
 
   const stopWebRtcStream = memoizedStopWebRtcStream;
@@ -1041,7 +1078,7 @@ const MicroscopeControlPanel = ({
     try {
       setMicroscopeBusy(true);
       appendLog('Performing contrast autofocus...');
-      await microscopeControlService.auto_focus();
+      await microscopeControlService.contrast_autofocus();
     } catch (error) {
       appendLog(`Error in contrast autofocus: ${error.message}`);
     } finally {
@@ -1054,7 +1091,7 @@ const MicroscopeControlPanel = ({
     try {
       setMicroscopeBusy(true);
       appendLog('Performing laser autofocus...');
-      await microscopeControlService.do_laser_autofocus();
+      await microscopeControlService.reflection_autofocus();
     } catch (error) {
       appendLog(`Error in laser autofocus: ${error.message}`);
     } finally {
@@ -1071,7 +1108,7 @@ const MicroscopeControlPanel = ({
     try {
       setMicroscopeBusy(true);
       appendLog('Setting laser reference...');
-      await microscopeControlService.set_laser_reference(); 
+      await microscopeControlService.autofocus_set_reflection_reference(); 
       appendLog('Laser reference set successfully.');
       if (showNotification) showNotification('Laser reference set successfully.', 'success');
     } catch (error) {
@@ -1110,13 +1147,13 @@ const MicroscopeControlPanel = ({
     if (!orchestratorManagerService || !selectedMicroscopeId) {
       setImagingTasks([]);
       // For simulated or unmanaged scopes, ensure task-related busy state is cleared if no service/id.
-      if (selectedMicroscopeId === "agent-lens/squid-control-reef" || !orchestratorManagerService) {
+      if (isSimulatedMicroscope(selectedMicroscopeId) || !orchestratorManagerService) {
         setMicroscopeBusy(false);
       }
       return;
     }
 
-    if (selectedMicroscopeId === "agent-lens/squid-control-reef") {
+    if (isSimulatedMicroscope(selectedMicroscopeId)) {
       appendLog("Time-lapse imaging not supported for simulated microscope.");
       setImagingTasks([]);
       setMicroscopeBusy(false); // Simulated microscope is not busy due to tasks
@@ -1130,12 +1167,8 @@ const MicroscopeControlPanel = ({
       const tasks = await orchestratorManagerService.get_all_imaging_tasks();
       appendLog(`Fetched ${tasks.length} imaging tasks.`);
       
-      // Extract microscope identifier from the full service ID
-      const microscopeIdentifier = selectedMicroscopeId.includes('microscope-control-squid') 
-        ? `microscope-control-squid-${selectedMicroscopeId.endsWith('1') ? '1' : '2'}`
-        : selectedMicroscopeId.includes('squid-plus-1')
-        ? 'microscope-squid-plus-1'
-        : null;
+      // Get orchestrator microscope identifier from centralized config
+      const microscopeIdentifier = getOrchestratorMicroscopeId(selectedMicroscopeId);
       
       const relevantTasks = tasks.filter(task => 
         task.settings && task.settings.allocated_microscope === microscopeIdentifier
@@ -1159,7 +1192,7 @@ const MicroscopeControlPanel = ({
       } else {
         // If no active task is found for this REAL microscope, it's not busy due to tasks.
         // (Simulated scope and no orchestrator handled at the start of the function)
-        if (selectedMicroscopeId !== "agent-lens/squid-control-reef" && orchestratorManagerService) {
+        if (isRealMicroscope(selectedMicroscopeId) && orchestratorManagerService) {
             appendLog(`No active imaging tasks found for ${selectedMicroscopeId}. Setting microscope to not busy.`);
             setMicroscopeBusy(false);
         }
@@ -1180,7 +1213,7 @@ const MicroscopeControlPanel = ({
   }, [fetchImagingTasks]); // Depend on the memoized fetchImagingTasks
 
   const openImagingTaskModal = (task) => {
-    if (selectedMicroscopeId === "agent-lens/squid-control-reef") {
+    if (isSimulatedMicroscope(selectedMicroscopeId)) {
       appendLog("Time-lapse imaging management not supported for simulated microscope.");
       if(showNotification) showNotification("Time-lapse imaging not supported for simulated microscope.", "info");
       return;
@@ -1500,6 +1533,7 @@ const MicroscopeControlPanel = ({
           }}
         >
           <MicroscopeMapDisplay
+            ref={microscopeMapDisplayRef}
             isOpen={true}
             onClose={() => {}}
             microscopeConfiguration={microscopeConfiguration}
@@ -1578,7 +1612,7 @@ const MicroscopeControlPanel = ({
             <SampleSelector 
               isVisible={true}
               selectedMicroscopeId={selectedMicroscopeId}
-              microscopeControlService={selectedMicroscopeId === 'agent-lens/squid-control-reef' ? microscopeControlService : null}
+              microscopeControlService={isSimulatedMicroscope(selectedMicroscopeId) ? microscopeControlService : null}
               incubatorControlService={incubatorControlService}
               orchestratorManagerService={orchestratorManagerService}
               currentOperation={currentOperation}
@@ -1899,14 +1933,14 @@ const MicroscopeControlPanel = ({
                   className="control-button bg-green-500 text-white hover:bg-green-600 px-2 py-1 rounded text-xs disabled:opacity-75 disabled:cursor-not-allowed"
                   onClick={() => openImagingTaskModal(null)}
                   disabled={
-                    selectedMicroscopeId === "agent-lens/squid-control-reef" || 
+                    isSimulatedMicroscope(selectedMicroscopeId) || 
                     !orchestratorManagerService || 
                     currentOperation !== null || 
                     microscopeBusy || 
                     imagingTasks.some(t => t.operational_state?.status !== 'completed' && t.operational_state?.status !== 'failed')
                   }
                   title={
-                    selectedMicroscopeId === "agent-lens/squid-control-reef" 
+                    isSimulatedMicroscope(selectedMicroscopeId) 
                       ? "Time-lapse imaging not supported on simulated microscope"
                       : !orchestratorManagerService 
                         ? "Orchestrator service not available (check reef-imaging workspace access)"
@@ -1921,7 +1955,7 @@ const MicroscopeControlPanel = ({
                 </button>
               </div>
               
-              {selectedMicroscopeId === "agent-lens/squid-control-reef" ? (
+              {isSimulatedMicroscope(selectedMicroscopeId) ? (
                 <p className="text-xs text-gray-500 italic">Time-lapse imaging is not supported on the simulated microscope.</p>
               ) : !orchestratorManagerService ? (
                 <p className="text-xs text-gray-500 italic">Time-lapse imaging not available (orchestrator service not accessible - check reef-imaging workspace access).</p>
@@ -1997,11 +2031,7 @@ const MicroscopeControlPanel = ({
                 Microscope Configuration
                 {selectedMicroscopeId && (
                   <span className="text-sm text-gray-600 ml-2">
-                    ({selectedMicroscopeId === 'agent-lens/squid-control-reef' ? 'Simulated' :
-                      selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 'Real Microscope 1' :
-                      selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2' ? 'Real Microscope 2' :
-                      selectedMicroscopeId === 'reef-imaging/mirror-microscope-squid-plus-1' ? 'Squid+ Microscope 1' :
-                      selectedMicroscopeId})
+                    ({getMicroscopeDisplayName(selectedMicroscopeId)})
                     {isSquidPlusMicroscope(selectedMicroscopeId) && (
                       <i className="fas fa-plus-circle ml-1 text-purple-500" title="Squid+ Model"></i>
                     )}

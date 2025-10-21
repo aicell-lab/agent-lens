@@ -56,7 +56,7 @@ services:
     volumes:
       - squid-control-cache:/app/.cache
     healthcheck:
-      test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/agent-lens/services/squid-control-reef/is_service_healthy | jq -e '.status == \"ok\"'"]
+      test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/agent-lens/services/squid-control-simulation/is_service_healthy | jq -e '.status == \"ok\"'"]
       interval: 120s
       timeout: 30s
       retries: 1

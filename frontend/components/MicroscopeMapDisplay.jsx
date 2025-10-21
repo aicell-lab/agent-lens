@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, useImperativeHandle, forwardRef } from 'react';
 import PropTypes from 'prop-types';
-import { useValidatedNumberInput } from '../utils'; // Import validation utilities
+import { useValidatedNumberInput, isSquidPlusMicroscope } from '../utils'; // Import validation utilities
 import ArtifactZarrLoader from '../utils/artifactZarrLoader.js';
 import LayerPanel from './microscope/map/LayerPanel';
 import useExperimentZarrManager from './microscope/map/ExperimentZarrManager';
@@ -12,7 +12,7 @@ import AnnotationCanvas from './annotation/AnnotationCanvas';
 import SimilarAnnotationRenderer from './annotation/SimilarAnnotationRenderer';
 import './MicroscopeMapDisplay.css';
 
-const MicroscopeMapDisplay = ({
+const MicroscopeMapDisplay = forwardRef(({
   isOpen,
   microscopeConfiguration,
   isWebRtcActive,
@@ -69,13 +69,13 @@ const MicroscopeMapDisplay = ({
   onSampleLoadStatusChange,
   // Image capture props
   onSnapImage,
-}) => {
+}, ref) => {
   const mapContainerRef = useRef(null);
   const canvasRef = useRef(null);
   const mapVideoRef = useRef(null);
   
   // Check if using simulated microscope - disable scanning features
-  const isSimulatedMicroscope = selectedMicroscopeId === 'agent-lens/squid-control-reef';
+  const isSimulatedMicroscope = selectedMicroscopeId === 'agent-lens/squid-control-simulation';
   
   // Laser autofocus handler for FOV controls
   const handleLaserAutoFocus = useCallback(async () => {
@@ -84,7 +84,7 @@ const MicroscopeMapDisplay = ({
     try {
       setMicroscopeBusy(true);
       if (appendLog) appendLog('Performing laser autofocus...');
-      await microscopeControlService.do_laser_autofocus();
+      await microscopeControlService.reflection_autofocus();
       if (appendLog) appendLog('Laser autofocus completed');
     } catch (error) {
       if (appendLog) appendLog(`Error in laser autofocus: ${error.message}`);
@@ -119,14 +119,9 @@ const MicroscopeMapDisplay = ({
     };
   }, []);
 
-  // Helper function to detect squid plus microscope
-  const isSquidPlusMicroscope = (microscopeId) => {
-    return microscopeId && microscopeId.includes('squid-plus');
-  };
-
   // Set default scan parameters for specific microscope types
   useEffect(() => {
-    if (selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1') {
+    if (selectedMicroscopeId === 'reef-imaging/microscope-control-squid-1') {
       // Set default values for Real Microscope 1
       setQuickScanParameters(prev => ({
         ...prev,
@@ -189,7 +184,7 @@ const MicroscopeMapDisplay = ({
   const [showQuickScanConfig, setShowQuickScanConfig] = useState(false);
   const [isQuickScanInProgress, setIsQuickScanInProgress] = useState(false);
   const [quickScanParameters, setQuickScanParameters] = useState({
-    wellplate_type: '96',
+    well_plate_type: '96',
     exposure_time: 4,
     intensity: 100,
     fps_target: 5,
@@ -364,6 +359,54 @@ const MicroscopeMapDisplay = ({
       setNeedsTileReload(true);
     }
   }, [appendLog, isSimulatedMicroscope]); // Removed visibleLayers.scanResults to prevent triggering on layer toggles
+
+  // Callback for handling scan status updates from MicroscopeControlPanel
+  const handleScanStatusUpdate = useCallback((scanStatus) => {
+    const { state, saved_data_type, error_message, scanJustCompleted } = scanStatus;
+    
+    // Update scan progress states based on state and data type
+    if (state === 'running') {
+      if (saved_data_type === 'full_zarr') {
+        setIsScanInProgress(true);
+        setIsQuickScanInProgress(false);
+      } else if (saved_data_type === 'quick_zarr') {
+        setIsQuickScanInProgress(true);
+        setIsScanInProgress(false);
+      }
+    } else if (state === 'completed' || state === 'failed' || state === 'idle') {
+      // Clear both scan states when not running
+      setIsScanInProgress(false);
+      setIsQuickScanInProgress(false);
+      
+      // If scan just completed successfully, refresh results and show notification
+      if (scanJustCompleted) {
+        if (state === 'completed') {
+          if (showNotification) {
+            showNotification('Scan completed successfully', 'success');
+          }
+          if (appendLog) {
+            appendLog('Scan completed successfully');
+          }
+          // Refresh scan results after a short delay
+          setTimeout(() => {
+            refreshScanResults();
+          }, 1000);
+        } else if (state === 'failed') {
+          if (showNotification) {
+            showNotification(`Scan failed: ${error_message || 'Unknown error'}`, 'error');
+          }
+          if (appendLog) {
+            appendLog(`Scan failed: ${error_message || 'Unknown error'}`);
+          }
+        }
+      }
+    }
+  }, [refreshScanResults, showNotification, appendLog, setMicroscopeBusy, setCurrentOperation]);
+
+  // Expose handleScanStatusUpdate to parent component via ref
+  useImperativeHandle(ref, () => ({
+    handleScanStatusUpdate
+  }), [handleScanStatusUpdate]);
 
   // Initialize experiment zarr manager hook
   const experimentManager = useExperimentZarrManager({
@@ -3121,7 +3164,7 @@ const MicroscopeMapDisplay = ({
   // Mouse handlers for grid selection
   // Grid selection handlers are handled in NormalScanConfig component
 
-  // In scan start button handler, pass selectedWells to normal_scan_with_stitching
+  // In scan start button handler, pass selectedWells to scan_region_to_zarr
 
   // Helper: calculate FOV positions for a given well center
   const calculateFOVPositionsForWell = useCallback((wellInfo) => {
@@ -5500,6 +5543,10 @@ const MicroscopeMapDisplay = ({
         appendLog={appendLog}
         showNotification={showNotification}
         
+        // Busy state props
+        setMicroscopeBusy={setMicroscopeBusy}
+        setCurrentOperation={setCurrentOperation}
+        
         // Input validation hooks
         quickStripesInput={quickStripesInput}
         quickStripeWidthInput={quickStripeWidthInput}
@@ -5726,7 +5773,9 @@ const MicroscopeMapDisplay = ({
       
     </div>
   );
-};
+});
+
+MicroscopeMapDisplay.displayName = 'MicroscopeMapDisplay';
 
 MicroscopeMapDisplay.propTypes = {
   isOpen: PropTypes.bool.isRequired,

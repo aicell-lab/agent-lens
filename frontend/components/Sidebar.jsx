@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
 import './Sidebar.css';
-import SampleSelector from './SampleSelector';
+import { isRealMicroscope, isSimulatedMicroscope } from '../utils';
 
 const Sidebar = React.forwardRef(({ 
   activeTab, 
@@ -42,11 +42,9 @@ const Sidebar = React.forwardRef(({
 
 
 
-
-
-  const isRealMicroscopeSelected = selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ||
-                                 selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2';
-  const isSimulatedMicroscopeSelected = selectedMicroscopeId === 'agent-lens/squid-control-reef';
+  // Use centralized config utility functions
+  const isRealMicroscopeSelected = isRealMicroscope(selectedMicroscopeId);
+  const isSimulatedMicroscopeSelected = isSimulatedMicroscope(selectedMicroscopeId);
 
   // Toggle function for main sidebar collapse
   const toggleMainSidebarCollapse = () => {
@@ -94,9 +92,9 @@ const Sidebar = React.forwardRef(({
               className={`sidebar-submenu microscope-options-dropdown ${isMicroscopeDropdownOpen ? 'open' : ''}`}
             >
               <button
-                className={`sidebar-submenu-tab ${selectedMicroscopeId === 'agent-lens/squid-control-reef' ? 'active' : ''}`}
+                className={`sidebar-submenu-tab ${selectedMicroscopeId === 'agent-lens/squid-control-simulation' ? 'active' : ''}`}
                 onClick={() => {
-                  onMicroscopeSelect('agent-lens/squid-control-reef');
+                  onMicroscopeSelect('agent-lens/squid-control-simulation');
                   // setIsMicroscopeDropdownOpen(false); // Optional: close dropdown on selection
                 }}
                 disabled={!!currentOperation}
@@ -105,9 +103,9 @@ const Sidebar = React.forwardRef(({
                 <span>Simulated Microscope</span>
               </button>
               <button
-                className={`sidebar-submenu-tab ${selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-1' ? 'active' : ''}`}
+                className={`sidebar-submenu-tab ${selectedMicroscopeId === 'reef-imaging/microscope-control-squid-1' ? 'active' : ''}`}
                 onClick={() => {
-                  onMicroscopeSelect('reef-imaging/mirror-microscope-control-squid-1');
+                  onMicroscopeSelect('reef-imaging/microscope-control-squid-1');
                   // setIsMicroscopeDropdownOpen(false); // Optional: close dropdown on selection
                 }}
                 disabled={!!currentOperation}
@@ -116,9 +114,9 @@ const Sidebar = React.forwardRef(({
                 <span>Real Microscope 1</span>
               </button>
               <button
-                className={`sidebar-submenu-tab ${selectedMicroscopeId === 'reef-imaging/mirror-microscope-control-squid-2' ? 'active' : ''}`}
+                className={`sidebar-submenu-tab ${selectedMicroscopeId === 'reef-imaging/microscope-control-squid-2' ? 'active' : ''}`}
                 onClick={() => {
-                  onMicroscopeSelect('reef-imaging/mirror-microscope-control-squid-2');
+                  onMicroscopeSelect('reef-imaging/microscope-control-squid-2');
                   // setIsMicroscopeDropdownOpen(false); // Optional: close dropdown on selection
                 }}
                 disabled={!!currentOperation}
@@ -127,9 +125,9 @@ const Sidebar = React.forwardRef(({
                 <span>Real Microscope 2</span>
               </button>
               <button
-                className={`sidebar-submenu-tab ${selectedMicroscopeId === 'reef-imaging/mirror-microscope-squid-plus-1' ? 'active' : ''}`}
+                className={`sidebar-submenu-tab ${selectedMicroscopeId === 'reef-imaging/microscope-squid-plus-1' ? 'active' : ''}`}
                 onClick={() => {
-                  onMicroscopeSelect('reef-imaging/mirror-microscope-squid-plus-1');
+                  onMicroscopeSelect('reef-imaging/microscope-squid-plus-1');
                   // setIsMicroscopeDropdownOpen(false); // Optional: close dropdown on selection
                 }}
                 disabled={!!currentOperation}

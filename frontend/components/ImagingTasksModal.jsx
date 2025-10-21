@@ -1,7 +1,14 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import ReactDOM from 'react-dom'; // Import ReactDOM for createPortal
 import PropTypes from 'prop-types';
-import { useValidatedNumberInput, useValidatedStringInput, getInputValidationClasses, validateStringInput } from '../utils'; // Import validation utilities
+import { 
+  useValidatedNumberInput, 
+  useValidatedStringInput, 
+  getInputValidationClasses, 
+  validateStringInput,
+  getOrchestratorMicroscopeId,
+  isSimulatedMicroscope,
+} from '../utils'; // Import validation utilities
 import './ImagingTasksModal.css'; // We will create this CSS file
 
 const ROW_LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
@@ -584,11 +591,7 @@ const ImagingTasksModal = ({
       name: taskName.trim(),
       settings: {
         incubator_slot: parseInt(incubatorSlot, 10),
-        allocated_microscope: selectedMicroscopeId.includes('microscope-control-squid')
-          ? `microscope-control-squid-${selectedMicroscopeId.endsWith('1') ? '1' : '2'}`
-          : selectedMicroscopeId.includes('squid-plus-1')
-          ? 'microscope-squid-plus-1'
-          : null,
+        allocated_microscope: getOrchestratorMicroscopeId(selectedMicroscopeId),
         pending_time_points: timePointsArray,
         imaged_time_points: [],
         well_plate_type: wellPlateType,
@@ -631,7 +634,7 @@ const ImagingTasksModal = ({
         // Extract experiment_id from task name (assuming task name contains experiment_id)
         const experiment_id = task.name;
         
-        const result = await orchestratorManagerService.offline_stitch_and_upload_timelapse(
+        const result = await orchestratorManagerService.process_timelapse_offline(
           experiment_id,
           true,  // upload_immediately
           true   // cleanup_temp_files
@@ -691,7 +694,7 @@ const ImagingTasksModal = ({
           </button>
         </div>
         <div className="imaging-tasks-modal-body">
-          {selectedMicroscopeId === 'agent-lens/squid-control-reef' ? (
+          {isSimulatedMicroscope(selectedMicroscopeId) ? (
             <p>Time-lapse imaging is not supported for the simulated microscope.</p>
           ) : task ? (
             // Display existing task details (read-only view)
@@ -1185,7 +1188,7 @@ const ImagingTasksModal = ({
             </form>
           )}
         </div>
-        {selectedMicroscopeId !== 'agent-lens/squid-control-reef' && (
+        {!isSimulatedMicroscope(selectedMicroscopeId) && (
           <div className="imaging-tasks-modal-footer">
             {!task && (
               <button 

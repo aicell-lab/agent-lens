@@ -18,6 +18,10 @@ const QuickScanConfig = ({
   appendLog,
   showNotification,
   
+  // Busy state props
+  setMicroscopeBusy,
+  setCurrentOperation,
+  
   // Input validation hooks
   quickStripesInput,
   quickStripeWidthInput,
@@ -51,8 +55,8 @@ const QuickScanConfig = ({
           <div className="quick-scan-config-section">
             <label className="quick-scan-config-label">Well Plate Type</label>
             <select
-              value={quickScanParameters.wellplate_type}
-              onChange={(e) => setQuickScanParameters(prev => ({ ...prev, wellplate_type: e.target.value }))}
+              value={quickScanParameters.well_plate_type}
+              onChange={(e) => setQuickScanParameters(prev => ({ ...prev, well_plate_type: e.target.value }))}
               className="quick-scan-config-select"
               disabled={isQuickScanInProgress}
             >
@@ -298,10 +302,10 @@ const QuickScanConfig = ({
               <div>• Brightfield channel only</div>
               <div>• {quickScanParameters.n_stripes}-stripe × {quickScanParameters.stripe_width_mm}mm serpentine pattern per well</div>
               <div>• Maximum exposure: 30ms</div>
-              <div>• Scans entire {quickScanParameters.wellplate_type}-well plate</div>
+              <div>• Scans entire {quickScanParameters.well_plate_type}-well plate</div>
               <div>• Estimated scan time: {(() => {
                 const wellplateSizes = {'96': 96};
-                const wells = wellplateSizes[quickScanParameters.wellplate_type] || 96;
+                const wells = wellplateSizes[quickScanParameters.well_plate_type] || 96;
                 const stripesPerWell = quickScanParameters.n_stripes;
                 const timePerStripe = quickScanParameters.stripe_width_mm / quickScanParameters.velocity_scan_mm_per_s;
                 const estimatedTimeSeconds = wells * stripesPerWell * timePerStripe * 1.5; // 1.5x factor for movement overhead
@@ -318,66 +322,72 @@ const QuickScanConfig = ({
               if (!microscopeControlService) return;
               
               if (isQuickScanInProgress) {
-                // Stop scan logic
+                // Cancel scan using new unified API
                 try {
-                  if (appendLog) appendLog('Stopping quick scan...');
+                  if (appendLog) appendLog('Cancelling quick scan...');
                   
-                  const result = await microscopeControlService.stop_scan_and_stitching();
+                  const result = await microscopeControlService.scan_cancel();
                   
                   if (result.success) {
-                    if (showNotification) showNotification('Quick scan stop requested', 'success');
-                    setIsQuickScanInProgress(false);
-                    if (appendLog) appendLog('Quick scan stopped successfully');
+                    if (showNotification) showNotification('Quick scan cancelled successfully', 'success');
+                    // Note: scan state will be updated by status polling, no need to manually reset
+                    if (appendLog) appendLog('Quick scan cancelled - operation interrupted');
                   } else {
-                    if (showNotification) showNotification('Failed to stop quick scan', 'error');
-                    if (appendLog) appendLog(`Quick scan stop failed: ${result.message}`);
+                    if (showNotification) showNotification(`Failed to cancel quick scan: ${result.message}`, 'error');
+                    if (appendLog) appendLog(`Quick scan cancel failed: ${result.message}`);
                   }
                 } catch (error) {
-                  if (showNotification) showNotification('Error stopping quick scan', 'error');
-                  if (appendLog) appendLog(`Quick scan stop error: ${error.message}`);
+                  if (showNotification) showNotification(`Error cancelling quick scan: ${error.message}`, 'error');
+                  if (appendLog) appendLog(`Quick scan cancel error: ${error.message}`);
                 }
               } else {
-                // Start scan logic
+                // Start scan using new unified API
                 try {
                   if (appendLog) appendLog('Starting quick scan...');
                   
-                  // Set scanning state immediately to update UI
-                  setIsQuickScanInProgress(true);
+                  // Note: scan state will be managed by status polling, but we set busy states immediately
+                  if (setMicroscopeBusy) setMicroscopeBusy(true); // Set global busy state
+                  if (setCurrentOperation) setCurrentOperation('scanning'); // Disable sidebar during scanning
                   
-                  const result = await microscopeControlService.quick_scan_with_stitching(
-                    quickScanParameters.wellplate_type,
-                    quickScanParameters.exposure_time,
-                    quickScanParameters.intensity,
-                    quickScanParameters.fps_target,
-                    'quick_scan_' + Date.now(),
-                    quickScanParameters.n_stripes,
-                    quickScanParameters.stripe_width_mm,
-                    quickScanParameters.dy_mm,
-                    quickScanParameters.velocity_scan_mm_per_s,
-                    quickScanParameters.do_contrast_autofocus,
-                    quickScanParameters.do_reflection_af,
-                    activeExperiment, // experiment_name parameter
-                    wellPaddingMm, // well_padding_mm parameter
-                    quickScanParameters.uploading // uploading parameter
-                  );
+                  const result = await microscopeControlService.scan_start({
+                    saved_data_type: "quick_zarr",
+                    action_ID: 'quick_scan_' + Date.now(),
+                    well_plate_type: quickScanParameters.well_plate_type,
+                    well_padding_mm: wellPaddingMm,
+                    dy_mm: quickScanParameters.dy_mm,
+                    exposure_time: quickScanParameters.exposure_time,
+                    intensity: quickScanParameters.intensity,
+                    fps_target: quickScanParameters.fps_target,
+                    n_stripes: quickScanParameters.n_stripes,
+                    stripe_width_mm: quickScanParameters.stripe_width_mm,
+                    velocity_scan_mm_per_s: quickScanParameters.velocity_scan_mm_per_s,
+                    experiment_name: activeExperiment,
+                    uploading: quickScanParameters.uploading,
+                    do_contrast_autofocus: quickScanParameters.do_contrast_autofocus,
+                    do_reflection_af: quickScanParameters.do_reflection_af
+                  });
                   
-                  if (appendLog) appendLog(`Quick scan result: ${JSON.stringify(result)}`);
+                  if (appendLog) appendLog(`Quick scan start result: ${JSON.stringify(result)}`);
                   
                   if (result && result.success) {
-                    if (showNotification) showNotification('Quick scan started', 'success');
-                    if (appendLog) appendLog('Quick scan started successfully');
+                    if (showNotification) showNotification('Quick scan started successfully', 'success');
+                    if (appendLog) appendLog('Quick scan started - monitoring progress via status polling');
                   } else {
-                    // If scan failed, reset the state
-                    setIsQuickScanInProgress(false);
-                    if (showNotification) showNotification('Failed to start quick scan', 'error');
-                    if (appendLog) appendLog(`Quick scan start failed: ${result ? result.message : 'No result returned'}`);
+                    // If scan failed to start, show error and reset busy states
+                    if (showNotification) showNotification(`Failed to start quick scan: ${result?.error_message || result?.message || 'Unknown error'}`, 'error');
+                    if (appendLog) appendLog(`Quick scan start failed: ${result?.error_message || result?.message || 'No result returned'}`);
+                    // Reset busy states since scan didn't start
+                    if (setMicroscopeBusy) setMicroscopeBusy(false);
+                    if (setCurrentOperation) setCurrentOperation(null);
                   }
                 } catch (error) {
-                  // If error occurred, reset the state
-                  setIsQuickScanInProgress(false);
-                  if (showNotification) showNotification('Error starting quick scan', 'error');
+                  // If error occurred, show error and reset busy states
+                  if (showNotification) showNotification(`Error starting quick scan: ${error.message}`, 'error');
                   if (appendLog) appendLog(`Quick scan start error: ${error.message}`);
                   console.error('Quick scan error:', error);
+                  // Reset busy states since scan didn't start
+                  if (setMicroscopeBusy) setMicroscopeBusy(false);
+                  if (setCurrentOperation) setCurrentOperation(null);
                 }
               }
             }}

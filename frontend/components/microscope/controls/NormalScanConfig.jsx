@@ -608,25 +608,25 @@ const NormalScanConfig = ({
               if (!microscopeControlService) return;
               
               if (isScanInProgress) {
-                // Stop scan logic
+                // Stop scan logic using new unified API
                 try {
-                  if (appendLog) appendLog('Stopping scan...');
+                  if (appendLog) appendLog('Cancelling scan...');
                   
-                  const result = await microscopeControlService.stop_scan_and_stitching();
+                  const result = await microscopeControlService.scan_cancel();
                   
                   if (result.success) {
-                    if (showNotification) showNotification('Scan stop requested', 'success');
-                    if (appendLog) appendLog('Scan stop requested - scan will be interrupted');
-                    setIsScanInProgress(false);
+                    if (showNotification) showNotification('Scan cancelled successfully', 'success');
+                    if (appendLog) appendLog('Scan cancelled - operation interrupted');
+                    // Note: scan state will be updated by status polling, no need to manually reset
                     if (setMicroscopeBusy) setMicroscopeBusy(false);
                     if (setCurrentOperation) setCurrentOperation(null); // Re-enable sidebar
                   } else {
-                    if (showNotification) showNotification(`Failed to stop scan: ${result.message}`, 'error');
-                    if (appendLog) appendLog(`Failed to stop scan: ${result.message}`);
+                    if (showNotification) showNotification(`Failed to cancel scan: ${result.message}`, 'error');
+                    if (appendLog) appendLog(`Failed to cancel scan: ${result.message}`);
                   }
                 } catch (error) {
-                  if (showNotification) showNotification(`Error stopping scan: ${error.message}`, 'error');
-                  if (appendLog) appendLog(`Error stopping scan: ${error.message}`);
+                  if (showNotification) showNotification(`Error cancelling scan: ${error.message}`, 'error');
+                  if (appendLog) appendLog(`Error cancelling scan: ${error.message}`);
                 }
                 return;
               }
@@ -648,8 +648,8 @@ const NormalScanConfig = ({
                 }
               }
               
-              setIsScanInProgress(true);
-              if (setMicroscopeBusy) setMicroscopeBusy(true); // Also set global busy state
+              // Note: scan state will be managed by status polling, but we set busy states immediately
+              if (setMicroscopeBusy) setMicroscopeBusy(true); // Set global busy state
               if (setCurrentOperation) setCurrentOperation('scanning'); // Disable sidebar during scanning
               
               // Disable rectangle selection during scanning to allow map browsing
@@ -664,33 +664,36 @@ const NormalScanConfig = ({
                   appendLog(`Channels: ${channelNames}`);
                 }
                 
-                const result = await microscopeControlService.normal_scan_with_stitching(
-                  scanParameters.start_x_mm,
-                  scanParameters.start_y_mm,
-                  scanParameters.Nx,
-                  scanParameters.Ny,
-                  scanParameters.dx_mm,
-                  scanParameters.dy_mm,
-                  scanParameters.illumination_settings,
-                  scanParameters.do_contrast_autofocus,
-                  scanParameters.do_reflection_af,
-                  'scan_' + Date.now(),
-                  0, // timepoint index
-                  activeExperiment, // experiment_name parameter
-                  selectedWells, // <-- now supports multi-well
-                  wellPlateType, // wellplate_type parameter
-                  wellPaddingMm, // well_padding_mm parameter
-                  scanParameters.uploading // uploading parameter
-                );
+                // Use new unified scan API
+                const result = await microscopeControlService.scan_start({
+                  saved_data_type: "full_zarr",
+                  action_ID: 'scan_' + Date.now(),
+                  start_x_mm: scanParameters.start_x_mm,
+                  start_y_mm: scanParameters.start_y_mm,
+                  Nx: scanParameters.Nx,
+                  Ny: scanParameters.Ny,
+                  dx_mm: scanParameters.dx_mm,
+                  dy_mm: scanParameters.dy_mm,
+                  illumination_settings: scanParameters.illumination_settings,
+                  wells_to_scan: selectedWells,
+                  well_plate_type: wellPlateType,
+                  well_padding_mm: wellPaddingMm,
+                  experiment_name: activeExperiment,
+                  uploading: scanParameters.uploading,
+                  do_contrast_autofocus: scanParameters.do_contrast_autofocus,
+                  do_reflection_af: scanParameters.do_reflection_af,
+                  timepoint: 0
+                });
                 
                 if (result.success) {
-                  if (showNotification) showNotification('Scan completed successfully', 'success');
+                  if (showNotification) showNotification('Scan started successfully', 'success');
                   if (appendLog) {
-                    appendLog('Scan completed successfully');
+                    appendLog('Scan started - monitoring progress via status polling');
                     if (wasWebRtcActive) {
                       appendLog('Note: WebRTC stream was stopped for scanning. Click "Start Live" to resume video stream if needed.');
                     }
                   }
+                  // Close scan config panel
                   setShowScanConfig(false);
                   setIsRectangleSelection(false);
                   setRectangleStart(null);
@@ -698,21 +701,20 @@ const NormalScanConfig = ({
                   // Enable scan results layer if not already
                   setVisibleLayers(prev => ({ ...prev, scanResults: true }));
                   
-                  // Refresh scan results display once after completion
-                  setTimeout(() => {
-                    refreshScanResults();
-                  }, 1000); // Wait 1 second then refresh
+                  // Note: scan completion and results refresh will be handled by status polling
                 } else {
-                  if (showNotification) showNotification(`Scan failed: ${result.message}`, 'error');
-                  if (appendLog) appendLog(`Scan failed: ${result.message}`);
+                  if (showNotification) showNotification(`Failed to start scan: ${result.error_message || result.message}`, 'error');
+                  if (appendLog) appendLog(`Failed to start scan: ${result.error_message || result.message}`);
+                  // Reset busy states since scan didn't start
+                  if (setMicroscopeBusy) setMicroscopeBusy(false);
+                  if (setCurrentOperation) setCurrentOperation(null);
                 }
               } catch (error) {
-                if (showNotification) showNotification(`Scan error: ${error.message}`, 'error');
-                if (appendLog) appendLog(`Scan error: ${error.message}`);
-              } finally {
-                setIsScanInProgress(false);
-                if (setMicroscopeBusy) setMicroscopeBusy(false); // Clear global busy state
-                if (setCurrentOperation) setCurrentOperation(null); // Re-enable sidebar
+                if (showNotification) showNotification(`Error starting scan: ${error.message}`, 'error');
+                if (appendLog) appendLog(`Error starting scan: ${error.message}`);
+                // Reset busy states on error
+                if (setMicroscopeBusy) setMicroscopeBusy(false);
+                if (setCurrentOperation) setCurrentOperation(null);
               }
             }}
             className={`normal-scan-config-button ${

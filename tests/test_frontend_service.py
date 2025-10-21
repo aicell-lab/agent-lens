@@ -1007,7 +1007,7 @@ async def test_frontend_webrtc_operations(test_frontend_service):
             # Select simulated microscope
             print("🔍 Selecting simulated microscope...")
             simulated_microscope_selectors = [
-                'option[value="agent-lens/squid-control-reef"]',
+                'option[value="agent-lens/squid-control-simulation"]',
                 'select option:has-text("Simulated Microscope")',
                 'text="Simulated Microscope"'
             ]
@@ -1020,7 +1020,7 @@ async def test_frontend_webrtc_operations(test_frontend_service):
                         if 'option' in selector:
                             # Select the option from dropdown
                             parent_select = page.locator('select').filter(has=element)
-                            await parent_select.select_option('agent-lens/squid-control-reef')
+                            await parent_select.select_option('agent-lens/squid-control-simulation')
                         else:
                             await element.click()
                         await page.wait_for_timeout(2000)

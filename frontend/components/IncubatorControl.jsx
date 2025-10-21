@@ -1,6 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
-import { tryGetService, useValidatedStringInput, getInputValidationClasses, validateStringInput } from '../utils';
+import { 
+  tryGetService, 
+  useValidatedStringInput, 
+  getInputValidationClasses, 
+  validateStringInput,
+  getMicroscopeServiceIdForNumber,
+} from '../utils';
 
 const IncubatorControl = ({ 
   incubatorControlService, 
@@ -189,13 +195,7 @@ const IncubatorControl = ({
       throw new Error("HyphaManager not available");
     }
 
-    const microscopeServiceIds = {
-      1: "reef-imaging/mirror-microscope-control-squid-1",
-      2: "reef-imaging/mirror-microscope-control-squid-2",
-      3: "reef-imaging/mirror-microscope-squid-plus-1"
-    };
-
-    const targetMicroscopeId = microscopeServiceIds[microscopeNumber];
+    const targetMicroscopeId = getMicroscopeServiceIdForNumber(microscopeNumber);
     if (!targetMicroscopeId) {
       throw new Error(`Invalid microscope number: ${microscopeNumber}`);
     }
