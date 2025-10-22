@@ -3220,7 +3220,12 @@ const MicroscopeMapDisplay = forwardRef(({
       .then(res => res.json())
       .then(data => {
         if (data.success) {
-          setGalleries(data.galleries || []);
+          // Filter galleries to only show those with 'Experiment Gallery' in the name
+          const filteredGalleries = (data.galleries || []).filter(gallery => {
+            const galleryName = gallery.manifest?.name || gallery.alias || gallery.id || '';
+            return galleryName.toLowerCase().includes('experiment gallery');
+          });
+          setGalleries(filteredGalleries);
         } else {
           setGalleriesError(data.error || 'Failed to load galleries');
           console.error(data.error);
