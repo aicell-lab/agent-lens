@@ -122,16 +122,32 @@ const ImagingTasksModal = ({
   const [doContrastAutofocus, setDoContrastAutofocus] = useState(false);
   const [doReflectionAf, setDoReflectionAf] = useState(true);
   
-  // State for visual imaging zone selection
-  const [scanningZoneString, setScanningZoneString] = useState('[[0,0],[0,0]]'); // Keep this for the final JSON string
+  // State for visual well selection
+  const [selectedWells, setSelectedWells] = useState([]); // Array of well IDs like ["A1", "B2", "C3"]
   const [selectionStartCell, setSelectionStartCell] = useState(null); // [rowIdx, colIdx]
   const [selectionEndCell, setSelectionEndCell] = useState(null); // [rowIdx, colIdx]
   const [isDragging, setIsDragging] = useState(false);
+  const [dragStartTime, setDragStartTime] = useState(null); // Track timing for click vs drag
   const [nx, setNx] = useState('3'); // Default Nx for FOV grid
   const [ny, setNy] = useState('3'); // Default Ny for FOV grid
   const defaultSpacing = getDefaultSpacing();
   const [dx, setDx] = useState(defaultSpacing.dx); // Default dx for FOV spacing in mm
   const [dy, setDy] = useState(defaultSpacing.dy); // Default dy for FOV spacing in mm
+
+  // Helper functions for well selection
+  const getWellIdFromIndices = (rowIdx, colIdx) => {
+    return `${ROW_LABELS[rowIdx]}${COL_LABELS[colIdx]}`;
+  };
+
+  const convertRectangleToWells = (r1, c1, r2, c2) => {
+    const wells = [];
+    for (let r = r1; r <= r2; r++) {
+      for (let c = c1; c <= c2; c++) {
+        wells.push(getWellIdFromIndices(r, c));
+      }
+    }
+    return wells;
+  };
 
   // State for time point generation
   const [minDateTime, setMinDateTime] = useState('');
@@ -353,11 +369,12 @@ const ImagingTasksModal = ({
       setIntervalMinutes('30');
       setPendingTimePoints('');
       
-      // Reset imaging zone selection
-      setSelectionStartCell([0,0]); // Default to A1
-      setSelectionEndCell([0,0]); // Default to A1
-      setScanningZoneString('[[0,0],[0,0]]');
+      // Reset well selection
+      setSelectedWells([]);
+      setSelectionStartCell(null);
+      setSelectionEndCell(null);
       setIsDragging(false);
+      setDragStartTime(null);
       setNx('3'); // Reset Nx for new task
       setNy('3'); // Reset Ny for new task
       const resetSpacing = getDefaultSpacing();
@@ -389,14 +406,19 @@ const ImagingTasksModal = ({
     }
   }, [isOpen, task, incubatorControlService, fetchIncubatorSlots, fetchCurrentIlluminationSettings]);
 
-  // Update imagingZoneString whenever selection changes and dragging stops
+  // Update selectedWells when drag selection completes
   useEffect(() => {
     if (!isDragging && selectionStartCell && selectionEndCell) {
       const r1 = Math.min(selectionStartCell[0], selectionEndCell[0]);
       const c1 = Math.min(selectionStartCell[1], selectionEndCell[1]);
       const r2 = Math.max(selectionStartCell[0], selectionEndCell[0]);
       const c2 = Math.max(selectionStartCell[1], selectionEndCell[1]);
-      setScanningZoneString(JSON.stringify([[r1, c1], [r2, c2]]));
+      const newWells = convertRectangleToWells(r1, c1, r2, c2);
+      setSelectedWells(prev => {
+        // Add new wells to existing selection
+        const combined = [...new Set([...prev, ...newWells])];
+        return combined;
+      });
     }
   }, [selectionStartCell, selectionEndCell, isDragging]);
 
@@ -408,6 +430,7 @@ const ImagingTasksModal = ({
     setSelectionStartCell([rowIndex, colIndex]);
     setSelectionEndCell([rowIndex, colIndex]);
     setIsDragging(true);
+    setDragStartTime(Date.now());
   };
 
   const handleCellMouseEnter = (rowIndex, colIndex) => {
@@ -416,12 +439,35 @@ const ImagingTasksModal = ({
     }
   };
 
+  const handleCellClick = (rowIndex, colIndex) => {
+    const wellId = getWellIdFromIndices(rowIndex, colIndex);
+    setSelectedWells(prev => {
+      if (prev.includes(wellId)) {
+        // Remove well if already selected
+        return prev.filter(id => id !== wellId);
+      } else {
+        // Add well if not selected
+        return [...prev, wellId];
+      }
+    });
+  };
+
   const handleMouseUpWindow = useCallback(() => {
     if(isDragging) {
-        setIsDragging(false);
-        // imagingZoneString is updated by the useEffect dependent on isDragging
+      const dragDuration = Date.now() - dragStartTime;
+      const startCell = selectionStartCell;
+      const endCell = selectionEndCell;
+      
+      // If drag was very short (< 200ms) and no movement, treat as click
+      if (dragDuration < 200 && startCell && endCell && 
+          startCell[0] === endCell[0] && startCell[1] === endCell[1]) {
+        handleCellClick(startCell[0], startCell[1]);
+      }
+      
+      setIsDragging(false);
+      setDragStartTime(null);
     }
-  }, [isDragging]);
+  }, [isDragging, dragStartTime, selectionStartCell, selectionEndCell]);
 
   useEffect(() => {
     window.addEventListener('mouseup', handleMouseUpWindow);
@@ -431,17 +477,33 @@ const ImagingTasksModal = ({
   }, [handleMouseUpWindow]);
 
   const getSelectedCells = () => {
-    if (!selectionStartCell || !selectionEndCell) return {};
-    const r1 = Math.min(selectionStartCell[0], selectionEndCell[0]);
-    const c1 = Math.min(selectionStartCell[1], selectionEndCell[1]);
-    const r2 = Math.max(selectionStartCell[0], selectionEndCell[0]);
-    const c2 = Math.max(selectionStartCell[1], selectionEndCell[1]);
     const selected = {};
-    for (let r = r1; r <= r2; r++) {
-      for (let c = c1; c <= c2; c++) {
-        selected[`${r}-${c}`] = true;
+    
+    // Add permanently selected wells
+    selectedWells.forEach(wellId => {
+      // Find row/col indices for this well ID
+      for (let r = 0; r < ROW_LABELS.length; r++) {
+        for (let c = 0; c < COL_LABELS.length; c++) {
+          if (getWellIdFromIndices(r, c) === wellId) {
+            selected[`${r}-${c}`] = true;
+          }
+        }
+      }
+    });
+    
+    // Add drag selection preview
+    if (isDragging && selectionStartCell && selectionEndCell) {
+      const r1 = Math.min(selectionStartCell[0], selectionEndCell[0]);
+      const c1 = Math.min(selectionStartCell[1], selectionEndCell[1]);
+      const r2 = Math.max(selectionStartCell[0], selectionEndCell[0]);
+      const c2 = Math.max(selectionStartCell[1], selectionEndCell[1]);
+      for (let r = r1; r <= r2; r++) {
+        for (let c = c1; c <= c2; c++) {
+          selected[`${r}-${c}`] = true;
+        }
       }
     }
+    
     return selected;
   };
   const currentSelectedCells = getSelectedCells();
@@ -558,23 +620,10 @@ const ImagingTasksModal = ({
       return; 
     }
     
-    if (!scanningZoneString.trim()) { showNotification('Scanning Zone is required.', 'warning'); return; }
+    if (selectedWells.length === 0) { showNotification('At least one well must be selected.', 'warning'); return; }
     
     const timePointsArray = pendingTimePoints.split('\n').map(tp => tp.trim()).filter(tp => tp);
     if (timePointsArray.length === 0) { showNotification('At least one Pending Time Point is required.', 'warning'); return; }
-
-    let parsedScanningZone;
-    try {
-      parsedScanningZone = JSON.parse(scanningZoneString);
-      if (!Array.isArray(parsedScanningZone) || parsedScanningZone.length !== 2 || 
-          !Array.isArray(parsedScanningZone[0]) || parsedScanningZone[0].length !== 2 ||
-          !Array.isArray(parsedScanningZone[1]) || parsedScanningZone[1].length !== 2 ||
-          !parsedScanningZone.every(p => p.every(coord => typeof coord === 'number'))){
-        throw new Error('Scanning zone must be an array of two [row,col] index pairs.');
-      }
-    } catch (e) {
-      showNotification(`Invalid Scanning Zone format: ${e.message}`, 'error'); return;
-    }
 
     // Get well plate type from selected slot
     const selectedSlotInfo = availableSlots.find(s => s.value === incubatorSlot);
@@ -598,7 +647,7 @@ const ImagingTasksModal = ({
         illumination_settings: formattedIlluminationSettings,
         do_contrast_autofocus: doContrastAutofocus,
         do_reflection_af: doReflectionAf,
-        imaging_zone: parsedScanningZone,
+        wells_to_scan: selectedWells,
         Nx: parseInt(nx, 10),
         Ny: parseInt(ny, 10),
         dx: parseFloat(dx),
@@ -709,7 +758,7 @@ const ImagingTasksModal = ({
               <p><strong>Illumination Settings:</strong> {task.settings?.illumination_settings ? JSON.stringify(task.settings.illumination_settings) : 'N/A'}</p>
               <p><strong>Nx, Ny:</strong> {task.settings?.Nx}, {task.settings?.Ny}</p>
               <p><strong>dx, dy:</strong> {task.settings?.dx || 'N/A'}, {task.settings?.dy || 'N/A'} mm</p>
-              <p><strong>Imaging Zone:</strong> {JSON.stringify(task.settings?.imaging_zone || task.settings?.scanning_zone)}</p>
+              <p><strong>Wells to Scan:</strong> {task.settings?.wells_to_scan?.join(', ') || 'N/A'}</p>
               <p><strong>Contrast AF:</strong> {task.settings?.do_contrast_autofocus ? 'Yes' : 'No'}</p>
               <p><strong>Reflection AF:</strong> {task.settings?.do_reflection_af ? 'Yes' : 'No'}</p>
               <p><strong>Pending Time Points:</strong> {task.settings?.pending_time_points?.length || 0}</p>
@@ -812,7 +861,19 @@ const ImagingTasksModal = ({
 
                   <p className="text-sm mb-2 form-label">
                       Select imaging area by clicking and dragging on the grid below.
-                      <TutorialTooltip text="Click and drag on the grid to select the wells for imaging. The selected area will be highlighted." />
+                      <TutorialTooltip text="Click individual wells to select them, or drag to select a rectangular area. The selected wells will be highlighted." />
+                  </p>
+                  <p className="text-sm mb-2 form-label">
+                    Selected Wells: {selectedWells.length > 0 ? selectedWells.join(', ') : 'None'}
+                    {selectedWells.length > 0 && (
+                      <button 
+                        onClick={() => setSelectedWells([])} 
+                        className="ml-2 px-2 py-1 text-xs bg-gray-600 hover:bg-gray-500 text-white rounded"
+                        title="Clear all selected wells"
+                      >
+                        Clear All
+                      </button>
+                    )}
                   </p>
                   <div className="well-plate-grid-container" onMouseLeave={() => { if (isDragging) setIsDragging(false); /* Stop drag if mouse leaves grid */ }}>
                     <div className="well-plate-grid">
@@ -838,7 +899,7 @@ const ImagingTasksModal = ({
                     </div>
                   </div>
                    <p className="text-xs mt-1">
-                      Selected Zone: {selectionStartCell && selectionEndCell ? `${ROW_LABELS[selectionStartCell[0]]}${COL_LABELS[selectionStartCell[1]]} to ${ROW_LABELS[selectionEndCell[0]]}${COL_LABELS[selectionEndCell[1]]}` : 'None'}
+                      Selected Wells: {selectedWells.length} wells ({selectedWells.length > 0 ? selectedWells.join(', ') : 'None'})
                   </p>
 
                   <div className="form-grid mt-3">
