@@ -26,3 +26,6 @@ bin/minio*
 # test coverage files
 *.coverage*
 coverage/
+
+# IDE settings (user-specific)
+.vscode/
