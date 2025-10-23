@@ -100,7 +100,7 @@ const Sidebar = React.forwardRef(({
                 disabled={!!currentOperation}
               >
                 <i className="fas fa-desktop"></i> {/* Changed icon for simulated */}
-                <span>Simulated Microscope</span>
+                <span>Simulated 0</span>
               </button>
               <button
                 className={`sidebar-submenu-tab ${selectedMicroscopeId === 'reef-imaging/microscope-control-squid-1' ? 'active' : ''}`}
@@ -111,7 +111,7 @@ const Sidebar = React.forwardRef(({
                 disabled={!!currentOperation}
               >
                 <i className="fas fa-microscope"></i>
-                <span>Real Microscope 1</span>
+                <span>Squid 1</span>
               </button>
               <button
                 className={`sidebar-submenu-tab ${selectedMicroscopeId === 'reef-imaging/microscope-control-squid-2' ? 'active' : ''}`}
@@ -122,7 +122,7 @@ const Sidebar = React.forwardRef(({
                 disabled={!!currentOperation}
               >
                 <i className="fas fa-microscope"></i>
-                <span>Real Microscope 2</span>
+                <span>Squid 2</span>
               </button>
               <button
                 className={`sidebar-submenu-tab ${selectedMicroscopeId === 'reef-imaging/microscope-squid-plus-1' ? 'active' : ''}`}
@@ -133,7 +133,7 @@ const Sidebar = React.forwardRef(({
                 disabled={!!currentOperation}
               >
                 <i className="fas fa-microscope"></i>
-                <span>Squid+ 1</span>
+                <span>Squid+ 3</span>
               </button>
             </div>
           )}
