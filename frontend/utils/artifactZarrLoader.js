@@ -1428,6 +1428,22 @@ class ArtifactZarrLoader {
     }
     }
     
+    // Sort chunks by distance from viewport center (center-out loading)
+    const viewportCenterX = (x_start + x_end) / 2;
+    const viewportCenterY = (y_start + y_end) / 2;
+    
+    chunks.sort((a, b) => {
+      const aCenterX = (a.pixelBounds.x_start + a.pixelBounds.x_end) / 2;
+      const aCenterY = (a.pixelBounds.y_start + a.pixelBounds.y_end) / 2;
+      const bCenterX = (b.pixelBounds.x_start + b.pixelBounds.x_end) / 2;
+      const bCenterY = (b.pixelBounds.y_start + b.pixelBounds.y_end) / 2;
+      
+      const distA = Math.sqrt(Math.pow(aCenterX - viewportCenterX, 2) + Math.pow(aCenterY - viewportCenterY, 2));
+      const distB = Math.sqrt(Math.pow(bCenterX - viewportCenterX, 2) + Math.pow(bCenterY - viewportCenterY, 2));
+      
+      return distA - distB;
+    });
+    
     return chunks;
   }
 
