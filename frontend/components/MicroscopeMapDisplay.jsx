@@ -1945,6 +1945,21 @@ const MicroscopeMapDisplay = forwardRef(({
       
       // For historical mode, be more conservative with cleanup to prevent map clearing during zoom
       if (isHistoricalDataMode) {
+        // 🔍 EARLY CHECK #1: Preserve tiles during active zooming
+        // When user is actively zooming (including multi-level scale jumps), keep all tiles
+        if (isZooming || currentOperation === 'zooming') {
+          console.log(`[cleanupOldTiles] Historical mode: Active zooming detected, preserving all existing tiles to prevent blackout`);
+          return prevTiles; // Keep all existing tiles during zooming
+        }
+        
+        // 🔍 EARLY CHECK #2: Preserve tiles during ANY scale transition to prevent blackout
+        // This check must happen FIRST, before examining tile loading progress
+        const isScaleChanging = scaleLevel !== lastTileRequestRef.current.scaleLevel;
+        if (isScaleChanging) {
+          console.log(`[cleanupOldTiles] Historical mode: Scale level changing from ${lastTileRequestRef.current.scaleLevel} to ${scaleLevel}, preserving all existing tiles to prevent blackout`);
+          return prevTiles; // Keep all existing tiles during scale changes
+        }
+        
         // In historical mode, if there are no tiles for current scale, keep all existing tiles
         // to prevent the map from clearing during zoom operations
         if (currentTiles.length === 0) {
@@ -1966,13 +1981,6 @@ const MicroscopeMapDisplay = forwardRef(({
         if (partialTiles.length > completeTiles.length && avgProgress < 0.5) {
           console.log(`[cleanupOldTiles] Historical mode: New tiles loading (${Math.round(avgProgress * 100)}%), preserving old scale tiles`);
           return prevTiles; // Keep all tiles including old scales during loading
-        }
-        
-        // Also preserve tiles if we're in the middle of a scale change (zoom in or out)
-        const isScaleChanging = scaleLevel !== lastTileRequestRef.current.scaleLevel;
-        if (isScaleChanging) {
-          console.log(`[cleanupOldTiles] Historical mode: Scale level changing from ${lastTileRequestRef.current.scaleLevel} to ${scaleLevel}, preserving all existing tiles to prevent blackout`);
-          return prevTiles; // Keep all existing tiles during scale changes
         }
       }
       
