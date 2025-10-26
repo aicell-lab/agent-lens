@@ -75,8 +75,7 @@ RUN npm config set prefix '/home/agent_lens/.npm-global' && \
     rm -rf frontend/node_modules
 
 RUN pip install --upgrade pip
-RUN pip install --user --extra-index-url https://download.pytorch.org/whl/cpu -e .
-
+RUN pip install --user -e .
 # Ensure the start script is executable
 RUN chmod +x /app/scripts/docker_start.sh
 
