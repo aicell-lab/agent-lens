@@ -70,7 +70,7 @@ RUN npm install --prefix frontend && \
     cd ..
 
 RUN pip install --upgrade pip
-RUN pip install --user -e .
+RUN pip install --user --extra-index-url https://download.pytorch.org/whl/cpu -e .
 
 # Ensure the start script is executable
 RUN chmod +x /app/scripts/docker_start.sh

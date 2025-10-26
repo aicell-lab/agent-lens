@@ -43,7 +43,7 @@ dependencies = [
     "zarr==2.15.0",
     
     # AI and machine learning
-    "torch==2.5.1",
+    "torch==2.5.1+cpu",
     "clip @ git+https://github.com/openai/CLIP.git",
 ]
 
