@@ -121,7 +121,7 @@ const MicroscopeMapDisplay = forwardRef(({
 
   // Set default scan parameters for specific microscope types
   useEffect(() => {
-    if (selectedMicroscopeId === 'reef-imaging/microscope-control-squid-1') {
+    if (selectedMicroscopeId === 'reef-imaging/microscope-squid-1') {
       // Set default values for Real Microscope 1
       setQuickScanParameters(prev => ({
         ...prev,

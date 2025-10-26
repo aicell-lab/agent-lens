@@ -15,31 +15,31 @@ export const MICROSCOPE_CONFIG = {
     orchestratorId: null, // Not supported for time-lapse
     microscopeNumber: null, // Not a real microscope
   },
-  'reef-imaging/microscope-control-squid-1': {
-    id: 'reef-imaging/microscope-control-squid-1',
+  'reef-imaging/microscope-squid-1': {
+    id: 'reef-imaging/microscope-squid-1',
     type: 'real',
     model: 'squid',
     displayName: 'Squid 1',
-    videoTrackServiceId: 'reef-imaging/video-track-microscope-control-squid-1',
-    orchestratorId: 'microscope-control-squid-1',
+    videoTrackServiceId: 'reef-imaging/video-track-microscope-squid-1',
+    orchestratorId: 'microscope-squid-1',
     microscopeNumber: 1,
   },
-  'reef-imaging/microscope-control-squid-2': {
-    id: 'reef-imaging/microscope-control-squid-2',
+  'reef-imaging/microscope-squid-2': {
+    id: 'reef-imaging/microscope-squid-2',
     type: 'real',
     model: 'squid',
     displayName: 'Squid 2',
-    videoTrackServiceId: 'reef-imaging/video-track-microscope-control-squid-2',
-    orchestratorId: 'microscope-control-squid-2',
+    videoTrackServiceId: 'reef-imaging/video-track-microscope-squid-2',
+    orchestratorId: 'microscope-squid-2',
     microscopeNumber: 2,
   },
-  'reef-imaging/microscope-squid-plus-1': {
-    id: 'reef-imaging/microscope-squid-plus-1',
+  'reef-imaging/microscope-squid-plus-3': {
+    id: 'reef-imaging/microscope-squid-plus-3',
     type: 'real',
     model: 'squid+',
     displayName: 'Squid+ 3',
-    videoTrackServiceId: 'reef-imaging/video-track-microscope-squid-plus-1',
-    orchestratorId: 'microscope-squid-plus-1',
+    videoTrackServiceId: 'reef-imaging/video-track-microscope-squid-plus-3',
+    orchestratorId: 'microscope-squid-plus-3',
     microscopeNumber: 3,
   },
 };
@@ -50,9 +50,9 @@ export const ROBOTIC_ARM_SERVICE_ID = 'reef-imaging/robotic-arm-control';
 
 // Microscope number to service ID mapping (for sample transfer operations)
 export const MICROSCOPE_NUMBER_TO_SERVICE = {
-  1: 'reef-imaging/microscope-control-squid-1',
-  2: 'reef-imaging/microscope-control-squid-2',
-  3: 'reef-imaging/microscope-squid-plus-1',
+  1: 'reef-imaging/microscope-squid-1',
+  2: 'reef-imaging/microscope-squid-2',
+  3: 'reef-imaging/microscope-squid-plus-3',
 };
 
 // ============================================================================

@@ -330,7 +330,7 @@ performance-analysis/     # Performance analysis tools
 - **State Tracking**: Monitor sample locations and hardware status across all devices
 - **Real vs Simulated**: Support both real hardware and simulated microscope modes
 - **Operation Sequencing**: Ensure proper order of operations (home stage → arm transport → placement)
-- **Multi-Microscope Support**: Handle reef-imaging/microscope-control-squid-1 and squid-2
+- **Multi-Microscope Support**: Handle reef-imaging/microscope-squid-1 and squid-2
 - **Robotic Arm Integration**: Coordinate sample transport with reef-imaging/robotic-arm-control
 - **Incubator Management**: Track sample slots and locations in automated incubator system
 - **Operation Locking**: Prevent concurrent operations that could cause hardware conflicts

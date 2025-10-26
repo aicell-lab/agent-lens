@@ -69,9 +69,9 @@ const SampleSelector = ({
 
   // Helper function to convert full service ID to orchestrator microscope ID format
   const getMicroscopeIdForOrchestrator = (fullServiceId) => {
-    if (fullServiceId.includes('squid-1')) return 'microscope-control-squid-1';
-    if (fullServiceId.includes('squid-2')) return 'microscope-control-squid-2';
-    if (fullServiceId.includes('squid-plus-1')) return 'microscope-squid-plus-1';
+    if (fullServiceId.includes('squid-1')) return 'microscope-squid-1';
+    if (fullServiceId.includes('squid-2')) return 'microscope-squid-2';
+    if (fullServiceId.includes('squid-plus-3')) return 'microscope-squid-plus-3';
     return fullServiceId; // Fallback for other formats
   };
 
