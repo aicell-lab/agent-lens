@@ -67,8 +67,7 @@ const AnnotationImagePreview = ({
   onEmbeddingsGenerated,
   // Layer activation props
   activeLayer,
-  layers,
-  experiments
+  layers
 }) => {
   const [previewUrl, setPreviewUrl] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -348,7 +347,6 @@ AnnotationImagePreview.propTypes = {
 
 const AnnotationPanel = ({
   isDrawingMode,
-  setIsDrawingMode,
   currentTool,
   setCurrentTool,
   strokeColor,
@@ -357,8 +355,6 @@ const AnnotationPanel = ({
   setStrokeWidth,
   fillColor,
   setFillColor,
-  description,
-  setDescription,
   annotations,
   onAnnotationDelete,
   onClearAllAnnotations,
@@ -419,6 +415,10 @@ const AnnotationPanel = ({
   // Load all annotations states
   const [isLoadingAllAnnotations, setIsLoadingAllAnnotations] = useState(false);
   const [loadedAnnotationsCount, setLoadedAnnotationsCount] = useState(0);
+  
+  // Text search states
+  const [searchType, setSearchType] = useState(null); // 'image' or 'text'
+  const [textSearchQuery, setTextSearchQuery] = useState('');
 
   // Helper functions for layer management
   const getActiveLayerInfo = () => {
@@ -775,6 +775,7 @@ const AnnotationPanel = ({
     setIsSearching(true);
     setSimilarityResults([]);
     setShowSimilarityPanel(true);
+    setSearchType('image');
 
     try {
       const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
@@ -834,6 +835,86 @@ const AnnotationPanel = ({
     }
   };
 
+  const handleTextSearch = async () => {
+    if (!textSearchQuery.trim()) {
+      alert('Please enter a search query.');
+      return;
+    }
+
+    // Get dataset ID for application ID - support both historical datasets and experiments
+    let applicationId = selectedHistoricalDataset?.id;
+    
+    // If no historical dataset, check if we're using an experiment layer
+    if (!applicationId && activeLayer && experiments.length > 0) {
+      const experiment = experiments.find(exp => exp.name === activeLayer);
+      if (experiment) {
+        applicationId = experiment.name; // Use experiment name as application ID
+      }
+    }
+    
+    if (!applicationId) {
+      alert('No dataset or experiment selected. Cannot search for annotations.');
+      return;
+    }
+
+    setIsSearching(true);
+    setSimilarityResults([]);
+    setShowSimilarityPanel(true);
+    setSearchType('text');
+
+    try {
+      const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
+      
+      // Prepare query parameters
+      const queryParams = new URLSearchParams({
+        collection_name: convertToValidCollectionName('agent-lens'),
+        application_id: applicationId,
+        query_text: textSearchQuery.trim(),
+        limit: '10'
+      });
+      
+      const response = await fetch(`/agent-lens/apps/${serviceId}/similarity/search/text?${queryParams}`, {
+        method: 'POST'
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        
+        if (result.success && result.results) {
+          // Handle different result formats from Weaviate
+          let results = result.results;
+          
+          // If results has an 'objects' property, extract it
+          if (results.objects && Array.isArray(results.objects)) {
+            results = results.objects;
+          }
+          
+          // If results is not an array, try to extract objects from it
+          if (!Array.isArray(results) && results.objects) {
+            results = results.objects;
+          }
+          
+          // Final validation
+          if (!Array.isArray(results)) {
+            results = results ? [results] : [];
+          }
+          
+          setSimilarityResults(results);
+        } else {
+          console.error('No results found:', result);
+          setSimilarityResults([]);
+        }
+      } else {
+        console.error('Text search failed:', await response.text());
+        alert('Failed to search for annotations.');
+      }
+    } catch (error) {
+      console.error('Error searching for annotations:', error);
+      alert('Error searching for annotations: ' + error.message);
+    } finally {
+      setIsSearching(false);
+    }
+  };
 
   const handleAnnotationClick = (annotation) => {
     const wellInfo = wellInfoMap[annotation.id];
@@ -982,20 +1063,27 @@ const AnnotationPanel = ({
               </div>
             </div>
 
-            {/* Description */}
+            {/* Text Search */}
             <div className="style-control">
-              <label>Description:</label>
-              <textarea
-                value={description || ''}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="text ... in development"
-                className="description-input"
-                rows="2"
-                maxLength="200"
-                disabled
-              />
-              <div className="description-counter">
-                {(description || '').length}/200 characters
+              <label>Text Search:</label>
+              <div className="text-search-container">
+                <textarea
+                  value={textSearchQuery}
+                  onChange={(e) => setTextSearchQuery(e.target.value)}
+                  placeholder="Search annotations (e.g., 'round cell')"
+                  className="description-input"
+                  rows="2"
+                  maxLength="200"
+                />
+                <button
+                  onClick={handleTextSearch}
+                  className="text-search-button"
+                  disabled={!textSearchQuery.trim() || isSearching}
+                  title="Search for similar annotations using text"
+                >
+                  <i className="fas fa-search"></i>
+                  {isSearching ? 'Searching...' : 'Search'}
+                </button>
               </div>
             </div>
 
@@ -1174,7 +1262,9 @@ const AnnotationPanel = ({
             <div className="annotation-section">
               <div className="annotation-section-title">
                 <i className="fas fa-search"></i>
-                Similar Annotations
+                {searchType === 'text' 
+                  ? `Similar Annotations (Text: "${textSearchQuery}")` 
+                  : 'Similar Annotations (Image)'}
                 <div className="similarity-results-actions">
                   {/* Go back button */}
                   {goBackToPreviousPosition && hasPreviousPosition && (

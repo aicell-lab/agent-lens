@@ -1,7 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
 import './Sidebar.css';
-import { isRealMicroscope, isSimulatedMicroscope } from '../utils';
+import { 
+  getAllMicroscopeIds, 
+  getMicroscopeDisplayName, 
+  getMicroscopeConfig 
+} from '../utils';
 
 const Sidebar = React.forwardRef(({ 
   activeTab, 
@@ -42,9 +46,8 @@ const Sidebar = React.forwardRef(({
 
 
 
-  // Use centralized config utility functions
-  const isRealMicroscopeSelected = isRealMicroscope(selectedMicroscopeId);
-  const isSimulatedMicroscopeSelected = isSimulatedMicroscope(selectedMicroscopeId);
+  // Note: isRealMicroscope and isSimulatedMicroscope utility functions are available
+  // but not currently used in this component since we're using dynamic rendering
 
   // Toggle function for main sidebar collapse
   const toggleMainSidebarCollapse = () => {
@@ -86,55 +89,34 @@ const Sidebar = React.forwardRef(({
             {!isMainSidebarCollapsed && <span>Microscopes</span>}
             {!isMainSidebarCollapsed && <i className={`fas ${isMicroscopeDropdownOpen ? 'fa-chevron-down' : 'fa-chevron-right'} microscope-toggle-icon`}></i>}
           </button>
-          {/* Microscope Dropdown Submenu - Modified for CSS transition */}
+          {/* Microscope Dropdown Submenu - Dynamic from centralized config */}
           {activeTab === 'microscope' && !isMainSidebarCollapsed && (
             <div 
               className={`sidebar-submenu microscope-options-dropdown ${isMicroscopeDropdownOpen ? 'open' : ''}`}
             >
-              <button
-                className={`sidebar-submenu-tab ${selectedMicroscopeId === 'agent-lens/squid-control-simulation' ? 'active' : ''}`}
-                onClick={() => {
-                  onMicroscopeSelect('agent-lens/squid-control-simulation');
-                  // setIsMicroscopeDropdownOpen(false); // Optional: close dropdown on selection
-                }}
-                disabled={!!currentOperation}
-              >
-                <i className="fas fa-desktop"></i> {/* Changed icon for simulated */}
-                <span>Simulated Microscope</span>
-              </button>
-              <button
-                className={`sidebar-submenu-tab ${selectedMicroscopeId === 'reef-imaging/microscope-control-squid-1' ? 'active' : ''}`}
-                onClick={() => {
-                  onMicroscopeSelect('reef-imaging/microscope-control-squid-1');
-                  // setIsMicroscopeDropdownOpen(false); // Optional: close dropdown on selection
-                }}
-                disabled={!!currentOperation}
-              >
-                <i className="fas fa-microscope"></i>
-                <span>Real Microscope 1</span>
-              </button>
-              <button
-                className={`sidebar-submenu-tab ${selectedMicroscopeId === 'reef-imaging/microscope-control-squid-2' ? 'active' : ''}`}
-                onClick={() => {
-                  onMicroscopeSelect('reef-imaging/microscope-control-squid-2');
-                  // setIsMicroscopeDropdownOpen(false); // Optional: close dropdown on selection
-                }}
-                disabled={!!currentOperation}
-              >
-                <i className="fas fa-microscope"></i>
-                <span>Real Microscope 2</span>
-              </button>
-              <button
-                className={`sidebar-submenu-tab ${selectedMicroscopeId === 'reef-imaging/microscope-squid-plus-1' ? 'active' : ''}`}
-                onClick={() => {
-                  onMicroscopeSelect('reef-imaging/microscope-squid-plus-1');
-                  // setIsMicroscopeDropdownOpen(false); // Optional: close dropdown on selection
-                }}
-                disabled={!!currentOperation}
-              >
-                <i className="fas fa-microscope"></i>
-                <span>Squid+ 1</span>
-              </button>
+              {getAllMicroscopeIds().map((microscopeId) => {
+                const config = getMicroscopeConfig(microscopeId);
+                const displayName = getMicroscopeDisplayName(microscopeId);
+                const isActive = selectedMicroscopeId === microscopeId;
+                
+                // Choose appropriate icon based on microscope type
+                const iconClass = config?.type === 'simulated' ? 'fas fa-desktop' : 'fas fa-microscope';
+                
+                return (
+                  <button
+                    key={microscopeId}
+                    className={`sidebar-submenu-tab ${isActive ? 'active' : ''}`}
+                    onClick={() => {
+                      onMicroscopeSelect(microscopeId);
+                      // setIsMicroscopeDropdownOpen(false); // Optional: close dropdown on selection
+                    }}
+                    disabled={!!currentOperation}
+                  >
+                    <i className={iconClass}></i>
+                    <span>{displayName}</span>
+                  </button>
+                );
+              })}
             </div>
           )}
           <button 
@@ -180,6 +162,9 @@ const Sidebar = React.forwardRef(({
     </div>
   );
 });
+
+// Add display name for the component
+Sidebar.displayName = 'Sidebar';
 
 Sidebar.propTypes = {
   activeTab: PropTypes.string.isRequired,
