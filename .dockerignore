@@ -1,0 +1,52 @@
+# Git
+.git
+.gitignore
+.github
+
+# Node modules (will be installed during build)
+node_modules
+frontend/node_modules
+scripts/node_modules
+tests/node_modules
+
+# Build artifacts
+frontend/dist
+frontend/coverage
+*.pyc
+__pycache__
+*.egg-info
+
+# Logs and temp files
+logs
+*.log
+
+# Test files
+tests
+performance-analysis
+
+# Documentation
+docs
+*.md
+!README.md
+
+# IDE and editor files
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Coverage reports
+coverage
+.coverage
+htmlcov
+
+# Python virtual environments
+venv
+env
+.env
+

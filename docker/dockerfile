@@ -55,14 +55,6 @@ COPY --chown=agent_lens:agent_lens pyproject.toml README.md ./
 COPY --chown=agent_lens:agent_lens agent_lens ./agent_lens
 COPY --chown=agent_lens:agent_lens frontend ./frontend
 COPY --chown=agent_lens:agent_lens scripts ./scripts
-COPY --chown=agent_lens:agent_lens .git ./.git
-COPY --chown=agent_lens:agent_lens .gitignore ./.gitignore
-
-# Add /app to the list of safe directories for Git
-RUN git config --global --add safe.directory /app
-
-# Remove all files matching .gitignore patterns and .git directory
-RUN git clean -fdX && rm -rf .git
 
 # Copy package files first
 COPY --chown=agent_lens:agent_lens frontend/package*.json frontend/vite.config.mjs ./frontend/
