@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, useImperativeHandle, forwardRef } from 'react';
 import PropTypes from 'prop-types';
-import { useValidatedNumberInput, isSquidPlusMicroscope } from '../utils'; // Import validation utilities
+import { useValidatedNumberInput, isSquidPlusMicroscope, isSimulatedMicroscope, getMicroscopeConfig } from '../utils'; // Import validation utilities
 import ArtifactZarrLoader from '../utils/artifactZarrLoader.js';
 import LayerPanel from './microscope/map/LayerPanel';
 import useExperimentZarrManager from './microscope/map/ExperimentZarrManager';
@@ -75,7 +75,7 @@ const MicroscopeMapDisplay = forwardRef(({
   const mapVideoRef = useRef(null);
   
   // Check if using simulated microscope - disable scanning features
-  const isSimulatedMicroscope = selectedMicroscopeId === 'agent-lens/squid-control-simulation';
+  const isSimulatedMicroscopeSelected = isSimulatedMicroscope(selectedMicroscopeId);
   
   // Laser autofocus handler for FOV controls
   const handleLaserAutoFocus = useCallback(async () => {
@@ -96,7 +96,7 @@ const MicroscopeMapDisplay = forwardRef(({
   
   // Close scan configurations when switching to simulated microscope (basic cleanup only)
   useEffect(() => {
-    if (isSimulatedMicroscope) {
+    if (isSimulatedMicroscopeSelected) {
       // Close any open scan configurations
       setShowScanConfig(false);
       setShowQuickScanConfig(false);
@@ -109,7 +109,7 @@ const MicroscopeMapDisplay = forwardRef(({
       setGridDragEnd(null);
       setIsGridDragging(false);
     }
-  }, [isSimulatedMicroscope]);
+  }, [isSimulatedMicroscopeSelected]);
   
   // 🚀 PERFORMANCE OPTIMIZATION: Clean up progress tracking on unmount or mode change
   useEffect(() => {
@@ -121,7 +121,8 @@ const MicroscopeMapDisplay = forwardRef(({
 
   // Set default scan parameters for specific microscope types
   useEffect(() => {
-    if (selectedMicroscopeId === 'reef-imaging/microscope-squid-1') {
+    const microscopeConfig = getMicroscopeConfig(selectedMicroscopeId);
+    if (microscopeConfig?.microscopeNumber === 1) {
       // Set default values for Real Microscope 1
       setQuickScanParameters(prev => ({
         ...prev,
@@ -347,7 +348,7 @@ const MicroscopeMapDisplay = forwardRef(({
 
   // Function to refresh scan results (moved early to avoid dependency issues)
   const refreshScanResults = useCallback(() => {
-    if (visibleLayers.scanResults && !isSimulatedMicroscope) {
+    if (visibleLayers.scanResults && !isSimulatedMicroscopeSelected) {
       // Clear only legacy active requests 
       activeTileRequestsRef.current.clear();
       
@@ -358,7 +359,7 @@ const MicroscopeMapDisplay = forwardRef(({
       // Set flag to trigger tile loading - loadStitchedTiles will be called by the effect
       setNeedsTileReload(true);
     }
-  }, [appendLog, isSimulatedMicroscope]); // Removed visibleLayers.scanResults to prevent triggering on layer toggles
+  }, [appendLog, isSimulatedMicroscopeSelected]); // Removed visibleLayers.scanResults to prevent triggering on layer toggles
 
   // Callback for handling scan status updates from MicroscopeControlPanel
   const handleScanStatusUpdate = useCallback((scanStatus) => {
@@ -411,7 +412,7 @@ const MicroscopeMapDisplay = forwardRef(({
   // Initialize experiment zarr manager hook
   const experimentManager = useExperimentZarrManager({
     microscopeControlService,
-    isSimulatedMicroscope,
+    isSimulatedMicroscopeSelected,
     showNotification,
     appendLog,
     onExperimentChange: (data) => {
@@ -610,9 +611,9 @@ const MicroscopeMapDisplay = forwardRef(({
     // For scan data layer: use visibleLayers.channels
     // Let the microscope service handle channel merging
     const scanDataLayer = getScanDataLayer();
-    return scanDataLayer && !isSimulatedMicroscope && 
+    return scanDataLayer && !isSimulatedMicroscopeSelected && 
            Object.values(visibleLayers.channels).some(isVisible => isVisible);
-  }, [getBrowseDataLayer, getScanDataLayer, availableZarrChannels.length, zarrChannelConfigs, isSimulatedMicroscope, visibleLayers.channels]);
+  }, [getBrowseDataLayer, getScanDataLayer, availableZarrChannels.length, zarrChannelConfigs, isSimulatedMicroscopeSelected, visibleLayers.channels]);
 
   // State to track the well being selected during drag operations
   const [dragSelectedWell, setDragSelectedWell] = useState(null);
@@ -1429,7 +1430,7 @@ const MicroscopeMapDisplay = forwardRef(({
   }, [containerDimensions, mapViewMode, currentStagePosition, stageDimensions, mapScale, effectivePan, fovSize, pixelsPerMm]);
 
   // Split interaction controls: hardware vs map browsing, exclude simulated microscope in historical mode
-  const isHardwareInteractionDisabled = (isHistoricalDataMode && !(isSimulatedMicroscope && isHistoricalDataMode)) || microscopeBusy || currentOperation !== null || isScanInProgress || isQuickScanInProgress || isDrawingMode || isHardwareLocked;
+  const isHardwareInteractionDisabled = (isHistoricalDataMode && !(isSimulatedMicroscopeSelected && isHistoricalDataMode)) || microscopeBusy || currentOperation !== null || isScanInProgress || isQuickScanInProgress || isDrawingMode || isHardwareLocked;
   const isMapBrowsingDisabled = isDrawingMode && !isMapBrowsingMode; // Disable map browsing when in drawing mode unless map browsing is explicitly enabled
   
   // Legacy compatibility - some UI elements still use the general disabled state
@@ -1594,7 +1595,7 @@ const MicroscopeMapDisplay = forwardRef(({
     // Container dimensions will be automatically updated by ResizeObserver
     // No need for setTimeout hack - memoized calculations will recalculate
     // when containerDimensions state updates
-  }, [onFitToViewUncollapse, appendLog, isSimulatedMicroscope, isHistoricalDataMode, setStitchedTiles, setVideoZoom]);
+  }, [onFitToViewUncollapse, appendLog, isSimulatedMicroscopeSelected, isHistoricalDataMode, setStitchedTiles, setVideoZoom]);
 
   const handleDoubleClick = async (e) => {
     if (!microscopeControlService || !microscopeConfiguration || !stageDimensions || isHardwareInteractionDisabled) {
@@ -2157,7 +2158,7 @@ const MicroscopeMapDisplay = forwardRef(({
 
   // Handle well click for selection
   const handleWellClick = useCallback((wellId) => {
-    if (isSimulatedMicroscope && !isHistoricalDataMode) return;
+    if (isSimulatedMicroscopeSelected && !isHistoricalDataMode) return;
     
     setSelectedWells(prev => {
       if (prev.includes(wellId)) {
@@ -2168,7 +2169,7 @@ const MicroscopeMapDisplay = forwardRef(({
         return [...prev, wellId];
       }
     });
-  }, [isSimulatedMicroscope, isHistoricalDataMode]);
+  }, [isSimulatedMicroscopeSelected, isHistoricalDataMode]);
 
   // Render well plate overlay with interactive wells
   const render96WellPlate = () => {
@@ -2233,8 +2234,8 @@ const MicroscopeMapDisplay = forwardRef(({
               fill="none"
               stroke="rgba(255, 255, 255, 0.6)"
               strokeWidth={isSelected ? "2" : "1"}
-              style={{ cursor: (isSimulatedMicroscope && !isHistoricalDataMode) ? 'default' : 'pointer' }}
-              onClick={() => !(isSimulatedMicroscope && !isHistoricalDataMode) && handleWellClick(wellId)}
+              style={{ cursor: (isSimulatedMicroscopeSelected && !isHistoricalDataMode) ? 'default' : 'pointer' }}
+              onClick={() => !(isSimulatedMicroscopeSelected && !isHistoricalDataMode) && handleWellClick(wellId)}
             />
             {scaleLevel >= 2 && (
               <text
@@ -2244,7 +2245,7 @@ const MicroscopeMapDisplay = forwardRef(({
                 dominantBaseline="middle"
                 fill="rgba(255, 255, 255, 0.8)"
                 fontSize={`${Math.min(12, 6 + scaleLevel * 2)}px`}
-                style={{ cursor: (isSimulatedMicroscope && !isHistoricalDataMode) ? 'default' : 'pointer', pointerEvents: 'none' }}
+                style={{ cursor: (isSimulatedMicroscopeSelected && !isHistoricalDataMode) ? 'default' : 'pointer', pointerEvents: 'none' }}
               >
                 {wellId}
               </text>
@@ -2263,7 +2264,7 @@ const MicroscopeMapDisplay = forwardRef(({
           left: 0,
           width: '100%',
           height: '100%',
-          pointerEvents: (isSimulatedMicroscope && !isHistoricalDataMode) ? 'none' : 'auto', // Allow clicks for well selection
+          pointerEvents: (isSimulatedMicroscopeSelected && !isHistoricalDataMode) ? 'none' : 'auto', // Allow clicks for well selection
           zIndex: 5 // Well plate overlay above scan results
         }}
       >
@@ -2643,17 +2644,17 @@ const MicroscopeMapDisplay = forwardRef(({
 
   // Effect to update scan parameters when channel selection changes
   useEffect(() => {
-    if (microscopeControlService && !isSimulatedMicroscope) {
+    if (microscopeControlService && !isSimulatedMicroscopeSelected) {
       loadCurrentMicroscopeSettings();
     }
-  }, [visibleLayers.channels, loadCurrentMicroscopeSettings, microscopeControlService, isSimulatedMicroscope]);
+  }, [visibleLayers.channels, loadCurrentMicroscopeSettings, microscopeControlService, isSimulatedMicroscopeSelected]);
 
   // Track previous channel selection to prevent unnecessary tile clearing
   const previousChannelSelectionRef = useRef('');
   
   // Effect to refresh tiles when channel selection changes
   useEffect(() => {
-    if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && !isSimulatedMicroscope) {
+    if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && !isSimulatedMicroscopeSelected) {
       // Only clear tiles if we actually have a meaningful channel change
       const selectedChannels = Object.entries(visibleLayers.channels)
         .filter(([, isVisible]) => isVisible)
@@ -2695,7 +2696,7 @@ const MicroscopeMapDisplay = forwardRef(({
         console.log(`[Channel Change] No real channel change detected - LayerPanel UI update only`);
       }
     }
-  }, [visibleLayers.channels, mapViewMode, isSimulatedMicroscope, appendLog]); // Removed visibleLayers.scanResults to prevent triggering on layer toggles
+  }, [visibleLayers.channels, mapViewMode, isSimulatedMicroscopeSelected, appendLog]); // Removed visibleLayers.scanResults to prevent triggering on layer toggles
 
   // Effect to handle historical layer cleanup when layers are toggled off or deleted
   useEffect(() => {
@@ -2759,9 +2760,9 @@ const MicroscopeMapDisplay = forwardRef(({
   useEffect(() => {
     const handleContrastSettingsChanged = (event) => {
       console.log(`🎨 MicroscopeMapDisplay: Received contrast settings change event:`, event.detail);
-      console.log(`🎨 MicroscopeMapDisplay: Current conditions - mapViewMode: ${mapViewMode}, scanResults: ${visibleLayers.scanResults}, isSimulated: ${isSimulatedMicroscope}`);
+      console.log(`🎨 MicroscopeMapDisplay: Current conditions - mapViewMode: ${mapViewMode}, scanResults: ${visibleLayers.scanResults}, isSimulated: ${isSimulatedMicroscopeSelected}`);
       
-      if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && !isSimulatedMicroscope) {
+      if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && !isSimulatedMicroscopeSelected) {
         console.log(`🎨 MicroscopeMapDisplay: Processing contrast settings change event`);
         
         // Clear active requests to prevent conflicts
@@ -2788,12 +2789,12 @@ const MicroscopeMapDisplay = forwardRef(({
     return () => {
       window.removeEventListener('contrastSettingsChanged', handleContrastSettingsChanged);
     };
-  }, [mapViewMode, isSimulatedMicroscope, appendLog]); // Removed visibleLayers.scanResults to prevent triggering on layer toggles
+  }, [mapViewMode, isSimulatedMicroscopeSelected, appendLog]); // Removed visibleLayers.scanResults to prevent triggering on layer toggles
 
   // Initialize real microscope channel configs for visible channels
   useEffect(() => {
     const scanDataLayer = getScanDataLayer();
-    if (scanDataLayer && !isSimulatedMicroscope && mapViewMode === 'FREE_PAN') {
+    if (scanDataLayer && !isSimulatedMicroscopeSelected && mapViewMode === 'FREE_PAN') {
       const visibleChannels = Object.entries(visibleLayers.channels)
         .filter(([_, isVisible]) => isVisible)
         .map(([channelName]) => channelName);
@@ -2820,7 +2821,7 @@ const MicroscopeMapDisplay = forwardRef(({
         }));
       }
     }
-  }, [visibleLayers.channels, getScanDataLayer, isSimulatedMicroscope, mapViewMode, realMicroscopeChannelConfigs]);
+  }, [visibleLayers.channels, getScanDataLayer, isSimulatedMicroscopeSelected, mapViewMode, realMicroscopeChannelConfigs]);
 
 
 
@@ -2830,7 +2831,7 @@ const MicroscopeMapDisplay = forwardRef(({
   
   // Rectangle selection handlers
   const handleRectangleSelectionStart = useCallback((e) => {
-    if (!isRectangleSelection || isHardwareInteractionDisabled || (isSimulatedMicroscope && !isHistoricalDataMode)) return;
+    if (!isRectangleSelection || isHardwareInteractionDisabled || (isSimulatedMicroscopeSelected && !isHistoricalDataMode)) return;
     
     const rect = mapContainerRef.current.getBoundingClientRect();
     const startX = e.clientX - rect.left;
@@ -2855,10 +2856,10 @@ const MicroscopeMapDisplay = forwardRef(({
     if (appendLog) {
       appendLog(`Started scan area selection in well ${detectedWell.id}`);
     }
-  }, [isRectangleSelection, isHardwareInteractionDisabled, isSimulatedMicroscope, isHistoricalDataMode, displayToStageCoords, detectWellFromStageCoords, showNotification, appendLog]);
+  }, [isRectangleSelection, isHardwareInteractionDisabled, isSimulatedMicroscopeSelected, isHistoricalDataMode, displayToStageCoords, detectWellFromStageCoords, showNotification, appendLog]);
   
   const handleRectangleSelectionMove = useCallback((e) => {
-    if (!rectangleStart || !isRectangleSelection || (isSimulatedMicroscope && !isHistoricalDataMode) || !dragSelectedWell) return;
+    if (!rectangleStart || !isRectangleSelection || (isSimulatedMicroscopeSelected && !isHistoricalDataMode) || !dragSelectedWell) return;
     
     const rect = mapContainerRef.current.getBoundingClientRect();
     const currentX = e.clientX - rect.left;
@@ -2873,10 +2874,10 @@ const MicroscopeMapDisplay = forwardRef(({
     const clampedDisplayCoords = stageToDisplayCoords(clampedStageCoords.x, clampedStageCoords.y);
     
     setRectangleEnd({ x: clampedDisplayCoords.x, y: clampedDisplayCoords.y });
-  }, [rectangleStart, isRectangleSelection, isSimulatedMicroscope, isHistoricalDataMode, dragSelectedWell, displayToStageCoords, getWellBoundaries, clampToWellBoundaries, stageToDisplayCoords]);
+  }, [rectangleStart, isRectangleSelection, isSimulatedMicroscopeSelected, isHistoricalDataMode, dragSelectedWell, displayToStageCoords, getWellBoundaries, clampToWellBoundaries, stageToDisplayCoords]);
   
   const handleRectangleSelectionEnd = useCallback((e) => {
-    if (!rectangleStart || !rectangleEnd || !isRectangleSelection || (isSimulatedMicroscope && !isHistoricalDataMode) || !dragSelectedWell) return;
+    if (!rectangleStart || !rectangleEnd || !isRectangleSelection || (isSimulatedMicroscopeSelected && !isHistoricalDataMode) || !dragSelectedWell) return;
     
     // Convert rectangle corners to stage coordinates
     const topLeft = displayToStageCoords(
@@ -2922,7 +2923,7 @@ const MicroscopeMapDisplay = forwardRef(({
     // This keeps the grid visible but makes it non-interactive (fixed)
     setIsRectangleSelection(false);
     setShowScanConfig(true);
-  }, [rectangleStart, rectangleEnd, isRectangleSelection, displayToStageCoords, scanParameters.dx_mm, scanParameters.dy_mm, isSimulatedMicroscope, isHistoricalDataMode, dragSelectedWell, stageToRelativeCoords, appendLog]);
+  }, [rectangleStart, rectangleEnd, isRectangleSelection, displayToStageCoords, scanParameters.dx_mm, scanParameters.dy_mm, isSimulatedMicroscopeSelected, isHistoricalDataMode, dragSelectedWell, stageToRelativeCoords, appendLog]);
 
 
 
@@ -3080,11 +3081,11 @@ const MicroscopeMapDisplay = forwardRef(({
 
   // Load experiments when microscope service becomes available
   useEffect(() => {
-    if (microscopeControlService && !isSimulatedMicroscope) {
+    if (microscopeControlService && !isSimulatedMicroscopeSelected) {
       console.log('[Experiment Loading] Microscope service available - loading experiments');
       loadExperiments();
     }
-  }, [microscopeControlService, isSimulatedMicroscope]); // Removed loadExperiments to prevent infinite loops
+  }, [microscopeControlService, isSimulatedMicroscopeSelected]); // Removed loadExperiments to prevent infinite loops
 
   // Only load experiments when layer dropdown is opened AND we don't have experiments yet
   const hasExperimentsRef = useRef(false);
@@ -3095,17 +3096,17 @@ const MicroscopeMapDisplay = forwardRef(({
   }, [experiments]);
 
   useEffect(() => {
-    if (isLayerDropdownOpen && !isSimulatedMicroscope && !hasExperimentsRef.current) {
+    if (isLayerDropdownOpen && !isSimulatedMicroscopeSelected && !hasExperimentsRef.current) {
       console.log('[Layer Dropdown] Loading experiments for first time');
       loadExperiments();
       // Also get experiment info for the active experiment
       if (activeExperiment) {
         getExperimentInfo(activeExperiment);
       }
-    } else if (isLayerDropdownOpen && !isSimulatedMicroscope && hasExperimentsRef.current) {
+    } else if (isLayerDropdownOpen && !isSimulatedMicroscopeSelected && hasExperimentsRef.current) {
       console.log('[Layer Dropdown] Experiments already loaded, skipping refresh');
     }
-  }, [isLayerDropdownOpen, isSimulatedMicroscope]); // Removed function dependencies to prevent infinite loops
+  }, [isLayerDropdownOpen, isSimulatedMicroscopeSelected]); // Removed function dependencies to prevent infinite loops
 
   // Cleanup timeouts on unmount
   useEffect(() => {
@@ -3311,7 +3312,7 @@ const MicroscopeMapDisplay = forwardRef(({
   
   // Handle simulated sample switching - update dataset when sample changes
   useEffect(() => {
-    if (isSimulatedMicroscope && sampleLoadStatus?.isSampleLoaded && sampleLoadStatus?.selectedSampleId) {
+    if (isSimulatedMicroscopeSelected && sampleLoadStatus?.isSampleLoaded && sampleLoadStatus?.selectedSampleId) {
       // Map sample IDs to their data aliases (same as in SampleSelector)
       const sampleDataAliases = {
         'simulated-sample-1': 'agent-lens/20250824-example-data-20250824-221822',
@@ -3348,7 +3349,7 @@ const MicroscopeMapDisplay = forwardRef(({
         });
       }
     }
-  }, [isSimulatedMicroscope, sampleLoadStatus?.isSampleLoaded, sampleLoadStatus?.selectedSampleId, selectedMicroscopeId, setStitchedTiles, setSelectedGallery]);
+  }, [isSimulatedMicroscopeSelected, sampleLoadStatus?.isSampleLoaded, sampleLoadStatus?.selectedSampleId, selectedMicroscopeId, setStitchedTiles, setSelectedGallery]);
   
   // Auto-select first dataset when datasets are loaded in historical mode
   useEffect(() => {
@@ -4110,7 +4111,7 @@ const MicroscopeMapDisplay = forwardRef(({
     // Handle scan data layer (real microscope mode) or scan results  
     const scanDataPromise = (scanDataLayer || hasScanResults) ? (async () => {
       console.log('[loadStitchedTiles] Processing scan data:', scanDataLayer ? `layer: ${scanDataLayer.name}` : 'scan results');
-      if (!microscopeControlService || isSimulatedMicroscope) {
+      if (!microscopeControlService || isSimulatedMicroscopeSelected) {
         console.log('[loadStitchedTiles] Skipping scan data - no microscope service or simulated mode');
         // Don't return early - browse data might have been loaded
       } else {
@@ -4299,7 +4300,7 @@ const MicroscopeMapDisplay = forwardRef(({
     
     // Run both browse data and scan data loading in parallel
     await Promise.all([browseDataPromise, scanDataPromise]);
-  }, [getBrowseDataLayer, getScanDataLayer, microscopeControlService, visibleLayers.channels, mapViewMode, scaleLevel, displayToStageCoords, stageDimensions, pixelsPerMm, getTileKey, addOrUpdateTile, appendLog, isSimulatedMicroscope, selectedHistoricalDataset, selectedGallery, getIntersectingWells, calculateWellRegion, wellPlateType, realMicroscopeChannelConfigs, zarrChannelConfigs, getEnabledZarrChannels, shouldUseMultiChannelLoading, visibleExperiments, activeExperiment, getLayerContrastSettings, experiments]);
+  }, [getBrowseDataLayer, getScanDataLayer, microscopeControlService, visibleLayers.channels, mapViewMode, scaleLevel, displayToStageCoords, stageDimensions, pixelsPerMm, getTileKey, addOrUpdateTile, appendLog, isSimulatedMicroscopeSelected, selectedHistoricalDataset, selectedGallery, getIntersectingWells, calculateWellRegion, wellPlateType, realMicroscopeChannelConfigs, zarrChannelConfigs, getEnabledZarrChannels, shouldUseMultiChannelLoading, visibleExperiments, activeExperiment, getLayerContrastSettings, experiments]);
 
   // Add a ref to track previous experiment selection to avoid unnecessary reloads
   const previousExperimentSelectionRef = useRef(null);
@@ -4332,7 +4333,7 @@ const MicroscopeMapDisplay = forwardRef(({
       const activeChannel = getChannelString();
       
       // Check if microscope service is available
-      if (!microscopeControlService || isSimulatedMicroscope) {
+      if (!microscopeControlService || isSimulatedMicroscopeSelected) {
         console.log('[Visible Experiments] Skipping - no microscope service or simulated mode');
         return;
       }
@@ -4395,7 +4396,7 @@ const MicroscopeMapDisplay = forwardRef(({
         console.log(`[Experiment Change] No real experiment change detected - UI update only`);
       }
     }
-  }, [visibleExperiments, activeExperiment, mapViewMode, getScanDataLayer, visibleLayers.scanResults, microscopeControlService, isSimulatedMicroscope, scaleLevel, stitchedTiles, getChannelString, isPanning, isZooming, appendLog, setNeedsTileReload]); // Updated to use layer-based logic
+  }, [visibleExperiments, activeExperiment, mapViewMode, getScanDataLayer, visibleLayers.scanResults, microscopeControlService, isSimulatedMicroscopeSelected, scaleLevel, stitchedTiles, getChannelString, isPanning, isZooming, appendLog, setNeedsTileReload]); // Updated to use layer-based logic
 
   // Debounce tile loading - only load after user stops interacting for 1 second
   const scheduleTileUpdate = useCallback((source = 'unknown') => {
@@ -4432,7 +4433,7 @@ const MicroscopeMapDisplay = forwardRef(({
 
   // Function to refresh canvas view (can be used by timepoint operations)
   const refreshCanvasView = useCallback(() => {
-    if (!isSimulatedMicroscope) {
+    if (!isSimulatedMicroscopeSelected) {
       // 🚀 REQUEST CANCELLATION: Cancel any pending requests before refreshing
       if (currentCancellableRequest) {
         const cancelledCount = currentCancellableRequest.cancel();
@@ -4457,7 +4458,7 @@ const MicroscopeMapDisplay = forwardRef(({
         appendLog('Refreshing canvas view');
       }
     }
-  }, [loadStitchedTiles, appendLog, isSimulatedMicroscope, currentCancellableRequest]);
+  }, [loadStitchedTiles, appendLog, isSimulatedMicroscopeSelected, currentCancellableRequest]);
 
   // Consolidated tile loading effect - replaces multiple overlapping effects
   const lastTileRequestRef = useRef({ panX: 0, panY: 0, scale: 0, scaleLevel: 0, timestamp: 0 });
@@ -4723,7 +4724,7 @@ const MicroscopeMapDisplay = forwardRef(({
                   <i className="fas fa-search-plus"></i>
                 </button>
                 <button
-                  onClick={(isInteractionDisabled && !(isSimulatedMicroscope && isHistoricalDataMode)) ? undefined : () => {
+                  onClick={(isInteractionDisabled && !(isSimulatedMicroscopeSelected && isHistoricalDataMode)) ? undefined : () => {
                     // Track zoom operation
                     setIsZooming(true);
                     if (zoomTimeoutRef.current) {
@@ -4737,7 +4738,7 @@ const MicroscopeMapDisplay = forwardRef(({
                   }}
                   className="px-2 py-1 text-xs bg-green-600 hover:bg-green-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Fit to View"
-                  disabled={isInteractionDisabled && !(isSimulatedMicroscope && isHistoricalDataMode)}
+                  disabled={isInteractionDisabled && !(isSimulatedMicroscopeSelected && isHistoricalDataMode)}
                 >
                   <i className="fas fa-crosshairs mr-1"></i>
                   Fit to View
@@ -4765,7 +4766,7 @@ const MicroscopeMapDisplay = forwardRef(({
                       setVisibleLayers={setVisibleLayers}
                       
                       // Experiments props
-                      isSimulatedMicroscope={isSimulatedMicroscope}
+                      isSimulatedMicroscopeSelected={isSimulatedMicroscopeSelected}
                       isLoadingExperiments={isLoadingExperiments}
                       activeExperiment={activeExperiment}
                       experiments={experiments}
@@ -5267,7 +5268,7 @@ const MicroscopeMapDisplay = forwardRef(({
         })()}
         
         {/* Current video frame position indicator */}
-        {videoFramePosition && (!isHistoricalDataMode || (isSimulatedMicroscope && isHistoricalDataMode)) && !isHardwareLocked && (
+        {videoFramePosition && (!isHistoricalDataMode || (isSimulatedMicroscopeSelected && isHistoricalDataMode)) && !isHardwareLocked && (
           <>
             {/* Control buttons above FOV box for FREE_PAN mode */}
             {mapViewMode === 'FREE_PAN' && microscopeControlService && (
@@ -5334,7 +5335,7 @@ const MicroscopeMapDisplay = forwardRef(({
                 top: `${videoFramePosition.y - videoFramePosition.height / 2}px`,
                 width: `${videoFramePosition.width}px`,
                 height: `${videoFramePosition.height}px`,
-                zIndex: isSimulatedMicroscope ? 100 : 10 // Much higher z-index for simulated microscope
+                zIndex: isSimulatedMicroscopeSelected ? 100 : 10 // Much higher z-index for simulated microscope
               }}
             >
               {/* Show video content based on mode */}

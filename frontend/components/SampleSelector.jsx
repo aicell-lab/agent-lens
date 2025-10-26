@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
-import { isRealMicroscope, isSimulatedMicroscope, getMicroscopeNumber } from '../utils';
+import { isRealMicroscope, isSimulatedMicroscope, getMicroscopeNumber, getOrchestratorMicroscopeId } from '../utils';
 
 // NOTE: Ensure corresponding CSS for .sample-selector-dropdown and .hidden is added.
 // .sample-selector-dropdown { position: absolute; top: 50px; /* Adjust as needed */ left: 20px; z-index: 1000; background: white; border: 1px solid #ccc; box-shadow: 0 2px 10px rgba(0,0,0,0.1); padding: 15px; border-radius: 5px; width: 300px; /* Or max-content */ }
@@ -67,13 +67,6 @@ const SampleSelector = ({
     setWorkflowMessages([]);
   };
 
-  // Helper function to convert full service ID to orchestrator microscope ID format
-  const getMicroscopeIdForOrchestrator = (fullServiceId) => {
-    if (fullServiceId.includes('squid-1')) return 'microscope-squid-1';
-    if (fullServiceId.includes('squid-2')) return 'microscope-squid-2';
-    if (fullServiceId.includes('squid-plus-3')) return 'microscope-squid-plus-3';
-    return fullServiceId; // Fallback for other formats
-  };
 
   // Check transport queue status
   const checkTransportQueueStatus = async () => {
@@ -258,7 +251,7 @@ const SampleSelector = ({
         const incubatorSlot = parseInt(slotMatch[1], 10);
 
         // Convert full service ID to the format expected by orchestrator
-        const microscopeIdForOrchestrator = getMicroscopeIdForOrchestrator(selectedMicroscopeId);
+        const microscopeIdForOrchestrator = getOrchestratorMicroscopeId(selectedMicroscopeId);
         
         addWorkflowMessage(`Queuing load operation for incubator slot ${incubatorSlot} to microscope ${microscopeIdForOrchestrator}`);
         
@@ -349,7 +342,7 @@ const SampleSelector = ({
         const incubatorSlot = parseInt(slotMatch[1], 10);
 
         // Convert full service ID to the format expected by orchestrator
-        const microscopeIdForOrchestrator = getMicroscopeIdForOrchestrator(selectedMicroscopeId);
+        const microscopeIdForOrchestrator = getOrchestratorMicroscopeId(selectedMicroscopeId);
         
         addWorkflowMessage(`Queuing unload operation for incubator slot ${incubatorSlot} from microscope ${microscopeIdForOrchestrator}`);
         
