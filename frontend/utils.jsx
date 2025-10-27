@@ -332,18 +332,6 @@ export const initializeServices = async (
   console.log(`[initializeServices] Starting with HyphaManager. Selected Microscope ID: ${selectedMicroscopeId}`);
   appendLog('Initializing services using HyphaManager...');
 
-  const segmentationServiceRemoteId = "agent-lens/interactive-segmentation";
-  const segmentationServiceLocalId = "interactive-segmentation";
-  const segmentationService = await tryGetService(
-    hyphaManager,
-    "Segmentation",
-    segmentationServiceRemoteId,
-    segmentationServiceLocalId,
-    appendLog,
-    showNotification
-  );
-  setSegmentService(segmentationService);
-
   // For microscope, selectedMicroscopeId is already the full remote ID
   const microscopeLocalId = selectedMicroscopeId.startsWith("squid-control/") ? null : selectedMicroscopeId; 
   // This local ID logic might need refinement based on how local simulated vs real microscopes are identified.
