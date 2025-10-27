@@ -188,42 +188,23 @@ The application requires several backend services:
 ```
 agent-lens/
 ├── 📁 agent_lens/              # Python backend package
-│   ├── 📁 utils/               # Utility modules
-│   │   ├── 📄 artifact_manager.py  # Data storage and Zarr tile management
-│   │   ├── 📄 register_sam_service.py  # SAM segmentation service registration
-│   │   └── 📄 weaviate_search.py     # Similarity search utilities
+│   ├── 📁 utils/               # Utility modules (artifact manager, similarity search)
 │   ├── 📄 register_frontend_service.py  # Frontend ASGI service registration
-│   ├── 📄 register_similarity_search_service.py  # Similarity search service
-│   ├── 📄 log.py               # Logging configuration
 │   └── 📄 __main__.py          # CLI entry point
 ├── 📁 frontend/                # React application
-│   ├── 📁 components/          # Reusable UI components
+│   ├── 📁 components/          # UI components
 │   │   ├── 📁 annotation/      # Image annotation system
-│   │   ├── 📁 microscope/      # Microscope-specific components
-│   │   │   ├── 📁 controls/    # Microscope control interfaces
-│   │   │   └── 📁 map/         # Microscope map and data visualization
-│   │   └── 📄 *.jsx            # Main UI components
-│   ├── 📁 utils/               # Frontend utility modules
-│   │   ├── 📄 artifactZarrLoader.js  # OME-Zarr data loading
-│   │   ├── 📄 annotationEmbeddingService.js  # Annotation embeddings
-│   │   └── 📄 previewImageUtils.js  # Image preview utilities
+│   │   ├── 📁 microscope/      # Microscope control and visualization
+│   │   └── 📄 *.jsx            # Control panels, modals, settings
+│   ├── 📁 utils/               # Frontend utilities (Zarr loader, embeddings)
 │   ├── 📄 main.jsx             # Root React component
-│   ├── 📄 utils.jsx            # Utility functions and validation
-│   └── 📄 main.css             # Global styles
+│   └── 📄 package.json         # Frontend dependencies
 ├── 📁 tests/                   # Test suite (project root level)
 │   ├── 📁 test-frontend-components/  # Frontend component tests
-│   ├── 📄 conftest.py          # Test configuration and fixtures
-│   ├── 📄 test_*.py            # Python test files
-│   └── 📄 test_*.js            # JavaScript test files
-├── 📁 docker/                  # Containerization
-│   ├── 📄 docker-compose-*.yml # Multi-service configurations
-│   ├── 📄 dockerfile           # Main application container
-│   └── 📄 healthcheck.sh       # Health monitoring
+│   └── 📄 test_*.py/js         # Python and JavaScript tests
+├── 📁 docker/                  # Containerization configs
 ├── 📁 scripts/                 # Development and deployment scripts
-│   ├── 📄 run_tests.py         # Comprehensive test runner
-│   ├── 📄 run_frontend_tests.py # Frontend service test runner
-│   └── 📄 setup_dev.sh         # Development setup
-└── 📄 pyproject.toml           # Python project configuration and dependencies
+└── 📄 pyproject.toml           # Python project configuration
 ```
 
 ## Core Components
