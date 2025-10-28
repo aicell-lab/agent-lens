@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import PropTypes from 'prop-types';
 import './LayerPanel.css';
 import DualRangeSlider from '../../DualRangeSlider';
+import { getChannelColor } from '../../../utils';
 
 const LayerPanel = ({
   // Map Layers props
@@ -823,15 +824,7 @@ const LayerPanel = ({
                           {Object.entries(visibleLayers.channels).map(([channel, isVisible]) => {
                             const isLastChannel = isLastSelectedChannel(channel, isVisible);
                             
-                            const defaultColors = {
-                              'BF LED matrix full': '#FFFFFF',
-                              'Fluorescence 405 nm Ex': '#8A2BE2',
-                              'Fluorescence 488 nm Ex': '#00FF00',
-                              'Fluorescence 561 nm Ex': '#FFFF00',
-                              'Fluorescence 638 nm Ex': '#FF0000',
-                              'Fluorescence 730 nm Ex': '#FF69B4',
-                            };
-                            const channelColor = defaultColors[channel] || '#FFFFFF';
+                            const channelColor = getChannelColor(channel);
                             
                             return (
                               <div key={channel} className="channel-item">

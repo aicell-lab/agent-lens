@@ -1,6 +1,54 @@
 import { useState, useEffect, useCallback } from 'react';
 
 // ============================================================================
+// Centralized Channel Color Configuration
+// ============================================================================
+// This configuration object centralizes all microscopy channel color mappings,
+// eliminating hardcoded color values scattered across multiple components.
+export const CHANNEL_COLORS = {
+  'BF LED matrix full': '#FFFFFF',        // White for brightfield (channel_id 0)
+  'Fluorescence 405 nm Ex': '#8000FF',   // Blue-violet (channel_id 11)
+  'Fluorescence 488 nm Ex': '#00FF00',    // Green (channel_id 12)
+  'Fluorescence 561 nm Ex': '#FFFF00',    // Yellow (channel_id 14)
+  'Fluorescence 638 nm Ex': '#FF0000',   // Red (channel_id 13)
+  'Fluorescence 730 nm Ex': '#FF00FF',   // Magenta (channel_id 15)
+};
+
+/**
+ * Get the default color for a microscopy channel.
+ * @param {string} channelName - The name of the channel
+ * @returns {string} Hex color code or white as fallback
+ */
+export const getChannelColor = (channelName) => {
+  return CHANNEL_COLORS[channelName] || '#FFFFFF';
+};
+
+/**
+ * Get all available channel colors as an object.
+ * @returns {Object} Object mapping channel names to hex colors
+ */
+export const getAllChannelColors = () => {
+  return { ...CHANNEL_COLORS };
+};
+
+/**
+ * Convert RGB array to hex color string.
+ * @param {Array|string} rgb - RGB array [r,g,b] or existing hex string
+ * @returns {string} Hex color string
+ */
+export const rgbToHex = (rgb) => {
+  if (!rgb) return '#FFFFFF';
+  if (typeof rgb === 'string' && rgb.startsWith('#')) return rgb;
+  
+  try {
+    return `#${rgb[0].toString(16).padStart(2, '0')}${rgb[1].toString(16).padStart(2, '0')}${rgb[2].toString(16).padStart(2, '0')}`;
+  } catch (e) {
+    console.warn('Error converting RGB to hex:', e);
+    return '#FFFFFF';
+  }
+};
+
+// ============================================================================
 // Centralized Microscope Configuration
 // ============================================================================
 // This configuration object centralizes all microscope service information,

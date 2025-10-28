@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
+import { rgbToHex } from './utils';
 // Import with a fallback for the color picker
 let SketchPicker;
 try {
@@ -77,19 +78,6 @@ const ChannelSettings = ({
       setActiveTab(selectedChannels[0].toString());
     }
   }, [selectedChannels, initialSettingsKey]); // Add initialSettingsKey to dependency array
-
-  // Convert RGB array to hex color
-  const rgbToHex = (rgb) => {
-    if (!rgb) return '#FFFFFF';
-    if (typeof rgb === 'string' && rgb.startsWith('#')) return rgb;
-    
-    try {
-      return `#${rgb[0].toString(16).padStart(2, '0')}${rgb[1].toString(16).padStart(2, '0')}${rgb[2].toString(16).padStart(2, '0')}`;
-    } catch (e) {
-      console.warn('Error converting RGB to hex:', e);
-      return '#FFFFFF';
-    }
-  };
 
   // Convert hex color to RGB array
   const hexToRgb = (hex) => {
