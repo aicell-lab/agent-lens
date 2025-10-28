@@ -412,7 +412,7 @@
   justify-content: center;
 }
 
-.scan-btn, .live-btn, .snap-btn, .load-btn, .control-btn {
+.scan-btn, .live-btn, .snap-btn, .load-btn, .control-btn, .upload-btn {
   background: #374151;
   color: white;
   border: 1px solid #4b5563;
@@ -441,6 +441,11 @@
 .load-btn:hover {
   background: #10b981;
   border-color: #059669;
+}
+
+.upload-btn:hover {
+  background: #8b5cf6;
+  border-color: #7c3aed;
 }
 
 .control-btn:hover {

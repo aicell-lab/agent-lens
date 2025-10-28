@@ -3034,6 +3034,57 @@ const MicroscopeMapDisplay = forwardRef(({
     };
   }, [setActiveLayer, showNotification]);
 
+  // Handle upload zarr dataset events from LayerPanel
+  useEffect(() => {
+    const handleUploadZarrDataset = async (event) => {
+      const { experimentName } = event.detail;
+      
+      if (!microscopeControlService) {
+        showNotification('Microscope service not available', 'error');
+        return;
+      }
+
+      try {
+        showNotification(`Starting upload of experiment: ${experimentName}`, 'info');
+        if (appendLog) {
+          appendLog(`Starting upload of experiment: ${experimentName}`);
+        }
+
+        // Call the microscope service upload_zarr_dataset method
+        const result = await microscopeControlService.upload_zarr_dataset(
+          experimentName,
+          `Experiment ${experimentName} uploaded from Agent-Lens`,
+          true // include_acquisition_settings
+        );
+
+        if (result.success) {
+          showNotification(
+            `Successfully uploaded ${result.total_wells} wells (${result.total_size_mb.toFixed(2)} MB) to dataset: ${result.dataset_name}`,
+            'success'
+          );
+          if (appendLog) {
+            appendLog(`Upload successful: ${result.dataset_name} with ${result.total_wells} wells`);
+          }
+        } else {
+          throw new Error(result.message || 'Upload failed');
+        }
+      } catch (error) {
+        console.error('Upload zarr dataset error:', error);
+        showNotification(`Upload failed: ${error.message}`, 'error');
+        if (appendLog) {
+          appendLog(`Upload failed: ${error.message}`);
+        }
+      }
+    };
+
+    // Add event listener
+    window.addEventListener('uploadZarrDataset', handleUploadZarrDataset);
+
+    return () => {
+      window.removeEventListener('uploadZarrDataset', handleUploadZarrDataset);
+    };
+  }, [microscopeControlService, showNotification, appendLog]);
+
   // Auto-disable other layers when annotation panel is opened for better annotation accuracy
   useEffect(() => {
     if (isAnnotationDropdownOpen && activeLayer) {

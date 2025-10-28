@@ -756,6 +756,23 @@ const LayerPanel = ({
                               Normal Scan
                             </button>
                           )}
+                          {/* Upload Zarr Dataset button */}
+                          <button 
+                            className="upload-btn"
+                            onClick={() => {
+                              if (isSimulatedMicroscope || !microscopeControlService) return;
+                              // Trigger upload zarr dataset event
+                              const event = new CustomEvent('uploadZarrDataset', {
+                                detail: { experimentName: exp.name }
+                              });
+                              window.dispatchEvent(event);
+                            }}
+                            disabled={isSimulatedMicroscope || !microscopeControlService}
+                            title="Upload experiment data to artifact manager"
+                          >
+                            <i className="fas fa-cloud-upload-alt mr-1"></i>
+                            Upload Dataset
+                          </button>
                         </div>
                       </div>
                       
