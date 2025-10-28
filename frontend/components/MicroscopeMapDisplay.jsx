@@ -3575,13 +3575,36 @@ const MicroscopeMapDisplay = forwardRef(({
   const loadStitchedTiles = useCallback(async () => {
     console.log('[loadStitchedTiles] Called - checking conditions');
     
-    // 🚀 REQUEST CANCELLATION: Only cancel if we're starting a significantly different request
-    // Calculate bounds first to generate consistent request key
+    // 🚫 CRITICAL FIX: ALWAYS cancel ALL requests FIRST before doing anything else
+    // This is the simplest and most reliable way to prevent parallel loading
+    console.log('🚫 [loadStitchedTiles] Step 1: Cancelling ALL existing requests before starting new load');
+    
+    // Cancel cancellable request if it exists
+    if (currentCancellableRequest) {
+      const cancelledCount = currentCancellableRequest.cancel();
+      console.log(`🚫 [loadStitchedTiles] Cancelled ${cancelledCount} cancellable requests`);
+      setCurrentCancellableRequest(null);
+    }
+    
+    // ALWAYS cancel ALL artifact loader requests, regardless of currentCancellableRequest
+    if (artifactZarrLoaderRef.current) {
+      const artifactCancelledCount = artifactZarrLoaderRef.current.cancelAllRequests();
+      console.log(`🚫 [loadStitchedTiles] Cancelled ${artifactCancelledCount} artifact loader requests`);
+    }
+    
+    // Clear all request tracking
+    activeTileRequestsRef.current.clear();
+    browseDataRequestsRef.current.clear();
+    scanDataRequestsRef.current.clear();
+    console.log('✅ [loadStitchedTiles] All requests cancelled and tracking cleared');
+    
+    // Now proceed with checks
     if (!canvasRef.current) {
       console.log('[loadStitchedTiles] Canvas not ready, skipping');
       return;
     }
     
+    // Calculate request key for tracking (but don't use it for cancellation decisions)
     const earlyScaleLevel = Math.max(0, Math.min(4, Math.round(Math.log2(mapScale / 0.25))));
     const earlyActiveChannel = getSelectedChannels()[0] || 'BF LED matrix full';
     const currentViewBounds = {
@@ -3589,37 +3612,8 @@ const MicroscopeMapDisplay = forwardRef(({
       bottomRight: { x: mapPan.x + canvasRef.current.width / (2 * mapScale), y: mapPan.y + canvasRef.current.height / (2 * mapScale) }
     };
     const currentRequestKey = getTileKey(currentViewBounds, earlyScaleLevel, earlyActiveChannel, selectedHistoricalDataset?.name || 'historical');
-    const shouldCancelPrevious = lastRequestKey && lastRequestKey !== currentRequestKey;
     
-    if (shouldCancelPrevious && currentCancellableRequest) {
-      const cancelledCount = currentCancellableRequest.cancel();
-      console.log(`🚫 loadStitchedTiles: Cancelled ${cancelledCount} pending requests (new area)`);
-      setCurrentCancellableRequest(null);
-      
-      // 🚀 CRITICAL FIX: Also cancel ALL active requests in the artifact loader when moving to new area
-      if (artifactZarrLoaderRef.current) {
-        const artifactCancelledCount = artifactZarrLoaderRef.current.cancelAllRequests();
-        console.log(`🚫 loadStitchedTiles: Cancelled ${artifactCancelledCount} active artifact requests (new area)`);
-      }
-    } else if (!shouldCancelPrevious && currentCancellableRequest) {
-      console.log(`🔄 loadStitchedTiles: Request for same area already in progress, checking if it should be cancelled anyway`);
-      // Cancel anyway if the request is very old (over 30 seconds)
-      if (currentCancellableRequest.startTime && (Date.now() - currentCancellableRequest.startTime > 30000)) {
-        console.log(`🚫 loadStitchedTiles: Cancelling old request (over 30s old)`);
-        const cancelledCount = currentCancellableRequest.cancel();
-        console.log(`🚫 loadStitchedTiles: Cancelled ${cancelledCount} old requests`);
-        setCurrentCancellableRequest(null);
-        
-        if (artifactZarrLoaderRef.current) {
-          const artifactCancelledCount = artifactZarrLoaderRef.current.cancelAllRequests();
-          console.log(`🚫 loadStitchedTiles: Cancelled ${artifactCancelledCount} old artifact requests`);
-        }
-      } else {
-        return; // Don't start duplicate requests for the same area
-      }
-    }
-    
-    // Update request tracking at the start to prevent duplicate requests
+    // Update request tracking for logging purposes
     setLastRequestKey(currentRequestKey);
     
     // Clear active requests to prevent conflicts - only clear legacy for compatibility

@@ -33,9 +33,11 @@ class ArtifactZarrLoader {
     this.cleanupInterval = 30000; // Clean up every 30 seconds
     
     // 🚀 BATCH REQUEST MANAGEMENT: Control concurrent requests
-    this.maxConcurrentRequests = 10; // Limit concurrent chunk requests
+    this.maxConcurrentRequests = 5; // Limit concurrent chunk requests
     this.requestQueue = []; // Queue for pending requests
     this.activeRequestCount = 0; // Track active request count
+    this.batchRequests = new Map(); // Map batchId to Set of requestIds
+    this.cancelledBatches = new Set(); // Track cancelled batches to prevent callback execution
   }
 
   /**
@@ -68,6 +70,14 @@ class ArtifactZarrLoader {
    */
   cancelAllRequests() {
     let cancelledCount = 0;
+    
+    // Mark all batches as cancelled to prevent callbacks from firing
+    for (const [batchId, ] of this.batchRequests) {
+      this.cancelledBatches.add(batchId);
+      console.log(`🚫 Marking batch ${batchId} as cancelled`);
+    }
+    
+    // Abort all active requests
     for (const [, controller] of this.requestControllers) {
       controller.abort();
       cancelledCount++;
@@ -83,9 +93,19 @@ class ArtifactZarrLoader {
     this.requestControllers.clear();
     this.requestIds.clear();
     this.requestPromises.clear(); // Also clear promises to prevent duplicate requests
+    this.batchRequests.clear(); // Clear batch tracking
     
     console.log(`🚫 Cancelled all ${cancelledCount} active requests and ${queuedCount} queued requests`);
     return cancelledCount + queuedCount;
+  }
+
+  /**
+   * Check if a batch has been cancelled
+   * @param {string} batchId - Batch ID to check
+   * @returns {boolean} True if batch is cancelled
+   */
+  isBatchCancelled(batchId) {
+    return this.cancelledBatches.has(batchId);
   }
 
   /**
@@ -711,6 +731,11 @@ class ArtifactZarrLoader {
   async getMultipleWellRegionsRealTime(wellRequests, onChunkProgress, onWellComplete, batchId = null) {
     const requestBatchId = batchId || `well_batch_${Date.now()}_${Math.random()}`;
     
+    // Register this batch
+    this.batchRequests.set(requestBatchId, new Set());
+    // Clear from cancelled set in case it was previously cancelled
+    this.cancelledBatches.delete(requestBatchId);
+    
     // 🚀 PERFORMANCE OPTIMIZATION: Run memory cleanup before starting new batch
     this.cleanupMemory();
     
@@ -727,6 +752,12 @@ class ArtifactZarrLoader {
             centerX, centerY, width_mm, height_mm,
             channel, scaleLevel, timepoint, datasetId, wellId,
             (loadedChunks, totalChunks, partialCanvas) => {
+              // 🚫 CHECK CANCELLATION: Don't call callbacks if this batch has been cancelled
+              if (this.isBatchCancelled(requestBatchId)) {
+                console.log(`🚫 Skipping callback for cancelled batch ${requestBatchId} (well ${wellId})`);
+                return;
+              }
+              
               // Call progress callback for real-time updates
               if (onChunkProgress) {
                 onChunkProgress(wellId, loadedChunks, totalChunks, partialCanvas);
@@ -772,8 +803,11 @@ class ArtifactZarrLoader {
           };
           
           // Call completion callback
-          if (onWellComplete) {
+          // 🚫 CHECK CANCELLATION: Don't call completion callback if batch was cancelled
+          if (onWellComplete && !this.isBatchCancelled(requestBatchId)) {
             onWellComplete(wellId, finalResult);
+          } else if (this.isBatchCancelled(requestBatchId)) {
+            console.log(`🚫 Skipping completion callback for cancelled batch ${requestBatchId} (well ${wellId})`);
           }
           
           return finalResult;
@@ -866,10 +900,15 @@ class ArtifactZarrLoader {
   async getMultipleWellRegionsMultiChannelRealTime(wellRequests, channelConfigs, onChunkProgress, onWellComplete, batchId = null) {
     const requestBatchId = batchId || `multi_channel_batch_${Date.now()}_${Math.random()}`;
     
+    // Register this batch
+    this.batchRequests.set(requestBatchId, new Set());
+    // Clear from cancelled set in case it was previously cancelled
+    this.cancelledBatches.delete(requestBatchId);
+    
     this.cleanupMemory();
     
     try {
-      console.log(`🎨 MULTI-CHANNEL REAL-TIME: Starting progressive loading for ${wellRequests.length} wells with ${channelConfigs.length} channels`);
+      console.log(`🎨 MULTI-CHANNEL REAL-TIME: Starting progressive loading for ${wellRequests.length} wells with ${channelConfigs.length} channels (batch: ${requestBatchId})`);
       
       // Process each well with multi-channel support
       const wellPromises = wellRequests.map(async (request) => {
@@ -880,6 +919,12 @@ class ArtifactZarrLoader {
             wellId, centerX, centerY, width_mm, height_mm,
             channelConfigs, scaleLevel, timepoint, datasetId,
             (loadedChunks, totalChunks, partialCanvas) => {
+              // 🚫 CHECK CANCELLATION: Don't call callbacks if this batch has been cancelled
+              if (this.isBatchCancelled(requestBatchId)) {
+                console.log(`🚫 Skipping callback for cancelled batch ${requestBatchId} (well ${wellId})`);
+                return;
+              }
+              
               // 🚀 REAL-TIME MERGED UPDATES: Forward merged progress updates for this specific well
               if (onChunkProgress) {
                 onChunkProgress(wellId, loadedChunks, totalChunks, partialCanvas);
@@ -906,8 +951,11 @@ class ArtifactZarrLoader {
           };
           
           // Call completion callback - no need for progress simulation since we have real progress
-          if (onWellComplete) {
+          // 🚫 CHECK CANCELLATION: Don't call completion callback if batch was cancelled
+          if (onWellComplete && !this.isBatchCancelled(requestBatchId)) {
             onWellComplete(wellId, finalResult);
+          } else if (this.isBatchCancelled(requestBatchId)) {
+            console.log(`🚫 Skipping completion callback for cancelled batch ${requestBatchId} (well ${wellId})`);
           }
           
           return finalResult;
@@ -2266,6 +2314,9 @@ class ArtifactZarrLoader {
     // 🚀 DATASET CACHE: Also clear dataset-level caches
     this.datasetZattrsCache.clear();
     this.currentDatasetId = null;
+    // 🚫 BATCH TRACKING: Clear cancelled batches tracking
+    this.cancelledBatches.clear();
+    this.batchRequests.clear();
   }
   
   /**
