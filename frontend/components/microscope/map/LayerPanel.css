@@ -412,7 +412,7 @@
   justify-content: center;
 }
 
-.scan-btn, .live-btn, .snap-btn, .load-btn, .control-btn, .upload-btn {
+.scan-btn, .live-btn, .snap-btn, .load-btn, .control-btn, .upload-btn, .segment-btn {
   background: #374151;
   color: white;
   border: 1px solid #4b5563;
@@ -444,6 +444,11 @@
 }
 
 .upload-btn:hover {
+  background: #8b5cf6;
+  border-color: #7c3aed;
+}
+
+.segment-btn:hover {
   background: #8b5cf6;
   border-color: #7c3aed;
 }

@@ -774,6 +774,23 @@ const LayerPanel = ({
                             <i className="fas fa-cloud-upload-alt mr-1"></i>
                             Upload Dataset
                           </button>
+                          {/* Segment Experiment button */}
+                          <button 
+                            className="segment-btn"
+                            onClick={() => {
+                              if (isSimulatedMicroscope || !microscopeControlService) return;
+                              // Trigger segment experiment event
+                              const event = new CustomEvent('segmentExperiment', {
+                                detail: { experimentName: exp.name }
+                              });
+                              window.dispatchEvent(event);
+                            }}
+                            disabled={isSimulatedMicroscope || !microscopeControlService}
+                            title="Run automated cell segmentation on this experiment"
+                          >
+                            <i className="fas fa-cut mr-1"></i>
+                            Segment Experiment
+                          </button>
                         </div>
                       </div>
                       
