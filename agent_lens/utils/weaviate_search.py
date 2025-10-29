@@ -247,8 +247,21 @@ class WeaviateSimilarityService:
         return actual_results
     
     async def fetch_all_annotations(self, collection_name: str, application_id: str,
-                                   limit: int = 1000, include_vector: bool = False) -> List[Dict[str, Any]]:
-        """Fetch all annotations from a collection without vector search."""
+                                   limit: int = 1000, include_vector: bool = False,
+                                   use_prefix_match: bool = False) -> List[Dict[str, Any]]:
+        """
+        Fetch all annotations from a collection without vector search.
+        
+        Args:
+            collection_name: Name of the collection
+            application_id: Application ID to match (exact match by default, or prefix if use_prefix_match=True)
+            limit: Maximum number of annotations to return
+            include_vector: Whether to include vectors in results
+            use_prefix_match: If True, match all annotations where application_id starts with the given prefix
+            
+        Returns:
+            List of annotations matching the criteria
+        """
         if not await self.ensure_connected():
             raise RuntimeError("Not connected to Weaviate service")
         
@@ -262,29 +275,110 @@ class WeaviateSimilarityService:
             "preview_image"
         ]
         
-        # Use fetch_objects to get all annotations for this application
-        results = await self.weaviate_service.query.fetch_objects(
-            collection_name=collection_name,
-            application_id=application_id,
-            limit=limit,
-            return_properties=return_properties
-        )
-        
-        # Handle different result formats
-        if hasattr(results, 'objects') and results.objects:
-            actual_results = results.objects
-        elif isinstance(results, dict) and 'objects' in results:
-            actual_results = results['objects']
-        elif isinstance(results, (list, tuple)):
-            actual_results = results
-        else:
+        # Handle prefix matching vs exact matching
+        if use_prefix_match:
+            # For prefix matching, we need to discover all applications matching the prefix,
+            # then fetch from each. Since Weaviate organizes by application_id, we can't
+            # easily fetch all without knowing the applications first.
+            # Strategy: Use the prefix as application_id (in case there's an exact match),
+            # then filter client-side. For multi-application scenarios, users should
+            # first call list_annotation_applications to discover apps, then load from each.
+            actual_results = []
             try:
-                actual_results = list(results) if hasattr(results, '__iter__') else [results]
+                # Fetch with prefix as exact application_id (may return matches)
+                # We'll filter client-side to get all matching annotations
+                results = await self.weaviate_service.query.fetch_objects(
+                    collection_name=collection_name,
+                    application_id=application_id,  # Use prefix as application_id
+                    limit=limit * 10,  # Fetch more to account for filtering
+                    return_properties=return_properties
+                )
+                # Process results
+                if hasattr(results, 'objects') and results.objects:
+                    actual_results = results.objects
+                elif isinstance(results, dict) and 'objects' in results:
+                    actual_results = results['objects']
+                elif isinstance(results, (list, tuple)):
+                    actual_results = results
             except Exception as e:
-                logger.error(f"Failed to process results: {e}")
+                logger.warning(f"Failed to fetch with prefix matching: {e}")
                 actual_results = []
+        else:
+            # Use exact match as before
+            results = await self.weaviate_service.query.fetch_objects(
+                collection_name=collection_name,
+                application_id=application_id,
+                limit=limit,
+                return_properties=return_properties
+            )
+            
+            # Handle different result formats
+            if hasattr(results, 'objects') and results.objects:
+                actual_results = results.objects
+            elif isinstance(results, dict) and 'objects' in results:
+                actual_results = results['objects']
+            elif isinstance(results, (list, tuple)):
+                actual_results = results
+            else:
+                try:
+                    actual_results = list(results) if hasattr(results, '__iter__') else [results]
+                except Exception as e:
+                    logger.error(f"Failed to process results: {e}")
+                    actual_results = []
         
-        logger.info(f"Fetched {len(actual_results)} annotations from collection: {collection_name}")
+        # If prefix matching is enabled, filter results by application_id prefix
+        if use_prefix_match:
+            filtered_results = []
+            for annotation in actual_results:
+                # Extract application_id from annotation - check multiple possible locations
+                ann_app_id = None
+                
+                # Get the annotation data (handle different structures)
+                ann_data = annotation
+                if hasattr(annotation, 'properties'):
+                    ann_data = annotation.properties
+                elif hasattr(annotation, '__dict__'):
+                    ann_data = annotation.__dict__
+                
+                # Try to find dataset_id or application_id in various locations
+                if isinstance(ann_data, dict):
+                    # Direct properties in dict
+                    ann_app_id = ann_data.get('dataset_id') or ann_data.get('application_id')
+                    
+                    # Check nested properties structure
+                    if not ann_app_id and 'properties' in ann_data:
+                        props = ann_data['properties']
+                        ann_app_id = props.get('dataset_id') or props.get('application_id')
+                    
+                    # Check metadata field (JSON string)
+                    if not ann_app_id and 'metadata' in ann_data:
+                        try:
+                            import json
+                            metadata_str = ann_data.get('metadata', '{}')
+                            if isinstance(metadata_str, str):
+                                metadata = json.loads(metadata_str)
+                            else:
+                                metadata = metadata_str
+                            ann_app_id = metadata.get('dataset_id') or metadata.get('application_id')
+                        except (json.JSONDecodeError, AttributeError, TypeError):
+                            pass
+                    
+                    # Extract from image_id pattern: "application_id_annotation_id"
+                    if not ann_app_id:
+                        image_id = ann_data.get('image_id') or ann_data.get('properties', {}).get('image_id', '')
+                        if image_id and '_' in str(image_id):
+                            # Extract the application_id part (before first underscore)
+                            ann_app_id = str(image_id).split('_')[0]
+                
+                # Match if application_id starts with the prefix
+                if ann_app_id and str(ann_app_id).startswith(application_id):
+                    filtered_results.append(annotation)
+            
+            actual_results = filtered_results[:limit]  # Apply limit after filtering
+            logger.info(f"Fetched {len(actual_results)} annotations matching prefix '{application_id}*' from collection: {collection_name}")
+        else:
+            logger.info(f"Fetched {len(actual_results)} annotations from collection: {collection_name}")
+        
         return actual_results
     
     async def search_by_text(self, collection_name: str, application_id: str,
@@ -335,6 +429,119 @@ class WeaviateSimilarityService:
         except Exception as e:
             logger.warning(f"Could not check if application {application_id} exists in collection {collection_name}: {e}")
             return False
+    
+    async def list_annotation_applications(self, collection_name: str, prefix: str = None, limit: int = 1000) -> List[Dict[str, Any]]:
+        """
+        List all annotation applications in a collection, optionally filtered by prefix.
+        
+        Args:
+            collection_name: Name of the collection
+            prefix: Optional prefix to filter application IDs (returns applications starting with this prefix)
+            limit: Maximum number of annotations to scan (used when fetching to extract application IDs)
+            
+        Returns:
+            List of dictionaries with application_id and annotation count
+        """
+        if not await self.ensure_connected():
+            raise RuntimeError("Not connected to Weaviate service")
+        
+        # To discover applications, we need to fetch annotations and extract unique application_ids
+        # Note: This approach has limitations - we can only discover applications from annotations
+        # that we can successfully fetch. For proper application discovery, the Weaviate service
+        # would need to provide a list_applications method.
+        results = []
+        
+        # Extract unique application IDs from annotations
+        application_counts = {}
+        
+        if prefix:
+            # If prefix is provided, try fetching with prefix as application_id (exact match)
+            # All annotations fetched with this application_id belong to this application
+            try:
+                results = await self.fetch_all_annotations(
+                    collection_name=collection_name,
+                    application_id=prefix,
+                    limit=limit,
+                    include_vector=False,
+                    use_prefix_match=False  # Use exact match to avoid recursion
+                )
+                
+                # If we successfully fetched annotations, they all belong to the application_id used for fetching
+                if results and len(results) > 0:
+                    application_counts[prefix] = len(results)
+                    logger.info(f"Found application '{prefix}' with {len(results)} annotations from direct fetch")
+            except Exception as e:
+                logger.warning(f"Failed to fetch annotations with prefix '{prefix}': {e}")
+                results = []
+        else:
+            # Without prefix, we can't discover all applications easily without knowing them first
+            # This is a limitation of the current approach - we'd need Weaviate to provide
+            # a list_applications method or similar functionality
+            logger.warning("Cannot discover all applications without a prefix. Please provide a prefix to search within.")
+            results = []
+        
+        # Also extract application IDs from annotation properties/metadata (in case some annotations
+        # have different application_ids in their metadata)
+        for annotation in results:
+            ann_app_id = None
+            
+            # Get annotation data
+            ann_data = annotation
+            if hasattr(annotation, 'properties'):
+                ann_data = annotation.properties
+            elif hasattr(annotation, '__dict__'):
+                ann_data = annotation.__dict__
+            
+            # Extract application_id from annotation properties
+            if isinstance(ann_data, dict):
+                ann_app_id = ann_data.get('dataset_id') or ann_data.get('application_id')
+                
+                if not ann_app_id and 'properties' in ann_data:
+                    props = ann_data['properties']
+                    if isinstance(props, dict):
+                        ann_app_id = props.get('dataset_id') or props.get('application_id')
+                
+                if not ann_app_id and 'metadata' in ann_data:
+                    try:
+                        import json
+                        metadata_str = ann_data.get('metadata', '{}')
+                        if isinstance(metadata_str, str):
+                            metadata = json.loads(metadata_str)
+                        else:
+                            metadata = metadata_str
+                        if isinstance(metadata, dict):
+                            ann_app_id = metadata.get('dataset_id') or metadata.get('application_id')
+                    except (json.JSONDecodeError, AttributeError, TypeError):
+                        pass
+                
+                # Extract from image_id pattern: "application_id_annotation_id"
+                if not ann_app_id:
+                    image_id = ann_data.get('image_id') or (ann_data.get('properties', {}) or {}).get('image_id', '')
+                    if image_id and '_' in str(image_id):
+                        # Extract the application_id part (everything before the last underscore group)
+                        # Since image_id is `${applicationId}_${annotation.id}`, split and take first part
+                        parts = str(image_id).split('_')
+                        if len(parts) > 1:
+                            # Take all but the last part as application_id (in case annotation.id contains underscores)
+                            ann_app_id = '_'.join(parts[:-1])
+            
+            # If we extracted an application_id from annotation properties and it's different from prefix
+            if ann_app_id and ann_app_id != prefix:
+                # Filter by prefix if provided
+                if prefix is None or str(ann_app_id).startswith(prefix):
+                    application_counts[ann_app_id] = application_counts.get(ann_app_id, 0) + 1
+        
+        # Convert to list of dictionaries
+        applications = [
+            {
+                "application_id": app_id,
+                "annotation_count": count
+            }
+            for app_id, count in sorted(application_counts.items())
+        ]
+        
+        logger.info(f"Found {len(applications)} annotation applications matching prefix '{prefix or '*'}' in collection: {collection_name}")
+        return applications
 
 # Global instance for the frontend service
 similarity_service = WeaviateSimilarityService()
