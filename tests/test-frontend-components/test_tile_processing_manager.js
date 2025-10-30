@@ -122,7 +122,11 @@ class TileProcessingManagerTest {
       // Convert JSX to JS by removing React import and changing export
       const jsContent = jsxContent
         .replace(/import React from 'react';/g, '// React import removed for Node.js testing')
-        .replace(/export default new TileProcessingManager\(\);/g, 'export default TileProcessingManager;');
+        .replace(/export default new TileProcessingManager\(\);/g, 'export default TileProcessingManager;')
+        // Fix relative imports that break when copying file next to tests
+        // Original file imports CHANNEL_COLORS from '../../../utils' relative to its own location.
+        // From the tests directory, the correct path is '../../frontend/utils.jsx'.
+        .replace(/from ['\"]\.\.\/\.\.\/\.\.\/utils['\"]/g, "from '../../frontend/utils.jsx'");
       
       // Write temporary JS file
       const tempJsPath = path.join(__dirname, 'TileProcessingManager.temp.js');
