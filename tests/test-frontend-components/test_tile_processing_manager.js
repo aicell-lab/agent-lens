@@ -71,7 +71,7 @@ class TileProcessingManagerTest {
   createMockServices() {
     return {
       microscopeControlService: {
-        get_stitched_region: async (centerX, centerY, width_mm, height_mm, wellPlateType, scaleLevel, channel, timepoint, wellPaddingMm, outputFormat) => {
+        get_stitched_region: async (channel) => {
           // Simulate successful response
           return {
             success: true,
@@ -85,7 +85,7 @@ class TileProcessingManagerTest {
         }
       },
       artifactZarrLoader: {
-        getWellRegion: async (wellId, centerX, centerY, width_mm, height_mm, channel, scaleLevel, timepoint, datasetId, outputFormat) => {
+        getWellRegion: async () => {
           // Simulate successful response with proper structure
           return {
             success: true,
@@ -123,10 +123,11 @@ class TileProcessingManagerTest {
       const jsContent = jsxContent
         .replace(/import React from 'react';/g, '// React import removed for Node.js testing')
         .replace(/export default new TileProcessingManager\(\);/g, 'export default TileProcessingManager;')
-        // Fix relative imports that break when copying file next to tests
-        // Original file imports CHANNEL_COLORS from '../../../utils' relative to its own location.
-        // From the tests directory, the correct path is '../../frontend/utils.jsx'.
-        .replace(/from ['\"]\.\.\/\.\.\/\.\.\/utils['\"]/g, "from '../../frontend/utils.jsx'");
+        // Replace CHANNEL_COLORS import with inline constant to avoid importing .jsx in Node
+        .replace(
+          /import\s*\{\s*CHANNEL_COLORS\s*\}\s*from\s*['"]\.\.\/\.\.\/\.\.\/utils['"];?/,
+          "const CHANNEL_COLORS = {\n  'BF LED matrix full': '#FFFFFF',\n  'Fluorescence 405 nm Ex': '#8000FF',\n  'Fluorescence 488 nm Ex': '#00FF00',\n  'Fluorescence 561 nm Ex': '#FFFF00',\n  'Fluorescence 638 nm Ex': '#FF0000',\n  'Fluorescence 730 nm Ex': '#FF00FF',\n};"
+        );
       
       // Write temporary JS file
       const tempJsPath = path.join(__dirname, 'TileProcessingManager.temp.js');
@@ -144,7 +145,7 @@ class TileProcessingManagerTest {
         fs.unlinkSync(tempJsPath);
       } catch (error) {
         // Clean up temporary file even if import fails
-        try { fs.unlinkSync(tempJsPath); } catch {}
+        try { fs.unlinkSync(tempJsPath); } catch { /* ignore cleanup error */ }
         throw error;
       }
 
