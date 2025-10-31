@@ -10,6 +10,18 @@ import NormalScanConfig from './microscope/controls/NormalScanConfig';
 import AnnotationPanel from './annotation/AnnotationPanel';
 import AnnotationCanvas from './annotation/AnnotationCanvas';
 import SimilarAnnotationRenderer from './annotation/SimilarAnnotationRenderer';
+import { 
+  startSegmentation, 
+  getSegmentationStatus, 
+  cancelSegmentation, 
+  buildChannelConfigs,
+  formatProgressMessage,
+  formatErrorMessage,
+  isSegmentationCompleted,
+  isSegmentationFailed,
+  getSegmentationExperimentName,
+  isSegmentationExperiment
+} from '../utils/segmentationService.js';
 import './MicroscopeMapDisplay.css';
 
 const MicroscopeMapDisplay = forwardRef(({
@@ -197,6 +209,15 @@ const MicroscopeMapDisplay = forwardRef(({
     do_reflection_af: false,
     uploading: false
   });
+
+  // Segmentation state management
+  const [segmentationState, setSegmentationState] = useState({
+    isRunning: false,
+    experimentName: null,
+    progress: null,
+    error: null
+  });
+  const segmentationPollingRef = useRef(null);
 
   // Layer dropdown state
   const [isLayerDropdownOpen, setIsLayerDropdownOpen] = useState(false);
@@ -578,28 +599,6 @@ const MicroscopeMapDisplay = forwardRef(({
   const getLayerContrastSettings = useCallback((layerId) => {
     return layerContrastSettings[layerId] || { min: 0, max: 255 };
   }, [layerContrastSettings]);
-
-  const initializeZarrChannelsFromMetadata = useCallback((channelMetadata) => {
-    if (!channelMetadata || !channelMetadata.activeChannels) return;
-    
-    const newConfigs = {};
-    channelMetadata.activeChannels.forEach(channel => {
-      newConfigs[channel.label] = {
-        enabled: true, // Auto-enable all active channels as requested
-        min: channel.window.start,
-        max: channel.window.end,
-        color: channel.color,
-        index: channel.index,
-        coefficient: channel.coefficient,
-        family: channel.family
-      };
-    });
-    
-    console.log(`🎨 Initialized ${Object.keys(newConfigs).length} zarr channels:`, Object.keys(newConfigs));
-    setZarrChannelConfigs(newConfigs);
-    setAvailableZarrChannels(channelMetadata.activeChannels);
-    setIsMultiChannelMode(Object.keys(newConfigs).length > 1);
-  }, []);
 
   const shouldUseMultiChannelLoading = useCallback(() => {
     // For browse data layer: use zarr channels
@@ -989,6 +988,206 @@ const MicroscopeMapDisplay = forwardRef(({
     handleDeleteExperiment,
     renderDialogs,
   } = experimentManager;
+
+  // Function to refresh experiment data after segmentation completion
+  const refreshExperimentData = useCallback(async () => {
+    if (!microscopeControlService || !activeExperiment) return;
+    
+    try {
+      // Reload experiments to get updated list including segmentation results
+      const result = await microscopeControlService.list_experiments();
+      if (result.success !== false) {
+        // Check if segmentation experiment was created
+        const segmentationExpName = getSegmentationExperimentName(activeExperiment);
+        const segmentationExp = result.experiments.find(exp => exp.name === segmentationExpName);
+        
+        if (segmentationExp) {
+          console.log(`🔬 Segmentation experiment found: ${segmentationExpName}`);
+          // The experiment manager will handle updating the experiments list
+          // We just need to trigger a refresh of the current experiment's channels
+          if (appendLog) {
+            appendLog(`Segmentation results available in experiment: ${segmentationExpName}`);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error refreshing experiment data:', error);
+      if (appendLog) {
+        appendLog(`Error refreshing experiment data: ${error.message}`);
+      }
+    }
+  }, [microscopeControlService, activeExperiment, appendLog]);
+
+  const initializeZarrChannelsFromMetadata = useCallback((channelMetadata) => {
+    if (!channelMetadata || !channelMetadata.activeChannels) return;
+    
+    const newConfigs = {};
+    const activeChannels = [...channelMetadata.activeChannels];
+    
+    // Check if this is a segmentation experiment and add Segmentation channel
+    const isSegmentationExp = isSegmentationExperiment(activeExperiment);
+    if (isSegmentationExp) {
+      // Add Segmentation channel for segmentation experiments
+      const segmentationChannel = {
+        label: 'Segmentation',
+        window: { start: 0, end: 255 },
+        color: '#8b5cf6', // Purple color for segmentation
+        index: activeChannels.length,
+        coefficient: 1.0,
+        family: 'segmentation'
+      };
+      activeChannels.push(segmentationChannel);
+    }
+    
+    activeChannels.forEach(channel => {
+      newConfigs[channel.label] = {
+        enabled: true, // Auto-enable all active channels as requested
+        min: channel.window.start,
+        max: channel.window.end,
+        color: channel.color,
+        index: channel.index,
+        coefficient: channel.coefficient,
+        family: channel.family
+      };
+    });
+    
+    console.log(`🎨 Initialized ${Object.keys(newConfigs).length} zarr channels:`, Object.keys(newConfigs));
+    if (isSegmentationExp) {
+      console.log(`🔬 Segmentation experiment detected - added Segmentation channel`);
+    }
+    setZarrChannelConfigs(newConfigs);
+    setAvailableZarrChannels(activeChannels);
+    setIsMultiChannelMode(Object.keys(newConfigs).length > 1);
+  }, [activeExperiment]);
+
+  // Segmentation polling functions
+  const startSegmentationPolling = useCallback(() => {
+    if (segmentationPollingRef.current) {
+      clearInterval(segmentationPollingRef.current);
+    }
+
+    segmentationPollingRef.current = setInterval(async () => {
+      if (!microscopeControlService || !segmentationState.isRunning) {
+        return;
+      }
+
+      try {
+        const status = await getSegmentationStatus(microscopeControlService);
+        
+        if (status.success) {
+          setSegmentationState(prev => ({
+            ...prev,
+            progress: status.progress,
+            error: null
+          }));
+
+          // Update progress notification
+          const progressMessage = formatProgressMessage(status.progress);
+          showNotification(
+            `Segmentation progress: ${progressMessage}`,
+            'info'
+          );
+
+          if (appendLog) {
+            appendLog(`Segmentation progress: ${progressMessage}`);
+          }
+
+          // Check if segmentation is complete
+          if (isSegmentationCompleted(status.state)) {
+            stopSegmentationPolling();
+            setSegmentationState(prev => ({
+              ...prev,
+              isRunning: false,
+              progress: status.progress
+            }));
+
+            showNotification(
+              `Segmentation completed! Processed ${status.progress?.total_wells || 0} wells`,
+              'success'
+            );
+            if (appendLog) {
+              appendLog(`Segmentation completed successfully`);
+            }
+
+            // Refresh experiment data to show segmentation results
+            if (refreshExperimentData) {
+              await refreshExperimentData();
+            }
+          } else if (isSegmentationFailed(status.state)) {
+            stopSegmentationPolling();
+            setSegmentationState(prev => ({
+              ...prev,
+              isRunning: false,
+              error: status.errorMessage
+            }));
+
+            const errorMessage = formatErrorMessage(status.errorMessage, segmentationState.experimentName);
+            showNotification(errorMessage, 'error');
+            if (appendLog) {
+              appendLog(`Segmentation failed: ${status.errorMessage}`);
+            }
+          }
+        } else {
+          console.error('Failed to get segmentation status:', status.error);
+        }
+      } catch (error) {
+        console.error('Error polling segmentation status:', error);
+        if (appendLog) {
+          appendLog(`Error checking segmentation status: ${error.message}`);
+        }
+      }
+    }, 5000); // Poll every 5 seconds
+  }, [microscopeControlService, segmentationState.isRunning, segmentationState.experimentName, showNotification, appendLog, refreshExperimentData]);
+
+  const stopSegmentationPolling = useCallback(() => {
+    if (segmentationPollingRef.current) {
+      clearInterval(segmentationPollingRef.current);
+      segmentationPollingRef.current = null;
+    }
+  }, []);
+
+  const cancelRunningSegmentation = useCallback(async () => {
+    if (!microscopeControlService || !segmentationState.isRunning) {
+      return;
+    }
+
+    try {
+      const result = await cancelSegmentation(microscopeControlService);
+      
+      if (result.success) {
+        stopSegmentationPolling();
+        setSegmentationState({
+          isRunning: false,
+          experimentName: null,
+          progress: null,
+          error: null
+        });
+
+        showNotification('Segmentation cancelled', 'info');
+        if (appendLog) {
+          appendLog('Segmentation cancelled by user');
+        }
+      } else {
+        showNotification(`Failed to cancel segmentation: ${result.error}`, 'error');
+        if (appendLog) {
+          appendLog(`Failed to cancel segmentation: ${result.error}`);
+        }
+      }
+    } catch (error) {
+      console.error('Error cancelling segmentation:', error);
+      showNotification(`Error cancelling segmentation: ${error.message}`, 'error');
+      if (appendLog) {
+        appendLog(`Error cancelling segmentation: ${error.message}`);
+      }
+    }
+  }, [microscopeControlService, segmentationState.isRunning, stopSegmentationPolling, showNotification, appendLog]);
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      stopSegmentationPolling();
+    };
+  }, [stopSegmentationPolling]);
 
   // Multi-layer experiment visibility state
   const [visibleExperiments, setVisibleExperiments] = useState([]);
@@ -3034,6 +3233,136 @@ const MicroscopeMapDisplay = forwardRef(({
     };
   }, [setActiveLayer, showNotification]);
 
+  // Handle upload zarr dataset events from LayerPanel
+  useEffect(() => {
+    const handleUploadZarrDataset = async (event) => {
+      const { experimentName } = event.detail;
+      
+      if (!microscopeControlService) {
+        showNotification('Microscope service not available', 'error');
+        return;
+      }
+
+      try {
+        showNotification(`Starting upload of experiment: ${experimentName}`, 'info');
+        if (appendLog) {
+          appendLog(`Starting upload of experiment: ${experimentName}`);
+        }
+
+        // Call the microscope service upload_zarr_dataset method
+        const result = await microscopeControlService.upload_zarr_dataset(
+          experimentName,
+          `Experiment ${experimentName} uploaded from Agent-Lens`,
+          true // include_acquisition_settings
+        );
+
+        if (result.success) {
+          showNotification(
+            `Successfully uploaded ${result.total_wells} wells (${result.total_size_mb.toFixed(2)} MB) to dataset: ${result.dataset_name}`,
+            'success'
+          );
+          if (appendLog) {
+            appendLog(`Upload successful: ${result.dataset_name} with ${result.total_wells} wells`);
+          }
+        } else {
+          throw new Error(result.message || 'Upload failed');
+        }
+      } catch (error) {
+        console.error('Upload zarr dataset error:', error);
+        showNotification(`Upload failed: ${error.message}`, 'error');
+        if (appendLog) {
+          appendLog(`Upload failed: ${error.message}`);
+        }
+      }
+    };
+
+    // Add event listener
+    window.addEventListener('uploadZarrDataset', handleUploadZarrDataset);
+
+    return () => {
+      window.removeEventListener('uploadZarrDataset', handleUploadZarrDataset);
+    };
+  }, [microscopeControlService, showNotification, appendLog]);
+
+  // Segmentation event handler
+  useEffect(() => {
+    const handleSegmentExperiment = async (event) => {
+      const { experimentName } = event.detail;
+      
+      if (!microscopeControlService) {
+        showNotification('Microscope service not available', 'error');
+        return;
+      }
+
+      if (segmentationState.isRunning) {
+        showNotification('Segmentation is already running', 'warning');
+        return;
+      }
+
+      try {
+        // Build channel configurations from current UI state
+        const channelConfigs = buildChannelConfigs(
+          visibleLayers.channels,
+          getLayerContrastSettings,
+          experimentName
+        );
+
+        if (channelConfigs.length === 0) {
+          showNotification('No visible channels found for segmentation', 'error');
+          return;
+        }
+
+        // Start segmentation
+        showNotification(`Starting segmentation for experiment: ${experimentName}`, 'info');
+        if (appendLog) {
+          appendLog(`Starting segmentation for experiment: ${experimentName} with ${channelConfigs.length} channels`);
+        }
+
+        const result = await startSegmentation(
+          microscopeControlService,
+          experimentName,
+          channelConfigs
+        );
+
+        if (result.success) {
+          // Update segmentation state
+          setSegmentationState({
+            isRunning: true,
+            experimentName: experimentName,
+            progress: null,
+            error: null
+          });
+
+          showNotification(
+            `Segmentation started! Processing ${result.totalWells} wells`,
+            'success'
+          );
+          if (appendLog) {
+            appendLog(`Segmentation started: ${result.message}`);
+          }
+
+          // Start polling for status updates
+          startSegmentationPolling();
+        } else {
+          throw new Error(result.error || 'Failed to start segmentation');
+        }
+      } catch (error) {
+        console.error('Segmentation start error:', error);
+        showNotification(`Segmentation failed: ${error.message}`, 'error');
+        if (appendLog) {
+          appendLog(`Segmentation failed: ${error.message}`);
+        }
+      }
+    };
+
+    // Add event listener
+    window.addEventListener('segmentExperiment', handleSegmentExperiment);
+
+    return () => {
+      window.removeEventListener('segmentExperiment', handleSegmentExperiment);
+    };
+  }, [microscopeControlService, showNotification, appendLog, segmentationState.isRunning, visibleLayers.channels, getLayerContrastSettings]);
+
   // Auto-disable other layers when annotation panel is opened for better annotation accuracy
   useEffect(() => {
     if (isAnnotationDropdownOpen && activeLayer) {
@@ -3524,13 +3853,36 @@ const MicroscopeMapDisplay = forwardRef(({
   const loadStitchedTiles = useCallback(async () => {
     console.log('[loadStitchedTiles] Called - checking conditions');
     
-    // 🚀 REQUEST CANCELLATION: Only cancel if we're starting a significantly different request
-    // Calculate bounds first to generate consistent request key
+    // 🚫 CRITICAL FIX: ALWAYS cancel ALL requests FIRST before doing anything else
+    // This is the simplest and most reliable way to prevent parallel loading
+    console.log('🚫 [loadStitchedTiles] Step 1: Cancelling ALL existing requests before starting new load');
+    
+    // Cancel cancellable request if it exists
+    if (currentCancellableRequest) {
+      const cancelledCount = currentCancellableRequest.cancel();
+      console.log(`🚫 [loadStitchedTiles] Cancelled ${cancelledCount} cancellable requests`);
+      setCurrentCancellableRequest(null);
+    }
+    
+    // ALWAYS cancel ALL artifact loader requests, regardless of currentCancellableRequest
+    if (artifactZarrLoaderRef.current) {
+      const artifactCancelledCount = artifactZarrLoaderRef.current.cancelAllRequests();
+      console.log(`🚫 [loadStitchedTiles] Cancelled ${artifactCancelledCount} artifact loader requests`);
+    }
+    
+    // Clear all request tracking
+    activeTileRequestsRef.current.clear();
+    browseDataRequestsRef.current.clear();
+    scanDataRequestsRef.current.clear();
+    console.log('✅ [loadStitchedTiles] All requests cancelled and tracking cleared');
+    
+    // Now proceed with checks
     if (!canvasRef.current) {
       console.log('[loadStitchedTiles] Canvas not ready, skipping');
       return;
     }
     
+    // Calculate request key for tracking (but don't use it for cancellation decisions)
     const earlyScaleLevel = Math.max(0, Math.min(4, Math.round(Math.log2(mapScale / 0.25))));
     const earlyActiveChannel = getSelectedChannels()[0] || 'BF LED matrix full';
     const currentViewBounds = {
@@ -3538,37 +3890,8 @@ const MicroscopeMapDisplay = forwardRef(({
       bottomRight: { x: mapPan.x + canvasRef.current.width / (2 * mapScale), y: mapPan.y + canvasRef.current.height / (2 * mapScale) }
     };
     const currentRequestKey = getTileKey(currentViewBounds, earlyScaleLevel, earlyActiveChannel, selectedHistoricalDataset?.name || 'historical');
-    const shouldCancelPrevious = lastRequestKey && lastRequestKey !== currentRequestKey;
     
-    if (shouldCancelPrevious && currentCancellableRequest) {
-      const cancelledCount = currentCancellableRequest.cancel();
-      console.log(`🚫 loadStitchedTiles: Cancelled ${cancelledCount} pending requests (new area)`);
-      setCurrentCancellableRequest(null);
-      
-      // 🚀 CRITICAL FIX: Also cancel ALL active requests in the artifact loader when moving to new area
-      if (artifactZarrLoaderRef.current) {
-        const artifactCancelledCount = artifactZarrLoaderRef.current.cancelAllRequests();
-        console.log(`🚫 loadStitchedTiles: Cancelled ${artifactCancelledCount} active artifact requests (new area)`);
-      }
-    } else if (!shouldCancelPrevious && currentCancellableRequest) {
-      console.log(`🔄 loadStitchedTiles: Request for same area already in progress, checking if it should be cancelled anyway`);
-      // Cancel anyway if the request is very old (over 30 seconds)
-      if (currentCancellableRequest.startTime && (Date.now() - currentCancellableRequest.startTime > 30000)) {
-        console.log(`🚫 loadStitchedTiles: Cancelling old request (over 30s old)`);
-        const cancelledCount = currentCancellableRequest.cancel();
-        console.log(`🚫 loadStitchedTiles: Cancelled ${cancelledCount} old requests`);
-        setCurrentCancellableRequest(null);
-        
-        if (artifactZarrLoaderRef.current) {
-          const artifactCancelledCount = artifactZarrLoaderRef.current.cancelAllRequests();
-          console.log(`🚫 loadStitchedTiles: Cancelled ${artifactCancelledCount} old artifact requests`);
-        }
-      } else {
-        return; // Don't start duplicate requests for the same area
-      }
-    }
-    
-    // Update request tracking at the start to prevent duplicate requests
+    // Update request tracking for logging purposes
     setLastRequestKey(currentRequestKey);
     
     // Clear active requests to prevent conflicts - only clear legacy for compatibility

@@ -415,6 +415,10 @@ const AnnotationPanel = ({
   // Load all annotations states
   const [isLoadingAllAnnotations, setIsLoadingAllAnnotations] = useState(false);
   const [loadedAnnotationsCount, setLoadedAnnotationsCount] = useState(0);
+  const [availableApplications, setAvailableApplications] = useState([]);
+  const [selectedApplicationId, setSelectedApplicationId] = useState(null);
+  const [isLoadingApplications, setIsLoadingApplications] = useState(false);
+  const [showApplicationList, setShowApplicationList] = useState(false);
   
   // Text search states
   const [searchType, setSearchType] = useState(null); // 'image' or 'text'
@@ -682,9 +686,71 @@ const AnnotationPanel = ({
     }
   };
 
-  const handleLoadAllAnnotations = async () => {
+  const handleLoadApplicationList = async () => {
+    // Get dataset ID for prefix - support both historical datasets and experiments
+    let prefix = selectedHistoricalDataset?.id;
+    
+    // If no historical dataset, check if we're using an experiment layer
+    if (!prefix && activeLayer && experiments.length > 0) {
+      const experiment = experiments.find(exp => exp.name === activeLayer);
+      if (experiment) {
+        prefix = experiment.name;
+      }
+    }
+    
+    if (!prefix) {
+      alert('No dataset or experiment selected. Cannot load annotation applications.');
+      return;
+    }
+
+    setIsLoadingApplications(true);
+    
+    try {
+      const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
+      
+      // Prepare query parameters
+      const queryParams = new URLSearchParams({
+        collection_name: convertToValidCollectionName('agent-lens'),
+        prefix: prefix,
+        limit: '1000'
+      });
+      
+      const response = await fetch(`/agent-lens/apps/${serviceId}/similarity/list-applications?${queryParams}`, {
+        method: 'GET'
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        
+        if (result.success && result.applications) {
+          console.log(`📋 Found ${result.applications.length} annotation application(s)`);
+          setAvailableApplications(result.applications);
+          setShowApplicationList(true);
+          
+          // Auto-select first application if none selected
+          if (!selectedApplicationId && result.applications.length > 0) {
+            setSelectedApplicationId(result.applications[0].application_id);
+          }
+        } else {
+          console.error('No applications found:', result);
+          setAvailableApplications([]);
+          alert('No annotation applications found.');
+        }
+      } else {
+        console.error('Load applications failed:', await response.text());
+        alert('Failed to load annotation applications from database.');
+      }
+    } catch (error) {
+      console.error('Error loading applications:', error);
+      alert('Error loading applications: ' + error.message);
+    } finally {
+      setIsLoadingApplications(false);
+    }
+  };
+
+  const handleLoadAllAnnotations = async (specificApplicationId = null) => {
     // Get dataset ID for application ID - support both historical datasets and experiments
-    let applicationId = selectedHistoricalDataset?.id;
+    let applicationId = specificApplicationId || selectedApplicationId || selectedHistoricalDataset?.id;
     
     // If no historical dataset, check if we're using an experiment layer
     if (!applicationId && activeLayer && experiments.length > 0) {
@@ -695,8 +761,14 @@ const AnnotationPanel = ({
     }
     
     if (!applicationId) {
-      alert('No dataset or experiment selected. Cannot load annotations.');
-      return;
+      // If no specific application ID, try to load all with prefix matching
+      const prefix = selectedHistoricalDataset?.id || (activeLayer && experiments.find(exp => exp.name === activeLayer)?.name);
+      if (!prefix) {
+        alert('No dataset or experiment selected. Cannot load annotations.');
+        return;
+      }
+      // Use prefix matching to load all
+      applicationId = prefix;
     }
 
     setIsLoadingAllAnnotations(true);
@@ -704,12 +776,17 @@ const AnnotationPanel = ({
     try {
       const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
       
+      // Determine if we should use prefix matching (if applicationId matches the base prefix)
+      const basePrefix = selectedHistoricalDataset?.id || (activeLayer && experiments.find(exp => exp.name === activeLayer)?.name);
+      const usePrefixMatch = basePrefix && (applicationId === basePrefix || applicationId.startsWith(basePrefix + '_'));
+      
       // Prepare query parameters
       const queryParams = new URLSearchParams({
         collection_name: convertToValidCollectionName('agent-lens'),
         application_id: applicationId,
         limit: '1000',
-        include_vector: 'false'
+        include_vector: 'false',
+        use_prefix_match: usePrefixMatch ? 'true' : 'false'
       });
       
       const response = await fetch(`/agent-lens/apps/${serviceId}/similarity/fetch-all?${queryParams}`, {
@@ -731,6 +808,11 @@ const AnnotationPanel = ({
           // Show the annotations on the map
           if (setShowSimilarAnnotations) {
             setShowSimilarAnnotations(true);
+          }
+          
+          // Update selected application ID if we loaded a specific one
+          if (specificApplicationId) {
+            setSelectedApplicationId(specificApplicationId);
           }
           
           alert(`Successfully loaded ${result.annotations.length} annotation(s) from the database.`);
@@ -963,11 +1045,25 @@ const AnnotationPanel = ({
               Dataset: {selectedHistoricalDataset.id}
             </span>
           )}
+          {/* Load Applications List Button */}
+          <span 
+            className="text-xs text-blue-400 ml-2 px-2 py-1 bg-blue-900 rounded cursor-pointer hover:bg-blue-800 transition-colors" 
+            title="Click to see available annotation applications"
+            onClick={handleLoadApplicationList}
+            style={{ 
+              pointerEvents: isLoadingApplications ? 'none' : 'auto',
+              opacity: isLoadingApplications ? 0.6 : 1 
+            }}
+          >
+            <i className={`fas ${isLoadingApplications ? 'fa-spinner fa-spin' : 'fa-list'} mr-1`}></i>
+            {isLoadingApplications ? 'Loading...' : 'List Apps'}
+          </span>
+          
           {/* Load All Button / Loaded Annotations Indicator */}
           <span 
             className="text-xs text-green-400 ml-2 px-2 py-1 bg-green-900 rounded cursor-pointer hover:bg-green-800 transition-colors" 
             title={loadedAnnotationsCount > 0 ? "Loaded annotations from database" : "Click to load all annotations from database"}
-            onClick={handleLoadAllAnnotations}
+            onClick={() => handleLoadAllAnnotations()}
             style={{ 
               pointerEvents: isLoadingAllAnnotations ? 'none' : 'auto',
               opacity: isLoadingAllAnnotations ? 0.6 : 1 
@@ -978,6 +1074,71 @@ const AnnotationPanel = ({
           </span>
         </div>
       </div>
+
+      {/* Annotation Applications List */}
+      {showApplicationList && availableApplications.length > 0 && (
+        <div className="annotation-section" style={{ marginBottom: '10px', border: '1px solid #3b82f6', borderRadius: '4px', padding: '8px' }}>
+          <div className="annotation-section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>
+              <i className="fas fa-list text-blue-400 mr-2"></i>
+              Annotation Applications ({availableApplications.length})
+            </span>
+            <button
+              onClick={() => setShowApplicationList(false)}
+              className="text-xs text-gray-400 hover:text-gray-200"
+              style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+              title="Close application list"
+            >
+              <i className="fas fa-times"></i>
+            </button>
+          </div>
+          <div style={{ marginTop: '8px', maxHeight: '200px', overflowY: 'auto' }}>
+            {availableApplications.map((app) => (
+              <div
+                key={app.application_id}
+                onClick={() => handleLoadAllAnnotations(app.application_id)}
+                style={{
+                  padding: '8px',
+                  marginBottom: '4px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  backgroundColor: selectedApplicationId === app.application_id ? '#1e40af' : '#1e3a8a',
+                  border: selectedApplicationId === app.application_id ? '2px solid #60a5fa' : '1px solid #3b82f6',
+                  transition: 'all 0.2s',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center'
+                }}
+                onMouseEnter={(e) => {
+                  if (selectedApplicationId !== app.application_id) {
+                    e.currentTarget.style.backgroundColor = '#2563eb';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (selectedApplicationId !== app.application_id) {
+                    e.currentTarget.style.backgroundColor = '#1e3a8a';
+                  }
+                }}
+                title={`Click to load annotations from ${app.application_id}`}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <i className={`fas ${selectedApplicationId === app.application_id ? 'fa-check-circle' : 'fa-circle'} text-blue-400`}></i>
+                  <span style={{ fontSize: '12px', color: '#e0e7ff' }}>{app.application_id}</span>
+                </div>
+                <span style={{ fontSize: '11px', color: '#93c5fd' }}>
+                  {app.annotation_count} annotation{app.annotation_count !== 1 ? 's' : ''}
+                </span>
+              </div>
+            ))}
+          </div>
+          {selectedApplicationId && (
+            <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #3b82f6', fontSize: '11px', color: '#93c5fd' }}>
+              <i className="fas fa-info-circle mr-1"></i>
+              Selected: <strong>{selectedApplicationId}</strong>
+            </div>
+          )}
+        </div>
+      )}
 
       {isDrawingMode && (
         <>

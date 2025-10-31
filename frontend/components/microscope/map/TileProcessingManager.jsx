@@ -1,4 +1,5 @@
 import React from 'react';
+import { CHANNEL_COLORS } from '../../../utils';
 
 /**
  * TileProcessingManager - Centralized tile processing with simplified workflow
@@ -12,14 +13,7 @@ import React from 'react';
  */
 class TileProcessingManager {
   constructor() {
-    this.defaultColors = {
-      'BF LED matrix full': '#FFFFFF',
-      'Fluorescence 405 nm Ex': '#8A2BE2', // Blue Violet
-      'Fluorescence 488 nm Ex': '#00FF00', // Green
-      'Fluorescence 561 nm Ex': '#FFFF00', // Yellow
-      'Fluorescence 638 nm Ex': '#FF0000', // Red
-      'Fluorescence 730 nm Ex': '#FF69B4', // Hot Pink
-    };
+    this.defaultColors = CHANNEL_COLORS;
   }
 
   /**

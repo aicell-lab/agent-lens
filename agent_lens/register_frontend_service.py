@@ -818,16 +818,19 @@ def get_frontend_api():
         collection_name: str,
         application_id: str,
         limit: int = 1000,
-        include_vector: bool = False
+        include_vector: bool = False,
+        use_prefix_match: bool = True
     ):
         """
         Fetch all annotations from a collection for a given application.
         
         Args:
             collection_name (str): Name of the collection
-            application_id (str): Application ID (dataset or experiment name)
+            application_id (str): Application ID (dataset or experiment name) - used as prefix if use_prefix_match=True
             limit (int): Maximum number of annotations to return
             include_vector (bool): Whether to include vectors in results
+            use_prefix_match (bool): If True, match all annotations where application_id starts with the given prefix.
+                                     Defaults to True to show all annotations for multiple annotation applications.
             
         Returns:
             dict: All annotations in the collection
@@ -853,14 +856,63 @@ def get_frontend_api():
                 collection_name=valid_collection_name,
                 application_id=clean_application_id,
                 limit=limit,
-                include_vector=include_vector
+                include_vector=include_vector,
+                use_prefix_match=use_prefix_match
             )
             
-            logger.info(f"Fetched {len(results)} annotations for application {clean_application_id}")
+            match_type = f"prefix '{clean_application_id}*'" if use_prefix_match else f"exact '{clean_application_id}'"
+            logger.info(f"Fetched {len(results)} annotations for application {match_type}")
             return {"success": True, "annotations": results, "total": len(results)}
             
         except Exception as e:
             logger.error(f"Error fetching all annotations: {e}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/similarity/list-applications")
+    async def list_annotation_applications(
+        collection_name: str,
+        prefix: str = None,
+        limit: int = 1000
+    ):
+        """
+        List all annotation applications in a collection, optionally filtered by prefix.
+        
+        Args:
+            collection_name (str): Name of the collection
+            prefix (str): Optional prefix to filter application IDs
+            limit (int): Maximum number of annotations to scan
+            
+        Returns:
+            dict: List of annotation applications with counts
+        """
+        try:
+            try:
+                if not await similarity_service.ensure_connected():
+                    raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            except Exception as e:
+                logger.warning(f"Similarity service not available: {e}")
+                raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            
+            # Convert collection name to valid Weaviate class name
+            words = collection_name.split('-')
+            valid_collection_name = ''.join(word.capitalize() for word in words)
+            if not valid_collection_name[0].isupper():
+                valid_collection_name = 'A' + valid_collection_name[1:]
+            
+            # Clean prefix - extract just the dataset ID part (last part after slash)
+            clean_prefix = prefix.split('/')[-1] if prefix and '/' in prefix else prefix
+            
+            applications = await similarity_service.list_annotation_applications(
+                collection_name=valid_collection_name,
+                prefix=clean_prefix,
+                limit=limit
+            )
+            
+            return {"success": True, "applications": applications, "total": len(applications)}
+            
+        except Exception as e:
+            logger.error(f"Error listing annotation applications: {e}")
             logger.error(traceback.format_exc())
             raise HTTPException(status_code=500, detail=str(e))
 

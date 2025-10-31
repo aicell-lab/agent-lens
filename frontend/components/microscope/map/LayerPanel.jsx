@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import PropTypes from 'prop-types';
 import './LayerPanel.css';
 import DualRangeSlider from '../../DualRangeSlider';
+import { getChannelColor } from '../../../utils';
 
 const LayerPanel = ({
   // Map Layers props
@@ -756,6 +757,40 @@ const LayerPanel = ({
                               Normal Scan
                             </button>
                           )}
+                          {/* Upload Zarr Dataset button */}
+                          <button 
+                            className="upload-btn"
+                            onClick={() => {
+                              if (isSimulatedMicroscope || !microscopeControlService) return;
+                              // Trigger upload zarr dataset event
+                              const event = new CustomEvent('uploadZarrDataset', {
+                                detail: { experimentName: exp.name }
+                              });
+                              window.dispatchEvent(event);
+                            }}
+                            disabled={isSimulatedMicroscope || !microscopeControlService}
+                            title="Upload experiment data to artifact manager"
+                          >
+                            <i className="fas fa-cloud-upload-alt mr-1"></i>
+                            Upload Dataset
+                          </button>
+                          {/* Segment Experiment button */}
+                          <button 
+                            className="segment-btn"
+                            onClick={() => {
+                              if (isSimulatedMicroscope || !microscopeControlService) return;
+                              // Trigger segment experiment event
+                              const event = new CustomEvent('segmentExperiment', {
+                                detail: { experimentName: exp.name }
+                              });
+                              window.dispatchEvent(event);
+                            }}
+                            disabled={isSimulatedMicroscope || !microscopeControlService}
+                            title="Run automated cell segmentation on this experiment"
+                          >
+                            <i className="fas fa-cut mr-1"></i>
+                            Segment Experiment
+                          </button>
                         </div>
                       </div>
                       
@@ -806,15 +841,7 @@ const LayerPanel = ({
                           {Object.entries(visibleLayers.channels).map(([channel, isVisible]) => {
                             const isLastChannel = isLastSelectedChannel(channel, isVisible);
                             
-                            const defaultColors = {
-                              'BF LED matrix full': '#FFFFFF',
-                              'Fluorescence 405 nm Ex': '#8A2BE2',
-                              'Fluorescence 488 nm Ex': '#00FF00',
-                              'Fluorescence 561 nm Ex': '#FFFF00',
-                              'Fluorescence 638 nm Ex': '#FF0000',
-                              'Fluorescence 730 nm Ex': '#FF69B4',
-                            };
-                            const channelColor = defaultColors[channel] || '#FFFFFF';
+                            const channelColor = getChannelColor(channel);
                             
                             return (
                               <div key={channel} className="channel-item">
