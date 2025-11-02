@@ -2016,7 +2016,7 @@ const MicroscopeMapDisplay = forwardRef(({
     return `${bounds.topLeft.x.toFixed(1)}_${bounds.topLeft.y.toFixed(1)}_${bounds.bottomRight.x.toFixed(1)}_${bounds.bottomRight.y.toFixed(1)}_${scale}_${normalizedChannel}_${expName}`;
   }, []);
 
-  // Memoize visible tiles with smart cleanup strategy  
+  // Memoize visible tiles with smart cleanup strategy
   const visibleTiles = useMemo(() => {
     const browseDataLayer = getBrowseDataLayer();
     const scanDataLayer = getScanDataLayer();
@@ -2117,7 +2117,7 @@ const MicroscopeMapDisplay = forwardRef(({
     }
     
     return [];
-  }, [stitchedTiles, scaleLevel, visibleLayers.channels, visibleLayers.scanResults, shouldUseMultiChannelLoading, getEnabledZarrChannels, getSelectedChannels, getChannelString, visibleExperiments, activeExperiment, isZooming, isPanning, getBrowseDataLayer, getScanDataLayer]); // Added interaction state dependencies for proper logging control
+  }, [stitchedTiles, scaleLevel, visibleLayers.channels, visibleLayers.scanResults, shouldUseMultiChannelLoading, getEnabledZarrChannels, getSelectedChannels, getChannelString, visibleExperiments, activeExperiment, isZooming, isPanning, getBrowseDataLayer, getScanDataLayer]);
 
   const addOrUpdateTile = useCallback((newTile) => {
     setStitchedTiles(prevTiles => {
@@ -2125,11 +2125,6 @@ const MicroscopeMapDisplay = forwardRef(({
       const existingIndex = prevTiles.findIndex(tile => 
         getTileKey(tile.bounds, tile.scale, tile.channel, tile.experimentName) === tileKey
       );
-      
-      // If this tile replaces a pending one, mark it as replaced
-      if (pendingTileReplacementsRef.current.has(tileKey)) {
-        pendingTileReplacementsRef.current.delete(tileKey);
-      }
       
       if (existingIndex >= 0) {
         // Update existing tile
@@ -2145,29 +2140,9 @@ const MicroscopeMapDisplay = forwardRef(({
 
   const cleanupOldTiles = useCallback((currentScale, activeChannel, maxTilesPerScale = 20) => {
     setStitchedTiles(prevTiles => {
-      // For FREE_PAN mode: Never delete tiles during active operations
+      // FREE_PAN mode: No tile caching or cleanup - tiles are managed directly by addOrUpdateTile
       if (mapViewMode === 'FREE_PAN') {
-        // Preserve tiles during active zooming or panning
-        if (isZooming || isPanning) {
-          console.log(`[cleanupOldTiles] FREE_PAN mode: Active operation detected, preserving all existing tiles`);
-          return prevTiles; // Keep all existing tiles during operations
-        }
-        
-        // Only remove tiles that are explicitly marked for replacement
-        if (pendingTileReplacementsRef.current.size > 0) {
-          const tilesToRemove = Array.from(pendingTileReplacementsRef.current);
-          const filteredTiles = prevTiles.filter(tile => {
-            const tileKey = getTileKey(tile.bounds, tile.scale, tile.channel, tile.experimentName);
-            return !tilesToRemove.includes(tileKey);
-          });
-          
-          console.log(`[cleanupOldTiles] FREE_PAN mode: Removed ${prevTiles.length - filteredTiles.length} tiles marked for replacement`);
-          pendingTileReplacementsRef.current.clear();
-          return filteredTiles;
-        }
-        
-        // No cleanup needed if no tiles are marked for replacement
-        return prevTiles;
+        return prevTiles; // No cleanup in FREE_PAN mode
       }
       
       // For historical mode, be more conservative with cleanup to prevent map clearing during zoom
@@ -3934,7 +3909,7 @@ const MicroscopeMapDisplay = forwardRef(({
     
     // 🚀 PERFORMANCE OPTIMIZATION: Throttle tile loading attempts to prevent CPU overload
     const now = Date.now();
-    const MIN_LOAD_INTERVAL = 300; // Minimum 0.3 seconds between tile load attempts
+    const MIN_LOAD_INTERVAL = 1000; // Minimum 1 second between tile load attempts
     if (now - lastTileLoadAttemptRef.current < MIN_LOAD_INTERVAL) {
       console.log('[loadStitchedTiles] Throttling tile load attempt - too soon since last attempt');
       return;
@@ -4551,37 +4526,28 @@ const MicroscopeMapDisplay = forwardRef(({
         return;
       }
       
-      // Mark existing tiles for replacement BEFORE loading new ones
-      // This ensures old tiles stay visible during the loading process
-      if (mapViewMode === 'FREE_PAN') {
-        pendingTileReplacementsRef.current.clear();
-        const activeChannel = getChannelString();
-        
-        // Find existing tiles that will be replaced by this load
-        // We need to read current tiles and mark matching ones
-        setStitchedTiles(prevTiles => {
-          prevTiles.forEach(tile => {
-            // Mark tiles that match current scale, channel, and experiment
-            // These are the ones that will be replaced by new tiles with same parameters
-            const matchesScale = tile.scale === scaleLevel;
-            const matchesChannel = tile.channel === activeChannel;
-            const matchesExperiment = experimentsToLoad.some(exp => 
-              (exp === null && tile.experimentName === null) || 
-              (exp !== null && tile.experimentName === exp)
-            );
-            
-            if (matchesScale && matchesChannel && matchesExperiment) {
-              const tileKey = getTileKey(tile.bounds, tile.scale, tile.channel, tile.experimentName);
-              pendingTileReplacementsRef.current.add(tileKey);
-            }
-          });
-          return prevTiles; // Don't modify tiles yet, just mark them
+      // FREE_PAN mode: Before loading new tiles, mark existing tiles that match current scale/channel/experiment for removal
+      // These are the tiles that will be replaced by the new load
+      tilesToRemoveRef.current.clear();
+      const activeChannel = getChannelString();
+      
+      setStitchedTiles(prevTiles => {
+        prevTiles.forEach(tile => {
+          // Mark tiles that match current scale, channel, and experiment for removal
+          const matchesScale = tile.scale === scaleLevel;
+          const matchesChannel = tile.channel === activeChannel;
+          const matchesExperiment = experimentsToLoad.some(exp => 
+            (exp === null && tile.experimentName === null) || 
+            (exp !== null && tile.experimentName === exp)
+          );
+          
+          if (matchesScale && matchesChannel && matchesExperiment) {
+            const tileKey = getTileKey(tile.bounds, tile.scale, tile.channel, tile.experimentName);
+            tilesToRemoveRef.current.add(tileKey);
+          }
         });
-        
-        if (pendingTileReplacementsRef.current.size > 0) {
-          console.log(`🎨 FREE_PAN: Marked ${pendingTileReplacementsRef.current.size} existing tiles for replacement`);
-        }
-      }
+        return prevTiles; // Don't modify yet, just mark
+      });
       
       // Get enabled channels for FREE_PAN mode
       const enabledChannels = getSelectedChannels().map(channelName => ({
@@ -4658,10 +4624,23 @@ const MicroscopeMapDisplay = forwardRef(({
         }
       }
       
-      // After all tiles are loaded, remove old tiles that were marked for replacement
-      // Only do this in FREE_PAN mode and when not actively operating
-      if (mapViewMode === 'FREE_PAN' && !isZooming && !isPanning) {
-        cleanupOldTiles(scaleLevel, getChannelString());
+      // After new tiles are loaded, remove old tiles that were replaced
+      if (mapViewMode === 'FREE_PAN' && tilesToRemoveRef.current.size > 0) {
+        setStitchedTiles(prevTiles => {
+          const tilesToRemove = Array.from(tilesToRemoveRef.current);
+          const filteredTiles = prevTiles.filter(tile => {
+            const tileKey = getTileKey(tile.bounds, tile.scale, tile.channel, tile.experimentName);
+            return !tilesToRemove.includes(tileKey);
+          });
+          
+          const removedCount = prevTiles.length - filteredTiles.length;
+          if (removedCount > 0) {
+            console.log(`🎨 FREE_PAN: Removed ${removedCount} old tiles after new ones loaded`);
+          }
+          
+          return filteredTiles;
+        });
+        tilesToRemoveRef.current.clear();
       }
       
       if (appendLog) {
@@ -4712,7 +4691,13 @@ const MicroscopeMapDisplay = forwardRef(({
   }, [visibleExperiments]);
 
   // Effect to load tiles when visible experiments change
+  // Skip entirely during active interactions to prevent performance issues
   useEffect(() => {
+    // Early exit: Don't even run the effect if user is interacting
+    if (isPanning || isZooming) {
+      return;
+    }
+    
     const scanDataLayer = getScanDataLayer();
     const hasScanResults = visibleLayers.scanResults && visibleExperiments.length > 0;
     if (mapViewMode === 'FREE_PAN' && (scanDataLayer || hasScanResults)) {
@@ -4721,12 +4706,6 @@ const MicroscopeMapDisplay = forwardRef(({
       // Check if microscope service is available
       if (!microscopeControlService || isSimulatedMicroscopeSelected) {
         console.log('[Visible Experiments] Skipping - no microscope service or simulated mode');
-        return;
-      }
-      
-      // Don't load tiles while user is actively interacting
-      if (isPanning || isZooming) {
-        console.log('[Visible Experiments] Skipping - user is actively interacting (panning:', isPanning, 'zooming:', isZooming, ')');
         return;
       }
       
@@ -4782,7 +4761,7 @@ const MicroscopeMapDisplay = forwardRef(({
         console.log(`[Experiment Change] No real experiment change detected - UI update only`);
       }
     }
-  }, [visibleExperiments, activeExperiment, mapViewMode, getScanDataLayer, visibleLayers.scanResults, microscopeControlService, isSimulatedMicroscopeSelected, scaleLevel, stitchedTiles, getChannelString, isPanning, isZooming, appendLog, setNeedsTileReload]); // Updated to use layer-based logic
+  }, [visibleExperiments, activeExperiment, mapViewMode, getScanDataLayer, visibleLayers.scanResults, microscopeControlService, isSimulatedMicroscopeSelected, stitchedTiles, getChannelString, isPanning, isZooming, appendLog, setNeedsTileReload]); // Removed scaleLevel from deps - checked via lastTileRequestRef
 
   // Debounce tile loading - only load after user stops interacting for 1 second
   const scheduleTileUpdate = useCallback((source = 'unknown') => {
@@ -4813,7 +4792,7 @@ const MicroscopeMapDisplay = forwardRef(({
     canvasUpdateTimerRef.current = setTimeout(() => {
       console.log(`[scheduleTileUpdate] Timer fired from ${source} - calling loadStitchedTiles`);
       loadStitchedTiles();
-    }, 300); // Wait 0.3 second after user stops
+    }, 1000); // Wait 1 second after user stops
     console.log(`[scheduleTileUpdate] New timer scheduled for 300ms (source: ${source})`);
   }, [loadStitchedTiles]);
 
@@ -4849,28 +4828,22 @@ const MicroscopeMapDisplay = forwardRef(({
   // Consolidated tile loading effect - replaces multiple overlapping effects
   const lastTileRequestRef = useRef({ panX: 0, panY: 0, scale: 0, scaleLevel: 0, timestamp: 0 });
   
-  // Track tiles marked for replacement in FREE_PAN mode
-  // These are tiles that will be replaced when new tiles finish loading
-  const pendingTileReplacementsRef = useRef(new Set());
+  // Track tiles to remove after new ones are loaded in FREE_PAN mode
+  const tilesToRemoveRef = useRef(new Set());
   
   useEffect(() => {
-    if (mapViewMode !== 'FREE_PAN' || !visibleLayers.scanResults) {
-      console.log('[Tile Loading] Skipping - not in FREE_PAN mode or scan results not visible');
-      return;
-    }
-
-    // Don't trigger tile loading if user is actively interacting
+    // Early exit: Don't even run the effect if user is interacting
+    // This prevents the effect from running on every zoom/pan change
     if (isPanning || isZooming) {
-      console.log('[Tile Loading] Skipping - user is actively interacting (panning:', isPanning, 'zooming:', isZooming, ')');
       return;
     }
-
-    // REMOVED: Don't prevent cancellation when tiles are loading - this creates deadlock!
-    // The scheduleTileUpdate function now handles cancellation properly
+    
+    if (mapViewMode !== 'FREE_PAN' || !visibleLayers.scanResults) {
+      return;
+    }
 
     const container = mapContainerRef.current;
     if (!container) {
-      console.log('[Tile Loading] Skipping - no container reference');
       return;
     }
 
@@ -4890,17 +4863,6 @@ const MicroscopeMapDisplay = forwardRef(({
     const timeSinceLastRequest = Date.now() - lastRequest.timestamp;
     const minTimeBetweenRequests = 500; // 500ms minimum between requests
     
-    console.log('[Tile Loading] Checking conditions:', {
-      panChangeX: panChangeX.toFixed(1),
-      panChangeY: panChangeY.toFixed(1),
-      scaleChange: scaleChange.toFixed(3),
-      significantPanChange,
-      significantScaleChange,
-      timeSinceLastRequest: timeSinceLastRequest + 'ms',
-      minTimeBetweenRequests: minTimeBetweenRequests + 'ms',
-      willTrigger: (significantPanChange || significantScaleChange) && timeSinceLastRequest > minTimeBetweenRequests
-    });
-    
     if ((significantPanChange || significantScaleChange) && timeSinceLastRequest > minTimeBetweenRequests) {
       console.log('[Tile Loading] TRIGGERING tile update - significant change detected');
       
@@ -4915,19 +4877,17 @@ const MicroscopeMapDisplay = forwardRef(({
       
       // Schedule tile update
       scheduleTileUpdate('tile-loading-effect');
-    } else {
-      console.log('[Tile Loading] Skipping - no significant change or too soon since last request');
     }
-  }, [
-    mapViewMode, 
-    visibleLayers.scanResults, 
-    isPanning, 
-    isZooming, 
-    mapPan.x, 
-    mapPan.y, 
-    mapScale, 
-    scheduleTileUpdate
-  ]);
+    }, [
+      mapViewMode, 
+      visibleLayers.scanResults, 
+      isPanning, 
+      isZooming, 
+      scheduleTileUpdate
+      // Removed mapPan.x, mapPan.y, mapScale, scaleLevel from deps
+      // These are checked via lastTileRequestRef to prevent effect from running on every change
+      // Effect only runs when isPanning/isZooming changes from true->false
+    ]);
 
   // 🚀 REQUEST CANCELLATION: Cleanup effect for cancellable requests (only on actual unmount)
   useEffect(() => {
