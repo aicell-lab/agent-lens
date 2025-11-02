@@ -193,7 +193,7 @@ agent-lens/
 │   └── 📄 __main__.py          # CLI entry point
 ├── 📁 frontend/                # React application
 │   ├── 📁 components/          # UI components
-│   │   ├── 📁 annotation/      # Image annotation system
+│   │   ├── 📁 similarity_search/      # Image annotation system
 │   │   ├── 📁 microscope/      # Microscope control and visualization
 │   │   └── 📄 *.jsx            # Control panels, modals, settings
 │   ├── 📁 utils/               # Frontend utilities (Zarr loader, embeddings)

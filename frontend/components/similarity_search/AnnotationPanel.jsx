@@ -360,7 +360,7 @@ const AnnotationPanel = ({
   onClearAllAnnotations,
   onExportAnnotations,
   wellInfoMap = {}, // Map of annotation IDs to well information
-  similarAnnotationWellMap = {}, // Map of well IDs to well information for similar annotations
+  similarityResultsWellMap = {}, // Map of well IDs to well information for similarity results
   getWellInfoById = null, // Function to get well info by well ID
   embeddingStatus = {}, // Map of annotation IDs to embedding status
   mapScale = null, // Current map scale for image extraction
@@ -383,13 +383,13 @@ const AnnotationPanel = ({
   // Map browsing state
   isMapBrowsingMode = false,
   setIsMapBrowsingMode = null,
-  // Similar annotation map rendering
-  onSimilarAnnotationsUpdate = null,
-  // Similar annotations state and controls
-  similarAnnotations = [],
-  showSimilarAnnotations = false,
-  setShowSimilarAnnotations = null,
-  onSimilarAnnotationsCleanup = null,
+  // Similarity results map rendering
+  onSimilarityResultsUpdate = null,
+  // Similarity results state and controls
+  similarityResults = [],
+  showSimilarityResults = false,
+  setShowSimilarityResults = null,
+  onSimilarityResultsCleanup = null,
   // Navigation functions
   navigateToCoordinates = null,
   goBackToPreviousPosition = null,
@@ -404,12 +404,12 @@ const AnnotationPanel = ({
   onFindSimilar = null,
   // Similarity search results props
   showSimilarityPanel = false,
-  similarityResults = [],
+  similaritySearchResults = [],
   isSearching = false,
   searchType = null, // 'image' or 'text'
   textSearchQuery = '',
   setShowSimilarityPanel = null,
-  setSimilarityResults = null
+  setSimilaritySearchResults = null
 }) => {
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [activeColorType, setActiveColorType] = useState('stroke'); // 'stroke' or 'fill'
@@ -800,15 +800,15 @@ const AnnotationPanel = ({
         if (result.success && result.annotations) {
           console.log(`📥 Loaded ${result.annotations.length} annotations from Weaviate`);
           
-          // Update similar annotations to display all loaded annotations on the map
-          if (onSimilarAnnotationsUpdate) {
-            onSimilarAnnotationsUpdate(result.annotations);
+          // Update similarity results to display all loaded results on the map
+          if (onSimilarityResultsUpdate) {
+            onSimilarityResultsUpdate(result.annotations);
             setLoadedAnnotationsCount(result.annotations.length);
           }
           
-          // Show the annotations on the map
-          if (setShowSimilarAnnotations) {
-            setShowSimilarAnnotations(true);
+          // Show the results on the map
+          if (setShowSimilarityResults) {
+            setShowSimilarityResults(true);
           }
           
           // Update selected application ID if we loaded a specific one
@@ -891,12 +891,12 @@ const AnnotationPanel = ({
               if (setShowSimilarityPanel) {
                 setShowSimilarityPanel(false);
               }
-              if (setSimilarityResults) {
-                setSimilarityResults([]);
+              if (setSimilaritySearchResults) {
+                setSimilaritySearchResults([]);
               }
-              // Clean up similar annotations from map
-              if (onSimilarAnnotationsCleanup) {
-                onSimilarAnnotationsCleanup();
+              // Clean up similarity results from map
+              if (onSimilarityResultsCleanup) {
+                onSimilarityResultsCleanup();
               }
               // Trigger deactivation event to close annotation layer and update visibility
               const event = new CustomEvent('annotationLayerDeactivated', {
@@ -1195,15 +1195,15 @@ const AnnotationPanel = ({
                       Go Back
                     </button>
                   )}
-                  {/* Map Toggle - only show if we have similar annotations on the map */}
-                  {similarAnnotations.length > 0 && setShowSimilarAnnotations && (
+                  {/* Map Toggle - only show if we have similarity results on the map */}
+                  {similarityResults.length > 0 && setShowSimilarityResults && (
                     <button
-                      onClick={() => setShowSimilarAnnotations(!showSimilarAnnotations)}
+                      onClick={() => setShowSimilarityResults(!showSimilarityResults)}
                       className={`similarity-toggle-btn ${
-                        showSimilarAnnotations ? 'active' : ''
+                        showSimilarityResults ? 'active' : ''
                       }`}
                       style={{
-                        backgroundColor: showSimilarAnnotations ? '#f59e0b' : '#374151',
+                        backgroundColor: showSimilarityResults ? '#f59e0b' : '#374151',
                         color: '#d1d5db',
                         border: '1px solid #4b5563',
                         padding: '3px 6px',
@@ -1215,21 +1215,21 @@ const AnnotationPanel = ({
                         gap: '3px',
                         fontWeight: '500'
                       }}
-                      title={`${showSimilarAnnotations ? 'Hide' : 'Show'} similar annotations on map`}
+                      title={`${showSimilarityResults ? 'Hide' : 'Show'} similarity results on map`}
                     >
                       <i className="fas fa-map-marker-alt"></i>
-                      Map ({similarAnnotations.length})
-                      <i className={`fas ${showSimilarAnnotations ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                      Map ({similarityResults.length})
+                      <i className={`fas ${showSimilarityResults ? 'fa-eye-slash' : 'fa-eye'}`}></i>
                     </button>
                   )}
                   
                   {/* Show on Map button - for new search results */}
-                  {onSimilarAnnotationsUpdate && similarityResults.length > 0 && (
+                  {onSimilarityResultsUpdate && similaritySearchResults.length > 0 && (
                     <button
                       className="similarity-show-map-btn"
                       onClick={() => {
-                        onSimilarAnnotationsUpdate(similarityResults);
-                        // Enable map browsing when showing annotations on map
+                        onSimilarityResultsUpdate(similaritySearchResults);
+                        // Enable map browsing when showing results on map
                         if (setIsMapBrowsingMode) {
                           setIsMapBrowsingMode(true);
                         }
@@ -1247,7 +1247,7 @@ const AnnotationPanel = ({
                         gap: '3px',
                         fontWeight: '500'
                       }}
-                      title="Show similar annotations on the map"
+                      title="Show similarity results on the map"
                     >
                       <i className="fas fa-map-marker-alt"></i>
                       Show on Map
@@ -1261,10 +1261,10 @@ const AnnotationPanel = ({
                       if (setShowSimilarityPanel) {
                         setShowSimilarityPanel(false);
                       }
-                      // Clean up similar annotations from map when closing the window
-                      if (onSimilarAnnotationsCleanup) {
-                        onSimilarAnnotationsCleanup();
-                      }
+              // Clean up similarity results from map when closing the window
+              if (onSimilarityResultsCleanup) {
+                onSimilarityResultsCleanup();
+              }
                     }}
                     title="Close similarity search and clear map"
                     style={{
@@ -1287,9 +1287,9 @@ const AnnotationPanel = ({
                     <i className="fas fa-spinner fa-spin"></i>
                     <div>Searching for similar annotations...</div>
                   </div>
-                ) : similarityResults.length > 0 ? (
+                ) : similaritySearchResults.length > 0 ? (
                   <div className="similarity-results-list">
-                    {similarityResults.map((result, index) => {
+                    {similaritySearchResults.map((result, index) => {
                       const props = result.properties || result;
                       const metadata = props.metadata || '';
                       
@@ -1379,10 +1379,10 @@ const AnnotationPanel = ({
                                     }
                                     
                                     if (wellRelativeX !== undefined && wellRelativeY !== undefined && parsedMetadata.well_id) {
-                                      // Get well information - try similarAnnotationWellMap first, then use getWellInfoById
-                                      let wellInfo = similarAnnotationWellMap[parsedMetadata.well_id];
+                                      // Get well information - try similarityResultsWellMap first, then use getWellInfoById
+                                      let wellInfo = similarityResultsWellMap[parsedMetadata.well_id];
                                       
-                                      // If not in similarAnnotationWellMap, try to get it dynamically
+                                      // If not in similarityResultsWellMap, try to get it dynamically
                                       if (!wellInfo && getWellInfoById) {
                                         wellInfo = getWellInfoById(parsedMetadata.well_id);
                                       }
@@ -1396,10 +1396,10 @@ const AnnotationPanel = ({
                                         console.log(`✅ Well center: (${wellInfo.centerX.toFixed(3)}, ${wellInfo.centerY.toFixed(3)})`);
                                         console.log(`✅ Stage coords: (${stageX.toFixed(3)}, ${stageY.toFixed(3)})`);
                                         
-                                        // Automatically show similar annotations on map if not already shown
-                                        if (onSimilarAnnotationsUpdate && similarityResults.length > 0 && similarAnnotations.length === 0) {
-                                          console.log('🗺️ Auto-triggering similar annotations render on map');
-                                          onSimilarAnnotationsUpdate(similarityResults);
+                                        // Automatically show similarity results on map if not already shown
+                                        if (onSimilarityResultsUpdate && similaritySearchResults.length > 0 && !showSimilarityResults) {
+                                          console.log('🗺️ Auto-triggering similarity results render on map');
+                                          onSimilarityResultsUpdate(similaritySearchResults);
                                         }
                                         
                                         // Enable map browsing when navigating to annotation
@@ -1411,7 +1411,7 @@ const AnnotationPanel = ({
                                         navigateToCoordinates(stageX, stageY, currentZoomLevel, currentScaleLevel);
                                       } else {
                                         console.warn(`❌ No well info found for well ${parsedMetadata.well_id}`);
-                                        console.warn(`Available wells in similarAnnotationWellMap:`, Object.keys(similarAnnotationWellMap));
+                                        console.warn(`Available wells in similarityResultsWellMap:`, Object.keys(similarityResultsWellMap));
                                       }
                                     }
                                   }}
@@ -1529,7 +1529,7 @@ AnnotationPanel.propTypes = {
   onClearAllAnnotations: PropTypes.func.isRequired,
   onExportAnnotations: PropTypes.func.isRequired,
   wellInfoMap: PropTypes.object, // Map of annotation IDs to well information
-  similarAnnotationWellMap: PropTypes.object, // Map of well IDs to well information for similar annotations
+  similarityResultsWellMap: PropTypes.object, // Map of well IDs to well information for similarity results
   getWellInfoById: PropTypes.func, // Function to get well info by well ID
   embeddingStatus: PropTypes.object, // Map of annotation IDs to embedding status
   mapScale: PropTypes.object, // Current map scale for image extraction
@@ -1551,13 +1551,13 @@ AnnotationPanel.propTypes = {
   // Map browsing state
   isMapBrowsingMode: PropTypes.bool,
   setIsMapBrowsingMode: PropTypes.func,
-  // Similar annotation map rendering
-  onSimilarAnnotationsUpdate: PropTypes.func,
-  // Similar annotations state and controls
-  similarAnnotations: PropTypes.array,
-  showSimilarAnnotations: PropTypes.bool,
-  setShowSimilarAnnotations: PropTypes.func,
-  onSimilarAnnotationsCleanup: PropTypes.func,
+  // Similarity results map rendering
+  onSimilarityResultsUpdate: PropTypes.func,
+  // Similarity results state and controls
+  similarityResults: PropTypes.array,
+  showSimilarityResults: PropTypes.bool,
+  setShowSimilarityResults: PropTypes.func,
+  onSimilarityResultsCleanup: PropTypes.func,
   // Navigation functions
   navigateToCoordinates: PropTypes.func,
   goBackToPreviousPosition: PropTypes.func,
@@ -1572,12 +1572,12 @@ AnnotationPanel.propTypes = {
   onFindSimilar: PropTypes.func,
   // Similarity search results props
   showSimilarityPanel: PropTypes.bool,
-  similarityResults: PropTypes.array,
+  similaritySearchResults: PropTypes.array,
   isSearching: PropTypes.bool,
   searchType: PropTypes.string,
   textSearchQuery: PropTypes.string,
   setShowSimilarityPanel: PropTypes.func,
-  setSimilarityResults: PropTypes.func
+  setSimilaritySearchResults: PropTypes.func
 };
 
 export default AnnotationPanel;

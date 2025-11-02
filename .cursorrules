@@ -188,7 +188,7 @@ frontend/                  # React application
 ├── vite.config.mjs       # Vite build configuration
 ├── package.json          # Frontend dependencies and scripts
 ├── components/           # Reusable UI components
-│   ├── annotation/       # Image annotation system
+│   ├── similarity_search/       # Image annotation system
 │   │   ├── AnnotationCanvas.jsx      # Canvas for drawing annotations
 │   │   ├── AnnotationDetailsWindow.jsx  # Annotation details modal
 │   │   ├── AnnotationPanel.css       # Annotation panel styles

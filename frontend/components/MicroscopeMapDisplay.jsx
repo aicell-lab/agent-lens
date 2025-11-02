@@ -7,9 +7,10 @@ import useExperimentZarrManager from './microscope/map/ExperimentZarrManager';
 import TileProcessingManager from './microscope/map/TileProcessingManager';
 import QuickScanConfig from './microscope/controls/QuickScanConfig';
 import NormalScanConfig from './microscope/controls/NormalScanConfig';
-import AnnotationPanel from './annotation/AnnotationPanel';
-import AnnotationCanvas from './annotation/AnnotationCanvas';
-import SimilarAnnotationRenderer from './annotation/SimilarAnnotationRenderer';
+import AnnotationPanel from './similarity_search/AnnotationPanel';
+import AnnotationCanvas from './similarity_search/AnnotationCanvas';
+import SimilarityResultsRenderer from './similarity_search/SimilarityResultsRenderer';
+import SimilarityResultInfoWindow from './similarity_search/SimilarityResultInfoWindow';
 import { 
   startSegmentation, 
   getSegmentationStatus, 
@@ -235,13 +236,18 @@ const MicroscopeMapDisplay = forwardRef(({
   const [annotations, setAnnotations] = useState([]);
   const annotationDropdownRef = useRef(null);
 
-  // Similar annotations state
-  const [similarAnnotations, setSimilarAnnotations] = useState([]);
-  const [showSimilarAnnotations, setShowSimilarAnnotations] = useState(false);
-  const [similarAnnotationWellMap, setSimilarAnnotationWellMap] = useState({});
+  // Similarity results state
+  const [similarityResults, setSimilarityResults] = useState([]);
+  const [showSimilarityResults, setShowSimilarityResults] = useState(false);
+  const [similarityResultsWellMap, setSimilarityResultsWellMap] = useState({});
+  
+  // Similarity result info window state (for clickable results)
+  const [selectedSimilarityResult, setSelectedSimilarityResult] = useState(null);
+  const [similarityResultInfoWindowPosition, setSimilarityResultInfoWindowPosition] = useState({ x: 0, y: 0 });
+  const [showSimilarityResultInfoWindow, setShowSimilarityResultInfoWindow] = useState(false);
   
   // Similarity search state (moved from AnnotationPanel)
-  const [similarityResults, setSimilarityResults] = useState([]);
+  const [similaritySearchResults, setSimilaritySearchResults] = useState([]);
   const [showSimilarityPanel, setShowSimilarityPanel] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [textSearchQuery, setTextSearchQuery] = useState('');
@@ -851,14 +857,14 @@ const MicroscopeMapDisplay = forwardRef(({
     return null;
   }, [getWellPlateConfig, getWellPlateLayout, wellPaddingMm]);
 
-  // Similar annotation handlers
-  const handleSimilarAnnotationsUpdate = useCallback((newSimilarAnnotations) => {
-    setSimilarAnnotations(newSimilarAnnotations);
+  // Similarity result handlers
+  const handleSimilarityResultsUpdate = useCallback((newSimilarityResults) => {
+    setSimilarityResults(newSimilarityResults);
     
-    // Build well map for similar annotations
+    // Build well map for similarity results
     const wellMap = {};
-    newSimilarAnnotations.forEach((similarAnnotation, index) => {
-      const props = similarAnnotation.properties || similarAnnotation;
+    newSimilarityResults.forEach((similarityResult, index) => {
+      const props = similarityResult.properties || similarityResult;
       const metadata = props.metadata || '';
       
       let parsedMetadata = {};
@@ -874,7 +880,7 @@ const MicroscopeMapDisplay = forwardRef(({
               .replace(/None/g, 'null');
             parsedMetadata = JSON.parse(jsonString);
           } catch (error) {
-            console.error('Error parsing similar annotation metadata:', error);
+            console.error('Error parsing similarity result metadata:', error);
             parsedMetadata = { raw: metadata };
           }
         }
@@ -894,25 +900,69 @@ const MicroscopeMapDisplay = forwardRef(({
       }
     });
     
-    setSimilarAnnotationWellMap(wellMap);
-    setShowSimilarAnnotations(true);
+    setSimilarityResultsWellMap(wellMap);
+    setShowSimilarityResults(true);
     
-    console.log('🔍 Built well map for similar annotations:', wellMap);
+    console.log('🔍 Built well map for similarity results:', wellMap);
     console.log('🔍 Available well IDs:', Object.keys(wellMap));
     
     if (appendLog) {
-      appendLog(`Showing ${newSimilarAnnotations.length} similar annotations on map`);
+      appendLog(`Showing ${newSimilarityResults.length} similarity results on map`);
     }
   }, [getWellInfoById, appendLog]);
 
-  // Cleanup similar annotations when window is closed
-  const handleSimilarAnnotationsCleanup = useCallback(() => {
-    setSimilarAnnotations([]);
-    setSimilarAnnotationWellMap({});
-    setShowSimilarAnnotations(false);
+  // Cleanup similarity results when window is closed
+  const handleSimilarityResultsCleanup = useCallback(() => {
+    setSimilaritySearchResults([]);
+    setSimilarityResultsWellMap({});
+    setShowSimilarityResults(false);
+    // Also close similarity result info window
+    setShowSimilarityResultInfoWindow(false);
+    setSelectedSimilarityResult(null);
     
     if (appendLog) {
-      appendLog('Cleared similar annotations from map');
+      appendLog('Cleared similarity results from map');
+    }
+  }, [appendLog]);
+
+  // Handle clicking on a similarity result to show info window
+  const handleSimilarityResultClick = useCallback((result, clickPosition) => {
+    // Get container bounds for window positioning
+    const containerBounds = mapContainerRef.current?.getBoundingClientRect();
+    
+    // Calculate window position near the click, adjusted for screen edges
+    const windowWidth = 280;
+    const windowHeight = 350;
+    const padding = 20;
+    
+    let windowX = clickPosition.x + 10; // Offset slightly from cursor
+    let windowY = clickPosition.y + 10;
+    
+    if (containerBounds) {
+      // Adjust if would overflow right edge
+      if (windowX + windowWidth + padding > containerBounds.right) {
+        windowX = containerBounds.right - windowWidth - padding;
+      }
+      // Adjust if would overflow left edge
+      if (windowX < containerBounds.left + padding) {
+        windowX = containerBounds.left + padding;
+      }
+      // Adjust if would overflow bottom edge
+      if (windowY + windowHeight + padding > containerBounds.bottom) {
+        windowY = containerBounds.bottom - windowHeight - padding;
+      }
+      // Adjust if would overflow top edge
+      if (windowY < containerBounds.top + padding) {
+        windowY = containerBounds.top + padding;
+      }
+    }
+    
+    setSelectedSimilarityResult(result);
+    setSimilarityResultInfoWindowPosition({ x: windowX, y: windowY });
+    setShowSimilarityResultInfoWindow(true);
+    
+    if (appendLog) {
+      appendLog(`Opened info window for similarity result: ${result.properties?.image_id || 'unknown'}`);
     }
   }, [appendLog]);
 
@@ -930,11 +980,11 @@ const MicroscopeMapDisplay = forwardRef(({
     return valid;
   }, []);
 
-  // Note: handleClearSimilarAnnotations is available for future use
-  // const handleClearSimilarAnnotations = useCallback(() => {
-  //   setSimilarAnnotations([]);
-  //   setSimilarAnnotationWellMap({});
-  //   setShowSimilarAnnotations(false);
+  // Note: handleClearSimilarityResults is available for future use
+  // const handleClearSimilarityResults = useCallback(() => {
+  //   setSimilarityResults([]);
+  //   setSimilarityResultsWellMap({});
+  //   setShowSimilarityResults(false);
   //   
   //   if (appendLog) {
   //     appendLog('Cleared similar annotations from map');
@@ -2625,7 +2675,7 @@ const MicroscopeMapDisplay = forwardRef(({
     return { x: displayX, y: displayY };
   }, [mapViewMode, stageDimensions, pixelsPerMm, mapScale, effectivePan]);
 
-  // Note: wellRelativeToStageCoords is implemented in SimilarAnnotationRenderer
+  // Note: wellRelativeToStageCoords is implemented in SimilarityResultsRenderer
   // const wellRelativeToStageCoords = useCallback((wellRelativeX, wellRelativeY, wellInfo) => {
   //   return {
   //     x: wellInfo.centerX + wellRelativeX,
@@ -3626,7 +3676,7 @@ const MicroscopeMapDisplay = forwardRef(({
     }
 
     setIsSearching(true);
-    setSimilarityResults([]);
+    setSimilaritySearchResults([]);
     setShowSimilarityPanel(true);
     setSearchType('text');
 
@@ -3667,11 +3717,11 @@ const MicroscopeMapDisplay = forwardRef(({
             results = results ? [results] : [];
           }
           
-          setSimilarityResults(results);
+          setSimilaritySearchResults(results);
           showNotification(`Found ${results.length} similar annotation(s)`, 'success');
         } else {
           console.error('No results found:', result);
-          setSimilarityResults([]);
+          setSimilaritySearchResults([]);
           showNotification('No similar annotations found.', 'info');
         }
       } else {
@@ -3710,7 +3760,7 @@ const MicroscopeMapDisplay = forwardRef(({
     }
 
     setIsSearching(true);
-    setSimilarityResults([]);
+    setSimilaritySearchResults([]);
     setShowSimilarityPanel(true);
     setSearchType('image');
 
@@ -3755,11 +3805,11 @@ const MicroscopeMapDisplay = forwardRef(({
             results = results ? [results] : [];
           }
           
-          setSimilarityResults(results);
+          setSimilaritySearchResults(results);
           showNotification(`Found ${results.length} similar annotation(s)`, 'success');
         } else {
           console.error('No results found:', result);
-          setSimilarityResults([]);
+          setSimilaritySearchResults([]);
           showNotification('No similar annotations found.', 'info');
         }
       } else {
@@ -5434,7 +5484,7 @@ const MicroscopeMapDisplay = forwardRef(({
                       onClearAllAnnotations={handleClearAllAnnotations}
                       onExportAnnotations={handleExportAnnotations}
                       wellInfoMap={annotationWellMap}
-                      similarAnnotationWellMap={similarAnnotationWellMap}
+                      similarityResultsWellMap={similarityResultsWellMap}
                       getWellInfoById={getWellInfoById}
                       embeddingStatus={embeddingStatus}
                       mapScale={mapScale}
@@ -5453,12 +5503,12 @@ const MicroscopeMapDisplay = forwardRef(({
                       wellPlateType={wellPlateType}
                       timepoint={0}
                       onEmbeddingsGenerated={handleEmbeddingsGenerated}
-                      onSimilarAnnotationsUpdate={handleSimilarAnnotationsUpdate}
-                      // Similar annotations state and controls
-                      similarAnnotations={similarAnnotations}
-                      showSimilarAnnotations={showSimilarAnnotations}
-                      setShowSimilarAnnotations={setShowSimilarAnnotations}
-                      onSimilarAnnotationsCleanup={handleSimilarAnnotationsCleanup}
+                      onSimilarityResultsUpdate={handleSimilarityResultsUpdate}
+                      // Similarity results state and controls
+                      similarityResults={similarityResults}
+                      showSimilarityResults={showSimilarityResults}
+                      setShowSimilarityResults={setShowSimilarityResults}
+                      onSimilarityResultsCleanup={handleSimilarityResultsCleanup}
                       // Navigation functions
                       navigateToCoordinates={navigateToCoordinates}
                       goBackToPreviousPosition={goBackToPreviousPosition}
@@ -5473,12 +5523,12 @@ const MicroscopeMapDisplay = forwardRef(({
                       onFindSimilar={handleFindSimilar}
                       // Similarity search results props
                       showSimilarityPanel={showSimilarityPanel}
-                      similarityResults={similarityResults}
+                      similaritySearchResults={similaritySearchResults}
                       isSearching={isSearching}
                       searchType={searchType}
                       textSearchQuery={textSearchQuery}
                       setShowSimilarityPanel={setShowSimilarityPanel}
-                      setSimilarityResults={setSimilarityResults}
+                      setSimilaritySearchResults={setSimilaritySearchResults}
                     />
                 </div>
               </div>
@@ -5609,19 +5659,31 @@ const MicroscopeMapDisplay = forwardRef(({
            channelInfo={getCurrentChannelInfo()}
          />
          
-         {/* Similar Annotations Renderer - only in FREE_PAN mode */}
-         {mapViewMode === 'FREE_PAN' && (
-           <SimilarAnnotationRenderer
-             containerRef={mapContainerRef}
-             similarAnnotations={similarAnnotations}
-             isVisible={showSimilarAnnotations}
-             mapScale={mapScale}
-             mapPan={effectivePan}
-             stageDimensions={stageDimensions}
-             pixelsPerMm={pixelsPerMm}
-             wellInfoMap={similarAnnotationWellMap}
-           />
-         )}
+        {/* Similarity Results Renderer - only in FREE_PAN mode */}
+        {mapViewMode === 'FREE_PAN' && (
+          <SimilarityResultsRenderer
+            containerRef={mapContainerRef}
+            similarityResults={similarityResults}
+            isVisible={showSimilarityResults}
+            mapScale={mapScale}
+            mapPan={effectivePan}
+            stageDimensions={stageDimensions}
+            pixelsPerMm={pixelsPerMm}
+            wellInfoMap={similarityResultsWellMap}
+            isDrawingMode={isDrawingMode}
+            isMapBrowsingMode={isMapBrowsingMode}
+            onResultClick={handleSimilarityResultClick}
+          />
+        )}
+        
+        {/* Similarity Result Info Window - shows details when clicking results */}
+        <SimilarityResultInfoWindow
+          result={selectedSimilarityResult}
+          position={similarityResultInfoWindowPosition}
+          isVisible={showSimilarityResultInfoWindow}
+          onClose={() => setShowSimilarityResultInfoWindow(false)}
+          containerBounds={mapContainerRef.current?.getBoundingClientRect()}
+        />
         
         {/* Rectangle selection active indicator */}
         {mapViewMode === 'FREE_PAN' && isRectangleSelection && !rectangleStart && !isScanInProgress && !isQuickScanInProgress && (
