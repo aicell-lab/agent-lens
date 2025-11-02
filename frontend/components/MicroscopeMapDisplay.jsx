@@ -5478,6 +5478,7 @@ const MicroscopeMapDisplay = forwardRef(({
                       searchType={searchType}
                       textSearchQuery={textSearchQuery}
                       setShowSimilarityPanel={setShowSimilarityPanel}
+                      setSimilarityResults={setSimilarityResults}
                     />
                 </div>
               </div>

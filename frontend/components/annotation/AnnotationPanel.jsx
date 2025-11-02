@@ -408,7 +408,8 @@ const AnnotationPanel = ({
   isSearching = false,
   searchType = null, // 'image' or 'text'
   textSearchQuery = '',
-  setShowSimilarityPanel = null
+  setShowSimilarityPanel = null,
+  setSimilarityResults = null
 }) => {
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [activeColorType, setActiveColorType] = useState('stroke'); // 'stroke' or 'fill'
@@ -886,6 +887,17 @@ const AnnotationPanel = ({
               if (onClearAllAnnotations) {
                 onClearAllAnnotations();
               }
+              // Clean up similarity search results
+              if (setShowSimilarityPanel) {
+                setShowSimilarityPanel(false);
+              }
+              if (setSimilarityResults) {
+                setSimilarityResults([]);
+              }
+              // Clean up similar annotations from map
+              if (onSimilarAnnotationsCleanup) {
+                onSimilarAnnotationsCleanup();
+              }
               // Trigger deactivation event to close annotation layer and update visibility
               const event = new CustomEvent('annotationLayerDeactivated', {
                 detail: { layerId: activeLayer, layerType: getActiveLayerType() }
@@ -894,7 +906,7 @@ const AnnotationPanel = ({
             }}
             className="ml-auto text-red-400 hover:text-red-300 transition-colors"
             style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px' }}
-            title="Close annotation panel, clear annotations, and deactivate annotation layer"
+            title="Close annotation panel, clear annotations and similarity results, and deactivate annotation layer"
           >
             <i className="fas fa-times"></i>
           </button>
@@ -1564,7 +1576,8 @@ AnnotationPanel.propTypes = {
   isSearching: PropTypes.bool,
   searchType: PropTypes.string,
   textSearchQuery: PropTypes.string,
-  setShowSimilarityPanel: PropTypes.func
+  setShowSimilarityPanel: PropTypes.func,
+  setSimilarityResults: PropTypes.func
 };
 
 export default AnnotationPanel;
