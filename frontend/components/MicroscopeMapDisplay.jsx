@@ -227,7 +227,7 @@ const MicroscopeMapDisplay = forwardRef(({
   const [isAnnotationDropdownOpen, setIsAnnotationDropdownOpen] = useState(false);
   const [isDrawingMode, setIsDrawingMode] = useState(false);
   const [currentAnnotationTool, setCurrentAnnotationTool] = useState('select');
-  const [isMapBrowsingMode, setIsMapBrowsingMode] = useState(false);
+  const [isMapBrowsingMode, setIsMapBrowsingMode] = useState(true); // Default to enabled
   const [annotationStrokeColor, setAnnotationStrokeColor] = useState('#ff0000');
   const [annotationStrokeWidth, setAnnotationStrokeWidth] = useState(2);
   const [annotationFillColor, setAnnotationFillColor] = useState('transparent');
@@ -239,6 +239,13 @@ const MicroscopeMapDisplay = forwardRef(({
   const [similarAnnotations, setSimilarAnnotations] = useState([]);
   const [showSimilarAnnotations, setShowSimilarAnnotations] = useState(false);
   const [similarAnnotationWellMap, setSimilarAnnotationWellMap] = useState({});
+  
+  // Similarity search state (moved from AnnotationPanel)
+  const [similarityResults, setSimilarityResults] = useState([]);
+  const [showSimilarityPanel, setShowSimilarityPanel] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
+  const [textSearchQuery, setTextSearchQuery] = useState('');
+  const [searchType, setSearchType] = useState(null); // 'image' or 'text'
 
   // Layer visibility management (moved early to avoid dependency issues)
   const [visibleLayers, setVisibleLayers] = useState({
@@ -909,6 +916,20 @@ const MicroscopeMapDisplay = forwardRef(({
     }
   }, [appendLog]);
 
+  // Convert collection name to valid Weaviate class name (no hyphens, starts with uppercase)
+  const convertToValidCollectionName = useCallback((name) => {
+    // Split by hyphens and capitalize each word, then join
+    let valid = name.split('-').map(word => 
+      word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+    ).join('');
+    
+    // Ensure it starts with uppercase letter
+    if (!valid[0] || !valid[0].match(/[A-Z]/)) {
+      valid = 'A' + valid.slice(1);
+    }
+    return valid;
+  }, []);
+
   // Note: handleClearSimilarAnnotations is available for future use
   // const handleClearSimilarAnnotations = useCallback(() => {
   //   setSimilarAnnotations([]);
@@ -988,6 +1009,7 @@ const MicroscopeMapDisplay = forwardRef(({
     handleDeleteExperiment,
     renderDialogs,
   } = experimentManager;
+
 
   // Function to refresh experiment data after segmentation completion
   const refreshExperimentData = useCallback(async () => {
@@ -3178,6 +3200,22 @@ const MicroscopeMapDisplay = forwardRef(({
       const { layerId, layerType } = event.detail;
       console.log(`[MicroscopeMapDisplay] Annotation layer deactivated: ${layerId} (${layerType})`);
       
+      // Update layer annotation visibility to false
+      if (layerType === 'experiment') {
+        // For experiment layers, dispatch experimentAnnotationToggled event
+        const toggleEvent = new CustomEvent('experimentAnnotationToggled', {
+          detail: { experimentName: layerId, annotationVisible: false }
+        });
+        window.dispatchEvent(toggleEvent);
+      } else {
+        // For regular layers, update annotationVisible in layers state
+        setLayers(prev => prev.map(layer => 
+          layer.id === layerId 
+            ? { ...layer, annotationVisible: false }
+            : layer
+        ));
+      }
+      
       // Close annotation panel and exit drawing mode
       setIsAnnotationDropdownOpen(false);
       setIsDrawingMode(false);
@@ -3562,6 +3600,179 @@ const MicroscopeMapDisplay = forwardRef(({
 
   // Add state for selected dataset in historical mode
   const [selectedHistoricalDataset, setSelectedHistoricalDataset] = useState(null);
+
+  // Text search handler (moved from AnnotationPanel)
+  // Note: This must be defined AFTER all dependencies are declared (experiments, selectedHistoricalDataset, etc.)
+  const handleTextSearch = useCallback(async () => {
+    if (!textSearchQuery.trim()) {
+      showNotification('Please enter a search query.', 'warning');
+      return;
+    }
+
+    // Get dataset ID for application ID - support both historical datasets and experiments
+    let applicationId = selectedHistoricalDataset?.id;
+    
+    // If no historical dataset, check if we're using an experiment layer
+    if (!applicationId && activeLayer && experiments.length > 0) {
+      const experiment = experiments.find(exp => exp.name === activeLayer);
+      if (experiment) {
+        applicationId = experiment.name; // Use experiment name as application ID
+      }
+    }
+    
+    if (!applicationId) {
+      showNotification('No dataset or experiment selected. Cannot search for annotations.', 'warning');
+      return;
+    }
+
+    setIsSearching(true);
+    setSimilarityResults([]);
+    setShowSimilarityPanel(true);
+    setSearchType('text');
+
+    try {
+      const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
+      
+      // Prepare query parameters
+      const queryParams = new URLSearchParams({
+        collection_name: convertToValidCollectionName('agent-lens'),
+        application_id: applicationId,
+        query_text: textSearchQuery.trim(),
+        limit: '10'
+      });
+      
+      const response = await fetch(`/agent-lens/apps/${serviceId}/similarity/search/text?${queryParams}`, {
+        method: 'POST'
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        
+        if (result.success && result.results) {
+          // Handle different result formats from Weaviate
+          let results = result.results;
+          
+          // If results has an 'objects' property, extract it
+          if (results.objects && Array.isArray(results.objects)) {
+            results = results.objects;
+          }
+          
+          // If results is not an array, try to extract objects from it
+          if (!Array.isArray(results) && results.objects) {
+            results = results.objects;
+          }
+          
+          // Final validation
+          if (!Array.isArray(results)) {
+            results = results ? [results] : [];
+          }
+          
+          setSimilarityResults(results);
+          showNotification(`Found ${results.length} similar annotation(s)`, 'success');
+        } else {
+          console.error('No results found:', result);
+          setSimilarityResults([]);
+          showNotification('No similar annotations found.', 'info');
+        }
+      } else {
+        console.error('Text search failed:', await response.text());
+        showNotification('Failed to search for annotations.', 'error');
+      }
+    } catch (error) {
+      console.error('Error searching for annotations:', error);
+      showNotification('Error searching for annotations: ' + error.message, 'error');
+    } finally {
+      setIsSearching(false);
+    }
+  }, [textSearchQuery, selectedHistoricalDataset, activeLayer, experiments, convertToValidCollectionName, showNotification]);
+
+  // Image similarity search handler (for Find Similar button in AnnotationPanel)
+  const handleFindSimilar = useCallback(async (annotation) => {
+    if (!annotation.embeddings?.imageEmbedding) {
+      showNotification('This annotation does not have embeddings. Cannot search for similar annotations.', 'warning');
+      return;
+    }
+
+    // Get dataset ID for application ID - support both historical datasets and experiments
+    let applicationId = selectedHistoricalDataset?.id;
+    
+    // If no historical dataset, check if we're using an experiment layer
+    if (!applicationId && activeLayer && experiments.length > 0) {
+      const experiment = experiments.find(exp => exp.name === activeLayer);
+      if (experiment) {
+        applicationId = experiment.name; // Use experiment name as application ID
+      }
+    }
+    
+    if (!applicationId) {
+      showNotification('No dataset or experiment selected. Cannot search for similar annotations.', 'warning');
+      return;
+    }
+
+    setIsSearching(true);
+    setSimilarityResults([]);
+    setShowSimilarityPanel(true);
+    setSearchType('image');
+
+    try {
+      const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
+      
+      // Prepare query parameters
+      const queryParams = new URLSearchParams({
+        collection_name: convertToValidCollectionName('agent-lens'),
+        application_id: applicationId,
+        limit: '10',
+        include_vector: 'false'
+      });
+      
+      const response = await fetch(`/agent-lens/apps/${serviceId}/similarity/search/vector?${queryParams}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(annotation.embeddings.imageEmbedding)
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        
+        if (result.success && result.results) {
+          // Handle different result formats from Weaviate
+          let results = result.results;
+          
+          // If results has an 'objects' property, extract it
+          if (results.objects && Array.isArray(results.objects)) {
+            results = results.objects;
+          }
+          
+          // If results is not an array, try to extract objects from it
+          if (!Array.isArray(results) && results.objects) {
+            results = results.objects;
+          }
+          
+          // Final validation
+          if (!Array.isArray(results)) {
+            results = results ? [results] : [];
+          }
+          
+          setSimilarityResults(results);
+          showNotification(`Found ${results.length} similar annotation(s)`, 'success');
+        } else {
+          console.error('No results found:', result);
+          setSimilarityResults([]);
+          showNotification('No similar annotations found.', 'info');
+        }
+      } else {
+        console.error('Similarity search failed:', await response.text());
+        showNotification('Failed to search for similar annotations.', 'error');
+      }
+    } catch (error) {
+      console.error('Error searching for similar annotations:', error);
+      showNotification('Error searching for similar annotations: ' + error.message, 'error');
+    } finally {
+      setIsSearching(false);
+    }
+  }, [selectedHistoricalDataset, activeLayer, experiments, convertToValidCollectionName, showNotification]);
   
   // Helper function to get current channel information for annotations
   const getCurrentChannelInfo = useCallback(() => {
@@ -5155,6 +5366,36 @@ const MicroscopeMapDisplay = forwardRef(({
                   </div>
                 )}
               </div>
+              
+              {/* Text search input - only show when annotation layer is active */}
+              {isAnnotationDropdownOpen && activeLayer && (
+                <div className="relative ml-2">
+                  <div className="flex items-center space-x-1">
+                    <input
+                      type="text"
+                      value={textSearchQuery}
+                      onChange={(e) => setTextSearchQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && textSearchQuery.trim() && !isSearching) {
+                          handleTextSearch();
+                        }
+                      }}
+                      placeholder="Search annotations..."
+                      className="px-2 py-1 text-xs bg-gray-800 text-white border border-gray-600 rounded focus:outline-none focus:border-blue-500"
+                      style={{ width: '200px' }}
+                      disabled={isSearching}
+                    />
+                    <button
+                      onClick={handleTextSearch}
+                      disabled={!textSearchQuery.trim() || isSearching}
+                      className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded flex items-center"
+                      title="Search for similar annotations using text"
+                    >
+                      <i className={`fas ${isSearching ? 'fa-spinner fa-spin' : 'fa-search'}`}></i>
+                    </button>
+                  </div>
+                </div>
+              )}
             </>
           )}
           
@@ -5172,7 +5413,7 @@ const MicroscopeMapDisplay = forwardRef(({
             <>
               {/* Annotation panel - now controlled by layer panel */}
               <div className="relative mr-4" ref={annotationDropdownRef}>
-                <div className={`absolute top-full right-0 mt-1 z-20 ${isAnnotationDropdownOpen ? 'block' : 'hidden'}`}>
+                <div className={`absolute top-full right-0 mt-3 z-20 ${isAnnotationDropdownOpen ? 'block' : 'hidden'}`}>
                   <AnnotationPanel
                       isDrawingMode={isDrawingMode}
                       setIsDrawingMode={setIsDrawingMode}
@@ -5228,6 +5469,15 @@ const MicroscopeMapDisplay = forwardRef(({
                       activeLayer={activeLayer}
                       layers={layers}
                       experiments={experiments}
+                      // Similarity search handler
+                      onFindSimilar={handleFindSimilar}
+                      // Similarity search results props
+                      showSimilarityPanel={showSimilarityPanel}
+                      similarityResults={similarityResults}
+                      isSearching={isSearching}
+                      searchType={searchType}
+                      textSearchQuery={textSearchQuery}
+                      setShowSimilarityPanel={setShowSimilarityPanel}
                     />
                 </div>
               </div>

@@ -399,18 +399,22 @@ const AnnotationPanel = ({
   // Layer activation props
   activeLayer = null,
   layers = [],
-  experiments = []
+  experiments = [],
+  // Similarity search handler
+  onFindSimilar = null,
+  // Similarity search results props
+  showSimilarityPanel = false,
+  similarityResults = [],
+  isSearching = false,
+  searchType = null, // 'image' or 'text'
+  textSearchQuery = '',
+  setShowSimilarityPanel = null
 }) => {
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [activeColorType, setActiveColorType] = useState('stroke'); // 'stroke' or 'fill'
   const [selectedAnnotation, setSelectedAnnotation] = useState(null);
   const [showDetailsWindow, setShowDetailsWindow] = useState(false);
   const [detailsWindowPosition, setDetailsWindowPosition] = useState({ x: 100, y: 100 });
-  
-  // Similarity search states
-  const [similarityResults, setSimilarityResults] = useState([]);
-  const [showSimilarityPanel, setShowSimilarityPanel] = useState(false);
-  const [isSearching, setIsSearching] = useState(false);
   
   // Load all annotations states
   const [isLoadingAllAnnotations, setIsLoadingAllAnnotations] = useState(false);
@@ -419,10 +423,6 @@ const AnnotationPanel = ({
   const [selectedApplicationId, setSelectedApplicationId] = useState(null);
   const [isLoadingApplications, setIsLoadingApplications] = useState(false);
   const [showApplicationList, setShowApplicationList] = useState(false);
-  
-  // Text search states
-  const [searchType, setSearchType] = useState(null); // 'image' or 'text'
-  const [textSearchQuery, setTextSearchQuery] = useState('');
 
   // Helper functions for layer management
   const getActiveLayerInfo = () => {
@@ -832,169 +832,9 @@ const AnnotationPanel = ({
     }
   };
 
-  const handleFindSimilar = async (annotation) => {
-    if (!annotation.embeddings?.imageEmbedding) {
-      alert('This annotation does not have embeddings. Cannot search for similar annotations.');
-      return;
-    }
-
-    // Get dataset ID for application ID - support both historical datasets and experiments
-    let applicationId = selectedHistoricalDataset?.id;
-    
-    // If no historical dataset, check if we're using an experiment layer
-    if (!applicationId && activeLayer && experiments.length > 0) {
-      const experiment = experiments.find(exp => exp.name === activeLayer);
-      if (experiment) {
-        applicationId = experiment.name; // Use experiment name as application ID
-      }
-    }
-    
-    if (!applicationId) {
-      alert('No dataset or experiment selected. Cannot search for similar annotations.');
-      return;
-    }
-
-    setIsSearching(true);
-    setSimilarityResults([]);
-    setShowSimilarityPanel(true);
-    setSearchType('image');
-
-    try {
-      const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
-      
-      // Prepare query parameters
-      const queryParams = new URLSearchParams({
-        collection_name: convertToValidCollectionName('agent-lens'),
-        application_id: applicationId,
-        limit: '10',
-        include_vector: 'false'
-      });
-      
-      const response = await fetch(`/agent-lens/apps/${serviceId}/similarity/search/vector?${queryParams}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(annotation.embeddings.imageEmbedding)
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        
-        if (result.success && result.results) {
-          // Handle different result formats from Weaviate
-          let results = result.results;
-          
-          // If results has an 'objects' property, extract it
-          if (results.objects && Array.isArray(results.objects)) {
-            results = results.objects;
-          }
-          
-          // If results is not an array, try to extract objects from it
-          if (!Array.isArray(results) && results.objects) {
-            results = results.objects;
-          }
-          
-          // Final validation
-          if (!Array.isArray(results)) {
-            results = results ? [results] : [];
-          }
-          
-          setSimilarityResults(results);
-        } else {
-          console.error('No results found:', result);
-          setSimilarityResults([]);
-        }
-      } else {
-        console.error('Similarity search failed:', await response.text());
-        alert('Failed to search for similar annotations.');
-      }
-    } catch (error) {
-      console.error('Error searching for similar annotations:', error);
-      alert('Error searching for similar annotations: ' + error.message);
-    } finally {
-      setIsSearching(false);
-    }
-  };
-
-  const handleTextSearch = async () => {
-    if (!textSearchQuery.trim()) {
-      alert('Please enter a search query.');
-      return;
-    }
-
-    // Get dataset ID for application ID - support both historical datasets and experiments
-    let applicationId = selectedHistoricalDataset?.id;
-    
-    // If no historical dataset, check if we're using an experiment layer
-    if (!applicationId && activeLayer && experiments.length > 0) {
-      const experiment = experiments.find(exp => exp.name === activeLayer);
-      if (experiment) {
-        applicationId = experiment.name; // Use experiment name as application ID
-      }
-    }
-    
-    if (!applicationId) {
-      alert('No dataset or experiment selected. Cannot search for annotations.');
-      return;
-    }
-
-    setIsSearching(true);
-    setSimilarityResults([]);
-    setShowSimilarityPanel(true);
-    setSearchType('text');
-
-    try {
-      const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
-      
-      // Prepare query parameters
-      const queryParams = new URLSearchParams({
-        collection_name: convertToValidCollectionName('agent-lens'),
-        application_id: applicationId,
-        query_text: textSearchQuery.trim(),
-        limit: '10'
-      });
-      
-      const response = await fetch(`/agent-lens/apps/${serviceId}/similarity/search/text?${queryParams}`, {
-        method: 'POST'
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        
-        if (result.success && result.results) {
-          // Handle different result formats from Weaviate
-          let results = result.results;
-          
-          // If results has an 'objects' property, extract it
-          if (results.objects && Array.isArray(results.objects)) {
-            results = results.objects;
-          }
-          
-          // If results is not an array, try to extract objects from it
-          if (!Array.isArray(results) && results.objects) {
-            results = results.objects;
-          }
-          
-          // Final validation
-          if (!Array.isArray(results)) {
-            results = results ? [results] : [];
-          }
-          
-          setSimilarityResults(results);
-        } else {
-          console.error('No results found:', result);
-          setSimilarityResults([]);
-        }
-      } else {
-        console.error('Text search failed:', await response.text());
-        alert('Failed to search for annotations.');
-      }
-    } catch (error) {
-      console.error('Error searching for annotations:', error);
-      alert('Error searching for annotations: ' + error.message);
-    } finally {
-      setIsSearching(false);
+  const handleFindSimilar = (annotation) => {
+    if (onFindSimilar) {
+      onFindSimilar(annotation);
     }
   };
 
@@ -1039,6 +879,25 @@ const AnnotationPanel = ({
               {getLayerDisplayName()}
             </span>
           )}
+          {/* Close button to deactivate annotation layer */}
+          <button
+            onClick={() => {
+              // Clear all annotations when closing
+              if (onClearAllAnnotations) {
+                onClearAllAnnotations();
+              }
+              // Trigger deactivation event to close annotation layer and update visibility
+              const event = new CustomEvent('annotationLayerDeactivated', {
+                detail: { layerId: activeLayer, layerType: getActiveLayerType() }
+              });
+              window.dispatchEvent(event);
+            }}
+            className="ml-auto text-red-400 hover:text-red-300 transition-colors"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px' }}
+            title="Close annotation panel, clear annotations, and deactivate annotation layer"
+          >
+            <i className="fas fa-times"></i>
+          </button>
           {/* Dataset ID Display for Browse Data layers */}
           {isBrowseDataLayer() && selectedHistoricalDataset?.id && (
             <span className="text-xs text-gray-500 ml-2">
@@ -1164,141 +1023,6 @@ const AnnotationPanel = ({
             </div>
           </div>
 
-          {/* Style Controls */}
-          <div className="annotation-section">
-            <div className="annotation-section-title">Style</div>
-            
-            {/* Stroke Color */}
-            <div className="style-control">
-              <label>Stroke Color:</label>
-              <div className="color-control">
-                <button
-                  className="color-swatch"
-                  style={{ backgroundColor: strokeColor }}
-                  onClick={() => {
-                    setActiveColorType('stroke');
-                    setShowColorPicker(!showColorPicker);
-                  }}
-                  title="Change stroke color"
-                />
-                <span className="color-value">{strokeColor}</span>
-              </div>
-            </div>
-
-            {/* Fill Color */}
-            <div className="style-control">
-              <label>Fill Color:</label>
-              <div className="color-control">
-                <button
-                  className="color-swatch"
-                  style={{ 
-                    backgroundColor: fillColor === 'transparent' ? '#ffffff' : fillColor,
-                    backgroundImage: fillColor === 'transparent' ? 
-                      'linear-gradient(45deg, #ccc 25%, transparent 25%), linear-gradient(-45deg, #ccc 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #ccc 75%), linear-gradient(-45deg, transparent 75%, #ccc 75%)' : 'none',
-                    backgroundSize: '8px 8px',
-                    backgroundPosition: '0 0, 0 4px, 4px -4px, -4px 0px'
-                  }}
-                  onClick={() => {
-                    setActiveColorType('fill');
-                    setShowColorPicker(!showColorPicker);
-                  }}
-                  title="Change fill color"
-                />
-                <span className="color-value">{fillColor}</span>
-              </div>
-            </div>
-
-            {/* Stroke Width */}
-            <div className="style-control">
-              <label>Stroke Width:</label>
-              <div className="stroke-width-control">
-                <input
-                  type="range"
-                  min="1"
-                  max="10"
-                  value={strokeWidth}
-                  onChange={(e) => setStrokeWidth(parseInt(e.target.value))}
-                  className="stroke-width-slider"
-                />
-                <span className="stroke-width-value">{strokeWidth}px</span>
-              </div>
-            </div>
-
-            {/* Text Search */}
-            <div className="style-control">
-              <label>Text Search:</label>
-              <div className="text-search-container">
-                <textarea
-                  value={textSearchQuery}
-                  onChange={(e) => setTextSearchQuery(e.target.value)}
-                  placeholder="Search annotations (e.g., 'round cell')"
-                  className="description-input"
-                  rows="2"
-                  maxLength="200"
-                />
-                <button
-                  onClick={handleTextSearch}
-                  className="text-search-button"
-                  disabled={!textSearchQuery.trim() || isSearching}
-                  title="Search for similar annotations using text"
-                >
-                  <i className="fas fa-search"></i>
-                  {isSearching ? 'Searching...' : 'Search'}
-                </button>
-              </div>
-            </div>
-
-            {/* Color Picker */}
-            {showColorPicker && (
-              <div className="color-picker-overlay">
-                <div className="color-picker">
-                  <div className="color-picker-header">
-                    <span>Choose {activeColorType} color</span>
-                    <button 
-                      onClick={() => setShowColorPicker(false)}
-                      className="color-picker-close"
-                    >
-                      <i className="fas fa-times"></i>
-                    </button>
-                  </div>
-                  
-                  {/* Preset Colors */}
-                  <div className="preset-colors">
-                    {presetColors.map(color => (
-                      <button
-                        key={color}
-                        className="preset-color"
-                        style={{ backgroundColor: color }}
-                        onClick={() => handleColorChange(color, activeColorType)}
-                        title={color}
-                      />
-                    ))}
-                    {activeColorType === 'fill' && (
-                      <button
-                        className="preset-color transparent-color"
-                        onClick={() => handleColorChange('transparent', activeColorType)}
-                        title="Transparent"
-                      >
-                        <i className="fas fa-ban"></i>
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Custom Color Input */}
-                  <div className="custom-color">
-                    <label>Custom color:</label>
-                    <input
-                      type="color"
-                      value={activeColorType === 'stroke' ? strokeColor : fillColor === 'transparent' ? '#ffffff' : fillColor}
-                      onChange={(e) => handleColorChange(e.target.value, activeColorType)}
-                      className="color-input"
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
           {/* Annotation List */}
           <div className="annotation-section">
             <div className="annotation-section-title">
@@ -1398,7 +1122,6 @@ const AnnotationPanel = ({
                               borderRadius: '3px'
                             }}
                             title="Find similar annotations"
-                            disabled={isSearching}
                           >
                             <i className="fas fa-search"></i>
                           </button>
@@ -1421,12 +1144,21 @@ const AnnotationPanel = ({
           {/* Similar Annotations */}
           {showSimilarityPanel && (
             <div className="annotation-section">
-              <div className="annotation-section-title">
-                <i className="fas fa-search"></i>
-                {searchType === 'text' 
-                  ? `Similar Annotations (Text: "${textSearchQuery}")` 
-                  : 'Similar Annotations (Image)'}
-                <div className="similarity-results-actions">
+              <div className="annotation-section-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <i className="fas fa-search"></i>
+                  <span>
+                    {searchType === 'text' 
+                      ? `Similar Annotations (Text: "${textSearchQuery}")` 
+                      : 'Similar Annotations (Image)'}
+                  </span>
+                </div>
+                <div className="similarity-results-actions" style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '6px',
+                  marginLeft: 'auto'
+                }}>
                   {/* Go back button */}
                   {goBackToPreviousPosition && hasPreviousPosition && (
                     <button
@@ -1440,7 +1172,6 @@ const AnnotationPanel = ({
                         borderRadius: '4px',
                         fontSize: '10px',
                         cursor: 'pointer',
-                        marginRight: '6px',
                         display: 'flex',
                         alignItems: 'center',
                         gap: '3px',
@@ -1467,7 +1198,6 @@ const AnnotationPanel = ({
                         borderRadius: '4px',
                         fontSize: '10px',
                         cursor: 'pointer',
-                        marginRight: '6px',
                         display: 'flex',
                         alignItems: 'center',
                         gap: '3px',
@@ -1487,6 +1217,10 @@ const AnnotationPanel = ({
                       className="similarity-show-map-btn"
                       onClick={() => {
                         onSimilarAnnotationsUpdate(similarityResults);
+                        // Enable map browsing when showing annotations on map
+                        if (setIsMapBrowsingMode) {
+                          setIsMapBrowsingMode(true);
+                        }
                       }}
                       style={{
                         backgroundColor: '#374151',
@@ -1496,7 +1230,6 @@ const AnnotationPanel = ({
                         borderRadius: '4px',
                         fontSize: '10px',
                         cursor: 'pointer',
-                        marginRight: '6px',
                         display: 'flex',
                         alignItems: 'center',
                         gap: '3px',
@@ -1513,7 +1246,9 @@ const AnnotationPanel = ({
                   <button
                     className="similarity-close-btn"
                     onClick={() => {
-                      setShowSimilarityPanel(false);
+                      if (setShowSimilarityPanel) {
+                        setShowSimilarityPanel(false);
+                      }
                       // Clean up similar annotations from map when closing the window
                       if (onSimilarAnnotationsCleanup) {
                         onSimilarAnnotationsCleanup();
@@ -1653,6 +1388,11 @@ const AnnotationPanel = ({
                                         if (onSimilarAnnotationsUpdate && similarityResults.length > 0 && similarAnnotations.length === 0) {
                                           console.log('🗺️ Auto-triggering similar annotations render on map');
                                           onSimilarAnnotationsUpdate(similarityResults);
+                                        }
+                                        
+                                        // Enable map browsing when navigating to annotation
+                                        if (setIsMapBrowsingMode) {
+                                          setIsMapBrowsingMode(true);
                                         }
                                         
                                         // Navigate to the coordinates while preserving current zoom level
@@ -1815,7 +1555,16 @@ AnnotationPanel.propTypes = {
   // Layer activation props
   activeLayer: PropTypes.string,
   layers: PropTypes.array,
-  experiments: PropTypes.array
+  experiments: PropTypes.array,
+  // Similarity search handler
+  onFindSimilar: PropTypes.func,
+  // Similarity search results props
+  showSimilarityPanel: PropTypes.bool,
+  similarityResults: PropTypes.array,
+  isSearching: PropTypes.bool,
+  searchType: PropTypes.string,
+  textSearchQuery: PropTypes.string,
+  setShowSimilarityPanel: PropTypes.func
 };
 
 export default AnnotationPanel;
