@@ -2126,6 +2126,11 @@ const MicroscopeMapDisplay = forwardRef(({
         getTileKey(tile.bounds, tile.scale, tile.channel, tile.experimentName) === tileKey
       );
       
+      // If this tile replaces a pending one, mark it as replaced
+      if (pendingTileReplacementsRef.current.has(tileKey)) {
+        pendingTileReplacementsRef.current.delete(tileKey);
+      }
+      
       if (existingIndex >= 0) {
         // Update existing tile
         const updatedTiles = [...prevTiles];
@@ -2140,8 +2145,30 @@ const MicroscopeMapDisplay = forwardRef(({
 
   const cleanupOldTiles = useCallback((currentScale, activeChannel, maxTilesPerScale = 20) => {
     setStitchedTiles(prevTiles => {
-      // SIMPLIFIED: Only filter by scale to allow different layer types to coexist
-      const currentTiles = prevTiles.filter(tile => tile.scale === currentScale);
+      // For FREE_PAN mode: Never delete tiles during active operations
+      if (mapViewMode === 'FREE_PAN') {
+        // Preserve tiles during active zooming or panning
+        if (isZooming || isPanning) {
+          console.log(`[cleanupOldTiles] FREE_PAN mode: Active operation detected, preserving all existing tiles`);
+          return prevTiles; // Keep all existing tiles during operations
+        }
+        
+        // Only remove tiles that are explicitly marked for replacement
+        if (pendingTileReplacementsRef.current.size > 0) {
+          const tilesToRemove = Array.from(pendingTileReplacementsRef.current);
+          const filteredTiles = prevTiles.filter(tile => {
+            const tileKey = getTileKey(tile.bounds, tile.scale, tile.channel, tile.experimentName);
+            return !tilesToRemove.includes(tileKey);
+          });
+          
+          console.log(`[cleanupOldTiles] FREE_PAN mode: Removed ${prevTiles.length - filteredTiles.length} tiles marked for replacement`);
+          pendingTileReplacementsRef.current.clear();
+          return filteredTiles;
+        }
+        
+        // No cleanup needed if no tiles are marked for replacement
+        return prevTiles;
+      }
       
       // For historical mode, be more conservative with cleanup to prevent map clearing during zoom
       if (isHistoricalDataMode) {
@@ -2159,6 +2186,9 @@ const MicroscopeMapDisplay = forwardRef(({
           console.log(`[cleanupOldTiles] Historical mode: Scale level changing from ${lastTileRequestRef.current.scaleLevel} to ${scaleLevel}, preserving all existing tiles to prevent blackout`);
           return prevTiles; // Keep all existing tiles during scale changes
         }
+        
+        // SIMPLIFIED: Only filter by scale to allow different layer types to coexist
+        const currentTiles = prevTiles.filter(tile => tile.scale === currentScale);
         
         // In historical mode, if there are no tiles for current scale, keep all existing tiles
         // to prevent the map from clearing during zoom operations
@@ -2182,27 +2212,25 @@ const MicroscopeMapDisplay = forwardRef(({
           console.log(`[cleanupOldTiles] Historical mode: New tiles loading (${Math.round(avgProgress * 100)}%), preserving old scale tiles`);
           return prevTiles; // Keep all tiles including old scales during loading
         }
+        
+        // SIMPLIFIED: Keep tiles from other scales regardless of channel to allow coexistence
+        const otherTiles = prevTiles.filter(tile => tile.scale !== currentScale)
+          .slice(-maxTilesPerScale); // Just limit total number of tiles
+        
+        return [...currentTiles, ...otherTiles];
       }
       
-      // SIMPLIFIED: Keep tiles from other scales regardless of channel to allow coexistence
+      // Default behavior: Keep tiles from other scales regardless of channel to allow coexistence
+      const currentTiles = prevTiles.filter(tile => tile.scale === currentScale);
       const otherTiles = prevTiles.filter(tile => tile.scale !== currentScale)
         .slice(-maxTilesPerScale); // Just limit total number of tiles
       
       return [...currentTiles, ...otherTiles];
     });
-  }, [isHistoricalDataMode, scaleLevel]);
+  }, [mapViewMode, isHistoricalDataMode, scaleLevel, isZooming, isPanning, currentOperation, getTileKey]);
 
-  // Effect to clean up old tiles when channel changes  
-  useEffect(() => {
-    if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
-      // Trigger cleanup of old tiles after a delay to allow new ones to load
-      const cleanupTimer = setTimeout(() => {
-        cleanupOldTiles(scaleLevel, getChannelString());
-      }, 300);
-      
-      return () => clearTimeout(cleanupTimer);
-    }
-  }, [visibleLayers.channels, mapViewMode, visibleLayers.scanResults, scaleLevel, cleanupOldTiles, getChannelString]);
+  // Note: Channel change cleanup is now handled automatically in loadStitchedTiles()
+  // Tiles are marked for replacement when new ones are loaded, and removed after loading completes
 
 
 
@@ -4523,6 +4551,38 @@ const MicroscopeMapDisplay = forwardRef(({
         return;
       }
       
+      // Mark existing tiles for replacement BEFORE loading new ones
+      // This ensures old tiles stay visible during the loading process
+      if (mapViewMode === 'FREE_PAN') {
+        pendingTileReplacementsRef.current.clear();
+        const activeChannel = getChannelString();
+        
+        // Find existing tiles that will be replaced by this load
+        // We need to read current tiles and mark matching ones
+        setStitchedTiles(prevTiles => {
+          prevTiles.forEach(tile => {
+            // Mark tiles that match current scale, channel, and experiment
+            // These are the ones that will be replaced by new tiles with same parameters
+            const matchesScale = tile.scale === scaleLevel;
+            const matchesChannel = tile.channel === activeChannel;
+            const matchesExperiment = experimentsToLoad.some(exp => 
+              (exp === null && tile.experimentName === null) || 
+              (exp !== null && tile.experimentName === exp)
+            );
+            
+            if (matchesScale && matchesChannel && matchesExperiment) {
+              const tileKey = getTileKey(tile.bounds, tile.scale, tile.channel, tile.experimentName);
+              pendingTileReplacementsRef.current.add(tileKey);
+            }
+          });
+          return prevTiles; // Don't modify tiles yet, just mark them
+        });
+        
+        if (pendingTileReplacementsRef.current.size > 0) {
+          console.log(`🎨 FREE_PAN: Marked ${pendingTileReplacementsRef.current.size} existing tiles for replacement`);
+        }
+      }
+      
       // Get enabled channels for FREE_PAN mode
       const enabledChannels = getSelectedChannels().map(channelName => ({
         label: channelName,
@@ -4598,8 +4658,11 @@ const MicroscopeMapDisplay = forwardRef(({
         }
       }
       
-      // Clean up old tiles for this scale/channel combination to prevent memory bloat
-      cleanupOldTiles(scaleLevel, getChannelString());
+      // After all tiles are loaded, remove old tiles that were marked for replacement
+      // Only do this in FREE_PAN mode and when not actively operating
+      if (mapViewMode === 'FREE_PAN' && !isZooming && !isPanning) {
+        cleanupOldTiles(scaleLevel, getChannelString());
+      }
       
       if (appendLog) {
         appendLog(`Loaded tiles for ${experimentsToLoad.length} experiments at scale ${scaleLevel}, region (${clampedTopLeft.x.toFixed(1)}, ${clampedTopLeft.y.toFixed(1)}) to (${clampedBottomRight.x.toFixed(1)}, ${clampedBottomRight.y.toFixed(1)})`);
@@ -4786,6 +4849,10 @@ const MicroscopeMapDisplay = forwardRef(({
   // Consolidated tile loading effect - replaces multiple overlapping effects
   const lastTileRequestRef = useRef({ panX: 0, panY: 0, scale: 0, scaleLevel: 0, timestamp: 0 });
   
+  // Track tiles marked for replacement in FREE_PAN mode
+  // These are tiles that will be replaced when new tiles finish loading
+  const pendingTileReplacementsRef = useRef(new Set());
+  
   useEffect(() => {
     if (mapViewMode !== 'FREE_PAN' || !visibleLayers.scanResults) {
       console.log('[Tile Loading] Skipping - not in FREE_PAN mode or scan results not visible');
@@ -4931,18 +4998,6 @@ const MicroscopeMapDisplay = forwardRef(({
       loadStitchedTiles();
     }
   }, [needsTileReload, mapViewMode, getBrowseDataLayer, getScanDataLayer, visibleLayers.scanResults, visibleExperiments, loadStitchedTiles, isZooming, isPanning, isBrowseDataLoading, isScanDataLoading]);
-
-  // 🚀 SIMPLIFIED: Only cleanup tiles when scale changes, don't trigger new tile loading
-  // This prevents the endless loop while still cleaning up memory
-  useEffect(() => {
-    const scanDataLayer = getScanDataLayer();
-    if (mapViewMode === 'FREE_PAN' && scanDataLayer) {
-      const activeChannel = getChannelString();
-      console.log('[scaleLevel cleanup] Cleaning up old tiles for memory management');
-      cleanupOldTiles(scaleLevel, activeChannel);
-      // Tiles will be loaded only when user pans/zooms significantly
-    }
-  }, [scaleLevel, mapViewMode, getScanDataLayer, cleanupOldTiles, getChannelString]); // Updated to use layer-based logic
 
 
   if (!isOpen) return null;
