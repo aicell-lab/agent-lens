@@ -114,7 +114,7 @@ class TileProcessingManagerTest {
       
       const __filename = fileURLToPath(import.meta.url);
       const __dirname = path.dirname(__filename);
-      const tileProcessingManagerPath = path.join(__dirname, '../../frontend/components/microscope/map/TileProcessingManager.jsx');
+      const tileProcessingManagerPath = path.join(__dirname, '../../frontend/components/map_visualization/TileProcessingManager.jsx');
       
       // Read the JSX file and create a JS version for testing
       const jsxContent = fs.readFileSync(tileProcessingManagerPath, 'utf8');
