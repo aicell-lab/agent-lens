@@ -657,11 +657,27 @@ const LayerPanel = ({
                       className="layer-visibility-btn"
                       onClick={() => {
                         if (isVisible) {
-                          // Hide experiment
-                          setVisibleExperiments(prev => prev.filter(name => name !== exp.name));
+                          // Hide experiment and its segmentation layer (if exists)
+                          setVisibleExperiments(prev => {
+                            const filtered = prev.filter(name => name !== exp.name);
+                            // Also hide segmentation layer if it exists
+                            const segExp = segmentationMap[exp.name];
+                            if (segExp) {
+                              return filtered.filter(name => name !== segExp.name);
+                            }
+                            return filtered;
+                          });
                         } else {
-                          // Show experiment
-                          setVisibleExperiments(prev => [...prev, exp.name]);
+                          // Show experiment and automatically show its segmentation layer (if exists)
+                          setVisibleExperiments(prev => {
+                            const updated = [...prev, exp.name];
+                            // Also automatically show segmentation layer if it exists
+                            const segExp = segmentationMap[exp.name];
+                            if (segExp && !prev.includes(segExp.name)) {
+                              updated.push(segExp.name);
+                            }
+                            return updated;
+                          });
                         }
                       }}
                       title={isVisible ? "Hide experiment" : "Show experiment"}
