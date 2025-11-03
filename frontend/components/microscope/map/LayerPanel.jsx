@@ -81,7 +81,11 @@ const LayerPanel = ({
   
   // Layer activation props
   activeLayer,
-  setActiveLayer
+  setActiveLayer,
+  
+  // Segmentation props
+  segmentationState,
+  cancelRunningSegmentation
 }) => {
   const [showLayerTypeDropdown, setShowLayerTypeDropdown] = useState(false);
   const [newLayerType, setNewLayerType] = useState('quick-scan');
@@ -774,22 +778,40 @@ const LayerPanel = ({
                             <i className="fas fa-cloud-upload-alt mr-1"></i>
                             Upload Dataset
                           </button>
-                          {/* Segment Experiment button */}
+                          {/* Segment Experiment / Cancel Segmentation button */}
                           <button 
                             className="segment-btn"
-                            onClick={() => {
+                            onClick={async () => {
                               if (isSimulatedMicroscope || !microscopeControlService) return;
-                              // Trigger segment experiment event
-                              const event = new CustomEvent('segmentExperiment', {
-                                detail: { experimentName: exp.name }
-                              });
-                              window.dispatchEvent(event);
+                              
+                              // Check if segmentation is running for this experiment
+                              const isRunning = segmentationState?.isRunning && 
+                                                segmentationState?.experimentName === exp.name;
+                              
+                              if (isRunning) {
+                                // Cancel running segmentation
+                                if (cancelRunningSegmentation) {
+                                  await cancelRunningSegmentation();
+                                }
+                              } else {
+                                // Trigger segment experiment event
+                                const event = new CustomEvent('segmentExperiment', {
+                                  detail: { experimentName: exp.name }
+                                });
+                                window.dispatchEvent(event);
+                              }
                             }}
                             disabled={isSimulatedMicroscope || !microscopeControlService}
-                            title="Run automated cell segmentation on this experiment"
+                            title={
+                              segmentationState?.isRunning && segmentationState?.experimentName === exp.name
+                                ? "Cancel running segmentation"
+                                : "Run automated cell segmentation on this experiment"
+                            }
                           >
-                            <i className="fas fa-cut mr-1"></i>
-                            Segment Experiment
+                            <i className={`fas mr-1 ${segmentationState?.isRunning && segmentationState?.experimentName === exp.name ? 'fa-times' : 'fa-cut'}`}></i>
+                            {segmentationState?.isRunning && segmentationState?.experimentName === exp.name
+                              ? 'Cancel Segmentation'
+                              : 'Segment Experiment'}
                           </button>
                         </div>
                       </div>
@@ -1010,7 +1032,16 @@ LayerPanel.propTypes = {
   
   // Layer activation props
   activeLayer: PropTypes.string,
-  setActiveLayer: PropTypes.func
+  setActiveLayer: PropTypes.func,
+  
+  // Segmentation props
+  segmentationState: PropTypes.shape({
+    isRunning: PropTypes.bool,
+    experimentName: PropTypes.string,
+    progress: PropTypes.object,
+    error: PropTypes.string
+  }),
+  cancelRunningSegmentation: PropTypes.func
 };
 
 export default LayerPanel;

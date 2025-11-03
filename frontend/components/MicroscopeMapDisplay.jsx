@@ -18,6 +18,7 @@ import {
   buildChannelConfigs,
   formatProgressMessage,
   formatErrorMessage,
+  isSegmentationRunning,
   isSegmentationCompleted,
   isSegmentationFailed,
   getSegmentationExperimentName,
@@ -1148,35 +1149,52 @@ const MicroscopeMapDisplay = forwardRef(({
   }, [activeExperiment]);
 
   // Segmentation polling functions
+  // Define stopSegmentationPolling first to avoid circular dependency
+  const stopSegmentationPolling = useCallback(() => {
+    if (segmentationPollingRef.current) {
+      clearInterval(segmentationPollingRef.current);
+      segmentationPollingRef.current = null;
+    }
+  }, []);
+
   const startSegmentationPolling = useCallback(() => {
     if (segmentationPollingRef.current) {
       clearInterval(segmentationPollingRef.current);
     }
 
     segmentationPollingRef.current = setInterval(async () => {
-      if (!microscopeControlService || !segmentationState.isRunning) {
+      if (!microscopeControlService) {
         return;
       }
 
       try {
         const status = await getSegmentationStatus(microscopeControlService);
         
+        // Stop polling if segmentation is not running (check API status, not state)
+        if (status.success && !isSegmentationRunning(status.state) && !isSegmentationCompleted(status.state) && !isSegmentationFailed(status.state)) {
+          stopSegmentationPolling();
+          return;
+        }
+        
         if (status.success) {
+          const isRunning = isSegmentationRunning(status.state);
+          const experimentName = status.progress?.source_experiment || null;
+          
           setSegmentationState(prev => ({
             ...prev,
+            isRunning: isRunning,
+            experimentName: experimentName,
             progress: status.progress,
             error: null
           }));
 
-          // Update progress notification
-          const progressMessage = formatProgressMessage(status.progress);
-          showNotification(
-            `Segmentation progress: ${progressMessage}`,
-            'info'
-          );
-
-          if (appendLog) {
-            appendLog(`Segmentation progress: ${progressMessage}`);
+          // Only log progress if still running (no notification to avoid spam)
+          if (isRunning) {
+            // Log progress but don't show notification
+            const progressMessage = formatProgressMessage(status.progress);
+            if (appendLog) {
+              appendLog(`Segmentation progress: ${progressMessage}`);
+            }
           }
 
           // Check if segmentation is complete
@@ -1205,10 +1223,11 @@ const MicroscopeMapDisplay = forwardRef(({
             setSegmentationState(prev => ({
               ...prev,
               isRunning: false,
-              error: status.errorMessage
+              error: status.errorMessage,
+              experimentName: status.progress?.source_experiment || prev.experimentName
             }));
 
-            const errorMessage = formatErrorMessage(status.errorMessage, segmentationState.experimentName);
+            const errorMessage = formatErrorMessage(status.errorMessage, status.progress?.source_experiment);
             showNotification(errorMessage, 'error');
             if (appendLog) {
               appendLog(`Segmentation failed: ${status.errorMessage}`);
@@ -1224,14 +1243,7 @@ const MicroscopeMapDisplay = forwardRef(({
         }
       }
     }, 5000); // Poll every 5 seconds
-  }, [microscopeControlService, segmentationState.isRunning, segmentationState.experimentName, showNotification, appendLog, refreshExperimentData]);
-
-  const stopSegmentationPolling = useCallback(() => {
-    if (segmentationPollingRef.current) {
-      clearInterval(segmentationPollingRef.current);
-      segmentationPollingRef.current = null;
-    }
-  }, []);
+  }, [microscopeControlService, showNotification, appendLog, refreshExperimentData, stopSegmentationPolling]);
 
   const cancelRunningSegmentation = useCallback(async () => {
     if (!microscopeControlService || !segmentationState.isRunning) {
@@ -3490,6 +3502,51 @@ const MicroscopeMapDisplay = forwardRef(({
     }
   }, [experiments]);
 
+  // Check segmentation status when Layer dropdown opens
+  const checkSegmentationStatus = useCallback(async () => {
+    if (!microscopeControlService || isSimulatedMicroscopeSelected) return;
+    
+    try {
+      const status = await getSegmentationStatus(microscopeControlService);
+      
+      if (status.success) {
+        const isRunning = status.state === 'running';
+        const experimentName = isRunning && status.progress ? status.progress.source_experiment : null;
+        
+        // Update state if segmentation is running
+        if (isRunning) {
+          setSegmentationState(prev => ({
+            ...prev,
+            isRunning: true,
+            experimentName: experimentName,
+            progress: status.progress,
+            error: null
+          }));
+          
+          // Start polling if not already polling
+          if (!segmentationPollingRef.current) {
+            startSegmentationPolling();
+          }
+        } else if (status.state === 'completed' || status.state === 'failed' || status.state === 'idle') {
+          // If segmentation is done or idle, update state accordingly
+          setSegmentationState(prev => ({
+            ...prev,
+            isRunning: false,
+            progress: status.progress,
+            error: status.state === 'failed' ? status.errorMessage : null
+          }));
+          
+          // Stop polling if segmentation is done
+          if (status.state === 'completed' || status.state === 'failed') {
+            stopSegmentationPolling();
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error checking segmentation status:', error);
+    }
+  }, [microscopeControlService, isSimulatedMicroscopeSelected, startSegmentationPolling, stopSegmentationPolling]);
+
   useEffect(() => {
     if (isLayerDropdownOpen && !isSimulatedMicroscopeSelected && !hasExperimentsRef.current) {
       console.log('[Layer Dropdown] Loading experiments for first time');
@@ -3501,7 +3558,12 @@ const MicroscopeMapDisplay = forwardRef(({
     } else if (isLayerDropdownOpen && !isSimulatedMicroscopeSelected && hasExperimentsRef.current) {
       console.log('[Layer Dropdown] Experiments already loaded, skipping refresh');
     }
-  }, [isLayerDropdownOpen, isSimulatedMicroscopeSelected]); // Removed function dependencies to prevent infinite loops
+    
+    // Check segmentation status when Layer dropdown opens
+    if (isLayerDropdownOpen && !isSimulatedMicroscopeSelected) {
+      checkSegmentationStatus();
+    }
+  }, [isLayerDropdownOpen, isSimulatedMicroscopeSelected, checkSegmentationStatus]); // Removed function dependencies to prevent infinite loops
 
   // Cleanup timeouts on unmount
   useEffect(() => {
@@ -5427,6 +5489,10 @@ const MicroscopeMapDisplay = forwardRef(({
                       // Layer activation props
                       activeLayer={activeLayer}
                       setActiveLayer={setActiveLayer}
+                      
+                      // Segmentation props
+                      segmentationState={segmentationState}
+                      cancelRunningSegmentation={cancelRunningSegmentation}
                     />
                   </div>
                 )}
