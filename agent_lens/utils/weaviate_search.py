@@ -393,6 +393,203 @@ class WeaviateSimilarityService:
         query_vector = await generate_image_embedding(image_bytes)
         return await self.search_similar_images(collection_name, application_id, query_vector, limit)
     
+    async def fetch_by_uuid(self, collection_name: str, application_id: str,
+                           object_uuid: str, include_vector: bool = True) -> Dict[str, Any]:
+        """
+        Fetch an object by its UUID and return its vector for similarity search.
+        
+        Args:
+            collection_name: Name of the collection
+            application_id: Application ID
+            object_uuid: UUID of the object to fetch
+            include_vector: Whether to include the vector in the result
+            
+        Returns:
+            Dictionary containing the object data and vector (if include_vector=True)
+            
+        Raises:
+            ValueError: If the UUID is not found
+        """
+        if not await self.ensure_connected():
+            raise RuntimeError("Not connected to Weaviate service")
+        
+        try:
+            # Try to fetch object by UUID directly
+            # Weaviate typically supports fetching by UUID through the data.get method
+            try:
+                result = await self.weaviate_service.data.get(
+                    collection_name=collection_name,
+                    application_id=application_id,
+                    uuid=object_uuid,
+                    include_vector=include_vector
+                )
+                
+                if result is None:
+                    raise ValueError(f"UUID '{object_uuid}' not found in collection '{collection_name}' for application '{application_id}'")
+                
+                logger.info(f"Found object with UUID '{object_uuid}' in collection '{collection_name}'")
+                return result
+                
+            except Exception as get_error:
+                # Fallback: fetch objects and filter by UUID client-side
+                logger.debug(f"Direct UUID fetch failed, trying client-side filter: {get_error}")
+                
+                results = await self.weaviate_service.query.fetch_objects(
+                    collection_name=collection_name,
+                    application_id=application_id,
+                    limit=1000,
+                    return_properties=["image_id", "description", "metadata", "dataset_id", "file_path", "preview_image"],
+                    include_vector=include_vector
+                )
+                
+                # Handle different result formats
+                actual_results = []
+                if hasattr(results, 'objects') and results.objects:
+                    actual_results = results.objects
+                elif isinstance(results, dict) and 'objects' in results:
+                    actual_results = results['objects']
+                elif isinstance(results, (list, tuple)):
+                    actual_results = results
+                else:
+                    try:
+                        actual_results = list(results) if hasattr(results, '__iter__') else [results]
+                    except Exception as e:
+                        logger.error(f"Failed to process results: {e}")
+                        actual_results = []
+                
+                # Filter by UUID client-side
+                matching_object = None
+                for obj in actual_results:
+                    # Extract UUID from the object
+                    obj_uuid = None
+                    if hasattr(obj, 'uuid'):
+                        obj_uuid = obj.uuid
+                    elif hasattr(obj, 'id'):
+                        obj_uuid = obj.id
+                    elif isinstance(obj, dict):
+                        obj_uuid = obj.get('uuid') or obj.get('id') or obj.get('_id') or obj.get('_uuid')
+                    
+                    if obj_uuid and str(obj_uuid) == str(object_uuid):
+                        matching_object = obj
+                        break
+                
+                if matching_object is None:
+                    raise ValueError(f"UUID '{object_uuid}' not found in collection '{collection_name}' for application '{application_id}'")
+                
+                logger.info(f"Found object with UUID '{object_uuid}' in collection '{collection_name}'")
+                return matching_object
+                
+        except ValueError:
+            raise
+        except Exception as e:
+            logger.error(f"Error fetching object by UUID '{object_uuid}': {e}")
+            raise
+    
+    async def search_by_uuid(self, collection_name: str, application_id: str,
+                            object_uuid: str, limit: int = 10,
+                            include_vector: bool = False) -> List[Dict[str, Any]]:
+        """
+        Search for similar images using a UUID as the query.
+        First fetches the object by UUID to get its vector, then performs similarity search.
+        
+        Args:
+            collection_name: Name of the collection
+            application_id: Application ID
+            object_uuid: UUID to search for similar objects
+            limit: Maximum number of results to return
+            include_vector: Whether to include vectors in results
+            
+        Returns:
+            List of similar objects (excluding the query object itself)
+        """
+        if not await self.ensure_connected():
+            raise RuntimeError("Not connected to Weaviate service")
+        
+        # Fetch the query object by UUID
+        query_object = await self.fetch_by_uuid(
+            collection_name=collection_name,
+            application_id=application_id,
+            object_uuid=object_uuid,
+            include_vector=True  # Need the vector for similarity search
+        )
+        
+        # Extract the vector from the query object (same logic as search_by_image_id)
+        query_vector = None
+        
+        # Try different ways to access the vector
+        if hasattr(query_object, 'vector'):
+            query_vector = query_object.vector
+        elif isinstance(query_object, dict):
+            if 'vector' in query_object:
+                query_vector = query_object['vector']
+        
+        # If we still don't have the vector, try to access it via metadata or additional fields
+        if query_vector is None:
+            if hasattr(query_object, 'additional'):
+                additional = query_object.additional
+                if hasattr(additional, 'vector'):
+                    query_vector = additional.vector
+            elif isinstance(query_object, dict):
+                if 'additional' in query_object and isinstance(query_object['additional'], dict):
+                    query_vector = query_object['additional'].get('vector')
+            
+            if query_vector is None and isinstance(query_object, dict):
+                for key in ['vector', 'embedding', '_vector']:
+                    if key in query_object:
+                        query_vector = query_object[key]
+                        break
+        
+        # Handle case where vector is a dictionary (e.g., {'default': [vector...]})
+        if isinstance(query_vector, dict):
+            if 'default' in query_vector:
+                query_vector = query_vector['default']
+            elif len(query_vector) == 1:
+                query_vector = list(query_vector.values())[0]
+            else:
+                query_vector = list(query_vector.values())[0] if query_vector else None
+        
+        if query_vector is None:
+            raise ValueError(f"Could not extract vector from object with UUID '{object_uuid}'. The object may not have a vector stored.")
+        
+        if not isinstance(query_vector, list):
+            raise ValueError(f"Extracted vector is not a list: {type(query_vector)}")
+        
+        if not all(isinstance(x, (int, float)) for x in query_vector):
+            raise ValueError("Vector contains non-numeric values")
+        
+        # Perform similarity search using the extracted vector
+        search_results = await self.search_similar_images(
+            collection_name=collection_name,
+            application_id=application_id,
+            query_vector=query_vector,
+            limit=limit + 1,  # Fetch one extra to account for excluding the query object
+            include_vector=include_vector
+        )
+        
+        # Filter out the query object itself from results
+        filtered_results = []
+        for result in search_results:
+            # Extract UUID from result
+            result_uuid = None
+            if hasattr(result, 'uuid'):
+                result_uuid = result.uuid
+            elif hasattr(result, 'id'):
+                result_uuid = result.id
+            elif isinstance(result, dict):
+                result_uuid = result.get('uuid') or result.get('id') or result.get('_uuid')
+            
+            # Skip if this is the query object itself
+            if result_uuid and str(result_uuid) == str(object_uuid):
+                continue
+            
+            filtered_results.append(result)
+            
+            if len(filtered_results) >= limit:
+                break
+        
+        logger.info(f"Found {len(filtered_results)} similar objects for UUID '{object_uuid}' (excluding query object)")
+        return filtered_results
+    
     async def list_collections(self) -> Dict[str, Any]:
         """List all available collections."""
         if not await self.ensure_connected():

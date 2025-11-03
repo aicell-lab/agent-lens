@@ -132,8 +132,23 @@ const SimilarityResultsRenderer = ({
       wellRelativeToStageCoords(point.x, point.y, wellInfo)
     );
 
+    // Extract UUID for use as ID
+    const extractUUID = (resultObj) => {
+      if (resultObj.uuid) return resultObj.uuid;
+      if (resultObj.id) return resultObj.id;
+      if (resultObj._uuid) return resultObj._uuid;
+      if (resultObj.properties) {
+        const props = resultObj.properties;
+        if (props.uuid) return props.uuid;
+        if (props.id) return props.id;
+      }
+      return null;
+    };
+    
+    const objectUUID = extractUUID(similarityResult);
+
     return {
-      id: props.image_id || `similar_${Date.now()}`,
+      id: objectUUID || props.image_id || `similar_${Date.now()}`,
       type,
       points: stagePoints,
       wellId,

@@ -1013,146 +1013,6 @@ const AnnotationPanel = ({
 
       {isDrawingMode && (
         <>
-          {/* Drawing Tools */}
-          <div className="annotation-section">
-            <div className="annotation-section-title">Drawing Tools</div>
-            <div className="annotation-tools-grid">
-              {tools.map(tool => (
-                <button
-                  key={tool.id}
-                  onClick={() => handleToolSelection(tool.id)}
-                  className={`annotation-tool-btn ${
-                    tool.id === 'map-browse' 
-                      ? (isMapBrowsingMode ? 'active' : '') 
-                      : (currentTool === tool.id ? 'active' : '')
-                  }`}
-                  title={tool.tooltip}
-                >
-                  <i className={`fas ${tool.icon}`}></i>
-                  <span className="tool-name">{tool.name}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Annotation List */}
-          <div className="annotation-section">
-            <div className="annotation-section-title">
-              Annotations ({annotations.length})
-            </div>
-            {annotations.length === 0 ? (
-              <div className="no-annotations">No annotations yet</div>
-            ) : (
-              <div className="annotation-list">
-                {annotations.map((annotation, index) => {
-                  const wellInfo = wellInfoMap[annotation.id];
-                  const wellId = wellInfo ? wellInfo.id : 'Unknown';
-                  const status = embeddingStatus[annotation.id];
-                  
-                  return (
-                    <div key={annotation.id} className="annotation-item">
-                      <div 
-                        className="annotation-item-info"
-                        onClick={() => handleAnnotationClick(annotation)}
-                        style={{ cursor: 'pointer' }}
-                        title={`Click to view details (Well: ${wellId})`}
-                      >
-                        <i className={`fas ${
-                          annotation.type === 'rectangle' ? 'fa-square' :
-                          annotation.type === 'freehand' ? 'fa-pencil' :
-                          'fa-shape-polygon'
-                        }`}></i>
-                        <span className="annotation-type">{annotation.type}</span>
-                        <span className="annotation-index">#{index + 1}</span>
-                        
-                        {/* Image Preview */}
-                        <AnnotationImagePreview 
-                          annotation={annotation}
-                          wellInfo={wellInfo}
-                          mapScale={mapScale}
-                          mapPan={mapPan}
-                          stageDimensions={stageDimensions}
-                          pixelsPerMm={pixelsPerMm}
-                          isHistoricalDataMode={isHistoricalDataMode}
-                          microscopeControlService={microscopeControlService}
-                          artifactZarrLoader={artifactZarrLoader}
-                          zarrChannelConfigs={zarrChannelConfigs}
-                          realMicroscopeChannelConfigs={realMicroscopeChannelConfigs}
-                          enabledZarrChannels={enabledZarrChannels}
-                          visibleChannelsConfig={visibleChannelsConfig}
-                          selectedHistoricalDataset={selectedHistoricalDataset}
-                          wellPlateType={wellPlateType}
-                          timepoint={timepoint}
-                          onEmbeddingsGenerated={onEmbeddingsGenerated}
-                          activeLayer={activeLayer}
-                          layers={layers}
-                          experiments={experiments}
-                        />
-                        {wellInfo && (
-                          <span className="annotation-well" style={{ 
-                            fontSize: '10px', 
-                            color: '#666', 
-                            marginLeft: '4px' 
-                          }}>
-                            Well: {wellId}
-                          </span>
-                        )}
-                        {/* Embedding Status Indicator */}
-                        {status && (annotation.type === 'rectangle' || annotation.type === 'polygon' || annotation.type === 'freehand') && (
-                          <span 
-                            className="embedding-status" 
-                            style={{ 
-                              fontSize: '10px', 
-                              marginLeft: '8px',
-                              color: status.status === 'completed' ? '#28a745' : 
-                                     status.status === 'generating' ? '#ffc107' : 
-                                     status.status === 'error' ? '#dc3545' : '#666'
-                            }}
-                            title={status.status === 'generating' ? 'Generating embeddings...' : 
-                                   status.status === 'completed' ? 'Embeddings ready' : 
-                                   status.status === 'error' ? `Error: ${status.error}` : ''}
-                          >
-                            {status.status === 'generating' && <i className="fas fa-spinner fa-spin"></i>}
-                            {status.status === 'completed' && <i className="fas fa-check-circle"></i>}
-                            {status.status === 'error' && <i className="fas fa-exclamation-circle"></i>}
-                          </span>
-                        )}
-                      </div>
-                      <div className="annotation-item-actions">
-                        {/* Find Similar button - only show if annotation has image embeddings */}
-                        {annotation.embeddings?.imageEmbedding && (
-                          <button
-                            onClick={() => handleFindSimilar(annotation)}
-                            className="annotation-action-btn"
-                            style={{ 
-                              fontSize: '10px', 
-                              padding: '2px 4px', 
-                              marginRight: '4px',
-                              backgroundColor: '#17a2b8',
-                              color: 'white',
-                              border: 'none',
-                              borderRadius: '3px'
-                            }}
-                            title="Find similar annotations"
-                          >
-                            <i className="fas fa-search"></i>
-                          </button>
-                        )}
-                        <button
-                          onClick={() => onAnnotationDelete(annotation.id)}
-                          className="annotation-delete-btn"
-                          title="Delete annotation"
-                        >
-                          <i className="fas fa-trash"></i>
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
           {/* Similar Annotations */}
           {showSimilarityPanel && (
             <div className="annotation-section">
@@ -1161,8 +1021,16 @@ const AnnotationPanel = ({
                   <i className="fas fa-search"></i>
                   <span>
                     {searchType === 'text' 
-                      ? `Similar Annotations (Text: "${textSearchQuery}")` 
-                      : 'Similar Annotations (Image)'}
+                      ? (() => {
+                          // Check if it's a UUID search
+                          if (textSearchQuery.startsWith('uuid: ')) {
+                            const uuid = textSearchQuery.substring(6); // Remove "uuid: " prefix
+                            const truncatedUuid = uuid.length > 10 ? `${uuid.substring(0, 10)}...` : uuid;
+                            return `Similar Results (UUID: "${truncatedUuid}")`;
+                          }
+                          return `Similar Results (Text: "${textSearchQuery}")`;
+                        })()
+                      : 'Similar Results (Image)'}
                   </span>
                 </div>
                 <div className="similarity-results-actions" style={{ 
@@ -1285,7 +1153,7 @@ const AnnotationPanel = ({
                 {isSearching ? (
                   <div className="similarity-loading">
                     <i className="fas fa-spinner fa-spin"></i>
-                    <div>Searching for similar annotations...</div>
+                    <div>Searching for similar results...</div>
                   </div>
                 ) : similaritySearchResults.length > 0 ? (
                   <div className="similarity-results-list">
@@ -1314,6 +1182,22 @@ const AnnotationPanel = ({
                         parsedMetadata = metadata;
                       }
                       
+                      // Extract UUID from result object
+                      const extractUUID = (resultObj) => {
+                        if (resultObj.uuid) return resultObj.uuid;
+                        if (resultObj.id) return resultObj.id;
+                        if (resultObj._uuid) return resultObj._uuid;
+                        // Try accessing via properties
+                        if (resultObj.properties) {
+                          const props = resultObj.properties;
+                          if (props.uuid) return props.uuid;
+                          if (props.id) return props.id;
+                        }
+                        return null;
+                      };
+                      
+                      const objectUUID = extractUUID(result);
+                      
                       return (
                         <div key={index} className="similarity-result-item-embedded">
                           {/* Preview Image */}
@@ -1331,7 +1215,7 @@ const AnnotationPanel = ({
                               {props.description || 'No description'}
                             </div>
                             <div className="similarity-result-id-embedded">
-                              {props.image_id || 'Unknown'}
+                              {objectUUID || 'Unknown'}
                             </div>
                             {parsedMetadata && Object.keys(parsedMetadata).length > 0 && (
                               <div className="similarity-result-metadata-embedded">
@@ -1451,13 +1335,153 @@ const AnnotationPanel = ({
                 ) : (
                   <div className="similarity-empty-embedded">
                     <i className="fas fa-search"></i>
-                    <h4>No Similar Annotations Found</h4>
+                    <h4>No Similar Results Found</h4>
                     <p>Try creating more annotations or check if the current annotation has embeddings.</p>
                   </div>
                 )}
               </div>
             </div>
           )}
+
+          {/* Drawing Tools */}
+          <div className="annotation-section">
+            <div className="annotation-section-title">Drawing Tools</div>
+            <div className="annotation-tools-grid">
+              {tools.map(tool => (
+                <button
+                  key={tool.id}
+                  onClick={() => handleToolSelection(tool.id)}
+                  className={`annotation-tool-btn ${
+                    tool.id === 'map-browse' 
+                      ? (isMapBrowsingMode ? 'active' : '') 
+                      : (currentTool === tool.id ? 'active' : '')
+                  }`}
+                  title={tool.tooltip}
+                >
+                  <i className={`fas ${tool.icon}`}></i>
+                  <span className="tool-name">{tool.name}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Annotation List */}
+          <div className="annotation-section">
+            <div className="annotation-section-title">
+              Annotations ({annotations.length})
+            </div>
+            {annotations.length === 0 ? (
+              <div className="no-annotations">No annotations yet</div>
+            ) : (
+              <div className="annotation-list">
+                {annotations.map((annotation, index) => {
+                  const wellInfo = wellInfoMap[annotation.id];
+                  const wellId = wellInfo ? wellInfo.id : 'Unknown';
+                  const status = embeddingStatus[annotation.id];
+                  
+                  return (
+                    <div key={annotation.id} className="annotation-item">
+                      <div 
+                        className="annotation-item-info"
+                        onClick={() => handleAnnotationClick(annotation)}
+                        style={{ cursor: 'pointer' }}
+                        title={`Click to view details (Well: ${wellId})`}
+                      >
+                        <i className={`fas ${
+                          annotation.type === 'rectangle' ? 'fa-square' :
+                          annotation.type === 'freehand' ? 'fa-pencil' :
+                          'fa-shape-polygon'
+                        }`}></i>
+                        <span className="annotation-type">{annotation.type}</span>
+                        <span className="annotation-index">#{index + 1}</span>
+                        
+                        {/* Image Preview */}
+                        <AnnotationImagePreview 
+                          annotation={annotation}
+                          wellInfo={wellInfo}
+                          mapScale={mapScale}
+                          mapPan={mapPan}
+                          stageDimensions={stageDimensions}
+                          pixelsPerMm={pixelsPerMm}
+                          isHistoricalDataMode={isHistoricalDataMode}
+                          microscopeControlService={microscopeControlService}
+                          artifactZarrLoader={artifactZarrLoader}
+                          zarrChannelConfigs={zarrChannelConfigs}
+                          realMicroscopeChannelConfigs={realMicroscopeChannelConfigs}
+                          enabledZarrChannels={enabledZarrChannels}
+                          visibleChannelsConfig={visibleChannelsConfig}
+                          selectedHistoricalDataset={selectedHistoricalDataset}
+                          wellPlateType={wellPlateType}
+                          timepoint={timepoint}
+                          onEmbeddingsGenerated={onEmbeddingsGenerated}
+                          activeLayer={activeLayer}
+                          layers={layers}
+                          experiments={experiments}
+                        />
+                        {wellInfo && (
+                          <span className="annotation-well" style={{ 
+                            fontSize: '10px', 
+                            color: '#666', 
+                            marginLeft: '4px' 
+                          }}>
+                            Well: {wellId}
+                          </span>
+                        )}
+                        {/* Embedding Status Indicator */}
+                        {status && (annotation.type === 'rectangle' || annotation.type === 'polygon' || annotation.type === 'freehand') && (
+                          <span 
+                            className="embedding-status" 
+                            style={{ 
+                              fontSize: '10px', 
+                              marginLeft: '8px',
+                              color: status.status === 'completed' ? '#28a745' : 
+                                     status.status === 'generating' ? '#ffc107' : 
+                                     status.status === 'error' ? '#dc3545' : '#666'
+                            }}
+                            title={status.status === 'generating' ? 'Generating embeddings...' : 
+                                   status.status === 'completed' ? 'Embeddings ready' : 
+                                   status.status === 'error' ? `Error: ${status.error}` : ''}
+                          >
+                            {status.status === 'generating' && <i className="fas fa-spinner fa-spin"></i>}
+                            {status.status === 'completed' && <i className="fas fa-check-circle"></i>}
+                            {status.status === 'error' && <i className="fas fa-exclamation-circle"></i>}
+                          </span>
+                        )}
+                      </div>
+                      <div className="annotation-item-actions">
+                        {/* Find Similar button - only show if annotation has image embeddings */}
+                        {annotation.embeddings?.imageEmbedding && (
+                          <button
+                            onClick={() => handleFindSimilar(annotation)}
+                            className="annotation-action-btn"
+                            style={{ 
+                              fontSize: '10px', 
+                              padding: '2px 4px', 
+                              marginRight: '4px',
+                              backgroundColor: '#17a2b8',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '3px'
+                            }}
+                            title="Find similar results"
+                          >
+                            <i className="fas fa-search"></i>
+                          </button>
+                        )}
+                        <button
+                          onClick={() => onAnnotationDelete(annotation.id)}
+                          className="annotation-delete-btn"
+                          title="Delete annotation"
+                        >
+                          <i className="fas fa-trash"></i>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
 
           {/* Actions */}
           <div className="annotation-section">

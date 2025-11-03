@@ -7,7 +7,7 @@ import './AnnotationPanel.css'; // Import styles for annotation-details-window c
  * 
  * This component shows:
  * - Preview image
- * - Image ID
+ * - UUID
  * - Description
  * - Result type
  * - Well ID
@@ -76,6 +76,22 @@ const SimilarityResultInfoWindow = ({
   // Extract result data from properties
   const props = result.properties || result;
   const metadata = props.metadata || '';
+  
+  // Extract UUID from result object
+  const extractUUID = (resultObj) => {
+    if (resultObj.uuid) return resultObj.uuid;
+    if (resultObj.id) return resultObj.id;
+    if (resultObj._uuid) return resultObj._uuid;
+    // Try accessing via properties
+    if (resultObj.properties) {
+      const props = resultObj.properties;
+      if (props.uuid) return props.uuid;
+      if (props.id) return props.id;
+    }
+    return null;
+  };
+  
+  const objectUUID = extractUUID(result);
   
   // Parse metadata
   let parsedMetadata = {};
@@ -202,16 +218,16 @@ const SimilarityResultInfoWindow = ({
 
           {/* Information Fields */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '12px' }}>
-            {/* Image ID */}
+            {/* UUID */}
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                <strong style={{ color: '#f3f4f6', fontSize: '12px' }}>Image ID:</strong>
+                <strong style={{ color: '#f3f4f6', fontSize: '12px' }}>UUID:</strong>
                 <button
                   onClick={() => {
-                    const imageId = props.image_id || '';
-                    // Add header prefix for future image ID based search
-                    const imageIdWithHeader = imageId ? `image_id: ${imageId}` : '';
-                    navigator.clipboard.writeText(imageIdWithHeader).catch(console.error);
+                    const uuid = objectUUID || '';
+                    // Add header prefix for UUID based search
+                    const uuidWithHeader = uuid ? `uuid: ${uuid}` : '';
+                    navigator.clipboard.writeText(uuidWithHeader).catch(console.error);
                   }}
                   style={{
                     fontSize: '10px',
@@ -225,7 +241,7 @@ const SimilarityResultInfoWindow = ({
                     alignItems: 'center',
                     gap: '4px'
                   }}
-                  title="Copy Image ID (with header for search)"
+                  title="Copy UUID (with header for search)"
                 >
                   <i className="fas fa-copy" style={{ fontSize: '9px' }}></i>
                   Copy
@@ -242,7 +258,7 @@ const SimilarityResultInfoWindow = ({
                   fontSize: '11px'
                 }}
               >
-                {props.image_id || 'N/A'}
+                {objectUUID || 'N/A'}
               </div>
             </div>
 

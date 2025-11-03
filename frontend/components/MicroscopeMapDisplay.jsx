@@ -961,8 +961,23 @@ const MicroscopeMapDisplay = forwardRef(({
     setSimilarityResultInfoWindowPosition({ x: windowX, y: windowY });
     setShowSimilarityResultInfoWindow(true);
     
+    // Extract UUID from result object
+    const extractUUID = (resultObj) => {
+      if (resultObj.uuid) return resultObj.uuid;
+      if (resultObj.id) return resultObj.id;
+      if (resultObj._uuid) return resultObj._uuid;
+      if (resultObj.properties) {
+        const props = resultObj.properties;
+        if (props.uuid) return props.uuid;
+        if (props.id) return props.id;
+      }
+      return null;
+    };
+    
+    const objectUUID = extractUUID(result);
+    
     if (appendLog) {
-      appendLog(`Opened info window for similarity result: ${result.properties?.image_id || 'unknown'}`);
+      appendLog(`Opened info window for similarity result: ${objectUUID || 'unknown'}`);
     }
   }, [appendLog]);
 

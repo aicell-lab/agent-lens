@@ -669,11 +669,12 @@ def get_frontend_api():
     ):
         """
         Search for similar images using text query.
+        Supports uuid: prefix for UUID-based search.
         
         Args:
             collection_name (str): Name of the collection to search
             application_id (str): Application ID
-            query_text (str): Text query for similarity search
+            query_text (str): Text query for similarity search, or "uuid: <uuid>" for UUID search
             limit (int): Maximum number of results to return
             
         Returns:
@@ -696,15 +697,57 @@ def get_frontend_api():
             # Extract just the dataset ID part (last part after slash)
             clean_application_id = application_id.split('/')[-1] if '/' in application_id else application_id
             
-            results = await similarity_service.search_by_text(
-                collection_name=valid_collection_name,
-                application_id=clean_application_id,
-                query_text=query_text,
-                limit=limit
-            )
+            # Check if query_text starts with "uuid:" prefix
+            query_text_stripped = query_text.strip()
+            if query_text_stripped.startswith("uuid:"):
+                # Extract the UUID (everything after "uuid:")
+                object_uuid = query_text_stripped[len("uuid:"):].strip()
+                
+                if not object_uuid:
+                    raise HTTPException(status_code=400, detail="UUID cannot be empty after 'uuid:' prefix")
+                
+                logger.info(f"Performing UUID based search for UUID: {object_uuid}")
+                
+                # Use UUID based search
+                results = await similarity_service.search_by_uuid(
+                    collection_name=valid_collection_name,
+                    application_id=clean_application_id,
+                    object_uuid=object_uuid,
+                    limit=limit,
+                    include_vector=False
+                )
+                
+                return {
+                    "success": True,
+                    "results": results,
+                    "query": query_text,
+                    "query_type": "uuid",
+                    "uuid": object_uuid,
+                    "count": len(results)
+                }
+            else:
+                # Regular text search
+                results = await similarity_service.search_by_text(
+                    collection_name=valid_collection_name,
+                    application_id=clean_application_id,
+                    query_text=query_text,
+                    limit=limit
+                )
+                
+                return {
+                    "success": True,
+                    "results": results,
+                    "query": query_text,
+                    "query_type": "text",
+                    "count": len(results)
+                }
             
-            return {"success": True, "results": results, "query": query_text, "count": len(results)}
-            
+        except HTTPException:
+            raise
+        except ValueError as e:
+            # Handle case where image_id is not found
+            logger.error(f"Image ID search error: {e}")
+            raise HTTPException(status_code=404, detail=str(e))
         except Exception as e:
             logger.error(f"Error searching by text: {e}")
             logger.error(traceback.format_exc())

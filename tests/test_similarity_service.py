@@ -348,7 +348,7 @@ class TestWeaviateSimilarityService:
                         props = result.properties
                         if hasattr(props, 'preview_image') or (isinstance(props, dict) and 'preview_image' in props):
                             preview_image = props.preview_image if hasattr(props, 'preview_image') else props['preview_image']
-                            print(f"✅ Found preview image via attribute access")
+                            print("✅ Found preview image via attribute access")
                         else:
                             print(f"⚠️ Preview image not found via attribute access")
                             # Don't fail the test, just warn
@@ -518,7 +518,7 @@ class TestWeaviateSimilarityService:
                         props = result.properties
                         if hasattr(props, 'preview_image') or (isinstance(props, dict) and 'preview_image' in props):
                             preview_image = props.preview_image if hasattr(props, 'preview_image') else props['preview_image']
-                            print(f"✅ Found preview image via attribute access")
+                            print("✅ Found preview image via attribute access")
                         else:
                             print(f"⚠️ Preview image not found via attribute access")
                             # Don't fail the test, just warn
@@ -667,6 +667,290 @@ class TestWeaviateSimilarityService:
     # Weaviate naming conventions and tenant management issues that are difficult to resolve
     # in the test environment. The core Weaviate functionality is still tested through
     # the direct service integration tests above.
+
+    @pytest.mark.integration
+    async def test_uuid_based_search(self, weaviate_service):
+        """Test UUID based search functionality."""
+        collection_name = self._generate_test_collection_name()
+        application_id = "test-uuid-search"
+        
+        try:
+            # Create collection for test
+            print(f"Creating test collection for UUID search: {collection_name}")
+            try:
+                await weaviate_service.create_collection(
+                    collection_name=collection_name,
+                    description="Test collection for UUID search"
+                )
+                print(f"✅ Collection {collection_name} created successfully")
+            except Exception as e:
+                if "already exists" in str(e) or "class already exists" in str(e):
+                    print(f"Collection {collection_name} already exists - using existing collection")
+                else:
+                    raise
+            
+            await weaviate_service.create_application(
+                collection_name=collection_name,
+                application_id=application_id,
+                description="Test UUID search application"
+            )
+            
+            # Insert test objects with different descriptions
+            test_images = []
+            target_uuid = None
+            
+            for i in range(5):
+                image_id = f"test_img_id_{i}"
+                description = f"Test microscopy image {i}"
+                if i == 2:
+                    description = "Special cell with unique characteristics"
+                
+                # Generate CLIP vector
+                clip_vector = self._generate_clip_vector(description)
+                
+                # Generate test preview image
+                preview_image = self._generate_test_preview_image()
+                
+                insert_result = await weaviate_service.insert_image(
+                    collection_name=collection_name,
+                    application_id=application_id,
+                    image_id=image_id,
+                    description=description,
+                    metadata={"test_index": i},
+                    vector=clip_vector,
+                    preview_image=preview_image
+                )
+                test_images.append(image_id)
+                
+                # Extract UUID from insert result for the target (i == 2)
+                if i == 2:
+                    if hasattr(insert_result, 'uuid'):
+                        target_uuid = insert_result.uuid
+                    elif hasattr(insert_result, 'id'):
+                        target_uuid = insert_result.id
+                    elif isinstance(insert_result, dict):
+                        target_uuid = insert_result.get('uuid') or insert_result.get('id')
+                    # If not in result, we'll fetch it later
+                    if not target_uuid:
+                        # Fetch all annotations to get UUID
+                        all_results = await weaviate_service.fetch_all_annotations(
+                            collection_name=collection_name,
+                            application_id=application_id,
+                            limit=100,
+                            include_vector=False
+                        )
+                        for obj in all_results:
+                            obj_image_id = None
+                            if hasattr(obj, 'properties'):
+                                props = obj.properties
+                                if hasattr(props, 'image_id'):
+                                    obj_image_id = props.image_id
+                                elif isinstance(props, dict):
+                                    obj_image_id = props.get('image_id')
+                            elif isinstance(obj, dict):
+                                if 'properties' in obj and isinstance(obj['properties'], dict):
+                                    obj_image_id = obj['properties'].get('image_id')
+                                elif 'image_id' in obj:
+                                    obj_image_id = obj['image_id']
+                            
+                            if obj_image_id == image_id:
+                                if hasattr(obj, 'uuid'):
+                                    target_uuid = obj.uuid
+                                elif hasattr(obj, 'id'):
+                                    target_uuid = obj.id
+                                elif isinstance(obj, dict):
+                                    target_uuid = obj.get('uuid') or obj.get('id') or obj.get('_uuid')
+                                break
+            
+            assert target_uuid is not None, "Target UUID should be set"
+            print(f"✅ Inserted {len(test_images)} test images, target UUID: {target_uuid}")
+            
+            # Test 1: Fetch object by UUID
+            print(f"🧪 Testing fetch_by_uuid for '{target_uuid}'...")
+            fetched_object = await weaviate_service.fetch_by_uuid(
+                collection_name=collection_name,
+                application_id=application_id,
+                object_uuid=target_uuid,
+                include_vector=True
+            )
+            
+            # Verify the fetched object
+            fetched_uuid = None
+            if hasattr(fetched_object, 'uuid'):
+                fetched_uuid = fetched_object.uuid
+            elif hasattr(fetched_object, 'id'):
+                fetched_uuid = fetched_object.id
+            elif isinstance(fetched_object, dict):
+                fetched_uuid = fetched_object.get('_uuid') or fetched_object.get('uuid') or fetched_object.get('id')
+            
+            assert fetched_uuid == target_uuid, f"Fetched UUID should match: expected {target_uuid}, got {fetched_uuid}"
+            assert isinstance(fetched_uuid, str) and len(fetched_uuid) > 0, f"UUID should be a non-empty string, got: {fetched_uuid}"
+            print(f"✅ Successfully fetched object by UUID: {fetched_uuid}")
+            
+            # Test 2: Search by UUID
+            print(f"🧪 Testing search_by_uuid for '{target_uuid}'...")
+            search_results = await weaviate_service.search_by_uuid(
+                collection_name=collection_name,
+                application_id=application_id,
+                object_uuid=target_uuid,
+                limit=5,
+                include_vector=False
+            )
+            
+            assert len(search_results) > 0, "UUID search should return results"
+            print(f"✅ Found {len(search_results)} similar objects (excluding query object)")
+            
+            # Verify that the query object itself is not in the results
+            for result in search_results:
+                result_uuid = None
+                if hasattr(result, 'uuid'):
+                    result_uuid = result.uuid
+                elif hasattr(result, 'id'):
+                    result_uuid = result.id
+                elif isinstance(result, dict):
+                    result_uuid = result.get('uuid') or result.get('id') or result.get('_uuid')
+                
+                assert result_uuid != target_uuid, f"Query object should not be in results, but found UUID: {result_uuid}"
+            
+            print("✅ Verified that query object is excluded from results")
+            
+            # Test 3: Test error case - UUID not found
+            print("🧪 Testing error case - non-existent UUID...")
+            try:
+                await weaviate_service.fetch_by_uuid(
+                    collection_name=collection_name,
+                    application_id=application_id,
+                    object_uuid="non_existent_uuid_12345",
+                    include_vector=True
+                )
+                assert False, "Should have raised ValueError for non-existent UUID"
+            except ValueError as e:
+                assert "not found" in str(e).lower(), f"Error message should mention 'not found': {e}"
+                print(f"✅ Correctly raised ValueError for non-existent UUID: {e}")
+            
+        finally:
+            # Clean up the test collection
+            try:
+                await weaviate_service.delete_collection(collection_name)
+                print(f"✅ Cleaned up collection: {collection_name}")
+            except Exception as e:
+                print(f"Warning: Error cleaning up collection {collection_name}: {e}")
+
+    @pytest.mark.integration
+    async def test_uuid_search_endpoint(self, test_frontend_service):
+        """Test the FastAPI endpoint for UUID based search."""
+        service, service_url = test_frontend_service
+        import aiohttp
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                # First, we need to insert some test data
+                collection_name = "agent-lens"
+                application_id = "test-endpoint-uuid-search"
+                
+                print("🧪 Testing UUID search endpoint...")
+                
+                # Insert a test image first (using the insert endpoint)
+                insert_url = f"{service_url}/similarity/insert"
+                
+                # Generate test data
+                test_image_id = f"test_endpoint_img_{uuid.uuid4().hex[:8]}"
+                
+                # Create a simple test image
+                import io
+                from PIL import Image
+                test_image = Image.new('RGB', (50, 50), color='blue')
+                img_buffer = io.BytesIO()
+                test_image.save(img_buffer, format='PNG')
+                img_buffer.seek(0)
+                
+                # Generate CLIP vector for the description
+                clip_vector = self._generate_clip_vector("test endpoint microscopy image")
+                
+                from aiohttp import FormData
+                data = FormData()
+                data.add_field('collection_name', collection_name)
+                data.add_field('application_id', application_id)
+                data.add_field('image_id', test_image_id)
+                data.add_field('description', 'Test endpoint microscopy image')
+                data.add_field('metadata', '{"test": true}')
+                data.add_field('dataset_id', application_id)
+                data.add_field('image_embedding', str(clip_vector).replace("'", '"'))  # JSON string
+                
+                # Insert the test image
+                async with session.post(insert_url, data=data) as response:
+                    if response.status not in (200, 201):
+                        error_text = await response.text()
+                        print(f"⚠️ Failed to insert test image (status {response.status}): {error_text}")
+                        pytest.skip("Could not insert test image - skipping endpoint test")
+                    else:
+                        print(f"✅ Inserted test image with image_id: {test_image_id}")
+                
+                # Fetch the UUID from the inserted object by fetching all annotations
+                fetch_url = f"{service_url}/similarity/fetch-all"
+                fetch_params = {
+                    "collection_name": collection_name,
+                    "application_id": application_id,
+                    "limit": "10"
+                }
+                
+                test_uuid = None
+                async with session.get(fetch_url, params=fetch_params) as fetch_response:
+                    if fetch_response.status == 200:
+                        fetch_result = await fetch_response.json()
+                        if fetch_result.get("success") and fetch_result.get("annotations"):
+                            for annotation in fetch_result["annotations"]:
+                                props = annotation.get("properties") or annotation
+                                if props.get("image_id") == test_image_id:
+                                    # Extract UUID
+                                    if annotation.get("uuid"):
+                                        test_uuid = annotation["uuid"]
+                                    elif annotation.get("id"):
+                                        test_uuid = annotation["id"]
+                                    elif isinstance(annotation, dict):
+                                        test_uuid = annotation.get("uuid") or annotation.get("id") or annotation.get("_uuid")
+                                    break
+                
+                if not test_uuid:
+                    pytest.skip("Could not extract UUID from inserted object - skipping UUID endpoint test")
+                
+                print(f"✅ Extracted UUID from inserted object: {test_uuid}")
+                
+                # Test UUID search endpoint (via text search endpoint with uuid: prefix)
+                search_url = f"{service_url}/similarity/search/text"
+                query_params = {
+                    "collection_name": collection_name,
+                    "application_id": application_id,
+                    "query_text": f"uuid: {test_uuid}",
+                    "limit": "10"
+                }
+                
+                async with session.post(search_url, params=query_params) as response:
+                    assert response.status == 200, f"Expected 200, got {response.status}: {await response.text()}"
+                    result = await response.json()
+                    
+                    assert result["success"]
+                    assert result["query_type"] == "uuid"
+                    assert result["uuid"] == test_uuid
+                    assert "results" in result
+                    assert isinstance(result["results"], list)
+                    print(f"✅ UUID search endpoint returned {result['count']} results")
+                
+                # Test error case - non-existent UUID
+                error_query_params = {
+                    "collection_name": collection_name,
+                    "application_id": application_id,
+                    "query_text": "uuid: non_existent_uuid_12345",
+                    "limit": "10"
+                }
+                
+                async with session.post(search_url, params=error_query_params) as response:
+                    assert response.status == 404, f"Expected 404 for non-existent UUID, got {response.status}"
+                    print("✅ Correctly returned 404 for non-existent UUID")
+                
+        except Exception as e:
+            print(f"❌ Error in UUID search endpoint test: {e}")
+            raise
 
     @pytest.mark.unit
     def test_fastapi_imports(self):
