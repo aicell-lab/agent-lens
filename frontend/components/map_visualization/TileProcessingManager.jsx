@@ -1,5 +1,5 @@
 import React from 'react';
-import { CHANNEL_COLORS } from '../../../utils';
+import { CHANNEL_COLORS } from '../../utils';
 
 /**
  * TileProcessingManager - Centralized tile processing with simplified workflow

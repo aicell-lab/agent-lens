@@ -2,8 +2,8 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import PropTypes from 'prop-types';
 import ChatbotButton from './ChatbotButton';
 import SampleSelector from './SampleSelector';
-import ImagingTasksModal from './ImagingTasksModal';
-import MicroscopeMapDisplay from './MicroscopeMapDisplay';
+import ImagingTasksModal from './microscope_acquisition/ImagingTasksModal';
+import MicroscopeMapDisplay from './map_visualization/MicroscopeMapDisplay';
 import { 
   useValidatedNumberInput, 
   getInputValidationClasses,
@@ -14,7 +14,7 @@ import {
   getMicroscopeDisplayName,
   getOrchestratorMicroscopeId,
 } from '../utils';
-import './ImagingTasksModal.css';
+import './microscope_acquisition/ImagingTasksModal.css';
 
 // Helper function to convert a uint8 hypha-rpc numpy array to a displayable Data URL
 const numpyArrayToDataURL = (numpyArray) => {

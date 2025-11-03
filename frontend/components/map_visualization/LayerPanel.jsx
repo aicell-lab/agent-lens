@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import PropTypes from 'prop-types';
 import './LayerPanel.css';
-import DualRangeSlider from '../../DualRangeSlider';
-import { getChannelColor } from '../../../utils';
+import DualRangeSlider from '../DualRangeSlider';
+import { getChannelColor } from '../../utils';
 
 const LayerPanel = ({
   // Map Layers props

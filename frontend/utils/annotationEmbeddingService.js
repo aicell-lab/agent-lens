@@ -14,7 +14,7 @@
  * - Falls back when advanced extraction requirements not met
  */
 
-import TileProcessingManager from '../components/microscope/map/TileProcessingManager.jsx';
+import TileProcessingManager from '../components/map_visualization/TileProcessingManager.jsx';
 
 /**
  * Extract image region from canvas based on annotation coordinates

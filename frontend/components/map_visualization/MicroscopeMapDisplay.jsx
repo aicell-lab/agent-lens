@@ -1,16 +1,16 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, useImperativeHandle, forwardRef } from 'react';
 import PropTypes from 'prop-types';
-import { useValidatedNumberInput, isSquidPlusMicroscope, isSimulatedMicroscope, getMicroscopeConfig } from '../utils'; // Import validation utilities
-import ArtifactZarrLoader from '../utils/artifactZarrLoader.js';
-import LayerPanel from './microscope/map/LayerPanel';
-import useExperimentZarrManager from './microscope/map/ExperimentZarrManager';
-import TileProcessingManager from './microscope/map/TileProcessingManager';
-import QuickScanConfig from './microscope/controls/QuickScanConfig';
-import NormalScanConfig from './microscope/controls/NormalScanConfig';
-import AnnotationPanel from './similarity_search/AnnotationPanel';
-import AnnotationCanvas from './similarity_search/AnnotationCanvas';
-import SimilarityResultsRenderer from './similarity_search/SimilarityResultsRenderer';
-import SimilarityResultInfoWindow from './similarity_search/SimilarityResultInfoWindow';
+import { useValidatedNumberInput, isSquidPlusMicroscope, isSimulatedMicroscope, getMicroscopeConfig } from '../../utils'; // Import validation utilities
+import ArtifactZarrLoader from '../../utils/artifactZarrLoader.js';
+import LayerPanel from './LayerPanel';
+import useExperimentZarrManager from './ExperimentZarrManager';
+import TileProcessingManager from './TileProcessingManager';
+import QuickScanConfig from '../microscope_acquisition/QuickScanConfig';
+import NormalScanConfig from '../microscope_acquisition/NormalScanConfig';
+import AnnotationPanel from '../similarity_search/AnnotationPanel';
+import AnnotationCanvas from '../similarity_search/AnnotationCanvas';
+import SimilarityResultsRenderer from '../similarity_search/SimilarityResultsRenderer';
+import SimilarityResultInfoWindow from '../similarity_search/SimilarityResultInfoWindow';
 import { 
   startSegmentation, 
   getSegmentationStatus, 
@@ -23,7 +23,7 @@ import {
   isSegmentationFailed,
   getSegmentationExperimentName,
   isSegmentationExperiment
-} from '../utils/segmentationService.js';
+} from '../../utils/segmentationService.js';
 import './MicroscopeMapDisplay.css';
 
 const MicroscopeMapDisplay = forwardRef(({
@@ -3186,23 +3186,6 @@ const MicroscopeMapDisplay = forwardRef(({
     setShowScanConfig(true);
   }, [rectangleStart, rectangleEnd, isRectangleSelection, displayToStageCoords, scanParameters.dx_mm, scanParameters.dy_mm, isSimulatedMicroscopeSelected, isHistoricalDataMode, dragSelectedWell, stageToRelativeCoords, appendLog]);
 
-
-
-  // Click outside handler for layer dropdown - DISABLED to prevent auto-collapse
-  // useEffect(() => {
-  //   const handleClickOutside = (event) => {
-  //     if (layerDropdownRef.current && !layerDropdownRef.current.contains(event.target)) {
-  //       setIsLayerDropdownOpen(false);
-  //     }
-  //   };
-
-  //   if (isLayerDropdownOpen) {
-  //     document.addEventListener('mousedown', handleClickOutside);
-  //     return () => {
-  //       document.removeEventListener('mousedown', handleClickOutside);
-  //     };
-  //   }
-  // }, [isLayerDropdownOpen]);
 
   // Click outside handler for annotation dropdown
   useEffect(() => {

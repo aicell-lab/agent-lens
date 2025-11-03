@@ -8,7 +8,7 @@ import {
   validateStringInput,
   getOrchestratorMicroscopeId,
   isSimulatedMicroscope,
-} from '../utils'; // Import validation utilities
+} from '../../utils'; // Import validation utilities
 import './ImagingTasksModal.css'; // We will create this CSS file
 
 const ROW_LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
