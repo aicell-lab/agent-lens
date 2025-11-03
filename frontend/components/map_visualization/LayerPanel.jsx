@@ -3,6 +3,7 @@ import PropTypes from 'prop-types';
 import './LayerPanel.css';
 import DualRangeSlider from '../DualRangeSlider';
 import { getChannelColor } from '../../utils';
+import { isSegmentationExperiment, getSourceExperimentName } from '../../utils/segmentationUtils';
 
 const LayerPanel = ({
   // Map Layers props
@@ -282,7 +283,8 @@ const LayerPanel = ({
     
     // For real microscope experiments ONLY, also call setActiveExperimentHandler
     // Browse Data layers are remote data and don't need microscope experiment activation
-    if (layerType === 'experiment' && setActiveExperimentHandler) {
+    // Segmentation layers should not trigger experiment activation
+    if (layerType === 'experiment' && !isSegmentationExperiment(layerId) && setActiveExperimentHandler) {
       try {
         await setActiveExperimentHandler(layerId);
         console.log(`[LayerPanel] Set active experiment: ${layerId}`);
@@ -633,8 +635,19 @@ const LayerPanel = ({
           <>
             {isLoadingExperiments ? (
               <div className="loading-text">Loading experiments...</div>
-            ) : (
-              experiments.map((exp) => {
+            ) : (() => {
+              // Filter out segmentation experiments and create mapping
+              const regularExperiments = experiments.filter(exp => !isSegmentationExperiment(exp.name));
+              const segmentationExperiments = experiments.filter(exp => isSegmentationExperiment(exp.name));
+              
+              // Create mapping: parent experiment name -> segmentation experiment
+              const segmentationMap = {};
+              segmentationExperiments.forEach(segExp => {
+                const parentName = getSourceExperimentName(segExp.name);
+                segmentationMap[parentName] = segExp;
+              });
+              
+              return regularExperiments.map((exp) => {
                 const isVisible = visibleExperiments.includes(exp.name);
                 const isActive = exp.name === activeExperiment;
                 return (
@@ -816,6 +829,58 @@ const LayerPanel = ({
                         </div>
                       </div>
                       
+                      {/* Segmentation Layer (if exists) */}
+                      {segmentationMap[exp.name] && (
+                        <div className="channel-item channel-item--segmentation">
+                          <div className="channel-header">
+                            <button
+                              className="channel-visibility-btn"
+                              onClick={() => {
+                                // Toggle segmentation visibility
+                                const segExp = segmentationMap[exp.name];
+                                const isVisible = visibleExperiments.includes(segExp.name);
+                                if (isVisible) {
+                                  setVisibleExperiments(prev => prev.filter(name => name !== segExp.name));
+                                } else {
+                                  setVisibleExperiments(prev => [...prev, segExp.name]);
+                                }
+                              }}
+                              title={visibleExperiments.includes(segmentationMap[exp.name].name) ? "Hide segmentation" : "Show segmentation"}
+                            >
+                              <i className={`fas fa-eye${visibleExperiments.includes(segmentationMap[exp.name].name) ? '' : '-slash'}`}></i>
+                            </button>
+                            <span className="channel-name">
+                              <i className="fas fa-cut"></i>
+                              Segmentation
+                            </span>
+                            <div className="segmentation-actions">
+                              <button
+                                className="segmentation-action-btn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setExperimentToReset(segmentationMap[exp.name].name);
+                                  setShowClearCanvasConfirmation(true);
+                                }}
+                                title="Reset segmentation data"
+                              >
+                                <i className="fas fa-undo"></i>
+                              </button>
+                              <button
+                                className="segmentation-action-btn segmentation-action-btn--delete"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setExperimentToDelete(segmentationMap[exp.name].name);
+                                  setShowDeleteConfirmation(true);
+                                }}
+                                title="Delete segmentation layer"
+                              >
+                                <i className="fas fa-trash"></i>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      
                       {/* Annotation Sublayer for Experiments */}
                       <div className="channel-item channel-item--annotation">
                         <div className="channel-header">
@@ -939,8 +1004,8 @@ const LayerPanel = ({
                   )}
                 </div>
                 );
-              })
-            )}
+              });
+            })()}
           </>
         )}
 

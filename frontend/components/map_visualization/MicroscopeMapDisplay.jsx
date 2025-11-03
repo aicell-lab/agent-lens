@@ -22,7 +22,8 @@ import {
   isSegmentationCompleted,
   isSegmentationFailed,
   getSegmentationExperimentName,
-  isSegmentationExperiment
+  isSegmentationExperiment,
+  getSourceExperimentName
 } from '../../utils/segmentationUtils.js';
 import './MicroscopeMapDisplay.css';
 
@@ -5659,7 +5660,21 @@ const MicroscopeMapDisplay = forwardRef(({
           const experimentsToShow = visibleExperiments.length > 0 ? visibleExperiments : (activeExperiment ? [activeExperiment] : []);
           const experimentIndex = tile.experimentName ? experimentsToShow.indexOf(tile.experimentName) : -1;
           const baseZIndex = 1;
-          const experimentZIndex = experimentIndex >= 0 ? experimentIndex + baseZIndex : baseZIndex;
+          let experimentZIndex = experimentIndex >= 0 ? experimentIndex + baseZIndex : baseZIndex;
+          
+          // 🎨 SEGMENTATION LAYER Z-INDEX: Ensure segmentation layers always appear above their parent experiment
+          if (tile.experimentName && isSegmentationExperiment(tile.experimentName)) {
+            const parentExperimentName = getSourceExperimentName(tile.experimentName);
+            const parentIndex = experimentsToShow.indexOf(parentExperimentName);
+            // If parent experiment is visible, ensure segmentation has higher z-index
+            // Add a large offset (100) to segmentation layers to ensure they're always on top
+            if (parentIndex >= 0) {
+              experimentZIndex = parentIndex + baseZIndex + 100; // Segmentation always 100 units above parent
+            } else {
+              // Parent not visible, but still give segmentation a high z-index
+              experimentZIndex = baseZIndex + 100;
+            }
+          }
           
           // 🎨 SCALE-BASED Z-INDEX: Higher resolution (scale 0) > Lower resolution (scale 4)
           // Each scale level gets 10 z-index units to allow for experiment layering
@@ -5686,7 +5701,8 @@ const MicroscopeMapDisplay = forwardRef(({
                 style={{
                   objectFit: 'fill', // Fill the container exactly, matching the calculated dimensions
                   objectPosition: 'top left', // Ensure alignment with top-left corner
-                  display: 'block' // Remove any inline spacing
+                  display: 'block', // Remove any inline spacing
+                  opacity: tile.experimentName && isSegmentationExperiment(tile.experimentName) ? 0.5 : 1.0 // Fixed transparency for segmentation masks
                 }}
               />
               
