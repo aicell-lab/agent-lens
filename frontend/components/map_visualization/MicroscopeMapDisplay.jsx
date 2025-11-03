@@ -4807,33 +4807,7 @@ const MicroscopeMapDisplay = forwardRef(({
         return;
       }
       
-      // FREE_PAN mode: Track existing tiles that match scale/channel/experiment BEFORE loading
-      // We'll remove these AFTER new tiles are loaded (mark always, cleanup only when not panning/zooming)
-      const oldTileKeysToRemove = new Set();
-      if (mapViewMode === 'FREE_PAN') {
-        const activeChannel = getChannelString();
-        
-        // Identify old tiles that will be replaced (do this ALWAYS, even during pan/zoom)
-        stitchedTiles.forEach(tile => {
-          const matchesScale = tile.scale === scaleLevel;
-          const matchesChannel = tile.channel === activeChannel;
-          const matchesExperiment = experimentsToLoad.some(exp => 
-            (exp === null && tile.experimentName === null) || 
-            (exp !== null && tile.experimentName === exp)
-          );
-          
-          if (matchesScale && matchesChannel && matchesExperiment) {
-            const tileKey = getTileKey(tile.bounds, tile.scale, tile.channel, tile.experimentName);
-            oldTileKeysToRemove.add(tileKey);
-          }
-        });
-        
-        if (oldTileKeysToRemove.size > 0) {
-          console.log(`🎨 FREE_PAN: Marked ${oldTileKeysToRemove.size} old tiles for removal after new tiles load (isPanning: ${isPanning}, isZooming: ${isZooming})`);
-        } else {
-          console.log(`🎨 FREE_PAN: No old tiles found to mark (this is likely the first load)`);
-        }
-      }
+      const activeChannel = getChannelString();
       
       // Get enabled channels for FREE_PAN mode
       const enabledChannels = getSelectedChannels().map(channelName => ({
@@ -4846,6 +4820,10 @@ const MicroscopeMapDisplay = forwardRef(({
         microscopeControlService,
         artifactZarrLoader: null // Not needed for FREE_PAN mode
       };
+      
+      // Track which tiles to remove - only for experiments that successfully load new tiles
+      // Map from experiment name to Set of tile keys to remove for that experiment
+      const tilesToRemoveByExperiment = new Map();
       
       // Load tiles for each experiment
       for (const experimentName of experimentsToLoad) {
@@ -4885,6 +4863,7 @@ const MicroscopeMapDisplay = forwardRef(({
           
           if (processedTile && processedTile.data) {
             console.log(`🎨 FREE_PAN: Successfully processed tile for experiment ${experimentName} with ${processedTile.channelsUsed?.length || 0} channels`);
+            
             const newTile = {
               data: processedTile.data,
               bounds: processedTile.bounds,
@@ -4898,6 +4877,38 @@ const MicroscopeMapDisplay = forwardRef(({
               experimentName: experimentName || null // Add experiment name to real microscope tiles (null if no experiment)
             };
             
+            // CRITICAL FIX: Mark old tiles for removal BEFORE adding new tile
+            // Only mark tiles for THIS specific experiment that have the same key as the new tile
+            // addOrUpdateTile will handle replacement, but we want to remove OTHER tiles from this experiment
+            // that don't match (e.g., from previous pan/zoom positions)
+            if (mapViewMode === 'FREE_PAN') {
+              const newTileKey = getTileKey(newTile.bounds, newTile.scale, newTile.channel, newTile.experimentName);
+              const experimentTileKeys = new Set();
+              
+              // Only mark old tiles from THIS experiment that match scale/channel but have different keys
+              stitchedTiles.forEach(tile => {
+                const matchesScale = tile.scale === scaleLevel;
+                const matchesChannel = tile.channel === activeChannel;
+                const matchesThisExperiment = 
+                  (experimentName === null && tile.experimentName === null) || 
+                  (experimentName !== null && tile.experimentName === experimentName);
+                
+                // Only mark tiles for this specific experiment that don't match the new tile key
+                if (matchesScale && matchesChannel && matchesThisExperiment) {
+                  const tileKey = getTileKey(tile.bounds, tile.scale, tile.channel, tile.experimentName);
+                  // Don't mark if it's the same key - addOrUpdateTile will handle replacement
+                  if (tileKey !== newTileKey) {
+                    experimentTileKeys.add(tileKey);
+                  }
+                }
+              });
+              
+              // Store tile keys to remove for this experiment (only if we successfully loaded)
+              if (experimentTileKeys.size > 0) {
+                tilesToRemoveByExperiment.set(experimentName, experimentTileKeys);
+              }
+            }
+            
             addOrUpdateTile(newTile);
           } else {
             console.warn(`🎨 FREE_PAN: TileProcessingManager returned empty tile for experiment ${experimentName}, channels: "${getChannelString()}"`);
@@ -4910,8 +4921,14 @@ const MicroscopeMapDisplay = forwardRef(({
         }
       }
       
+      // Combine all tile keys to remove from all successfully loaded experiments
+      const oldTileKeysToRemove = new Set();
+      tilesToRemoveByExperiment.forEach((tileKeys, experimentName) => {
+        tileKeys.forEach(key => oldTileKeysToRemove.add(key));
+      });
+      
       // FREE_PAN mode: Remove old tiles IMMEDIATELY after new tiles are loaded
-      // Don't wait for user to stop panning/zooming - remove old tiles now
+      // Only remove tiles for experiments that successfully loaded new tiles
       if (mapViewMode === 'FREE_PAN' && oldTileKeysToRemove.size > 0) {
         console.log(`🎨 FREE_PAN: Removing ${oldTileKeysToRemove.size} old tiles IMMEDIATELY after loading`);
         
