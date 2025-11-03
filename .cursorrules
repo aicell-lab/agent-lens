@@ -194,32 +194,31 @@ frontend/                  # React application
 │   │   ├── AnnotationPanel.css       # Annotation panel styles
 │   │   ├── AnnotationPanel.jsx       # Main annotation control panel
 │   │   └── SimilarAnnotationRenderer.jsx  # Similar annotation rendering
-│   ├── microscope/       # Microscope-specific components
-│   │   ├── controls/     # Microscope control interfaces
-│   │   │   ├── NormalScanConfig.css  # Normal scan configuration styles
-│   │   │   ├── NormalScanConfig.jsx  # Normal scan configuration panel
-│   │   │   ├── QuickScanConfig.css   # Quick scan configuration styles
-│   │   │   └── QuickScanConfig.jsx   # Quick scan configuration panel
-│   │   └── map/          # Microscope map and data visualization
-│   │       ├── ExperimentZarrManager.jsx     # OME-Zarr experiment data management
-│   │       ├── LayerPanel.css               # Layer panel styles
-│   │       ├── LayerPanel.jsx               # Layer control panel
-│   │       ├── README_TileProcessingManager.md  # Tile processing documentation
-│   │       └── TileProcessingManager.jsx    # Tile processing and caching
+│   ├── microscope_acquisition/  # Scan configuration and task management
+│   │   ├── NormalScanConfig.css  # Normal scan configuration styles
+│   │   ├── NormalScanConfig.jsx  # Normal scan configuration panel
+│   │   ├── QuickScanConfig.css   # Quick scan configuration styles
+│   │   ├── QuickScanConfig.jsx   # Quick scan configuration panel
+│   │   ├── ImagingTasksModal.css # Imaging tasks modal styles
+│   │   └── ImagingTasksModal.jsx # Time-lapse imaging task management
+│   ├── map_visualization/       # Data viewing and display
+│   │   ├── ExperimentZarrManager.jsx     # OME-Zarr experiment data management
+│   │   ├── LayerPanel.css               # Layer panel styles
+│   │   ├── LayerPanel.jsx               # Layer control panel
+│   │   ├── MicroscopeMapDisplay.css      # Microscope map display styles
+│   │   ├── MicroscopeMapDisplay.jsx      # Main microscope map visualization
+│   │   ├── README_TileProcessingManager.md  # Tile processing documentation
+│   │   └── TileProcessingManager.jsx    # Tile processing and caching
 │   ├── CameraSettings.jsx        # Camera configuration component
 │   ├── ChannelSettings.jsx       # Channel configuration component
 │   ├── ChatbotButton.jsx         # AI chatbot interface button
 │   ├── ControlButton.jsx         # Generic control button component
 │   ├── DualRangeSlider.jsx       # Dual range slider component
 │   ├── ImageJPanel.jsx           # ImageJ integration panel
-│   ├── ImagingTasksModal.css     # Imaging tasks modal styles
-│   ├── ImagingTasksModal.jsx     # Time-lapse imaging task management
 │   ├── IncubatorControl.jsx      # Automated incubator control
 │   ├── LoginPrompt.jsx           # User authentication prompt
 │   ├── LogSection.jsx            # System logs display
 │   ├── MicroscopeControlPanel.jsx    # Main microscope control interface
-│   ├── MicroscopeMapDisplay.css      # Microscope map display styles
-│   ├── MicroscopeMapDisplay.jsx      # Main microscope map visualization
 │   ├── Notification.jsx              # User notification system
 │   ├── SampleSelector.jsx            # Sample management and transfer
 │   ├── Sidebar.css                   # Main sidebar styles

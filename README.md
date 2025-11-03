@@ -194,7 +194,8 @@ agent-lens/
 ├── 📁 frontend/                # React application
 │   ├── 📁 components/          # UI components
 │   │   ├── 📁 similarity_search/      # Image annotation system
-│   │   ├── 📁 microscope/      # Microscope control and visualization
+│   │   ├── 📁 microscope_acquisition/ # Scan configuration and task management
+│   │   ├── 📁 map_visualization/      # Data viewing and display
 │   │   └── 📄 *.jsx            # Control panels, modals, settings
 │   ├── 📁 utils/               # Frontend utilities (Zarr loader, embeddings)
 │   ├── 📄 main.jsx             # Root React component
