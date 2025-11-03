@@ -1,5 +1,5 @@
 /**
- * Segmentation Service - Helper functions for microSAM automated segmentation
+ * Segmentation Utils - Helper functions for microSAM automated segmentation
  * 
  * This module provides functions to interact with the microscope service's
  * segmentation API, including starting segmentation, monitoring progress,
@@ -27,8 +27,8 @@ export const startSegmentation = async (microscopeService, experimentName, chann
       throw new Error('At least one channel configuration is required');
     }
 
-    console.log(`[SegmentationService] Starting segmentation for experiment: ${experimentName}`);
-    console.log(`[SegmentationService] Channel configs:`, channelConfigs);
+    console.log(`[SegmentationUtils] Starting segmentation for experiment: ${experimentName}`);
+    console.log(`[SegmentationUtils] Channel configs:`, channelConfigs);
 
     const result = await microscopeService.segmentation_start(
       experimentName,
@@ -36,7 +36,7 @@ export const startSegmentation = async (microscopeService, experimentName, chann
       channelConfigs
     );
 
-    console.log(`[SegmentationService] Segmentation start result:`, result);
+    console.log(`[SegmentationUtils] Segmentation start result:`, result);
 
     if (result && result.success !== false) {
       return {
@@ -54,7 +54,7 @@ export const startSegmentation = async (microscopeService, experimentName, chann
       };
     }
   } catch (error) {
-    console.error(`[SegmentationService] Error starting segmentation:`, error);
+    console.error(`[SegmentationUtils] Error starting segmentation:`, error);
     return {
       success: false,
       error: error.message,
@@ -76,7 +76,7 @@ export const getSegmentationStatus = async (microscopeService) => {
 
     const status = await microscopeService.segmentation_get_status();
     
-    console.log(`[SegmentationService] Segmentation status:`, status);
+    console.log(`[SegmentationUtils] Segmentation status:`, status);
 
     return {
       success: true,
@@ -86,7 +86,7 @@ export const getSegmentationStatus = async (microscopeService) => {
       savedDataType: status.saved_data_type
     };
   } catch (error) {
-    console.error(`[SegmentationService] Error getting segmentation status:`, error);
+    console.error(`[SegmentationUtils] Error getting segmentation status:`, error);
     return {
       success: false,
       error: error.message,
@@ -106,18 +106,18 @@ export const cancelSegmentation = async (microscopeService) => {
       throw new Error('Microscope service not available');
     }
 
-    console.log(`[SegmentationService] Cancelling segmentation...`);
+    console.log(`[SegmentationUtils] Cancelling segmentation...`);
 
     const result = await microscopeService.segmentation_cancel();
     
-    console.log(`[SegmentationService] Segmentation cancel result:`, result);
+    console.log(`[SegmentationUtils] Segmentation cancel result:`, result);
 
     return {
       success: true,
       message: result.message || 'Segmentation cancelled successfully'
     };
   } catch (error) {
-    console.error(`[SegmentationService] Error cancelling segmentation:`, error);
+    console.error(`[SegmentationUtils] Error cancelling segmentation:`, error);
     return {
       success: false,
       error: error.message,
@@ -142,7 +142,7 @@ export const buildChannelConfigs = (visibleChannels, getLayerContrastSettings, e
   );
 
   if (visibleChannelNames.length === 0) {
-    console.warn(`[SegmentationService] No visible channels found for experiment: ${experimentName}`);
+    console.warn(`[SegmentationUtils] No visible channels found for experiment: ${experimentName}`);
     return [];
   }
 
@@ -172,14 +172,14 @@ export const buildChannelConfigs = (visibleChannels, getLayerContrastSettings, e
 
     channelConfigs.push(channelConfig);
 
-    console.log(`[SegmentationService] Built config for channel ${channelName}:`, {
+    console.log(`[SegmentationUtils] Built config for channel ${channelName}:`, {
       layerId,
       originalContrast: { min: layerContrast.min, max: layerContrast.max },
       percentiles: { min: finalMinPercentile, max: finalMaxPercentile }
     });
   });
 
-  console.log(`[SegmentationService] Built ${channelConfigs.length} channel configurations:`, channelConfigs);
+  console.log(`[SegmentationUtils] Built ${channelConfigs.length} channel configurations:`, channelConfigs);
   return channelConfigs;
 };
 
@@ -277,3 +277,4 @@ export const getSourceExperimentName = (segmentationExperimentName) => {
   
   return segmentationExperimentName.replace('-segmentation', '');
 };
+

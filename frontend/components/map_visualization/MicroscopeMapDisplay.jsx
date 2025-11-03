@@ -23,7 +23,7 @@ import {
   isSegmentationFailed,
   getSegmentationExperimentName,
   isSegmentationExperiment
-} from '../../utils/segmentationService.js';
+} from '../../utils/segmentationUtils.js';
 import './MicroscopeMapDisplay.css';
 
 const MicroscopeMapDisplay = forwardRef(({
