@@ -427,8 +427,21 @@ const SimilaritySearchPanel = ({
 
   // Helper functions for layer management
   const getActiveLayerInfo = () => {
-    if (!activeLayer || !layers.length) return null;
-    return layers.find(layer => layer.id === activeLayer);
+    if (!activeLayer) return null;
+    // First check regular layers
+    if (layers.length > 0) {
+      const layerInfo = layers.find(layer => layer.id === activeLayer);
+      if (layerInfo) return layerInfo;
+    }
+    // Then check experiments
+    if (experiments.length > 0) {
+      const experiment = experiments.find(exp => exp.name === activeLayer);
+      if (experiment) {
+        // Return a layer-like object for experiments
+        return { id: experiment.name, type: 'experiment' };
+      }
+    }
+    return null;
   };
 
   const getActiveLayerType = () => {
@@ -1102,10 +1115,20 @@ const SimilaritySearchPanel = ({
                       if (setShowSimilarityPanel) {
                         setShowSimilarityPanel(false);
                       }
-              // Clean up similarity results from map when closing the window
-              if (onSimilarityResultsCleanup) {
-                onSimilarityResultsCleanup();
-              }
+                      // Clean up similarity results from map when closing the window
+                      if (onSimilarityResultsCleanup) {
+                        onSimilarityResultsCleanup();
+                      }
+                      // Clean up similarity search results
+                      if (setSimilaritySearchResults) {
+                        setSimilaritySearchResults([]);
+                      }
+                      // Trigger deactivation event to update layer visibility icon
+                      const layerType = getActiveLayerType();
+                      const event = new CustomEvent('similaritySearchLayerDeactivated', {
+                        detail: { layerId: activeLayer, layerType: layerType }
+                      });
+                      window.dispatchEvent(event);
                     }}
                     title="Close similarity search and clear map"
                     style={{

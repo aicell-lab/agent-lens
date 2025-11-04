@@ -937,6 +937,8 @@ const LayerPanel = ({
                             className="channel-visibility-btn"
                             onClick={() => {
                               const newVisibility = !(exp.similaritySearchVisible || false);
+                              // Update experiment similarity search visibility immediately for UI responsiveness
+                              exp.similaritySearchVisible = newVisibility;
                               // Update experiment similarity search visibility (we'll need to track this in parent component)
                               const event = new CustomEvent('experimentSimilaritySearchToggled', {
                                 detail: { experimentName: exp.name, similaritySearchVisible: newVisibility }

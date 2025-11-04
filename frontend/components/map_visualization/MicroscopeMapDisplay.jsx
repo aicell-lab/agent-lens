@@ -3527,6 +3527,22 @@ const MicroscopeMapDisplay = forwardRef(({
       // Set the active layer
       setActiveLayer(layerId);
       
+      // Update layer similarity search visibility to true
+      if (layerType === 'experiment') {
+        // For experiment layers, dispatch experimentSimilaritySearchToggled event
+        const toggleEvent = new CustomEvent('experimentSimilaritySearchToggled', {
+          detail: { experimentName: layerId, similaritySearchVisible: true }
+        });
+        window.dispatchEvent(toggleEvent);
+      } else {
+        // For regular layers, update similarity search visibility in layers state
+        setLayers(prev => prev.map(layer => 
+          layer.id === layerId 
+            ? { ...layer, similaritySearchVisible: true }
+            : layer
+        ));
+      }
+      
       // Open the similarity search dropdown
       setIsSimilaritySearchDropdownOpen(true);
       
@@ -3541,15 +3557,19 @@ const MicroscopeMapDisplay = forwardRef(({
       const { experimentName, similaritySearchVisible } = event.detail;
       console.log(`[MicroscopeMapDisplay] Experiment similarity search toggled: ${experimentName} = ${similaritySearchVisible}`);
       
+      // Update experiment similarity search visibility in experiments array
+      // Direct mutation is needed here for immediate UI update since experiments are props
+      const experiment = experiments.find(exp => exp.name === experimentName);
+      if (experiment) {
+        experiment.similaritySearchVisible = similaritySearchVisible;
+      }
+      
       // If similarity search layer is being disabled, close similarity search panel and exit drawing mode
       if (!similaritySearchVisible) {
         setIsSimilaritySearchDropdownOpen(false);
         setIsDrawingMode(false);
         showNotification('Similarity search layer disabled. Exiting similarity search mode.', 'info');
       }
-      
-      // Update experiment similarity search visibility in experiments state
-      // This will be handled by the parent component that manages experiments
     };
 
     const handleSimilaritySearchLayerDeactivated = (event) => {
@@ -3588,7 +3608,7 @@ const MicroscopeMapDisplay = forwardRef(({
       window.removeEventListener('experimentSimilaritySearchToggled', handleExperimentSimilaritySearchToggled);
       window.removeEventListener('similaritySearchLayerDeactivated', handleSimilaritySearchLayerDeactivated);
     };
-  }, [setActiveLayer, showNotification]);
+  }, [setActiveLayer, setLayers, showNotification, experiments]);
 
   // Handle upload zarr dataset events from LayerPanel
   useEffect(() => {
