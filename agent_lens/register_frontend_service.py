@@ -495,33 +495,6 @@ def get_frontend_api():
             logger.error(traceback.format_exc())
             raise HTTPException(status_code=500, detail=str(e))
 
-    @app.delete("/similarity/collections/delete/{collection_name}")
-    async def delete_similarity_collection(collection_name: str):
-        """
-        Delete a similarity search collection.
-        
-        Args:
-            collection_name (str): Name of the collection to delete
-            
-        Returns:
-            dict: Result of deletion
-        """
-        try:
-            try:
-                if not await similarity_service.ensure_connected():
-                    raise HTTPException(status_code=503, detail="Similarity search service is not available")
-            except Exception as e:
-                logger.warning(f"Similarity service not available: {e}")
-                raise HTTPException(status_code=503, detail="Similarity search service is not available")
-            
-            result = await similarity_service.delete_collection(collection_name)
-            return {"success": True, "result": result}
-            
-        except Exception as e:
-            logger.error(f"Error deleting similarity collection: {e}")
-            logger.error(traceback.format_exc())
-            raise HTTPException(status_code=500, detail=str(e))
-
     @app.post("/similarity/insert")
     async def insert_image_for_similarity(
         collection_name: str,
