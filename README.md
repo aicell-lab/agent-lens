@@ -43,7 +43,7 @@ Built for research laboratories, Agent-Lens combines modern web technologies wit
 - **Well Plate Navigation**: Support for 96, 48, and 24-well plate formats
 
 ### 🤖 **AI-Powered Analysis**
-- **Similarity Search**: Vector-based image similarity matching
+- **Similarity Search**: Annotation-based vector similarity matching with CLIP embeddings. Draw annotations on the map to find similar cells or regions across datasets and time-lapse experiments.
 - **LLM Integration**: Natural language control and assistance
 - **Real-time Processing**: Live image analysis and feedback
 
@@ -193,7 +193,7 @@ agent-lens/
 │   └── 📄 __main__.py          # CLI entry point
 ├── 📁 frontend/                # React application
 │   ├── 📁 components/          # UI components
-│   │   ├── 📁 similarity_search/      # Image annotation system
+│   │   ├── 📁 similarity_search/      # Similarity search and annotation system
 │   │   ├── 📁 microscope_acquisition/ # Scan configuration and task management
 │   │   ├── 📁 map_visualization/      # Data viewing and display
 │   │   └── 📄 *.jsx            # Control panels, modals, settings
@@ -222,9 +222,10 @@ agent-lens/
 - **Multi-Well Support**: Select multiple wells for batch scanning or time-lapse imaging.
 - **Live Video Integration**: See the current field of view (FOV) and live video position on the map.
 - **Scan Results Overlay**: View stitched scan results with channel selection and layer controls.
+- **Similarity Search Layer**: Draw annotations on the map to search for similar cells or regions using vector embeddings. The similarity search layer can be activated per experiment or dataset, enabling annotation-based similarity matching across time-lapse data.
 - **Experiment Management**: Organize scan data by experiment, with per-well canvases and metadata.
 
-The stage map is integrated into the main control panel, providing a seamless experience for both real and simulated microscopes, supporting advanced workflows like multi-well scanning and experiment-based data management.
+The stage map is integrated into the main control panel, providing a seamless experience for both real and simulated microscopes, supporting advanced workflows like multi-well scanning, experiment-based data management, and similarity search with annotations.
 
 ### **AI Segmentation Engine**
 - Multiple model support (SAM, custom models)

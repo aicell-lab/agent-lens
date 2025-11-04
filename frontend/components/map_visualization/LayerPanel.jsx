@@ -524,38 +524,38 @@ const LayerPanel = ({
                         </button>
                       </div>
                       
-                      {/* Annotation Sublayer */}
+                      {/* Similarity Search Sublayer */}
                       <div className="channel-item channel-item--annotation">
                         <div className="channel-header">
                           <button
                             className="channel-visibility-btn"
                             onClick={() => {
-                              const newVisibility = !(layer.annotationVisible || false);
+                              const newVisibility = !(layer.similaritySearchVisible || false);
                               setLayers(prev => prev.map(l => 
                                 l.id === layer.id 
-                                  ? { ...l, annotationVisible: newVisibility }
+                                  ? { ...l, similaritySearchVisible: newVisibility }
                                   : l
                               ));
                               
-                              // If enabling annotation layer, activate the parent layer and open annotation dropdown
+                              // If enabling similarity search layer, activate the parent layer and open similarity search dropdown
                               if (newVisibility) {
                                 setActiveLayer(layer.id);
-                                // Trigger annotation activation through a custom event
-                                const event = new CustomEvent('annotationLayerActivated', {
+                                // Trigger similarity search layer activation through a custom event
+                                const event = new CustomEvent('similaritySearchLayerActivated', {
                                   detail: { layerId: layer.id, layerType: layer.type }
                                 });
                                 window.dispatchEvent(event);
                               } else {
-                                // If disabling annotation layer, trigger deactivation event
-                                const event = new CustomEvent('annotationLayerDeactivated', {
+                                // If disabling similarity search layer, trigger deactivation event
+                                const event = new CustomEvent('similaritySearchLayerDeactivated', {
                                   detail: { layerId: layer.id, layerType: layer.type }
                                 });
                                 window.dispatchEvent(event);
                               }
                             }}
-                            title={layer.annotationVisible ? "Hide similarity search layer" : "Show similarity search layer"}
+                            title={layer.similaritySearchVisible ? "Hide similarity search layer" : "Show similarity search layer"}
                           >
-                            <i className={`fas fa-eye${layer.annotationVisible ? '' : '-slash'}`}></i>
+                            <i className={`fas fa-eye${layer.similaritySearchVisible ? '' : '-slash'}`}></i>
                           </button>
                           <span className="channel-name">
                             <i className="fas fa-draw-polygon mr-2 text-blue-400"></i>
@@ -930,38 +930,38 @@ const LayerPanel = ({
                         </div>
                       )}
                       
-                      {/* Annotation Sublayer for Experiments */}
+                      {/* Similarity Search Sublayer for Experiments */}
                       <div className="channel-item channel-item--annotation">
                         <div className="channel-header">
                           <button
                             className="channel-visibility-btn"
                             onClick={() => {
-                              const newVisibility = !(exp.annotationVisible || false);
-                              // Update experiment annotation visibility (we'll need to track this in parent component)
-                              const event = new CustomEvent('experimentAnnotationToggled', {
-                                detail: { experimentName: exp.name, annotationVisible: newVisibility }
+                              const newVisibility = !(exp.similaritySearchVisible || false);
+                              // Update experiment similarity search visibility (we'll need to track this in parent component)
+                              const event = new CustomEvent('experimentSimilaritySearchToggled', {
+                                detail: { experimentName: exp.name, similaritySearchVisible: newVisibility }
                               });
                               window.dispatchEvent(event);
                               
-                              // If enabling annotation layer, activate the experiment and open annotation dropdown
+                              // If enabling similarity search layer, activate the experiment and open similarity search dropdown
                               if (newVisibility) {
                                 setActiveLayer(exp.name);
-                                // Trigger annotation activation through a custom event
-                                const activationEvent = new CustomEvent('annotationLayerActivated', {
+                                // Trigger similarity search layer activation through a custom event
+                                const activationEvent = new CustomEvent('similaritySearchLayerActivated', {
                                   detail: { layerId: exp.name, layerType: 'experiment' }
                                 });
                                 window.dispatchEvent(activationEvent);
                               } else {
-                                // If disabling annotation layer, trigger deactivation event
-                                const deactivationEvent = new CustomEvent('annotationLayerDeactivated', {
+                                // If disabling similarity search layer, trigger deactivation event
+                                const deactivationEvent = new CustomEvent('similaritySearchLayerDeactivated', {
                                   detail: { layerId: exp.name, layerType: 'experiment' }
                                 });
                                 window.dispatchEvent(deactivationEvent);
                               }
                             }}
-                            title={exp.annotationVisible ? "Hide similarity search layer" : "Show similarity search layer"}
+                            title={exp.similaritySearchVisible ? "Hide similarity search layer" : "Show similarity search layer"}
                           >
-                            <i className={`fas fa-eye${exp.annotationVisible ? '' : '-slash'}`}></i>
+                            <i className={`fas fa-eye${exp.similaritySearchVisible ? '' : '-slash'}`}></i>
                           </button>
                           <span className="channel-name">
                             <i className="fas fa-draw-polygon mr-2 text-blue-400"></i>

@@ -853,7 +853,7 @@ const SimilaritySearchPanel = ({
         <div className="flex items-center space-x-2">
           <i className="fas fa-draw-polygon text-blue-400"></i>
           <span className="font-medium text-sm">Similarity Search</span>
-          {/* Close button to deactivate annotation layer */}
+          {/* Close button to deactivate similarity search layer */}
           <button
             onClick={() => {
               // Clear all annotations when closing
@@ -871,8 +871,8 @@ const SimilaritySearchPanel = ({
               if (onSimilarityResultsCleanup) {
                 onSimilarityResultsCleanup();
               }
-              // Trigger deactivation event to close annotation layer and update visibility
-              const event = new CustomEvent('annotationLayerDeactivated', {
+              // Trigger deactivation event to close similarity search layer and update visibility
+              const event = new CustomEvent('similaritySearchLayerDeactivated', {
                 detail: { layerId: activeLayer, layerType: getActiveLayerType() }
               });
               window.dispatchEvent(event);

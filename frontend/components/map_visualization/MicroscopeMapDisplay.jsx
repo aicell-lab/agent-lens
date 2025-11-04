@@ -241,7 +241,7 @@ const MicroscopeMapDisplay = forwardRef(({
   const layerDropdownRef = useRef(null);
 
   // Annotation system state
-  const [isAnnotationDropdownOpen, setIsAnnotationDropdownOpen] = useState(false);
+  const [isSimilaritySearchDropdownOpen, setIsSimilaritySearchDropdownOpen] = useState(false);
   const [isDrawingMode, setIsDrawingMode] = useState(false);
   const [currentAnnotationTool, setCurrentAnnotationTool] = useState('select');
   const [isMapBrowsingMode, setIsMapBrowsingMode] = useState(true); // Default to enabled
@@ -250,7 +250,7 @@ const MicroscopeMapDisplay = forwardRef(({
   const [annotationFillColor, setAnnotationFillColor] = useState('transparent');
   const [annotationDescription, setAnnotationDescription] = useState('');
   const [annotations, setAnnotations] = useState([]);
-  const annotationDropdownRef = useRef(null);
+  const similaritySearchDropdownRef = useRef(null);
 
   // Similarity results state
   const [similarityResults, setSimilarityResults] = useState([]);
@@ -3483,24 +3483,24 @@ const MicroscopeMapDisplay = forwardRef(({
   }, [rectangleStart, rectangleEnd, isRectangleSelection, displayToStageCoords, scanParameters.dx_mm, scanParameters.dy_mm, isSimulatedMicroscopeSelected, isHistoricalDataMode, dragSelectedWell, stageToRelativeCoords, appendLog]);
 
 
-  // Click outside handler for annotation dropdown
+  // Click outside handler for similarity search dropdown
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (annotationDropdownRef.current && !annotationDropdownRef.current.contains(event.target)) {
+      if (similaritySearchDropdownRef.current && !similaritySearchDropdownRef.current.contains(event.target)) {
         // Don't close dropdown if we're in drawing mode - user needs to see the tools
         if (!isDrawingMode) {
-          setIsAnnotationDropdownOpen(false);
+          setIsSimilaritySearchDropdownOpen(false);
         }
       }
     };
 
-    if (isAnnotationDropdownOpen) {
+    if (isSimilaritySearchDropdownOpen) {
       document.addEventListener('mousedown', handleClickOutside);
       return () => {
         document.removeEventListener('mousedown', handleClickOutside);
       };
     }
-  }, [isAnnotationDropdownOpen, isDrawingMode]);
+  }, [isSimilaritySearchDropdownOpen, isDrawingMode]);
 
   // Disable conflicting interactions when entering drawing mode (but keep dropdown open)
   useEffect(() => {
@@ -3520,7 +3520,7 @@ const MicroscopeMapDisplay = forwardRef(({
 
   // Handle similarity search layer activation events from LayerPanel
   useEffect(() => {
-    const handleAnnotationLayerActivated = (event) => {
+    const handleSimilaritySearchLayerActivated = (event) => {
       const { layerId, layerType } = event.detail;
       console.log(`[MicroscopeMapDisplay] Similarity search layer activated: ${layerId} (${layerType})`);
       
@@ -3528,7 +3528,7 @@ const MicroscopeMapDisplay = forwardRef(({
       setActiveLayer(layerId);
       
       // Open the similarity search dropdown
-      setIsAnnotationDropdownOpen(true);
+      setIsSimilaritySearchDropdownOpen(true);
       
       // Automatically enable drawing mode
       setIsDrawingMode(true);
@@ -3537,56 +3537,56 @@ const MicroscopeMapDisplay = forwardRef(({
       showNotification('Similarity search layer activated. You can now draw annotations to search for similar cells.', 'success');
     };
 
-    const handleExperimentAnnotationToggled = (event) => {
-      const { experimentName, annotationVisible } = event.detail;
-      console.log(`[MicroscopeMapDisplay] Experiment similarity search toggled: ${experimentName} = ${annotationVisible}`);
+    const handleExperimentSimilaritySearchToggled = (event) => {
+      const { experimentName, similaritySearchVisible } = event.detail;
+      console.log(`[MicroscopeMapDisplay] Experiment similarity search toggled: ${experimentName} = ${similaritySearchVisible}`);
       
       // If similarity search layer is being disabled, close similarity search panel and exit drawing mode
-      if (!annotationVisible) {
-        setIsAnnotationDropdownOpen(false);
+      if (!similaritySearchVisible) {
+        setIsSimilaritySearchDropdownOpen(false);
         setIsDrawingMode(false);
         showNotification('Similarity search layer disabled. Exiting similarity search mode.', 'info');
       }
       
-      // Update experiment annotation visibility in experiments state
+      // Update experiment similarity search visibility in experiments state
       // This will be handled by the parent component that manages experiments
     };
 
-    const handleAnnotationLayerDeactivated = (event) => {
+    const handleSimilaritySearchLayerDeactivated = (event) => {
       const { layerId, layerType } = event.detail;
       console.log(`[MicroscopeMapDisplay] Similarity search layer deactivated: ${layerId} (${layerType})`);
       
       // Update layer similarity search visibility to false
       if (layerType === 'experiment') {
-        // For experiment layers, dispatch experimentAnnotationToggled event
-        const toggleEvent = new CustomEvent('experimentAnnotationToggled', {
-          detail: { experimentName: layerId, annotationVisible: false }
+        // For experiment layers, dispatch experimentSimilaritySearchToggled event
+        const toggleEvent = new CustomEvent('experimentSimilaritySearchToggled', {
+          detail: { experimentName: layerId, similaritySearchVisible: false }
         });
         window.dispatchEvent(toggleEvent);
       } else {
-        // For regular layers, update annotationVisible in layers state
+        // For regular layers, update similarity search visibility in layers state
         setLayers(prev => prev.map(layer => 
           layer.id === layerId 
-            ? { ...layer, annotationVisible: false }
+            ? { ...layer, similaritySearchVisible: false }
             : layer
         ));
       }
       
       // Close similarity search panel and exit drawing mode
-      setIsAnnotationDropdownOpen(false);
+      setIsSimilaritySearchDropdownOpen(false);
       setIsDrawingMode(false);
       showNotification('Similarity search layer disabled. Exiting similarity search mode.', 'info');
     };
 
     // Add event listeners
-    window.addEventListener('annotationLayerActivated', handleAnnotationLayerActivated);
-    window.addEventListener('experimentAnnotationToggled', handleExperimentAnnotationToggled);
-    window.addEventListener('annotationLayerDeactivated', handleAnnotationLayerDeactivated);
+    window.addEventListener('similaritySearchLayerActivated', handleSimilaritySearchLayerActivated);
+    window.addEventListener('experimentSimilaritySearchToggled', handleExperimentSimilaritySearchToggled);
+    window.addEventListener('similaritySearchLayerDeactivated', handleSimilaritySearchLayerDeactivated);
 
     return () => {
-      window.removeEventListener('annotationLayerActivated', handleAnnotationLayerActivated);
-      window.removeEventListener('experimentAnnotationToggled', handleExperimentAnnotationToggled);
-      window.removeEventListener('annotationLayerDeactivated', handleAnnotationLayerDeactivated);
+      window.removeEventListener('similaritySearchLayerActivated', handleSimilaritySearchLayerActivated);
+      window.removeEventListener('experimentSimilaritySearchToggled', handleExperimentSimilaritySearchToggled);
+      window.removeEventListener('similaritySearchLayerDeactivated', handleSimilaritySearchLayerDeactivated);
     };
   }, [setActiveLayer, showNotification]);
 
@@ -3722,7 +3722,7 @@ const MicroscopeMapDisplay = forwardRef(({
 
   // Auto-disable other layers when similarity search panel is opened for better annotation accuracy
   useEffect(() => {
-    if (isAnnotationDropdownOpen && activeLayer) {
+    if (isSimilaritySearchDropdownOpen && activeLayer) {
       // Check if activeLayer is an experiment (not in layers array)
       const isExperimentLayer = experiments.some(exp => exp.name === activeLayer);
       
@@ -3763,7 +3763,7 @@ const MicroscopeMapDisplay = forwardRef(({
         }
       };
     }
-  }, [isAnnotationDropdownOpen, activeLayer, setLayers, experiments, appendLog]); // Removed layers dependency to prevent infinite loop
+  }, [isSimilaritySearchDropdownOpen, activeLayer, setLayers, experiments, appendLog]); // Removed layers dependency to prevent infinite loop
 
   // Load experiments when microscope service becomes available
   useEffect(() => {
@@ -5797,7 +5797,7 @@ const MicroscopeMapDisplay = forwardRef(({
               </div>
               
               {/* Text search input - only show when similarity search layer is active */}
-              {isAnnotationDropdownOpen && activeLayer && (
+              {isSimilaritySearchDropdownOpen && activeLayer && (
                 <div className="relative ml-2">
                   <div className="flex items-center space-x-1">
                     <input
@@ -5841,8 +5841,8 @@ const MicroscopeMapDisplay = forwardRef(({
           {mapViewMode === 'FREE_PAN' && (
             <>
               {/* Similarity search panel - now controlled by layer panel */}
-              <div className="relative mr-4" ref={annotationDropdownRef}>
-                <div className={`absolute top-full right-0 mt-3 z-20 ${isAnnotationDropdownOpen ? 'block' : 'hidden'}`}>
+              <div className="relative mr-4" ref={similaritySearchDropdownRef}>
+                <div className={`absolute top-full right-0 mt-3 z-20 ${isSimilaritySearchDropdownOpen ? 'block' : 'hidden'}`}>
                   <SimilaritySearchPanel
                       isDrawingMode={isDrawingMode}
                       setIsDrawingMode={setIsDrawingMode}

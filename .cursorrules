@@ -188,12 +188,14 @@ frontend/                  # React application
 ├── vite.config.mjs       # Vite build configuration
 ├── package.json          # Frontend dependencies and scripts
 ├── components/           # Reusable UI components
-│   ├── similarity_search/       # Image annotation system
+│   ├── similarity_search/       # Similarity search and annotation system
 │   │   ├── AnnotationCanvas.jsx      # Canvas for drawing annotations
 │   │   ├── AnnotationDetailsWindow.jsx  # Annotation details modal
-│   │   ├── AnnotationPanel.css       # Annotation panel styles
-│   │   ├── AnnotationPanel.jsx       # Main annotation control panel
-│   │   └── SimilarAnnotationRenderer.jsx  # Similar annotation rendering
+│   │   ├── SimilaritySearchPanel.css  # Similarity search panel styles
+│   │   ├── SimilaritySearchPanel.jsx  # Main similarity search control panel
+│   │   ├── SimilarityResultInfoWindow.jsx  # Similarity result info window
+│   │   ├── SimilarityResultsRenderer.jsx  # Similar annotation rendering
+│   │   └── SimilarAnnotationRenderer.jsx  # Similar annotation rendering (legacy)
 │   ├── microscope_acquisition/  # Scan configuration and task management
 │   │   ├── NormalScanConfig.css  # Normal scan configuration styles
 │   │   ├── NormalScanConfig.jsx  # Normal scan configuration panel
