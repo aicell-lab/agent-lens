@@ -34,6 +34,16 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 _clip_model = None
 _clip_preprocess = None
 
+# Log GPU information at module load
+if torch.cuda.is_available():
+    logger.info(f"✓ CUDA available - GPU will be used for CLIP model")
+    logger.info(f"  CUDA Device: {torch.cuda.get_device_name(0)}")
+    logger.info(f"  CUDA Version: {torch.version.cuda}")
+    logger.info(f"  PyTorch Version: {torch.__version__}")
+else:
+    logger.warning("⚠ CUDA not available - CLIP model will use CPU (slower)")
+    logger.warning("  Ensure Docker has GPU access configured (nvidia-container-toolkit)")
+
 def _load_clip_model():
     """Load CLIP ViT-B/32 model lazily and cache it in memory."""
     global _clip_model, _clip_preprocess
