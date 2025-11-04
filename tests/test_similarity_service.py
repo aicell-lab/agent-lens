@@ -952,6 +952,355 @@ class TestWeaviateSimilarityService:
             print(f"❌ Error in UUID search endpoint test: {e}")
             raise
 
+    @pytest.mark.integration
+    @pytest.mark.timeout(120)
+    async def test_insert_many_format_exploration(self, weaviate_service):
+        """Test different object formats for insert_many to find the correct structure."""
+        collection_name = self._generate_test_collection_name()
+        application_id = "test-insert-many-format"
+        
+        try:
+            # Create collection and application
+            print(f"Creating test collection for insert_many format test: {collection_name}")
+            try:
+                await weaviate_service.create_collection(
+                    collection_name=collection_name,
+                    description="Test collection for insert_many format"
+                )
+            except Exception as e:
+                if "already exists" not in str(e) and "class already exists" not in str(e):
+                    raise
+            
+            await weaviate_service.create_application(
+                collection_name=collection_name,
+                application_id=application_id,
+                description="Test insert_many format application"
+            )
+            
+            # Generate test data
+            clip_vector = self._generate_clip_vector("test image")
+            preview_image = self._generate_test_preview_image()
+            
+            # Test different formats
+            test_formats = [
+                {
+                    "name": "Format 1: Properties and vector at top level (spread)",
+                    "objects": [
+                        {
+                            "image_id": "test_format1_0",
+                            "description": "Test image format 1",
+                            "metadata": '{"test": "format1"}',
+                            "dataset_id": application_id,
+                            "file_path": "",
+                            "preview_image": preview_image,
+                            "vector": clip_vector
+                        }
+                    ]
+                },
+                {
+                    "name": "Format 2: Properties nested, vector separate",
+                    "objects": [
+                        {
+                            "properties": {
+                                "image_id": "test_format2_0",
+                                "description": "Test image format 2",
+                                "metadata": '{"test": "format2"}',
+                                "dataset_id": application_id,
+                                "file_path": "",
+                                "preview_image": preview_image
+                            },
+                            "vector": clip_vector
+                        }
+                    ]
+                },
+                {
+                    "name": "Format 3: Direct properties dict (no nesting)",
+                    "objects": [
+                        {
+                            "image_id": "test_format3_0",
+                            "description": "Test image format 3",
+                            "metadata": '{"test": "format3"}',
+                            "dataset_id": application_id,
+                            "file_path": "",
+                            "preview_image": preview_image,
+                            "vector": clip_vector
+                        }
+                    ]
+                }
+            ]
+            
+            successful_format = None
+            
+            for format_test in test_formats:
+                print(f"\n🧪 Testing: {format_test['name']}")
+                try:
+                    result = await weaviate_service.insert_many_images(
+                        collection_name=collection_name,
+                        application_id=application_id,
+                        objects=format_test["objects"]
+                    )
+                    print(f"✅ SUCCESS with {format_test['name']}")
+                    print(f"   Result: {result}")
+                    successful_format = format_test["name"]
+                    break
+                except Exception as e:
+                    error_msg = str(e)
+                    print(f"❌ FAILED with {format_test['name']}")
+                    print(f"   Error: {error_msg[:200]}...")
+                    if "vector" in error_msg.lower() and "properties" in error_msg.lower():
+                        print(f"   ⚠️  Vector/properties conflict detected")
+            
+            if successful_format:
+                print(f"\n✅ Found working format: {successful_format}")
+            else:
+                print(f"\n❌ No working format found. Need to investigate further.")
+                # Try to inspect the weaviate service directly
+                print("\n🔍 Inspecting weaviate service structure...")
+                if hasattr(weaviate_service, 'weaviate_service'):
+                    ws = weaviate_service.weaviate_service
+                    if hasattr(ws, 'data'):
+                        if hasattr(ws.data, 'insert_many'):
+                            print(f"   insert_many method found: {ws.data.insert_many}")
+                            import inspect
+                            try:
+                                sig = inspect.signature(ws.data.insert_many)
+                                print(f"   Signature: {sig}")
+                            except:
+                                print(f"   Could not get signature")
+                            
+                            # Try calling with minimal arguments to see what it expects
+                            print("\n🔍 Testing direct call to insert_many...")
+                            try:
+                                # Try passing objects parameter explicitly
+                                test_obj = {
+                                    "image_id": "direct_test",
+                                    "description": "Direct test",
+                                    "metadata": '{"test": true}',
+                                    "dataset_id": application_id,
+                                    "file_path": "",
+                                    "preview_image": preview_image
+                                }
+                                
+                                # Try format: objects with properties dict and vector separate
+                                direct_result = await ws.data.insert_many(
+                                    collection_name=collection_name,
+                                    application_id=application_id,
+                                    objects=[{
+                                        "properties": test_obj,
+                                        "vector": clip_vector
+                                    }]
+                                )
+                                print(f"   ✅ Direct call SUCCESS with properties dict + vector")
+                                successful_format = "Direct: properties dict + vector separate"
+                            except Exception as e:
+                                print(f"   ❌ Direct call failed: {str(e)[:200]}")
+                                
+                                # Try without vector in the object - pass vectors separately
+                                try:
+                                    direct_result = await ws.data.insert_many(
+                                        collection_name=collection_name,
+                                        application_id=application_id,
+                                        objects=[test_obj],
+                                        vectors=[clip_vector]  # Try separate vectors parameter
+                                    )
+                                    print(f"   ✅ Direct call SUCCESS with separate vectors parameter")
+                                    successful_format = "Direct: objects (properties dict) + vectors separate"
+                                except Exception as e2:
+                                    print(f"   ❌ Separate vectors failed: {str(e2)[:200]}")
+                                    
+                                    # Try just properties, no vector (maybe it generates automatically)
+                                    try:
+                                        direct_result = await ws.data.insert_many(
+                                            collection_name=collection_name,
+                                            application_id=application_id,
+                                            objects=[test_obj]
+                                        )
+                                        print(f"   ✅ Direct call SUCCESS with just properties (auto vector)")
+                                        successful_format = "Direct: properties only (auto vector)"
+                                    except Exception as e3:
+                                        print(f"   ❌ Properties only also failed: {str(e3)[:200]}")
+                                        
+                                        # Try the exact format from tutorial - plain dicts with vector at top level
+                                        try:
+                                            tutorial_obj_with_vector = {
+                                                "image_id": "tutorial_vector_test",
+                                                "description": "Tutorial with vector",
+                                                "metadata": '{"test": true}',
+                                                "dataset_id": application_id,
+                                                "file_path": "",
+                                                "preview_image": preview_image,
+                                                "vector": clip_vector  # Vector at same level as properties
+                                            }
+                                            direct_result = await ws.data.insert_many(
+                                                collection_name=collection_name,
+                                                application_id=application_id,
+                                                objects=[tutorial_obj_with_vector]
+                                            )
+                                            print(f"   ✅ Direct call SUCCESS with vector at top level!")
+                                            successful_format = "Tutorial format: plain dicts with vector at top level"
+                                        except Exception as e4:
+                                            print(f"   ❌ Vector at top level failed: {str(e4)[:200]}")
+                                            
+                                            # Try more variations
+                                            print(f"\n   🔬 Trying additional variations...")
+                                            
+                                            # Variation 1: Check if we can use _vector or __vector naming
+                                            variations = [
+                                                {
+                                                    "name": "Using '_vector' key",
+                                                    "obj": {
+                                                        "image_id": "var1_test",
+                                                        "description": "Variation 1",
+                                                        "metadata": '{"test": true}',
+                                                        "dataset_id": application_id,
+                                                        "file_path": "",
+                                                        "preview_image": preview_image,
+                                                        "_vector": clip_vector
+                                                    }
+                                                },
+                                                {
+                                                    "name": "Using 'embedding' key",
+                                                    "obj": {
+                                                        "image_id": "var2_test",
+                                                        "description": "Variation 2",
+                                                        "metadata": '{"test": true}',
+                                                        "dataset_id": application_id,
+                                                        "file_path": "",
+                                                        "preview_image": preview_image,
+                                                        "embedding": clip_vector
+                                                    }
+                                                },
+                                                {
+                                                    "name": "Vector as bytes/string",
+                                                    "obj": {
+                                                        "image_id": "var3_test",
+                                                        "description": "Variation 3",
+                                                        "metadata": '{"test": true}',
+                                                        "dataset_id": application_id,
+                                                        "file_path": "",
+                                                        "preview_image": preview_image,
+                                                        "vector": str(clip_vector)  # Try as string
+                                                    }
+                                                },
+                                                {
+                                                    "name": "Nested vector in _additional",
+                                                    "obj": {
+                                                        "image_id": "var4_test",
+                                                        "description": "Variation 4",
+                                                        "metadata": '{"test": true}',
+                                                        "dataset_id": application_id,
+                                                        "file_path": "",
+                                                        "preview_image": preview_image,
+                                                        "_additional": {"vector": clip_vector}
+                                                    }
+                                                },
+                                            ]
+                                            
+                                            for var in variations:
+                                                try:
+                                                    var_result = await ws.data.insert_many(
+                                                        collection_name=collection_name,
+                                                        application_id=application_id,
+                                                        objects=[var["obj"]]
+                                                    )
+                                                    print(f"   ✅ SUCCESS with {var['name']}!")
+                                                    successful_format = var["name"]
+                                                    break
+                                                except Exception as e_var:
+                                                    print(f"   ❌ {var['name']} failed: {str(e_var)[:100]}")
+                                            
+                                            # Check if there's a way to pass vectors outside objects
+                                            if not successful_format:
+                                                print(f"\n   🔍 Checking for alternative parameters...")
+                                                # Check what parameters insert_many accepts
+                                                try:
+                                                    # Try with vector parameter (not in objects)
+                                                    alt_result = await ws.data.insert_many(
+                                                        collection_name=collection_name,
+                                                        application_id=application_id,
+                                                        objects=[test_obj],
+                                                        vector=clip_vector  # Single vector for all?
+                                                    )
+                                                    print(f"   ✅ SUCCESS with separate vector parameter!")
+                                                    successful_format = "Separate vector parameter"
+                                                except Exception as e_alt:
+                                                    print(f"   ❌ Separate vector parameter failed: {str(e_alt)[:100]}")
+                                                    
+                                                    # Try with vector_list parameter
+                                                    try:
+                                                        alt_result2 = await ws.data.insert_many(
+                                                            collection_name=collection_name,
+                                                            application_id=application_id,
+                                                            objects=[test_obj],
+                                                            vector_list=[clip_vector]
+                                                        )
+                                                        print(f"   ✅ SUCCESS with vector_list parameter!")
+                                                        successful_format = "vector_list parameter"
+                                                    except Exception as e_alt2:
+                                                        print(f"   ❌ vector_list parameter failed: {str(e_alt2)[:100]}")
+                                            
+                                            # Last attempt: inspect what the service actually does
+                                            if not successful_format:
+                                                error_str = str(e4)
+                                                print(f"\n   📋 Final analysis...")
+                                                print(f"   Error type: {type(e4).__name__}")
+                                                print(f"   Error message (first 500 chars): {error_str[:500]}")
+                                                
+                                                # Try to see if we can inspect the service method signature
+                                                try:
+                                                    import inspect
+                                                    if hasattr(ws.data.insert_many, '__doc__'):
+                                                        print(f"   Method doc: {ws.data.insert_many.__doc__[:300]}")
+                                                except:
+                                                    pass
+                                                
+                                                # Try using Weaviate's DataObject class if available
+                                                print(f"\n   🔬 Trying Weaviate DataObject class...")
+                                                try:
+                                                    from weaviate.classes.data import DataObject
+                                                    
+                                                    # Try with DataObject
+                                                    data_obj = DataObject(
+                                                        properties=test_obj,
+                                                        vector=clip_vector
+                                                    )
+                                                    data_obj_result = await ws.data.insert_many(
+                                                        collection_name=collection_name,
+                                                        application_id=application_id,
+                                                        objects=[data_obj]
+                                                    )
+                                                    print(f"   ✅ SUCCESS with DataObject class!")
+                                                    successful_format = "DataObject class with properties and vector"
+                                                except ImportError:
+                                                    print(f"   ❌ DataObject class not available")
+                                                except Exception as e_dataobj:
+                                                    print(f"   ❌ DataObject failed: {str(e_dataobj)[:200]}")
+                                                    
+                                                    # Try DataObject with uuid
+                                                    try:
+                                                        import uuid
+                                                        data_obj_uuid = DataObject(
+                                                            uuid=uuid.uuid4(),
+                                                            properties=test_obj,
+                                                            vector=clip_vector
+                                                        )
+                                                        data_obj_uuid_result = await ws.data.insert_many(
+                                                            collection_name=collection_name,
+                                                            application_id=application_id,
+                                                            objects=[data_obj_uuid]
+                                                        )
+                                                        print(f"   ✅ SUCCESS with DataObject + UUID!")
+                                                        successful_format = "DataObject class with UUID"
+                                                    except Exception as e_dataobj_uuid:
+                                                        print(f"   ❌ DataObject + UUID failed: {str(e_dataobj_uuid)[:200]}")
+            
+        finally:
+            # Cleanup
+            try:
+                await weaviate_service.delete_collection(collection_name)
+            except Exception as e:
+                print(f"Warning: Error cleaning up: {e}")
+
     @pytest.mark.unit
     def test_fastapi_imports(self):
         """Test that FastAPI imports work correctly."""

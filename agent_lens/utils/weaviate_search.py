@@ -230,45 +230,68 @@ class WeaviateSimilarityService:
         
         import json
         
-        # Prepare objects for insert_many
-        # Format: properties as top-level fields, vector as a special field
-        weaviate_objects = []
+        # Use individual insert() calls for each object
+        # Weaviate's insert_many() doesn't work with custom vectors through RPC because:
+        # - It requires DataObject instances (which can't be serialized through RPC)
+        # - Plain dicts with vectors get wrapped into properties, causing conflicts
+        # Individual insert() calls accept properties and vector as separate parameters, which works correctly
+        inserted_count = 0
+        failed_count = 0
+        errors = []
+        uuids = {}
+        
         for obj in objects:
-            # Build properties dict
-            properties = {
-                "image_id": obj.get("image_id", ""),
-                "description": obj.get("description", ""),
-                "metadata": json.dumps(obj.get("metadata", {})) if obj.get("metadata") else "",
-                "dataset_id": obj.get("dataset_id", ""),
-                "file_path": obj.get("file_path", ""),
-                "preview_image": obj.get("preview_image", "")
-            }
-            
-            # Get vector - required for insert_many
-            vector = obj.get("vector")
-            if vector is None:
-                # Generate from description if no vector provided
-                vector = await generate_text_embedding(obj.get("description", ""))
-            
-            # Combine properties and vector into a single object
-            # Weaviate insert_many expects objects with properties as top-level fields
-            # and vector as a special field (the service will handle it)
-            weaviate_obj = {
-                **properties,
-                "vector": vector
-            }
-            weaviate_objects.append(weaviate_obj)
+            try:
+                properties = {
+                    "image_id": obj.get("image_id", ""),
+                    "description": obj.get("description", ""),
+                    "metadata": json.dumps(obj.get("metadata", {})) if obj.get("metadata") else "",
+                    "dataset_id": obj.get("dataset_id", ""),
+                    "file_path": obj.get("file_path", ""),
+                    "preview_image": obj.get("preview_image", "")
+                }
+                
+                vector = obj.get("vector")
+                if vector is None:
+                    vector = await generate_text_embedding(obj.get("description", ""))
+                
+                # Use single insert which properly handles properties and vector separately
+                result = await self.weaviate_service.data.insert(
+                    collection_name=collection_name,
+                    application_id=application_id,
+                    properties=properties,
+                    vector=vector
+                )
+                
+                # Extract UUID from result
+                if hasattr(result, 'uuid'):
+                    uuid_val = result.uuid
+                elif hasattr(result, 'id'):
+                    uuid_val = result.id
+                elif isinstance(result, dict):
+                    uuid_val = result.get('uuid') or result.get('id')
+                else:
+                    uuid_val = str(result)
+                
+                if uuid_val:
+                    uuids[obj.get("image_id", f"object_{inserted_count}")] = str(uuid_val)
+                
+                inserted_count += 1
+            except Exception as e_insert:
+                failed_count += 1
+                error_msg_insert = f"Failed to insert object {obj.get('image_id', 'unknown')}: {str(e_insert)}"
+                errors.append(error_msg_insert)
+                logger.warning(error_msg_insert)
         
-        # Use insert_many for batch insertion
-        result = await self.weaviate_service.data.insert_many(
-            collection_name=collection_name,
-            application_id=application_id,
-            objects=weaviate_objects
-        )
+        logger.info(f"Inserted {inserted_count} images using individual inserts (failed: {failed_count})")
         
-        inserted_count = len(weaviate_objects)
-        logger.info(f"Inserted {inserted_count} images into collection: {collection_name} using insert_many")
-        return result
+        return {
+            "inserted_count": inserted_count,
+            "failed_count": failed_count,
+            "errors": errors if errors else None,
+            "uuids": uuids,
+            "has_errors": failed_count > 0
+        }
     
     async def search_similar_images(self, collection_name: str, application_id: str,
                                   query_vector: List[float], limit: int = 10,

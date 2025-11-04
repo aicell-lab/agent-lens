@@ -235,6 +235,7 @@ const MicroscopeMapDisplay = forwardRef(({
   });
   const [showSegmentationConfirmModal, setShowSegmentationConfirmModal] = useState(false);
   const [completedSegmentationExperiment, setCompletedSegmentationExperiment] = useState(null);
+  const segmentationUploadCancelRef = useRef(false);
 
   // Layer dropdown state
   const [isLayerDropdownOpen, setIsLayerDropdownOpen] = useState(false);
@@ -1338,12 +1339,29 @@ const MicroscopeMapDisplay = forwardRef(({
     }
   }, [microscopeControlService, segmentationState.isRunning, stopSegmentationPolling, showNotification, appendLog]);
 
+  // Cancel segmentation upload processing
+  const cancelSegmentationUpload = useCallback(() => {
+    segmentationUploadCancelRef.current = true;
+    setSegmentationUploadState(prev => ({
+      ...prev,
+      isProcessing: false,
+      error: 'Cancelled by user'
+    }));
+    showNotification('Processing cancelled', 'info');
+    if (appendLog) {
+      appendLog('Segmentation upload cancelled by user');
+    }
+  }, [showNotification, appendLog]);
+
   // Handler for processing segmentation results to similarity search
   const handleSegmentationToSimilaritySearch = useCallback(async (sourceExperimentName) => {
     if (!microscopeControlService || !sourceExperimentName) {
       showNotification('Missing required services or experiment name', 'error');
       return;
     }
+
+    // Reset cancellation flag
+    segmentationUploadCancelRef.current = false;
 
     try {
       setSegmentationUploadState({
@@ -1380,49 +1398,36 @@ const MicroscopeMapDisplay = forwardRef(({
         appendLog(`Found ${polygonsResult.totalCount} polygons to process`);
       }
 
-      // Step 2: Check if Weaviate application exists and delete if it does
-      const collectionName = 'agent-lens';
+      // Step 2: Delete existing Weaviate application if it exists
+      const collectionName = 'Agentlens';  // Use correct collection name (capital A)
       const applicationId = sourceExperimentName;
       
-      try {
-        const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
-        
-        // Check if application exists
-        const existsResponse = await fetch(
-          `/agent-lens/apps/${serviceId}/similarity/collections/${collectionName}/exists`
-        );
-        
-        if (existsResponse.ok) {
-          const existsResult = await existsResponse.json();
-          
-          if (existsResult.exists) {
-            // Delete existing application
-            if (appendLog) {
-              appendLog(`Deleting existing Weaviate application: ${applicationId}`);
-            }
-            
-            const deleteParams = new URLSearchParams({
-              collection_name: collectionName,
-              application_id: applicationId
-            });
-            
-            const deleteResponse = await fetch(
-              `/agent-lens/apps/${serviceId}/similarity/applications/delete?${deleteParams}`,
-              { method: 'DELETE' }
-            );
-            
-            if (deleteResponse.ok) {
-              if (appendLog) {
-                appendLog(`Deleted existing application: ${applicationId}`);
-              }
-            } else {
-              console.warn('Failed to delete existing application, continuing anyway');
-            }
-          }
+      const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
+      
+      // Delete existing application - any failure will stop execution
+      if (appendLog) {
+        appendLog(`Deleting existing Weaviate application: ${applicationId}`);
+      }
+      
+      const deleteParams = new URLSearchParams({
+        collection_name: collectionName,
+        application_id: applicationId
+      });
+      
+      const deleteResponse = await fetch(
+        `/agent-lens/apps/${serviceId}/similarity/applications/delete?${deleteParams}`,
+        { method: 'DELETE' }
+      );
+      
+      if (deleteResponse.ok) {
+        const deleteResult = await deleteResponse.json();
+        if (appendLog) {
+          appendLog(`Deleted existing application: ${applicationId} (removed ${deleteResult.result?.successful || 0} objects)`);
         }
-      } catch (error) {
-        console.warn('Error checking/deleting application:', error);
-        // Continue anyway - application might not exist
+      } else {
+        // Any failure to delete is an error - stop execution
+        const errorText = await deleteResponse.text().catch(() => 'Unknown error');
+        throw new Error(`Failed to delete existing application ${applicationId}: ${errorText}`);
       }
 
       // Step 3: Get channel configurations for image extraction
@@ -1445,12 +1450,21 @@ const MicroscopeMapDisplay = forwardRef(({
       };
 
       const onProgress = (current, total, successful, failed) => {
+        // Check for cancellation
+        if (segmentationUploadCancelRef.current) {
+          return;
+        }
         setSegmentationUploadState(prev => ({
           ...prev,
           currentPolygon: current,
           totalPolygons: total
         }));
       };
+
+      // Check for cancellation before processing
+      if (segmentationUploadCancelRef.current) {
+        return;
+      }
 
       const processResult = await batchProcessSegmentationPolygons(
         polygonsResult.polygons,
@@ -1462,41 +1476,51 @@ const MicroscopeMapDisplay = forwardRef(({
         getWellInfoById
       );
 
+      // Check for cancellation after processing
+      if (segmentationUploadCancelRef.current) {
+        return;
+      }
+
       if (appendLog) {
         appendLog(`Processed ${processResult.successfulCount}/${processResult.totalCount} polygons`);
       }
 
-      // Step 5: Upload to Weaviate in batches of 30
-      const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
-      const BATCH_SIZE = 100;
+      // Step 5: Upload to Weaviate using individual inserts
+      // Using individual insert() calls instead of insert_many() because:
+      // - insert_many() doesn't work with custom vectors through RPC
+      // - Individual inserts accept properties and vector as separate parameters
+      // serviceId is already defined above
       let uploadedCount = 0;
       let failedCount = 0;
 
-      // Process in batches
-      for (let i = 0; i < processResult.processedAnnotations.length; i += BATCH_SIZE) {
-        const batch = processResult.processedAnnotations.slice(i, i + BATCH_SIZE);
+      // Process each annotation individually
+      for (let i = 0; i < processResult.processedAnnotations.length; i++) {
+        // Check for cancellation before each insert
+        if (segmentationUploadCancelRef.current) {
+          break;
+        }
+
+        const processed = processResult.processedAnnotations[i];
         
         try {
-          // Prepare batch objects
-          const batchObjects = batch.map(processed => ({
-            image_id: processed.annotation.id,
-            description: processed.annotation.description,
-            metadata: processed.metadata,
-            dataset_id: applicationId,
-            vector: processed.embeddings.imageEmbedding,
-            preview_image: processed.previewImage || ''
-          }));
-
+          // Prepare single object
           const queryParams = new URLSearchParams({
             collection_name: collectionName,
-            application_id: applicationId
+            application_id: applicationId,
+            image_id: processed.annotation.id,
+            description: processed.annotation.description,
+            metadata: JSON.stringify(processed.metadata),
+            dataset_id: applicationId
           });
 
           const requestBody = new FormData();
-          requestBody.append('objects_json', JSON.stringify(batchObjects));
+          requestBody.append('image_embedding', JSON.stringify(processed.embeddings.imageEmbedding));
+          if (processed.previewImage) {
+            requestBody.append('preview_image', processed.previewImage);
+          }
 
           const insertResponse = await fetch(
-            `/agent-lens/apps/${serviceId}/similarity/insert-many?${queryParams}`,
+            `/agent-lens/apps/${serviceId}/similarity/insert?${queryParams}`,
             {
               method: 'POST',
               body: requestBody
@@ -1505,18 +1529,18 @@ const MicroscopeMapDisplay = forwardRef(({
 
           if (insertResponse.ok) {
             await insertResponse.json(); // Result not needed, just confirm success
-            uploadedCount += batch.length;
-            if (appendLog) {
-              appendLog(`Batch ${Math.floor(i / BATCH_SIZE) + 1}: Uploaded ${batch.length} cells`);
+            uploadedCount++;
+            if (appendLog && (i + 1) % 10 === 0) {
+              appendLog(`Uploaded ${i + 1}/${processResult.processedAnnotations.length} cells`);
             }
           } else {
             const errorText = await insertResponse.text();
-            console.error(`Failed to upload batch ${Math.floor(i / BATCH_SIZE) + 1}:`, errorText);
-            failedCount += batch.length;
+            console.error(`Failed to upload cell ${i + 1} (${processed.annotation.id}):`, errorText);
+            failedCount++;
           }
         } catch (error) {
-          console.error(`Error uploading batch ${Math.floor(i / BATCH_SIZE) + 1}:`, error);
-          failedCount += batch.length;
+          console.error(`Error uploading cell ${i + 1} (${processed.annotation.id}):`, error);
+          failedCount++;
         }
       }
 
@@ -1552,6 +1576,8 @@ const MicroscopeMapDisplay = forwardRef(({
         error: error.message
       }));
     } finally {
+      // Reset cancellation flag
+      segmentationUploadCancelRef.current = false;
       setSegmentationUploadState(prev => ({
         ...prev,
         isProcessing: false
@@ -5811,6 +5837,7 @@ const MicroscopeMapDisplay = forwardRef(({
                       // Segmentation upload props
                       segmentationUploadState={segmentationUploadState}
                       handleSegmentationToSimilaritySearch={handleSegmentationToSimilaritySearch}
+                      cancelSegmentationUpload={cancelSegmentationUpload}
                     />
                   </div>
                 )}

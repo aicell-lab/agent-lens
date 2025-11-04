@@ -544,30 +544,11 @@ def get_frontend_api():
                 logger.warning(f"Similarity service not available: {e}")
                 raise HTTPException(status_code=503, detail="Similarity search service is not available")
             
-            # Always use the existing 'Agentlens' collection - never create new collections
+            # Always use the existing 'Agentlens' collection
             valid_collection_name = WEAVIATE_COLLECTION_NAME
-            logger.info(f"Using existing collection: {valid_collection_name}")
             
             # Extract just the dataset ID part (last part after slash)
             clean_application_id = application_id.split('/')[-1] if '/' in application_id else application_id
-            
-            # Check if application exists, create if it doesn't
-            try:
-                app_exists = await similarity_service.application_exists(valid_collection_name, clean_application_id)
-                if not app_exists:
-                    logger.info(f"Application {clean_application_id} does not exist in collection {valid_collection_name}, creating it...")
-                    app_result = await similarity_service.create_application(
-                        collection_name=valid_collection_name,
-                        application_id=clean_application_id,
-                        description=f"Application for dataset {clean_application_id}"
-                    )
-                    logger.info(f"Successfully created application {clean_application_id}: {app_result}")
-                else:
-                    logger.info(f"Application {clean_application_id} already exists in collection {valid_collection_name}")
-            except Exception as e:
-                logger.error(f"Failed to check/create application {clean_application_id}: {e}")
-                # Don't continue if we can't create the application
-                raise HTTPException(status_code=500, detail=f"Failed to create application {clean_application_id}: {str(e)}")
             
             # Parse metadata
             import json
@@ -650,29 +631,11 @@ def get_frontend_api():
                 logger.warning(f"Similarity service not available: {e}")
                 raise HTTPException(status_code=503, detail="Similarity search service is not available")
             
-            # Always use the existing 'Agentlens' collection - never create new collections
+            # Always use the existing 'Agentlens' collection
             valid_collection_name = WEAVIATE_COLLECTION_NAME
-            logger.info(f"Using existing collection: {valid_collection_name} for batch insert")
             
             # Extract just the dataset ID part (last part after slash)
             clean_application_id = application_id.split('/')[-1] if '/' in application_id else application_id
-            
-            # Check if application exists, create if it doesn't
-            try:
-                app_exists = await similarity_service.application_exists(valid_collection_name, clean_application_id)
-                if not app_exists:
-                    logger.info(f"Application {clean_application_id} does not exist in collection {valid_collection_name}, creating it...")
-                    app_result = await similarity_service.create_application(
-                        collection_name=valid_collection_name,
-                        application_id=clean_application_id,
-                        description=f"Application for dataset {clean_application_id}"
-                    )
-                    logger.info(f"Successfully created application {clean_application_id}: {app_result}")
-                else:
-                    logger.info(f"Application {clean_application_id} already exists in collection {valid_collection_name}")
-            except Exception as e:
-                logger.error(f"Failed to check/create application {clean_application_id}: {e}")
-                raise HTTPException(status_code=500, detail=f"Failed to create application {clean_application_id}: {str(e)}")
             
             # Parse JSON string to list of objects
             import json

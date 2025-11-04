@@ -90,7 +90,8 @@ const LayerPanel = ({
   
   // Segmentation upload props
   segmentationUploadState,
-  handleSegmentationToSimilaritySearch
+  handleSegmentationToSimilaritySearch,
+  cancelSegmentationUpload
 }) => {
   const [showLayerTypeDropdown, setShowLayerTypeDropdown] = useState(false);
   const [newLayerType, setNewLayerType] = useState('quick-scan');
@@ -875,34 +876,48 @@ const LayerPanel = ({
                             </span>
                             <div className="segmentation-actions">
                               {/* Upload to Similarity Search Button */}
-                              <button
-                                className="segmentation-action-btn"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  const sourceExp = exp.name;
-                                  if (handleSegmentationToSimilaritySearch) {
-                                    handleSegmentationToSimilaritySearch(sourceExp);
-                                  }
-                                }}
-                                disabled={segmentationUploadState?.isProcessing}
-                                title={
-                                  segmentationUploadState?.isProcessing
-                                    ? `Processing ${segmentationUploadState.currentPolygon}/${segmentationUploadState.totalPolygons} cells...`
-                                    : "Upload segmentation results to similarity search"
-                                }
-                              >
-                                {segmentationUploadState?.isProcessing && 
-                                 segmentationUploadState?.sourceExperimentName === exp.name ? (
-                                  <>
-                                    <i className="fas fa-spinner fa-spin"></i>
-                                    <span className="ml-1 text-xs">
-                                      {segmentationUploadState.currentPolygon}/{segmentationUploadState.totalPolygons}
+                              {segmentationUploadState?.isProcessing && 
+                               segmentationUploadState?.sourceExperimentName === exp.name ? (
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    className="segmentation-action-btn"
+                                    disabled
+                                    title="Processing segmentation results"
+                                  >
+                                    <i className="fas fa-spinner fa-spin" style={{ fontSize: '0.8em' }}></i>
+                                    <span className="ml-1" style={{ fontSize: '0.75em' }}>
+                                      Processing {segmentationUploadState.currentPolygon}/{segmentationUploadState.totalPolygons}
                                     </span>
-                                  </>
-                                ) : (
+                                  </button>
+                                  <button
+                                    className="segmentation-action-btn segmentation-action-btn--delete"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (cancelSegmentationUpload) {
+                                        cancelSegmentationUpload();
+                                      }
+                                    }}
+                                    title="Stop processing"
+                                  >
+                                    <i className="fas fa-stop"></i>
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  className="segmentation-action-btn"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const sourceExp = exp.name;
+                                    if (handleSegmentationToSimilaritySearch) {
+                                      handleSegmentationToSimilaritySearch(sourceExp);
+                                    }
+                                  }}
+                                  disabled={segmentationUploadState?.isProcessing}
+                                  title="Upload segmentation results to similarity search"
+                                >
                                   <i className="fas fa-upload"></i>
-                                )}
-                              </button>
+                                </button>
+                              )}
                               <button
                                 className="segmentation-action-btn"
                                 onClick={(e) => {
@@ -1167,7 +1182,8 @@ LayerPanel.propTypes = {
     error: PropTypes.string,
     sourceExperimentName: PropTypes.string
   }),
-  handleSegmentationToSimilaritySearch: PropTypes.func
+  handleSegmentationToSimilaritySearch: PropTypes.func,
+  cancelSegmentationUpload: PropTypes.func
 };
 
 export default LayerPanel;
