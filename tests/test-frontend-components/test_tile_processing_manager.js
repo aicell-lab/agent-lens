@@ -124,8 +124,10 @@ class TileProcessingManagerTest {
         .replace(/import React from 'react';/g, '// React import removed for Node.js testing')
         .replace(/export default new TileProcessingManager\(\);/g, 'export default TileProcessingManager;')
         // Replace CHANNEL_COLORS import with inline constant to avoid importing .jsx in Node
+        // Match any import path ending with utils (../../utils, ../../../utils, etc.)
+        // Pattern: matches import { CHANNEL_COLORS } from '../../utils' or similar
         .replace(
-          /import\s*\{\s*CHANNEL_COLORS\s*\}\s*from\s*['"]\.\.\/\.\.\/\.\.\/utils['"];?/,
+          /import\s*\{\s*CHANNEL_COLORS\s*\}\s*from\s*['"]\.\.\/(?:\.\.\/)*utils['"];?/,
           "const CHANNEL_COLORS = {\n  'BF LED matrix full': '#FFFFFF',\n  'Fluorescence 405 nm Ex': '#8000FF',\n  'Fluorescence 488 nm Ex': '#00FF00',\n  'Fluorescence 561 nm Ex': '#FFFF00',\n  'Fluorescence 638 nm Ex': '#FF0000',\n  'Fluorescence 730 nm Ex': '#FF00FF',\n};"
         );
       
