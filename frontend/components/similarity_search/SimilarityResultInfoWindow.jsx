@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
-import './AnnotationPanel.css'; // Import styles for annotation-details-window class
+import './SimilaritySearchPanel.css'; // Import styles for annotation-details-window class
 
 /**
  * SimilarityResultInfoWindow - A floating window that displays detailed information about a clicked similarity result

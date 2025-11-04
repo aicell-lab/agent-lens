@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
-import './AnnotationPanel.css';
+import './SimilaritySearchPanel.css';
 import AnnotationDetailsWindow from './AnnotationDetailsWindow';
 import { generateAnnotationData, exportAnnotationsToJson } from '../../utils/annotationUtils';
 import { extractAnnotationImageRegion, extractAnnotationImageRegionAdvanced } from '../../utils/annotationEmbeddingService';
@@ -345,7 +345,7 @@ AnnotationImagePreview.propTypes = {
   experiments: PropTypes.array
 };
 
-const AnnotationPanel = ({
+const SimilaritySearchPanel = ({
   isDrawingMode,
   currentTool,
   setCurrentTool,
@@ -847,12 +847,12 @@ const AnnotationPanel = ({
   };
 
   return (
-    <div className="annotation-panel">
+    <div className="similarity-search-panel">
       {/* Header */}
-      <div className="annotation-panel-header">
+      <div className="similarity-search-panel-header">
         <div className="flex items-center space-x-2">
           <i className="fas fa-draw-polygon text-blue-400"></i>
-          <span className="font-medium">Annotations</span>
+          <span className="font-medium text-sm">Similarity Search</span>
           {/* Close button to deactivate annotation layer */}
           <button
             onClick={() => {
@@ -879,7 +879,7 @@ const AnnotationPanel = ({
             }}
             className="ml-auto text-red-400 hover:text-red-300 transition-colors"
             style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px' }}
-            title="Close annotation panel, clear annotations and similarity results, and deactivate annotation layer"
+            title="Close similarity search panel, clear annotations and similarity results, and deactivate similarity search layer"
           >
             <i className="fas fa-times"></i>
           </button>
@@ -892,7 +892,7 @@ const AnnotationPanel = ({
           {/* Load Applications List Button */}
           <span 
             className="text-xs text-blue-400 ml-2 px-2 py-1 bg-blue-900 rounded cursor-pointer hover:bg-blue-800 transition-colors" 
-            title="Click to see available annotation applications"
+            title="Click to see available similarity search applications"
             onClick={handleLoadApplicationList}
             style={{ 
               pointerEvents: isLoadingApplications ? 'none' : 'auto',
@@ -1505,7 +1505,7 @@ const AnnotationPanel = ({
   );
 };
 
-AnnotationPanel.propTypes = {
+SimilaritySearchPanel.propTypes = {
   isDrawingMode: PropTypes.bool.isRequired,
   setIsDrawingMode: PropTypes.func.isRequired,
   currentTool: PropTypes.string.isRequired,
@@ -1574,4 +1574,4 @@ AnnotationPanel.propTypes = {
   setSimilaritySearchResults: PropTypes.func
 };
 
-export default AnnotationPanel;
+export default SimilaritySearchPanel;
