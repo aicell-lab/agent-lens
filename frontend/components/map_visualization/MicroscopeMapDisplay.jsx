@@ -1398,13 +1398,13 @@ const MicroscopeMapDisplay = forwardRef(({
         appendLog(`Found ${polygonsResult.totalCount} polygons to process`);
       }
 
-      // Step 2: Delete existing Weaviate application if it exists
+      // Step 2: Delete existing Weaviate application if it exists, then create a new one
       const collectionName = 'Agentlens';  // Use correct collection name (capital A)
       const applicationId = sourceExperimentName;
       
       const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
       
-      // Delete existing application - any failure will stop execution
+      // Try to delete existing application (if it exists)
       if (appendLog) {
         appendLog(`Deleting existing Weaviate application: ${applicationId}`);
       }
@@ -1425,9 +1425,51 @@ const MicroscopeMapDisplay = forwardRef(({
           appendLog(`Deleted existing application: ${applicationId} (removed ${deleteResult.result?.successful || 0} objects)`);
         }
       } else {
-        // Any failure to delete is an error - stop execution
         const errorText = await deleteResponse.text().catch(() => 'Unknown error');
-        throw new Error(`Failed to delete existing application ${applicationId}: ${errorText}`);
+        let errorMessage = errorText.toLowerCase();
+        
+        // Parse JSON error if present
+        try {
+          const errorJson = JSON.parse(errorText);
+          if (errorJson.detail) {
+            errorMessage = errorJson.detail.toLowerCase();
+          }
+        } catch (e) {
+          // Not JSON, use text as-is
+        }
+        
+        if (deleteResponse.status === 404 || errorMessage.includes('does not exist')) {
+          if (appendLog) {
+            appendLog(`Application ${applicationId} does not exist, will create new one`);
+          }
+        } else {
+          throw new Error(`Failed to delete existing application ${applicationId}: ${errorText}`);
+        }
+      }
+      
+      // Create the application (whether it existed before or not)
+      if (appendLog) {
+        appendLog(`Creating Weaviate application: ${applicationId}`);
+      }
+      
+      const createParams = new URLSearchParams({
+        collection_name: collectionName,
+        description: `Application for experiment ${applicationId}`,
+        application_id: applicationId
+      });
+      
+      const createResponse = await fetch(
+        `/agent-lens/apps/${serviceId}/similarity/collections?${createParams}`,
+        { method: 'POST' }
+      );
+      
+      if (!createResponse.ok) {
+        const errorText = await createResponse.text().catch(() => 'Unknown error');
+        throw new Error(`Failed to create application ${applicationId}: ${errorText}`);
+      }
+      
+      if (appendLog) {
+        appendLog(`Created application: ${applicationId}`);
       }
 
       // Step 3: Get channel configurations for image extraction

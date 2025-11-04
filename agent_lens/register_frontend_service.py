@@ -912,6 +912,12 @@ def get_frontend_api():
             return {"success": True, "result": result}
             
         except Exception as e:
+            error_str = str(e)
+            # If application doesn't exist, return success instead of error
+            if "does not exist" in error_str.lower():
+                logger.info(f"Application does not exist: {error_str}")
+                return {"success": True, "result": {"message": "Application does not exist"}}
+            
             logger.error(f"Error deleting application: {e}")
             logger.error(traceback.format_exc())
             raise HTTPException(status_code=500, detail=str(e))
