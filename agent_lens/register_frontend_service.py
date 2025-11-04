@@ -20,7 +20,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 import uuid
 import traceback
 # Import similarity search utilities
-from agent_lens.utils.weaviate_search import similarity_service
+from agent_lens.utils.weaviate_search import similarity_service, WEAVIATE_COLLECTION_NAME
 
 # Configure logging
 from .log import setup_logging
@@ -428,14 +428,8 @@ def get_frontend_api():
                 logger.warning(f"Similarity service not available: {e}")
                 raise HTTPException(status_code=503, detail="Similarity search service is not available")
             
-            # Convert collection name to valid Weaviate class name (same logic as insert endpoint)
-            # Split by hyphens and capitalize each word, then join
-            words = collection_name.split('-')
-            valid_collection_name = ''.join(word.capitalize() for word in words)
-            
-            # Ensure it starts with uppercase letter
-            if not valid_collection_name[0].isupper():
-                valid_collection_name = 'A' + valid_collection_name[1:]
+            # Always use the existing 'Agentlens' collection - never create new collections
+            valid_collection_name = WEAVIATE_COLLECTION_NAME
             
             # Generate application ID if not provided
             if not application_id:
@@ -567,27 +561,9 @@ def get_frontend_api():
                 logger.warning(f"Similarity service not available: {e}")
                 raise HTTPException(status_code=503, detail="Similarity search service is not available")
             
-            # Convert collection name to valid Weaviate class name (no hyphens, starts with uppercase)
-            # Split by hyphens and capitalize each word, then join
-            words = collection_name.split('-')
-            valid_collection_name = ''.join(word.capitalize() for word in words)
-            
-            # Ensure it starts with uppercase letter
-            if not valid_collection_name[0].isupper():
-                valid_collection_name = 'A' + valid_collection_name[1:]
-            
-            # Check if collection exists, create if it doesn't
-            try:
-                collection_exists = await similarity_service.collection_exists(valid_collection_name)
-                if not collection_exists:
-                    logger.info(f"Collection {valid_collection_name} does not exist, creating it...")
-                    collection_result = await similarity_service.create_collection(valid_collection_name, f"Collection for {collection_name}")
-                    logger.info(f"Successfully created collection {valid_collection_name}: {collection_result}")
-                else:
-                    logger.info(f"Collection {valid_collection_name} already exists")
-            except Exception as e:
-                logger.error(f"Failed to check/create collection {valid_collection_name}: {e}")
-                raise HTTPException(status_code=500, detail=f"Failed to create collection {valid_collection_name}: {str(e)}")
+            # Always use the existing 'Agentlens' collection - never create new collections
+            valid_collection_name = WEAVIATE_COLLECTION_NAME
+            logger.info(f"Using existing collection: {valid_collection_name}")
             
             # Extract just the dataset ID part (last part after slash)
             clean_application_id = application_id.split('/')[-1] if '/' in application_id else application_id
@@ -660,6 +636,107 @@ def get_frontend_api():
             logger.error(traceback.format_exc())
             raise HTTPException(status_code=500, detail=str(e))
 
+    @app.post("/similarity/insert-many")
+    async def insert_many_images_for_similarity(
+        collection_name: str,
+        application_id: str,
+        objects_json: str = Form(...)  # JSON string of objects array
+    ):
+        """
+        Insert multiple images into a similarity search collection using batch insertion.
+        
+        Args:
+            collection_name (str): Name of the collection (will be overridden to use Agentlens)
+            application_id (str): Application ID
+            objects_json (str): JSON string containing array of objects, each with:
+                - image_id: Unique identifier
+                - description: Text description
+                - metadata: Dict of metadata
+                - dataset_id: Optional dataset ID
+                - vector: Image embedding vector (required)
+                - preview_image: Optional base64 preview image
+        
+        Returns:
+            dict: Result of batch insertion with uuids
+        """
+        try:
+            try:
+                if not await similarity_service.ensure_connected():
+                    raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            except Exception as e:
+                logger.warning(f"Similarity service not available: {e}")
+                raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            
+            # Always use the existing 'Agentlens' collection - never create new collections
+            valid_collection_name = WEAVIATE_COLLECTION_NAME
+            logger.info(f"Using existing collection: {valid_collection_name} for batch insert")
+            
+            # Extract just the dataset ID part (last part after slash)
+            clean_application_id = application_id.split('/')[-1] if '/' in application_id else application_id
+            
+            # Check if application exists, create if it doesn't
+            try:
+                app_exists = await similarity_service.application_exists(valid_collection_name, clean_application_id)
+                if not app_exists:
+                    logger.info(f"Application {clean_application_id} does not exist in collection {valid_collection_name}, creating it...")
+                    app_result = await similarity_service.create_application(
+                        collection_name=valid_collection_name,
+                        application_id=clean_application_id,
+                        description=f"Application for dataset {clean_application_id}"
+                    )
+                    logger.info(f"Successfully created application {clean_application_id}: {app_result}")
+                else:
+                    logger.info(f"Application {clean_application_id} already exists in collection {valid_collection_name}")
+            except Exception as e:
+                logger.error(f"Failed to check/create application {clean_application_id}: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to create application {clean_application_id}: {str(e)}")
+            
+            # Parse JSON string to list of objects
+            import json
+            try:
+                objects_list = json.loads(objects_json)
+            except json.JSONDecodeError as e:
+                raise HTTPException(status_code=400, detail=f"Invalid JSON in objects_json: {str(e)}")
+            
+            if not isinstance(objects_list, list):
+                raise HTTPException(status_code=400, detail="objects_json must be a JSON array")
+            
+            if len(objects_list) == 0:
+                raise HTTPException(status_code=400, detail="objects array cannot be empty")
+            
+            # Validate that all objects have required fields
+            for i, obj in enumerate(objects_list):
+                if not isinstance(obj, dict):
+                    raise HTTPException(status_code=400, detail=f"Object at index {i} must be a dictionary")
+                if "image_id" not in obj:
+                    raise HTTPException(status_code=400, detail=f"Object at index {i} missing required field 'image_id'")
+                if "vector" not in obj:
+                    raise HTTPException(status_code=400, detail=f"Object at index {i} missing required field 'vector'")
+                if not isinstance(obj["vector"], list):
+                    raise HTTPException(status_code=400, detail=f"Object at index {i} field 'vector' must be a list")
+            
+            # Prepare objects for insertion (ensure dataset_id is set)
+            for obj in objects_list:
+                if "dataset_id" not in obj or not obj["dataset_id"]:
+                    obj["dataset_id"] = clean_application_id
+            
+            # Use batch insertion
+            result = await similarity_service.insert_many_images(
+                collection_name=valid_collection_name,
+                application_id=clean_application_id,
+                objects=objects_list
+            )
+            
+            logger.info(f"Successfully batch inserted {len(objects_list)} images into collection: {valid_collection_name}")
+            return {"success": True, "result": result, "count": len(objects_list)}
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error batch inserting images for similarity: {e}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
+
     @app.post("/similarity/search/text")
     async def search_similar_by_text(
         collection_name: str,
@@ -688,11 +765,8 @@ def get_frontend_api():
                 logger.warning(f"Similarity service not available: {e}")
                 raise HTTPException(status_code=503, detail="Similarity search service is not available")
             
-            # Convert collection name to valid Weaviate class name (same logic as other endpoints)
-            words = collection_name.split('-')
-            valid_collection_name = ''.join(word.capitalize() for word in words)
-            if not valid_collection_name[0].isupper():
-                valid_collection_name = 'A' + valid_collection_name[1:]
+            # Always use the existing 'Agentlens' collection - never create new collections
+            valid_collection_name = WEAVIATE_COLLECTION_NAME
             
             # Extract just the dataset ID part (last part after slash)
             clean_application_id = application_id.split('/')[-1] if '/' in application_id else application_id
@@ -832,11 +906,8 @@ def get_frontend_api():
                 logger.warning(f"Similarity service not available: {e}")
                 raise HTTPException(status_code=503, detail="Similarity search service is not available")
             
-            # Convert collection name to valid Weaviate class name
-            words = collection_name.split('-')
-            valid_collection_name = ''.join(word.capitalize() for word in words)
-            if not valid_collection_name[0].isupper():
-                valid_collection_name = 'A' + valid_collection_name[1:]
+            # Always use the existing 'Agentlens' collection
+            valid_collection_name = WEAVIATE_COLLECTION_NAME
             
             # Extract just the dataset ID part (last part after slash)
             clean_application_id = application_id.split('/')[-1] if '/' in application_id else application_id
@@ -853,6 +924,49 @@ def get_frontend_api():
             
         except Exception as e:
             logger.error(f"Error searching by vector: {e}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.delete("/similarity/applications/delete")
+    async def delete_similarity_application(
+        collection_name: str,
+        application_id: str
+    ):
+        """
+        Delete an application and all its associated data from a collection.
+        
+        Args:
+            collection_name (str): Name of the collection
+            application_id (str): Application ID to delete
+            
+        Returns:
+            dict: Deletion result
+        """
+        try:
+            try:
+                if not await similarity_service.ensure_connected():
+                    raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            except Exception as e:
+                logger.warning(f"Similarity service not available: {e}")
+                raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            
+            # Always use the existing 'Agentlens' collection
+            valid_collection_name = WEAVIATE_COLLECTION_NAME
+            
+            # Extract just the dataset ID part (last part after slash)
+            clean_application_id = application_id.split('/')[-1] if '/' in application_id else application_id
+            
+            # Delete the application
+            result = await similarity_service.weaviate_service.applications.delete(
+                collection_name=valid_collection_name,
+                application_id=clean_application_id
+            )
+            
+            logger.info(f"Deleted application '{clean_application_id}' from collection '{valid_collection_name}'")
+            return {"success": True, "result": result}
+            
+        except Exception as e:
+            logger.error(f"Error deleting application: {e}")
             logger.error(traceback.format_exc())
             raise HTTPException(status_code=500, detail=str(e))
 
@@ -886,11 +1000,8 @@ def get_frontend_api():
                 logger.warning(f"Similarity service not available: {e}")
                 raise HTTPException(status_code=503, detail="Similarity search service is not available")
             
-            # Convert collection name to valid Weaviate class name
-            words = collection_name.split('-')
-            valid_collection_name = ''.join(word.capitalize() for word in words)
-            if not valid_collection_name[0].isupper():
-                valid_collection_name = 'A' + valid_collection_name[1:]
+            # Always use the existing 'Agentlens' collection
+            valid_collection_name = WEAVIATE_COLLECTION_NAME
             
             # Extract just the dataset ID part (last part after slash)
             clean_application_id = application_id.split('/')[-1] if '/' in application_id else application_id
@@ -937,11 +1048,8 @@ def get_frontend_api():
                 logger.warning(f"Similarity service not available: {e}")
                 raise HTTPException(status_code=503, detail="Similarity search service is not available")
             
-            # Convert collection name to valid Weaviate class name
-            words = collection_name.split('-')
-            valid_collection_name = ''.join(word.capitalize() for word in words)
-            if not valid_collection_name[0].isupper():
-                valid_collection_name = 'A' + valid_collection_name[1:]
+            # Always use the existing 'Agentlens' collection
+            valid_collection_name = WEAVIATE_COLLECTION_NAME
             
             # Clean prefix - extract just the dataset ID part (last part after slash)
             clean_prefix = prefix.split('/')[-1] if prefix and '/' in prefix else prefix

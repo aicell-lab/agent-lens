@@ -18,6 +18,9 @@ WEAVIATE_SERVER_URL = "https://hypha.aicell.io"
 WEAVIATE_WORKSPACE = "hypha-agents"
 WEAVIATE_SERVICE_NAME = "hypha-agents/weaviate"
 
+# Collection name - always use the existing 'Agentlens' collection (never create new collections)
+WEAVIATE_COLLECTION_NAME = "Agentlens"
+
 # CLIP model configuration
 device = "cuda" if torch.cuda.is_available() else "cpu"
 _clip_model = None
@@ -200,6 +203,71 @@ class WeaviateSimilarityService:
         )
         
         logger.info(f"Inserted image: {image_id} into collection: {collection_name}")
+        return result
+    
+    async def insert_many_images(self, collection_name: str, application_id: str,
+                                objects: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Insert multiple images with their embeddings into Weaviate using insert_many.
+        
+        Args:
+            collection_name: Name of the collection
+            application_id: Application ID
+            objects: List of dictionaries, each containing:
+                - image_id: Unique identifier for the image
+                - description: Text description
+                - metadata: Dict of metadata
+                - dataset_id: Optional dataset ID
+                - file_path: Optional file path
+                - vector: Image embedding vector (required)
+                - preview_image: Optional base64 preview image
+        
+        Returns:
+            Dict with insertion summary including uuids
+        """
+        if not await self.ensure_connected():
+            raise RuntimeError("Not connected to Weaviate service")
+        
+        import json
+        
+        # Prepare objects for insert_many
+        # Format: properties as top-level fields, vector as a special field
+        weaviate_objects = []
+        for obj in objects:
+            # Build properties dict
+            properties = {
+                "image_id": obj.get("image_id", ""),
+                "description": obj.get("description", ""),
+                "metadata": json.dumps(obj.get("metadata", {})) if obj.get("metadata") else "",
+                "dataset_id": obj.get("dataset_id", ""),
+                "file_path": obj.get("file_path", ""),
+                "preview_image": obj.get("preview_image", "")
+            }
+            
+            # Get vector - required for insert_many
+            vector = obj.get("vector")
+            if vector is None:
+                # Generate from description if no vector provided
+                vector = await generate_text_embedding(obj.get("description", ""))
+            
+            # Combine properties and vector into a single object
+            # Weaviate insert_many expects objects with properties as top-level fields
+            # and vector as a special field (the service will handle it)
+            weaviate_obj = {
+                **properties,
+                "vector": vector
+            }
+            weaviate_objects.append(weaviate_obj)
+        
+        # Use insert_many for batch insertion
+        result = await self.weaviate_service.data.insert_many(
+            collection_name=collection_name,
+            application_id=application_id,
+            objects=weaviate_objects
+        )
+        
+        inserted_count = len(weaviate_objects)
+        logger.info(f"Inserted {inserted_count} images into collection: {collection_name} using insert_many")
         return result
     
     async def search_similar_images(self, collection_name: str, application_id: str,

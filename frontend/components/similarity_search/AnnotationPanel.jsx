@@ -441,27 +441,6 @@ const AnnotationPanel = ({
   };
 
 
-  const getLayerDisplayName = () => {
-    const layerInfo = getActiveLayerInfo();
-    
-    // If no layer info found in layers array, check if it's an experiment
-    if (!layerInfo && activeLayer && experiments.length > 0) {
-      const experiment = experiments.find(exp => exp.name === activeLayer);
-      if (experiment) {
-        return `Experiment: ${experiment.name}`;
-      }
-    }
-    
-    if (!layerInfo) return 'Unknown Layer';
-    
-    if (layerInfo.type === 'load-server' && selectedHistoricalDataset) {
-      return '';
-    } else if (layerInfo.type === 'experiment') {
-      return `Experiment: ${layerInfo.name || 'Experiment'}`;
-    }
-    
-    return layerInfo.name || 'Layer';
-  };
 
   const tools = [
     { id: 'rectangle', name: 'Rectangle', icon: 'fa-square', tooltip: 'Draw rectangles' },
@@ -874,12 +853,6 @@ const AnnotationPanel = ({
         <div className="flex items-center space-x-2">
           <i className="fas fa-draw-polygon text-blue-400"></i>
           <span className="font-medium">Annotations</span>
-          {/* Active Layer Display */}
-          {activeLayer && getLayerDisplayName() && (
-            <span className="text-xs text-blue-300 ml-2 px-2 py-1 bg-blue-900 rounded">
-              {getLayerDisplayName()}
-            </span>
-          )}
           {/* Close button to deactivate annotation layer */}
           <button
             onClick={() => {
@@ -1367,9 +1340,6 @@ const AnnotationPanel = ({
 
           {/* Annotation List */}
           <div className="annotation-section">
-            <div className="annotation-section-title">
-              Annotations ({annotations.length})
-            </div>
             {annotations.length === 0 ? (
               <div className="no-annotations">No annotations yet</div>
             ) : (

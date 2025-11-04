@@ -23,7 +23,9 @@ import {
   isSegmentationFailed,
   getSegmentationExperimentName,
   isSegmentationExperiment,
-  getSourceExperimentName
+  getSourceExperimentName,
+  fetchSegmentationPolygons,
+  batchProcessSegmentationPolygons
 } from '../../utils/segmentationUtils.js';
 import './MicroscopeMapDisplay.css';
 
@@ -88,6 +90,7 @@ const MicroscopeMapDisplay = forwardRef(({
   const mapContainerRef = useRef(null);
   const canvasRef = useRef(null);
   const mapVideoRef = useRef(null);
+  const artifactZarrLoaderRef = useRef(null);
   
   // Check if using simulated microscope - disable scanning features
   const isSimulatedMicroscopeSelected = isSimulatedMicroscope(selectedMicroscopeId);
@@ -221,6 +224,17 @@ const MicroscopeMapDisplay = forwardRef(({
     error: null
   });
   const segmentationPollingRef = useRef(null);
+
+  // Segmentation to similarity search state
+  const [segmentationUploadState, setSegmentationUploadState] = useState({
+    isProcessing: false,
+    currentPolygon: 0,
+    totalPolygons: 0,
+    error: null,
+    sourceExperimentName: null
+  });
+  const [showSegmentationConfirmModal, setShowSegmentationConfirmModal] = useState(false);
+  const [completedSegmentationExperiment, setCompletedSegmentationExperiment] = useState(null);
 
   // Layer dropdown state
   const [isLayerDropdownOpen, setIsLayerDropdownOpen] = useState(false);
@@ -1254,6 +1268,13 @@ const MicroscopeMapDisplay = forwardRef(({
             if (refreshExperimentData) {
               await refreshExperimentData();
             }
+
+            // Show modal to ask if user wants to upload to similarity search
+            const sourceExperiment = status.progress?.source_experiment;
+            if (sourceExperiment) {
+              setCompletedSegmentationExperiment(sourceExperiment);
+              setShowSegmentationConfirmModal(true);
+            }
           } else if (isSegmentationFailed(status.state)) {
             stopSegmentationPolling();
             setSegmentationState(prev => ({
@@ -1316,6 +1337,235 @@ const MicroscopeMapDisplay = forwardRef(({
       }
     }
   }, [microscopeControlService, segmentationState.isRunning, stopSegmentationPolling, showNotification, appendLog]);
+
+  // Handler for processing segmentation results to similarity search
+  const handleSegmentationToSimilaritySearch = useCallback(async (sourceExperimentName) => {
+    if (!microscopeControlService || !sourceExperimentName) {
+      showNotification('Missing required services or experiment name', 'error');
+      return;
+    }
+
+    try {
+      setSegmentationUploadState({
+        isProcessing: true,
+        currentPolygon: 0,
+        totalPolygons: 0,
+        error: null,
+        sourceExperimentName
+      });
+
+      if (appendLog) {
+        appendLog(`Starting segmentation to similarity search for: ${sourceExperimentName}`);
+      }
+
+      // Step 1: Fetch polygons
+      const polygonsResult = await fetchSegmentationPolygons(microscopeControlService, sourceExperimentName);
+      
+      if (!polygonsResult.success) {
+        throw new Error(polygonsResult.error || 'Failed to fetch polygons');
+      }
+
+      if (polygonsResult.polygons.length === 0) {
+        showNotification('No polygons found in segmentation results', 'warning');
+        setSegmentationUploadState(prev => ({ ...prev, isProcessing: false }));
+        return;
+      }
+
+      setSegmentationUploadState(prev => ({
+        ...prev,
+        totalPolygons: polygonsResult.totalCount
+      }));
+
+      if (appendLog) {
+        appendLog(`Found ${polygonsResult.totalCount} polygons to process`);
+      }
+
+      // Step 2: Check if Weaviate application exists and delete if it does
+      const collectionName = 'agent-lens';
+      const applicationId = sourceExperimentName;
+      
+      try {
+        const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
+        
+        // Check if application exists
+        const existsResponse = await fetch(
+          `/agent-lens/apps/${serviceId}/similarity/collections/${collectionName}/exists`
+        );
+        
+        if (existsResponse.ok) {
+          const existsResult = await existsResponse.json();
+          
+          if (existsResult.exists) {
+            // Delete existing application
+            if (appendLog) {
+              appendLog(`Deleting existing Weaviate application: ${applicationId}`);
+            }
+            
+            const deleteParams = new URLSearchParams({
+              collection_name: collectionName,
+              application_id: applicationId
+            });
+            
+            const deleteResponse = await fetch(
+              `/agent-lens/apps/${serviceId}/similarity/applications/delete?${deleteParams}`,
+              { method: 'DELETE' }
+            );
+            
+            if (deleteResponse.ok) {
+              if (appendLog) {
+                appendLog(`Deleted existing application: ${applicationId}`);
+              }
+            } else {
+              console.warn('Failed to delete existing application, continuing anyway');
+            }
+          }
+        }
+      } catch (error) {
+        console.warn('Error checking/deleting application:', error);
+        // Continue anyway - application might not exist
+      }
+
+      // Step 3: Get channel configurations for image extraction
+      const channelConfigs = zarrChannelConfigs;
+      const enabledChannels = Object.entries(visibleLayers.channels)
+        .filter(([channelName, isVisible]) => isVisible)
+        .map(([channelName]) => ({ 
+          channelName, 
+          label: channelName 
+        }));
+
+      if (enabledChannels.length === 0) {
+        throw new Error('No visible channels found for image extraction');
+      }
+
+      // Step 4: Process polygons
+      const services = {
+        microscopeControlService,
+        artifactZarrLoader: artifactZarrLoaderRef.current
+      };
+
+      const onProgress = (current, total, successful, failed) => {
+        setSegmentationUploadState(prev => ({
+          ...prev,
+          currentPolygon: current,
+          totalPolygons: total
+        }));
+      };
+
+      const processResult = await batchProcessSegmentationPolygons(
+        polygonsResult.polygons,
+        sourceExperimentName,
+        services,
+        channelConfigs,
+        enabledChannels,
+        onProgress,
+        getWellInfoById
+      );
+
+      if (appendLog) {
+        appendLog(`Processed ${processResult.successfulCount}/${processResult.totalCount} polygons`);
+      }
+
+      // Step 5: Upload to Weaviate in batches of 30
+      const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
+      const BATCH_SIZE = 100;
+      let uploadedCount = 0;
+      let failedCount = 0;
+
+      // Process in batches
+      for (let i = 0; i < processResult.processedAnnotations.length; i += BATCH_SIZE) {
+        const batch = processResult.processedAnnotations.slice(i, i + BATCH_SIZE);
+        
+        try {
+          // Prepare batch objects
+          const batchObjects = batch.map(processed => ({
+            image_id: processed.annotation.id,
+            description: processed.annotation.description,
+            metadata: processed.metadata,
+            dataset_id: applicationId,
+            vector: processed.embeddings.imageEmbedding,
+            preview_image: processed.previewImage || ''
+          }));
+
+          const queryParams = new URLSearchParams({
+            collection_name: collectionName,
+            application_id: applicationId
+          });
+
+          const requestBody = new FormData();
+          requestBody.append('objects_json', JSON.stringify(batchObjects));
+
+          const insertResponse = await fetch(
+            `/agent-lens/apps/${serviceId}/similarity/insert-many?${queryParams}`,
+            {
+              method: 'POST',
+              body: requestBody
+            }
+          );
+
+          if (insertResponse.ok) {
+            await insertResponse.json(); // Result not needed, just confirm success
+            uploadedCount += batch.length;
+            if (appendLog) {
+              appendLog(`Batch ${Math.floor(i / BATCH_SIZE) + 1}: Uploaded ${batch.length} cells`);
+            }
+          } else {
+            const errorText = await insertResponse.text();
+            console.error(`Failed to upload batch ${Math.floor(i / BATCH_SIZE) + 1}:`, errorText);
+            failedCount += batch.length;
+          }
+        } catch (error) {
+          console.error(`Error uploading batch ${Math.floor(i / BATCH_SIZE) + 1}:`, error);
+          failedCount += batch.length;
+        }
+      }
+
+      // Step 6: Show completion notification
+      const totalFailed = processResult.failedCount + failedCount;
+      const totalProcessed = processResult.totalCount;
+      
+      if (totalFailed > 0) {
+        showNotification(
+          `Processed ${uploadedCount}/${totalProcessed} cells (${totalFailed} failed)`,
+          'warning'
+        );
+      } else {
+        showNotification(
+          `Successfully uploaded ${uploadedCount} cells to similarity search`,
+          'success'
+        );
+      }
+
+      if (appendLog) {
+        appendLog(`Segmentation to similarity search complete: ${uploadedCount} uploaded, ${totalFailed} failed`);
+      }
+
+    } catch (error) {
+      console.error('Error in segmentation to similarity search:', error);
+      showNotification(`Failed to process segmentation: ${error.message}`, 'error');
+      if (appendLog) {
+        appendLog(`Error processing segmentation: ${error.message}`);
+      }
+      
+      setSegmentationUploadState(prev => ({
+        ...prev,
+        error: error.message
+      }));
+    } finally {
+      setSegmentationUploadState(prev => ({
+        ...prev,
+        isProcessing: false
+      }));
+    }
+  }, [
+    microscopeControlService,
+    zarrChannelConfigs,
+    visibleLayers.channels,
+    artifactZarrLoaderRef,
+    getWellInfoById,
+    showNotification,
+    appendLog
+  ]);
 
   // Cleanup polling on unmount
   useEffect(() => {
@@ -4063,8 +4313,6 @@ const MicroscopeMapDisplay = forwardRef(({
 
   
   // Initialize ArtifactZarrLoader for historical data
-  const artifactZarrLoaderRef = useRef(null);
-  
   // Initialize the loader when component mounts
   useEffect(() => {
     if (!artifactZarrLoaderRef.current) {
@@ -5539,6 +5787,10 @@ const MicroscopeMapDisplay = forwardRef(({
                       // Segmentation props
                       segmentationState={segmentationState}
                       cancelRunningSegmentation={cancelRunningSegmentation}
+                      
+                      // Segmentation upload props
+                      segmentationUploadState={segmentationUploadState}
+                      handleSegmentationToSimilaritySearch={handleSegmentationToSimilaritySearch}
                     />
                   </div>
                 )}
@@ -6543,6 +6795,62 @@ const MicroscopeMapDisplay = forwardRef(({
 
       {/* Real-time chunk loading progress overlay */}
       {renderRealTimeProgress()}
+
+      {/* Segmentation to Similarity Search Confirmation Modal */}
+      {showSegmentationConfirmModal && completedSegmentationExperiment && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-800 border border-gray-600 rounded-lg shadow-xl max-w-md w-full text-white">
+            {/* Modal Header */}
+            <div className="flex items-center p-4 border-b border-gray-600">
+              <i className="fas fa-question-circle text-blue-400 mr-3 text-xl"></i>
+              <h3 className="text-lg font-semibold text-gray-200">
+                Use Segmentation for Similarity Search?
+              </h3>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-4">
+              <p className="text-gray-300 mb-4">
+                Segmentation is complete for experiment: <strong>{completedSegmentationExperiment}</strong>
+              </p>
+              <p className="text-gray-400 mb-4 text-sm">
+                Would you like to process the segmented cells and upload them to the similarity search system?
+                This will extract cell images and create embeddings for searching.
+              </p>
+              {segmentationUploadState.totalPolygons > 0 && (
+                <p className="text-gray-400 text-sm">
+                  This may take a few minutes for large datasets.
+                </p>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex justify-end space-x-3 p-4 border-t border-gray-600">
+              <button
+                onClick={() => {
+                  setShowSegmentationConfirmModal(false);
+                  setCompletedSegmentationExperiment(null);
+                }}
+                className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded transition"
+                disabled={segmentationUploadState.isProcessing}
+              >
+                Later
+              </button>
+              <button
+                onClick={() => {
+                  setShowSegmentationConfirmModal(false);
+                  handleSegmentationToSimilaritySearch(completedSegmentationExperiment);
+                }}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded transition flex items-center"
+                disabled={segmentationUploadState.isProcessing}
+              >
+                <i className="fas fa-check mr-2"></i>
+                Yes, Process
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       
     </div>
   );

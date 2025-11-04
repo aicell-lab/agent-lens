@@ -86,7 +86,11 @@ const LayerPanel = ({
   
   // Segmentation props
   segmentationState,
-  cancelRunningSegmentation
+  cancelRunningSegmentation,
+  
+  // Segmentation upload props
+  segmentationUploadState,
+  handleSegmentationToSimilaritySearch
 }) => {
   const [showLayerTypeDropdown, setShowLayerTypeDropdown] = useState(false);
   const [newLayerType, setNewLayerType] = useState('quick-scan');
@@ -549,13 +553,13 @@ const LayerPanel = ({
                                 window.dispatchEvent(event);
                               }
                             }}
-                            title={layer.annotationVisible ? "Hide annotation layer" : "Show annotation layer"}
+                            title={layer.annotationVisible ? "Hide similarity search layer" : "Show similarity search layer"}
                           >
                             <i className={`fas fa-eye${layer.annotationVisible ? '' : '-slash'}`}></i>
                           </button>
                           <span className="channel-name">
                             <i className="fas fa-draw-polygon mr-2 text-blue-400"></i>
-                            Annotations
+                            Similarity Search
                           </span>
                           <span className="channel-color-indicator" style={{ backgroundColor: '#3B82F6' }}></span>
                         </div>
@@ -870,6 +874,35 @@ const LayerPanel = ({
                               Segmentation
                             </span>
                             <div className="segmentation-actions">
+                              {/* Upload to Similarity Search Button */}
+                              <button
+                                className="segmentation-action-btn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const sourceExp = exp.name;
+                                  if (handleSegmentationToSimilaritySearch) {
+                                    handleSegmentationToSimilaritySearch(sourceExp);
+                                  }
+                                }}
+                                disabled={segmentationUploadState?.isProcessing}
+                                title={
+                                  segmentationUploadState?.isProcessing
+                                    ? `Processing ${segmentationUploadState.currentPolygon}/${segmentationUploadState.totalPolygons} cells...`
+                                    : "Upload segmentation results to similarity search"
+                                }
+                              >
+                                {segmentationUploadState?.isProcessing && 
+                                 segmentationUploadState?.sourceExperimentName === exp.name ? (
+                                  <>
+                                    <i className="fas fa-spinner fa-spin"></i>
+                                    <span className="ml-1 text-xs">
+                                      {segmentationUploadState.currentPolygon}/{segmentationUploadState.totalPolygons}
+                                    </span>
+                                  </>
+                                ) : (
+                                  <i className="fas fa-upload"></i>
+                                )}
+                              </button>
                               <button
                                 className="segmentation-action-btn"
                                 onClick={(e) => {
@@ -926,13 +959,13 @@ const LayerPanel = ({
                                 window.dispatchEvent(deactivationEvent);
                               }
                             }}
-                            title={exp.annotationVisible ? "Hide annotation layer" : "Show annotation layer"}
+                            title={exp.annotationVisible ? "Hide similarity search layer" : "Show similarity search layer"}
                           >
                             <i className={`fas fa-eye${exp.annotationVisible ? '' : '-slash'}`}></i>
                           </button>
                           <span className="channel-name">
                             <i className="fas fa-draw-polygon mr-2 text-blue-400"></i>
-                            Annotations
+                            Similarity Search
                           </span>
                           <span className="channel-color-indicator" style={{ backgroundColor: '#3B82F6' }}></span>
                         </div>
@@ -1122,7 +1155,17 @@ LayerPanel.propTypes = {
     progress: PropTypes.object,
     error: PropTypes.string
   }),
-  cancelRunningSegmentation: PropTypes.func
+  cancelRunningSegmentation: PropTypes.func,
+  
+  // Segmentation upload props
+  segmentationUploadState: PropTypes.shape({
+    isProcessing: PropTypes.bool,
+    currentPolygon: PropTypes.number,
+    totalPolygons: PropTypes.number,
+    error: PropTypes.string,
+    sourceExperimentName: PropTypes.string
+  }),
+  handleSegmentationToSimilaritySearch: PropTypes.func
 };
 
 export default LayerPanel;
