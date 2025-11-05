@@ -1,0 +1,421 @@
+/**
+ * Chat Completion utility for Agent Panel
+ * Simplified JavaScript port from hypha-agents chatCompletion
+ */
+
+import OpenAI from 'openai';
+
+/**
+ * Generate a unique ID
+ */
+function generateId() {
+  return Date.now().toString(36) + Math.random().toString(36).substring(2);
+}
+
+/**
+ * Response instructions for the AI agent
+ */
+const RESPONSE_INSTRUCTIONS = `
+You are a powerful coding assistant capable of solving complex tasks by writing and executing Python code.
+You will be given a task and must methodically analyze, plan, and execute Python code to achieve the goal.
+
+**FUNDAMENTAL REQUIREMENT: ALWAYS USE CODE AND TOOLS**
+- Never provide purely text-based responses without code execution
+- Every task must involve writing and executing Python code, except for simple questions
+- Use available tools, services, and APIs to gather information and solve problems
+
+**CRITICAL: MANDATORY TAG USAGE - FAILURE TO USE TAGS ENDS CONVERSATION**
+- You MUST ALWAYS use proper tags in your responses - NO EXCEPTIONS
+- You MUST use \`<py-script>\` tags when you want to execute Python code
+- You MUST use \`<returnToUser>\` tags when providing final results to the user
+- You MUST use \`<thoughts>\` tags when analyzing or planning your approach
+
+**THOUGHTS FORMATTING RULES:**
+- Think step by step, but keep each thinking step minimal
+- Use maximum 5 words per thinking step
+- Separate multiple thinking steps with line breaks
+
+## Core Execution Cycle
+
+### 1. Analysis Phase
+Use <thoughts> tags to analyze the task.
+
+### 2. Code Execution Phase
+Write Python code within <py-script> tags with a unique ID:
+<py-script id="unique_id">
+# Your code here
+print("Output")
+</py-script>
+
+### 3. Final Response
+Use <returnToUser> tags when complete:
+<returnToUser commit="id1,id2">
+Summary of what was accomplished.
+</returnToUser>
+`;
+
+/**
+ * Validate agent output
+ */
+function validateAgentOutput(content) {
+  const observationPattern = /<observation[^>]*>[\s\S]*?<\/observation>/gi;
+  const matches = content.match(observationPattern);
+  
+  if (matches && matches.length > 0) {
+    const errorMessage = `Agent attempted to generate observation blocks, which are reserved for system use only.`;
+    console.error('[ChatCompletion] Agent output validation failed:', matches);
+    throw new Error(errorMessage);
+  }
+}
+
+/**
+ * Extract returnToUser content
+ */
+function extractReturnToUser(script) {
+  const match = script.match(/<returnToUser(?:\s+([^>]*))?>([\s\S]*?)<\/returnToUser>/);
+  if (!match) return null;
+
+  const properties = {};
+  const [, attrs, content] = match;
+
+  if (attrs) {
+    const propRegex = /(\w+)=["']([^"']*)["']/g;
+    let propMatch;
+    while ((propMatch = propRegex.exec(attrs)) !== null) {
+      const [, key, value] = propMatch;
+      properties[key] = value;
+    }
+  }
+
+  return {
+    content: content.trim(),
+    properties
+  };
+}
+
+/**
+ * Extract thoughts content
+ */
+function extractThoughts(script) {
+  const match = script.match(/<thoughts>([\s\S]*?)<\/thoughts>/);
+  return match ? match[1].trim() : null;
+}
+
+/**
+ * Extract py-script content
+ */
+function extractScript(script) {
+  const match = script.match(/<py-script(?:\s+[^>]*)?>([\s\S]*?)<\/py-script>/);
+  return match ? match[1].trim() : null;
+}
+
+/**
+ * Chat completion generator
+ * @param {Object} options - Chat completion options
+ * @returns {AsyncGenerator} - Yields chat completion events
+ */
+export async function* chatCompletion({
+  messages,
+  systemPrompt = '',
+  model = 'gpt-4o',
+  temperature = 0.7,
+  onExecuteCode,
+  onMessage,
+  onStreaming,
+  maxSteps = 10,
+  baseURL,
+  apiKey,
+  stream = true,
+  abortController
+}) {
+  try {
+    const controller = abortController || new AbortController();
+    const { signal } = controller;
+
+    systemPrompt = (systemPrompt || '') + RESPONSE_INSTRUCTIONS;
+    
+    const openai = new OpenAI({
+      baseURL,
+      apiKey,
+      dangerouslyAllowBrowser: true
+    });
+
+    let loopCount = 0;
+
+    while (loopCount < maxSteps) {
+      if (signal.aborted) {
+        console.log('[ChatCompletion] Aborted by user');
+        return;
+      }
+
+      loopCount++;
+      const fullMessages = systemPrompt
+        ? [{ role: 'system', content: systemPrompt }, ...messages]
+        : messages;
+      const completionId = generateId();
+      
+      console.log('[ChatCompletion] New completion:', completionId);
+
+      yield {
+        type: 'new_completion',
+        completion_id: completionId
+      };
+
+      let accumulatedResponse = '';
+
+      try {
+        const completionStream = await openai.chat.completions.create(
+          {
+            model,
+            messages: fullMessages,
+            temperature,
+            stream: stream
+          },
+          { signal }
+        );
+
+        try {
+          for await (const chunk of completionStream) {
+            if (signal.aborted) {
+              console.log('[ChatCompletion] Stream aborted by user');
+              return;
+            }
+
+            const content = chunk.choices[0]?.delta?.content || '';
+            accumulatedResponse += content;
+
+            try {
+              validateAgentOutput(accumulatedResponse);
+            } catch (error) {
+              console.error('[ChatCompletion] Validation failed:', error);
+              yield {
+                type: 'error',
+                content: `Agent output validation failed: ${error.message}`,
+                error: error
+              };
+              return;
+            }
+
+            if (onStreaming) {
+              onStreaming(completionId, accumulatedResponse);
+            }
+            
+            yield {
+              type: 'text',
+              content: accumulatedResponse
+            };
+          }
+        } catch (error) {
+          if (signal.aborted) {
+            console.log('[ChatCompletion] Stream processing aborted');
+            return;
+          }
+          console.error('[ChatCompletion] Stream processing error:', error);
+          yield {
+            type: 'error',
+            content: `Error processing response: ${error.message}`,
+            error: error
+          };
+          return;
+        }
+      } catch (error) {
+        console.error('[ChatCompletion] API connection error:', error);
+        let errorMessage = 'Failed to connect to the language model API';
+
+        if (error instanceof Error) {
+          if (error.message.includes('404')) {
+            errorMessage = `Invalid model endpoint: ${baseURL} or model: ${model}`;
+          } else if (error.message.includes('401') || error.message.includes('403')) {
+            errorMessage = `Authentication error: Invalid API key`;
+          } else if (error.message.includes('429')) {
+            errorMessage = `Rate limit exceeded. Please try again later.`;
+          } else if (error.message.includes('timeout') || error.message.includes('ECONNREFUSED')) {
+            errorMessage = `Connection timeout. The model endpoint (${baseURL}) may be unavailable.`;
+          } else {
+            errorMessage = `API error: ${error.message}`;
+          }
+        }
+
+        yield {
+          type: 'error',
+          content: errorMessage,
+          error: error
+        };
+        return;
+      }
+
+      // Parse and validate the accumulated response
+      try {
+        if (signal.aborted) {
+          console.log('[ChatCompletion] Parsing aborted');
+          return;
+        }
+
+        // Final validation
+        try {
+          validateAgentOutput(accumulatedResponse);
+        } catch (error) {
+          console.error('[ChatCompletion] Final validation failed:', error);
+          yield {
+            type: 'error',
+            content: `Agent output validation failed: ${error.message}`,
+            error: error
+          };
+          return;
+        }
+
+        // Extract thoughts
+        const thoughts = extractThoughts(accumulatedResponse);
+        if (thoughts) {
+          console.log('[ChatCompletion] Thoughts:', thoughts);
+        }
+
+        // Check for final response
+        const returnToUser = extractReturnToUser(accumulatedResponse);
+        if (returnToUser) {
+          if (onMessage) {
+            const commitIds = returnToUser.properties.commit
+              ? returnToUser.properties.commit.split(',').map(id => id.trim())
+              : [];
+            onMessage(completionId, returnToUser.content, commitIds);
+          }
+          yield {
+            type: 'text',
+            content: returnToUser.content
+          };
+          return;
+        }
+
+        // Handle script execution
+        if (!onExecuteCode) {
+          throw new Error('onExecuteCode is not defined');
+        }
+
+        const scriptContent = extractScript(accumulatedResponse);
+        if (scriptContent) {
+          if (signal.aborted) {
+            console.log('[ChatCompletion] Tool execution aborted');
+            return;
+          }
+
+          yield {
+            type: 'function_call',
+            name: 'runCode',
+            arguments: {
+              code: scriptContent
+            },
+            call_id: completionId
+          };
+
+          // Add tool call to messages
+          messages.push({
+            role: 'assistant',
+            content: `<thoughts>${thoughts}</thoughts>\n<py-script id="${completionId}">${scriptContent}</py-script>`
+          });
+
+          if (onStreaming) {
+            onStreaming(completionId, `Executing code...`);
+          }
+
+          // Execute the tool call
+          try {
+            const result = await onExecuteCode(completionId, scriptContent);
+
+            yield {
+              type: 'function_call_output',
+              content: result,
+              call_id: completionId
+            };
+
+            // Add tool response to messages
+            messages.push({
+              role: 'user',
+              content: `<observation>I have executed the code. Here are the outputs:\n\`\`\`\n${result}\n\`\`\`\nNow continue with the next step.</observation>`
+            });
+          } catch (error) {
+            console.error('[ChatCompletion] Code execution error:', error);
+            const errorMessage = `Error executing code: ${error.message}`;
+
+            yield {
+              type: 'error',
+              content: errorMessage,
+              error: error
+            };
+
+            messages.push({
+              role: 'user',
+              content: `<observation>Error executing the code: ${error.message}\nPlease try a different approach.</observation>`
+            });
+          }
+        } else {
+          // No proper tags - send reminder
+          const reminder = `You MUST use proper tags in your responses. Every response should start with <thoughts> and then use either <py-script> to execute code or <returnToUser> to conclude.`;
+          
+          messages.push({
+            role: 'user',
+            content: `${reminder}\n\nYour previous response: "${accumulatedResponse}"\n\nPlease provide a proper response using the required tags.`
+          });
+        }
+
+        // Reminder if approaching max steps
+        if (loopCount >= maxSteps - 2) {
+          messages.push({
+            role: 'user',
+            content: `You are approaching the maximum number of steps (${maxSteps}). Please conclude the session with \`returnToUser\` tag and commit the current code and outputs.`
+          });
+        }
+
+        // Check loop limit
+        if (loopCount >= maxSteps) {
+          console.warn(`[ChatCompletion] Reached maximum loop limit of ${maxSteps}`);
+          if (onMessage) {
+            onMessage(completionId, `Reached maximum number of tool calls (${maxSteps}). Returning control to you now.`, []);
+          }
+          yield {
+            type: 'text',
+            content: `Reached maximum number of tool calls (${maxSteps}). Returning control to you now.`
+          };
+          break;
+        }
+      } catch (error) {
+        console.error('[ChatCompletion] Processing error:', error);
+        let errorMessage = 'Failed to process the model response';
+
+        if (error instanceof Error) {
+          errorMessage = `Error: ${error.message}`;
+        }
+
+        yield {
+          type: 'error',
+          content: errorMessage,
+          error: error
+        };
+
+        messages.push({
+          role: 'user',
+          content: `<observation>Error in processing: ${errorMessage}. Please try again with a simpler approach.</observation>`
+        });
+      }
+    }
+  } catch (err) {
+    console.error('[ChatCompletion] Fatal error:', err);
+    const errorMessage = `Chat completion error: ${err instanceof Error ? err.message : 'Unknown error'}`;
+
+    yield {
+      type: 'error',
+      content: errorMessage,
+      error: err instanceof Error ? err : new Error(errorMessage)
+    };
+  }
+}
+
+/**
+ * Default agent configuration
+ */
+export const DefaultAgentConfig = {
+  baseURL: 'https://api.openai.com/v1/',
+  apiKey: process.env.OPENAI_API_KEY || '',
+  model: 'gpt-4o',
+  temperature: 0.7
+};
+
