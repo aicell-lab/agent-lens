@@ -79,8 +79,16 @@ const AgentPanel = ({
         appendLog('[AgentPanel] Kernel initialized');
         setKernelStatus('ready');
 
-        // Load agent configuration
-        const systemCellCode = await loadAgentConfig(selectedMicroscopeId);
+        // Get token from hyphaManager to reuse existing login
+        const token = hyphaManager.getCurrentToken();
+        if (token) {
+          appendLog('[AgentPanel] Using existing login token');
+        } else {
+          appendLog('[AgentPanel] No token available, will use login() in system cell');
+        }
+
+        // Load agent configuration with token injection
+        const systemCellCode = await loadAgentConfig(selectedMicroscopeId, token || null);
         if (!mounted) return;
         
         appendLog(`[AgentPanel] Loaded agent config for ${selectedMicroscopeId}`);
