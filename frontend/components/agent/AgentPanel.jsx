@@ -9,7 +9,7 @@ import { AgentKernelManager } from '../../utils/agentKernelManager';
 import { CellManager } from '../../utils/cellManager';
 import { chatCompletion } from '../../utils/chatCompletion';
 import { loadAgentConfig } from '../../utils/agentConfigLoader';
-import { getOpenAIApiKey, getOpenAIBaseURL } from '../../utils/openaiConfig';
+import { getOpenAIApiKey, getOpenAIBaseURL, getOpenAIModel } from '../../utils/openaiConfig';
 import NotebookContent from './NotebookContent';
 import ChatInput from './ChatInput';
 import AgentSettings from './AgentSettings';
@@ -205,7 +205,7 @@ const AgentPanel = ({
       const chatStream = chatCompletion({
         messages: history,
         systemPrompt: '', // System prompt is in the system cell
-        model: 'gpt-4o',
+        model: getOpenAIModel(),
         temperature: 0.7,
         baseURL: getOpenAIBaseURL(),
         apiKey: getOpenAIApiKey(),

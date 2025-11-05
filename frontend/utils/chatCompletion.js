@@ -408,14 +408,3 @@ export async function* chatCompletion({
     };
   }
 }
-
-/**
- * Default agent configuration
- */
-export const DefaultAgentConfig = {
-  baseURL: 'https://api.openai.com/v1/',
-  apiKey: '', // Will be provided by caller
-  model: 'gpt-4o',
-  temperature: 0.7
-};
-

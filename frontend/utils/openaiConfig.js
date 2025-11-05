@@ -5,6 +5,7 @@
 
 const STORAGE_KEY = 'agent_lens_openai_api_key';
 const STORAGE_BASE_URL_KEY = 'agent_lens_openai_base_url';
+const STORAGE_MODEL_KEY = 'agent_lens_openai_model';
 
 /**
  * Get OpenAI API key from localStorage
@@ -22,6 +23,15 @@ export function getOpenAIApiKey() {
 export function getOpenAIBaseURL() {
   if (typeof window === 'undefined') return 'https://api.openai.com/v1/';
   return localStorage.getItem(STORAGE_BASE_URL_KEY) || 'https://api.openai.com/v1/';
+}
+
+/**
+ * Get OpenAI model from localStorage
+ * @returns {string} Model name or default 'gpt-4o'
+ */
+export function getOpenAIModel() {
+  if (typeof window === 'undefined') return 'gpt-4o';
+  return localStorage.getItem(STORAGE_MODEL_KEY) || 'gpt-4o';
 }
 
 /**

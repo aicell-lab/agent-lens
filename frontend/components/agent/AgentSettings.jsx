@@ -8,23 +8,36 @@ import PropTypes from 'prop-types';
 
 const STORAGE_KEY = 'agent_lens_openai_api_key';
 const STORAGE_BASE_URL_KEY = 'agent_lens_openai_base_url';
+const STORAGE_MODEL_KEY = 'agent_lens_openai_model';
+
+// Available OpenAI models
+const AVAILABLE_MODELS = [
+  { value: 'gpt-4o', label: 'GPT-4o (Latest)' },
+  { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+  { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
+  { value: 'gpt-4', label: 'GPT-4' },
+];
 
 const AgentSettings = ({ isOpen, onClose }) => {
   const [apiKey, setApiKey] = useState('');
   const [baseURL, setBaseURL] = useState('https://api.openai.com/v1/');
+  const [model, setModel] = useState('gpt-4o');
   const [showKey, setShowKey] = useState(false);
 
   // Load settings from localStorage on mount
   useEffect(() => {
     const savedKey = localStorage.getItem(STORAGE_KEY) || '';
     const savedBaseURL = localStorage.getItem(STORAGE_BASE_URL_KEY) || 'https://api.openai.com/v1/';
+    const savedModel = localStorage.getItem(STORAGE_MODEL_KEY) || 'gpt-4o';
     setApiKey(savedKey);
     setBaseURL(savedBaseURL);
+    setModel(savedModel);
   }, []);
 
   const handleSave = () => {
     localStorage.setItem(STORAGE_KEY, apiKey);
     localStorage.setItem(STORAGE_BASE_URL_KEY, baseURL);
+    localStorage.setItem(STORAGE_MODEL_KEY, model);
     if (onClose) {
       onClose();
     }
@@ -33,8 +46,10 @@ const AgentSettings = ({ isOpen, onClose }) => {
   const handleClear = () => {
     setApiKey('');
     setBaseURL('https://api.openai.com/v1/');
+    setModel('gpt-4o');
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(STORAGE_BASE_URL_KEY);
+    localStorage.removeItem(STORAGE_MODEL_KEY);
   };
 
   if (!isOpen) return null;
@@ -105,6 +120,27 @@ const AgentSettings = ({ isOpen, onClose }) => {
             />
             <p className="agent-settings-help">
               Leave as default unless using a custom OpenAI-compatible API endpoint
+            </p>
+          </div>
+
+          <div className="agent-settings-section">
+            <label htmlFor="model">
+              <i className="fas fa-brain"></i> Model
+            </label>
+            <select
+              id="model"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              className="agent-settings-input"
+            >
+              {AVAILABLE_MODELS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <p className="agent-settings-help">
+              Choose the OpenAI model to use for agent interactions. GPT-4o is recommended for best performance.
             </p>
           </div>
         </div>
