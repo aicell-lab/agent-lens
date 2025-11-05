@@ -13,6 +13,7 @@ import { getOpenAIApiKey, getOpenAIBaseURL, getOpenAIModel } from '../../utils/o
 import NotebookContent from './NotebookContent';
 import ChatInput from './ChatInput';
 import AgentSettings from './AgentSettings';
+import SystemPromptViewer from './SystemPromptViewer';
 import './AgentPanel.css';
 
 const AgentPanel = ({ 
@@ -37,9 +38,11 @@ const AgentPanel = ({
   
   // System cell tracking
   const systemCellIdRef = useRef(null);
+  const [systemPrompt, setSystemPrompt] = useState('');
   
   // Settings state
   const [showSettings, setShowSettings] = useState(false);
+  const [showSystemPrompt, setShowSystemPrompt] = useState(false);
   
   // Sync cells with CellManager
   useEffect(() => {
@@ -65,21 +68,7 @@ const AgentPanel = ({
         appendLog('[AgentPanel] Initializing agent...');
         setKernelStatus('starting');
 
-        // Get Hypha server connection
-        const server = await hyphaManager.getServer('hypha-agents');
-        if (!mounted) return;
-        
-        appendLog('[AgentPanel] Connected to Hypha server');
-        
-        // Initialize kernel
-        kernelManager.server = server;
-        await kernelManager.initialize();
-        if (!mounted) return;
-        
-        appendLog('[AgentPanel] Kernel initialized');
-        setKernelStatus('ready');
-
-        // Get token from hyphaManager to reuse existing login
+        // Get token from hyphaManager to reuse existing login (do this early)
         const token = hyphaManager.getCurrentToken();
         if (token) {
           appendLog('[AgentPanel] Using existing login token');
@@ -87,11 +76,55 @@ const AgentPanel = ({
           appendLog('[AgentPanel] No token available, will use login() in system cell');
         }
 
-        // Load agent configuration with token injection
+        // Load agent configuration with token injection (do this BEFORE kernel init)
+        // This way we can extract the system prompt even if kernel initialization fails
         const systemCellCode = await loadAgentConfig(selectedMicroscopeId, token || null);
         if (!mounted) return;
         
         appendLog(`[AgentPanel] Loaded agent config for ${selectedMicroscopeId}`);
+        
+        // Extract SYSTEM_PROMPT from the system cell code (do this BEFORE kernel init)
+        const systemPromptMatch = systemCellCode.match(/SYSTEM_PROMPT\s*=\s*"""([\s\S]*?)"""/);
+        if (systemPromptMatch && systemPromptMatch[1]) {
+          const extractedPrompt = systemPromptMatch[1].trim();
+          setSystemPrompt(extractedPrompt);
+          appendLog(`[AgentPanel] Extracted system prompt from config (${extractedPrompt.length} characters)`);
+          console.log('[AgentPanel] Extracted system prompt:', extractedPrompt.substring(0, 100) + '...');
+          console.log('[AgentPanel] System prompt state set to:', extractedPrompt.length, 'characters');
+        } else {
+          appendLog('[AgentPanel] No SYSTEM_PROMPT found in config, using default');
+          console.warn('[AgentPanel] SYSTEM_PROMPT pattern not found in code. First 500 chars:', systemCellCode.substring(0, 500));
+          console.warn('[AgentPanel] Looking for pattern: SYSTEM_PROMPT = """..."""');
+          console.warn('[AgentPanel] Code length:', systemCellCode.length);
+          // Check if SYSTEM_PROMPT exists at all
+          if (systemCellCode.includes('SYSTEM_PROMPT')) {
+            console.warn('[AgentPanel] SYSTEM_PROMPT found in code but regex failed');
+            const altMatch = systemCellCode.match(/SYSTEM_PROMPT\s*=\s*["']{3}([\s\S]*?)["']{3}/);
+            if (altMatch) {
+              console.log('[AgentPanel] Alternative regex matched!');
+              const extractedPrompt = altMatch[1].trim();
+              setSystemPrompt(extractedPrompt);
+            } else {
+              setSystemPrompt('');
+            }
+          } else {
+            setSystemPrompt('');
+          }
+        }
+
+        // Get Hypha server connection for kernel
+        const server = await hyphaManager.getServer('hypha-agents');
+        if (!mounted) return;
+        
+        appendLog('[AgentPanel] Connected to Hypha server');
+        
+        // Initialize kernel (this may fail if deno-app-engine is not available)
+        kernelManager.server = server;
+        await kernelManager.initialize();
+        if (!mounted) return;
+        
+        appendLog('[AgentPanel] Kernel initialized');
+        setKernelStatus('ready');
 
         // Create system cell
         const systemCellId = cellManager.addCell(
@@ -135,6 +168,10 @@ const AgentPanel = ({
         console.error('[AgentPanel] Initialization error:', error);
         appendLog(`[AgentPanel] Initialization error: ${error.message}`);
         setKernelStatus('error');
+        
+        // The system prompt should already be extracted (it happens before kernel init)
+        // The state variable in the catch block might not reflect the latest state due to closure
+        // But the state should be set correctly via setSystemPrompt() above
         
         if (showNotification) {
           showNotification(`Agent initialization failed: ${error.message}`, 'error');
@@ -204,7 +241,7 @@ const AgentPanel = ({
       // Start chat completion
       const chatStream = chatCompletion({
         messages: history,
-        systemPrompt: '', // System prompt is in the system cell
+        systemPrompt: systemPrompt, // System prompt extracted from system cell
         model: getOpenAIModel(),
         temperature: 0.7,
         baseURL: getOpenAIBaseURL(),
@@ -360,9 +397,14 @@ const AgentPanel = ({
   return (
     <div className="agent-panel-container">
       <div className="agent-panel-header">
-        <div className="agent-panel-title">
+        <div 
+          className="agent-panel-title"
+          onClick={() => setShowSystemPrompt(true)}
+          style={{ cursor: 'pointer', userSelect: 'none' }}
+          title="Click to view system prompt"
+        >
           <i className="fas fa-robot mr-2"></i>
-          <h4 style={{ fontSize: '0.85rem' }}>AI Microscopy Assistant</h4>
+          <h4 style={{ fontSize: '0.85rem', margin: 0 }}>AI Microscopy Assistant</h4>
         </div>
         <div className="agent-panel-actions">
           <button
@@ -472,6 +514,12 @@ const AgentPanel = ({
       <AgentSettings 
         isOpen={showSettings} 
         onClose={() => setShowSettings(false)} 
+      />
+
+      <SystemPromptViewer
+        isOpen={showSystemPrompt}
+        onClose={() => setShowSystemPrompt(false)}
+        systemPrompt={systemPrompt}
       />
     </div>
   );

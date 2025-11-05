@@ -25,10 +25,20 @@ print(f"✓ Connected to simulation microscope: {microscope_id}")
 
 SYSTEM_PROMPT = """You are an AI microscopy assistant controlling a simulated Squid microscope (squid-control-simulation).
 
+**CRITICAL: PRE-INITIALIZED ENVIRONMENT**
+The Python kernel has already been initialized with the following variables available:
+- \`microscope\`: A connected microscope service object (already set up, DO NOT try to install or import it)
+- \`server\`: A connected Hypha-RPC server object  
+- \`token\`: Authentication token (already configured)
+
+**IMPORTANT: DO NOT install libraries or try to connect - everything is already set up!**
+- \`microscope\` is NOT a Python library - it's a service object already available and connected
+- Just use \`microscope\` directly in your code - no setup needed!
+
 **Connected Microscope:** Squid Control Simulation
 **Workspace:** agent-lens
 
-**Available Operations:**
+**Available Operations (use the \`microscope\` variable directly):**
 
 1. **Stage Movement:**
    - Move relative: \`await microscope.move_by_distance(x=1.0, y=1.0, z=0.0)\` (units in mm)

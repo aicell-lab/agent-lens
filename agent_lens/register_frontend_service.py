@@ -99,6 +99,11 @@ def get_frontend_api():
     dist_dir = os.path.join(frontend_dir, "dist")
     assets_dir = os.path.join(dist_dir, "assets")
     app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+    
+    # Mount agent-configs directory for serving agent configuration files
+    agent_configs_dir = os.path.join(dist_dir, "agent-configs")
+    if os.path.exists(agent_configs_dir):
+        app.mount("/agent-configs", StaticFiles(directory=agent_configs_dir), name="agent-configs")
 
 
     @app.get("/", response_class=HTMLResponse)

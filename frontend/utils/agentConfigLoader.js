@@ -38,16 +38,35 @@ function injectToken(code, token) {
 }
 
 /**
+ * Normalize microscope ID by removing workspace prefix
+ * @param {string} microscopeId - Microscope ID (e.g., 'agent-lens/squid-control-simulation' or 'squid-control-simulation')
+ * @returns {string} - Normalized ID (e.g., 'squid-control-simulation')
+ */
+function normalizeMicroscopeId(microscopeId) {
+  // Remove workspace prefix if present (e.g., 'agent-lens/squid-control-simulation' -> 'squid-control-simulation')
+  // Also handle other patterns like 'reef-imaging/microscope-squid-1' -> 'microscope-squid-1'
+  if (microscopeId.includes('/')) {
+    return microscopeId.split('/').pop();
+  }
+  return microscopeId;
+}
+
+/**
  * Load agent configuration for a specific microscope ID
- * @param {string} microscopeId - The microscope ID (e.g., 'squid-control-simulation', 'microscope-squid-1')
+ * @param {string} microscopeId - The microscope ID (e.g., 'squid-control-simulation', 'microscope-squid-1', or 'agent-lens/squid-control-simulation')
  * @param {string|null} token - Optional authentication token to inject (replaces login() call)
  * @returns {Promise<string>} - The system cell code with token injected if provided
  */
 export async function loadAgentConfig(microscopeId, token = null) {
   try {
-    // Try to load microscope-specific config
-    const configPath = `/agent-configs/${microscopeId}.js`;
-    console.log(`[AgentConfigLoader] Loading config from:`, configPath);
+    // Normalize microscope ID (remove workspace prefix if present)
+    const normalizedId = normalizeMicroscopeId(microscopeId);
+    
+    // Use the current page URL as base, which should be the frontend service URL
+    // This ensures the request goes to the correct service endpoint (e.g., /agent-lens/agent-configs/...)
+    const baseUrl = window.location.origin + window.location.pathname.replace(/\/$/, '');
+    const configPath = `${baseUrl}/agent-configs/${normalizedId}.js`;
+    console.log(`[AgentConfigLoader] Loading config for "${microscopeId}" (normalized: "${normalizedId}") from:`, configPath);
     
     const response = await fetch(configPath);
     
@@ -90,7 +109,9 @@ export async function loadAgentConfig(microscopeId, token = null) {
  */
 async function loadDefaultConfig(token = null) {
   try {
-    const configPath = `/agent-configs/microscope-assistant.js`;
+    // Use the current page URL as base, which should be the frontend service URL
+    const baseUrl = window.location.origin + window.location.pathname.replace(/\/$/, '');
+    const configPath = `${baseUrl}/agent-configs/microscope-assistant.js`;
     console.log(`[AgentConfigLoader] Loading default config from:`, configPath);
     
     const response = await fetch(configPath);

@@ -50,6 +50,15 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  transition: opacity 0.2s;
+}
+
+.agent-panel-title:hover {
+  opacity: 0.7;
+}
+
+.agent-panel-title h4 {
+  margin: 0;
 }
 
 .agent-panel-title h3 {
@@ -832,6 +841,14 @@
   max-height: 90vh;
   display: flex;
   flex-direction: column;
+}
+
+.system-prompt-viewer {
+  max-width: 700px;
+}
+
+.system-prompt-content {
+  margin-top: 8px;
 }
 
 .agent-settings-header {
