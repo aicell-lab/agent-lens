@@ -414,7 +414,7 @@ export async function* chatCompletion({
  */
 export const DefaultAgentConfig = {
   baseURL: 'https://api.openai.com/v1/',
-  apiKey: process.env.OPENAI_API_KEY || '',
+  apiKey: '', // Will be provided by caller
   model: 'gpt-4o',
   temperature: 0.7
 };

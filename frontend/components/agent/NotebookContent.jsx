@@ -1,18 +1,36 @@
 /**
  * Notebook Content Component
- * Renders notebook cells (code, markdown, thinking)
+ * Renders notebook cells (code, markdown, thinking) with full functionality
  */
 
 import React, { useEffect, useRef } from 'react';
 import PropTypes from 'prop-types';
+import CodeCell from './CodeCell';
+import MarkdownCell from './MarkdownCell';
+import ThinkingCell from './ThinkingCell';
 
 const NotebookContent = ({ 
   cells, 
   activeCellId, 
   onActiveCellChange,
-  isReady 
+  onExecuteCell,
+  onDeleteCell,
+  onToggleCodeVisibility,
+  onToggleOutputVisibility,
+  onStopGeneration,
+  isReady,
+  cellManager
 }) => {
   const endRef = useRef(null);
+  const editorRefs = useRef({});
+
+  // Get or create editor ref for a cell
+  const getEditorRef = (cellId) => {
+    if (!editorRefs.current[cellId]) {
+      editorRefs.current[cellId] = React.createRef();
+    }
+    return editorRefs.current[cellId];
+  };
 
   // Auto-scroll to bottom when new cells are added
   useEffect(() => {
@@ -36,6 +54,39 @@ const NotebookContent = ({
     );
   }
 
+  const handleCellClick = (cellId) => {
+    if (onActiveCellChange) {
+      onActiveCellChange(cellId);
+    }
+  };
+
+  const handleExecuteCell = async (cellId) => {
+    if (onExecuteCell && cellManager) {
+      await onExecuteCell(cellId);
+    }
+  };
+
+  const handleDeleteCell = (cellId, e) => {
+    e.stopPropagation();
+    if (onDeleteCell) {
+      onDeleteCell(cellId);
+    }
+  };
+
+  const handleToggleCodeVisibility = (cellId, e) => {
+    e.stopPropagation();
+    if (onToggleCodeVisibility) {
+      onToggleCodeVisibility(cellId);
+    }
+  };
+
+  const handleToggleOutputVisibility = (cellId, e) => {
+    e.stopPropagation();
+    if (onToggleOutputVisibility) {
+      onToggleOutputVisibility(cellId);
+    }
+  };
+
   return (
     <div className="notebook-content-container">
       {cells.map((cell) => (
@@ -47,7 +98,7 @@ const NotebookContent = ({
           } ${cell.metadata?.parent ? 'child-cell' : ''} ${
             activeCellId === cell.id ? 'active-cell' : ''
           }`}
-          onClick={() => onActiveCellChange && onActiveCellChange(cell.id)}
+          onClick={() => handleCellClick(cell.id)}
         >
           {/* Cell role indicator */}
           {cell.role && (
@@ -58,70 +109,88 @@ const NotebookContent = ({
             </div>
           )}
 
+          {/* Cell operations toolbar */}
+          <div className="cell-operations-toolbar">
+            <button
+              onClick={(e) => handleDeleteCell(cell.id, e)}
+              className="cell-operation-button delete-button"
+              title="Delete cell"
+            >
+              <i className="fas fa-trash"></i>
+            </button>
+            {cell.type === 'code' && (
+              <>
+                <button
+                  onClick={(e) => handleToggleCodeVisibility(cell.id, e)}
+                  className="cell-operation-button toggle-button"
+                  title={cell.metadata?.isCodeVisible !== false ? "Hide code" : "Show code"}
+                >
+                  <i className={`fas ${cell.metadata?.isCodeVisible !== false ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                </button>
+                {cell.output && cell.output.length > 0 && (
+                  <button
+                    onClick={(e) => handleToggleOutputVisibility(cell.id, e)}
+                    className="cell-operation-button toggle-button"
+                    title={cell.metadata?.isOutputVisible !== false ? "Hide output" : "Show output"}
+                  >
+                    <i className={`fas ${cell.metadata?.isOutputVisible !== false ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+
           {/* Cell content based on type */}
           <div className="cell-content">
             {cell.type === 'thinking' && (
-              <div className="thinking-cell">
-                <div className="thinking-header">
-                  <i className="fas fa-brain fa-spin"></i>
-                  <span>Thinking...</span>
-                </div>
-                <div className="thinking-content">
-                  {cell.content}
-                </div>
-              </div>
+              <ThinkingCell
+                content={cell.content}
+                onStop={onStopGeneration}
+              />
             )}
 
             {cell.type === 'markdown' && (
-              <div className="markdown-cell">
-                <div className="markdown-content">
-                  {cell.content}
-                </div>
-              </div>
+              <MarkdownCell
+                content={cell.content}
+                isEditing={cell.metadata?.isEditing || false}
+              />
             )}
 
             {cell.type === 'code' && (
-              <div className="code-cell">
-                {/* Code editor will be rendered by CodeCell component */}
-                {cell.metadata?.isCodeVisible !== false && (
-                  <div className="code-cell-editor">
-                    <pre className="code-content">
-                      <code>{cell.content}</code>
-                    </pre>
-                  </div>
-                )}
-
-                {/* Execution counter */}
-                {cell.executionCount !== undefined && (
-                  <div className="execution-counter">
-                    [{cell.executionCount}]
-                  </div>
-                )}
-
-                {/* Output area */}
-                {cell.output && cell.output.length > 0 && cell.metadata?.isOutputVisible !== false && (
-                  <div className="code-cell-output">
-                    {cell.output.map((output, index) => (
-                      <div key={index} className={`output-item output-${output.type}`}>
-                        {output.type === 'stdout' && (
-                          <pre className="output-stdout">{output.content}</pre>
-                        )}
-                        {output.type === 'stderr' && (
-                          <pre className="output-stderr">{output.content}</pre>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Execution state indicator */}
-                {cell.executionState === 'running' && (
-                  <div className="execution-status">
-                    <i className="fas fa-spinner fa-spin"></i>
-                    <span>Executing...</span>
-                  </div>
-                )}
-              </div>
+              <CodeCell
+                code={cell.content}
+                language="python"
+                onExecute={() => handleExecuteCell(cell.id)}
+                onAbort={() => {}}
+                isExecuting={cell.executionState === 'running'}
+                executionCount={cell.executionCount}
+                blockRef={getEditorRef(cell.id)}
+                isActive={activeCellId === cell.id}
+                role={cell.role}
+                hideCode={cell.metadata?.isCodeVisible === false}
+                onVisibilityChange={(visible) => {
+                  if (cellManager) {
+                    if (visible) {
+                      cellManager.toggleCodeVisibility(cell.id);
+                    } else {
+                      cellManager.toggleCodeVisibility(cell.id);
+                    }
+                  }
+                }}
+                hideOutput={cell.metadata?.isOutputVisible === false}
+                onOutputVisibilityChange={(visible) => {
+                  if (cellManager) {
+                    if (visible) {
+                      cellManager.toggleOutputVisibility(cell.id);
+                    } else {
+                      cellManager.toggleOutputVisibility(cell.id);
+                    }
+                  }
+                }}
+                parent={cell.metadata?.parent}
+                output={cell.output || []}
+                isReady={isReady}
+              />
             )}
           </div>
         </div>
@@ -139,12 +208,18 @@ NotebookContent.propTypes = {
     executionState: PropTypes.oneOf(['idle', 'running', 'success', 'error']),
     role: PropTypes.oneOf(['user', 'assistant', 'system']),
     output: PropTypes.array,
-    metadata: PropTypes.object
+    metadata: PropTypes.object,
+    executionCount: PropTypes.number
   })).isRequired,
   activeCellId: PropTypes.string,
   onActiveCellChange: PropTypes.func,
-  isReady: PropTypes.bool
+  onExecuteCell: PropTypes.func,
+  onDeleteCell: PropTypes.func,
+  onToggleCodeVisibility: PropTypes.func,
+  onToggleOutputVisibility: PropTypes.func,
+  onStopGeneration: PropTypes.func,
+  isReady: PropTypes.bool,
+  cellManager: PropTypes.object
 };
 
 export default NotebookContent;
-

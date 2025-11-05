@@ -9,8 +9,10 @@ import { AgentKernelManager } from '../../utils/agentKernelManager';
 import { CellManager } from '../../utils/cellManager';
 import { chatCompletion } from '../../utils/chatCompletion';
 import { loadAgentConfig } from '../../utils/agentConfigLoader';
+import { getOpenAIApiKey, getOpenAIBaseURL } from '../../utils/openaiConfig';
 import NotebookContent from './NotebookContent';
 import ChatInput from './ChatInput';
+import AgentSettings from './AgentSettings';
 import './AgentPanel.css';
 
 const AgentPanel = ({ 
@@ -31,9 +33,13 @@ const AgentPanel = ({
   
   // Chat completion state
   const abortControllerRef = useRef(null);
+  const thinkingCellIdRef = useRef(null);
   
   // System cell tracking
   const systemCellIdRef = useRef(null);
+  
+  // Settings state
+  const [showSettings, setShowSettings] = useState(false);
   
   // Sync cells with CellManager
   useEffect(() => {
@@ -143,9 +149,20 @@ const AgentPanel = ({
 
   /**
    * Handle user message send
+   * Allow sending messages even when kernel has errors (chat-only mode)
    */
   const handleSendMessage = useCallback(async (message) => {
-    if (!message.trim() || kernelStatus !== 'ready' || isProcessing) {
+    if (!message.trim() || kernelStatus === 'starting' || isProcessing) {
+      return;
+    }
+
+    // Check if API key is configured
+    const apiKey = getOpenAIApiKey();
+    if (!apiKey) {
+      if (showNotification) {
+        showNotification('Please configure your OpenAI API key in settings', 'error');
+      }
+      setShowSettings(true);
       return;
     }
 
@@ -166,6 +183,7 @@ const AgentPanel = ({
         userCellId,
         userCellId
       );
+      thinkingCellIdRef.current = thinkingCellId;
       cellManager.setCurrentAgentCell(thinkingCellId);
       setCells([...cellManager.getCells()]);
 
@@ -179,29 +197,81 @@ const AgentPanel = ({
       const chatStream = chatCompletion({
         messages: history,
         systemPrompt: '', // System prompt is in the system cell
-        model: 'gpt-4',
+        model: 'gpt-4o',
         temperature: 0.7,
-        baseURL: process.env.OPENAI_API_BASE_URL || 'https://api.openai.com/v1/',
-        apiKey: process.env.OPENAI_API_KEY || '',
+        baseURL: getOpenAIBaseURL(),
+        apiKey: getOpenAIApiKey(),
         maxSteps: 10,
         abortController: abortControllerRef.current,
-        onExecuteCode: async (completionId, code) => {
+        onExecuteCode: async (completionId, scriptContent) => {
           // Execute code in a code cell
           appendLog(`[AgentPanel] Executing code for completion ${completionId}`);
           
-          const result = await cellManager.executeCell(completionId, async (code, callbacks) => {
-            return await kernelManager.executePython(code, callbacks);
-          });
+          // Update the cell with the script content if it doesn't exist yet
+          const existingCell = cellManager.findCell(c => c.id === completionId);
+          if (!existingCell) {
+            cellManager.updateCellById(completionId, scriptContent, 'code', 'assistant', userCellId);
+            setCells([...cellManager.getCells()]);
+          } else if (existingCell.content !== scriptContent) {
+            cellManager.updateCellContent(completionId, scriptContent);
+            setCells([...cellManager.getCells()]);
+          }
           
-          setCells([...cellManager.getCells()]);
-          return result;
+          // Check if kernel is available
+          if (kernelStatus !== 'ready') {
+            const errorMessage = 'Kernel is not available. Code execution requires the Deno kernel service to be running.';
+            appendLog(`[AgentPanel] ${errorMessage}`);
+            
+            // Create error output
+            const errorOutput = {
+              type: 'stderr',
+              content: errorMessage,
+              short_content: errorMessage,
+              attrs: {
+                className: 'output-area error-output',
+                isProcessedAnsi: false
+              }
+            };
+            
+            cellManager.updateCellExecutionState(completionId, 'error', [errorOutput]);
+            setCells([...cellManager.getCells()]);
+            
+            return `[Cell Id: ${completionId}]\nError: ${errorMessage}`;
+          }
+          
+          try {
+            const result = await cellManager.executeCell(completionId, async (code, callbacks) => {
+              return await kernelManager.executePython(code, callbacks);
+            });
+            
+            setCells([...cellManager.getCells()]);
+            return result;
+          } catch (error) {
+            const errorMessage = `Kernel execution failed: ${error.message}`;
+            appendLog(`[AgentPanel] ${errorMessage}`);
+            
+            const errorOutput = {
+              type: 'stderr',
+              content: errorMessage,
+              short_content: errorMessage,
+              attrs: {
+                className: 'output-area error-output',
+                isProcessedAnsi: false
+              }
+            };
+            
+            cellManager.updateCellExecutionState(completionId, 'error', [errorOutput]);
+            setCells([...cellManager.getCells()]);
+            
+            return `[Cell Id: ${completionId}]\nError: ${errorMessage}`;
+          }
         },
         onStreaming: (completionId, content) => {
           // Update thinking cell with streaming content
           cellManager.updateCellById(thinkingCellId, content, 'thinking', 'assistant', userCellId);
           setCells([...cellManager.getCells()]);
         },
-        onMessage: (completionId, finalMessage, commitIds) => {
+        onMessage: (completionId, finalMessage) => {
           // Replace thinking cell with final message
           cellManager.updateCellById(thinkingCellId, finalMessage, 'markdown', 'assistant', userCellId);
           setCells([...cellManager.getCells()]);
@@ -245,6 +315,7 @@ const AgentPanel = ({
     } finally {
       setIsProcessing(false);
       abortControllerRef.current = null;
+      thinkingCellIdRef.current = null;
     }
   }, [
     kernelStatus, 
@@ -283,7 +354,16 @@ const AgentPanel = ({
       <div className="agent-panel-header">
         <div className="agent-panel-title">
           <i className="fas fa-robot mr-2"></i>
-          <h3>AI Microscopy Assistant</h3>
+          <h4 style={{ fontSize: '0.85rem' }}>AI Microscopy Assistant</h4>
+        </div>
+        <div className="agent-panel-actions">
+          <button
+            className="agent-panel-settings-button"
+            onClick={() => setShowSettings(true)}
+            title="Open settings"
+          >
+            <i className="fas fa-cog"></i>
+          </button>
         </div>
         <div className="agent-panel-status">
           {kernelStatus === 'starting' && (
@@ -297,8 +377,8 @@ const AgentPanel = ({
             </span>
           )}
           {kernelStatus === 'error' && (
-            <span className="status-badge status-error">
-              <i className="fas fa-exclamation-circle"></i> Error
+            <span className="status-badge status-error" title="Kernel unavailable - chat mode only">
+              <i className="fas fa-exclamation-circle"></i> Kernel Unavailable
             </span>
           )}
         </div>
@@ -309,7 +389,64 @@ const AgentPanel = ({
           cells={cells}
           activeCellId={activeCellId}
           onActiveCellChange={handleActiveCellChange}
+          onExecuteCell={async (cellId) => {
+            if (kernelStatus !== 'ready') {
+              const errorMessage = 'Kernel is not available. Code execution requires the Deno kernel service to be running.';
+              appendLog(`[AgentPanel] ${errorMessage}`);
+              
+              const errorOutput = {
+                type: 'stderr',
+                content: errorMessage,
+                short_content: errorMessage,
+                attrs: {
+                  className: 'output-area error-output',
+                  isProcessedAnsi: false
+                }
+              };
+              
+              cellManager.updateCellExecutionState(cellId, 'error', [errorOutput]);
+              setCells([...cellManager.getCells()]);
+              return;
+            }
+            
+            try {
+              await cellManager.executeCell(cellId, async (code, callbacks) => {
+                return await kernelManager.executePython(code, callbacks);
+              });
+              setCells([...cellManager.getCells()]);
+            } catch (error) {
+              console.error('[AgentPanel] Cell execution error:', error);
+              appendLog(`[AgentPanel] Cell execution error: ${error.message}`);
+              
+              const errorOutput = {
+                type: 'stderr',
+                content: error.message,
+                short_content: error.message,
+                attrs: {
+                  className: 'output-area error-output',
+                  isProcessedAnsi: false
+                }
+              };
+              
+              cellManager.updateCellExecutionState(cellId, 'error', [errorOutput]);
+              setCells([...cellManager.getCells()]);
+            }
+          }}
+          onDeleteCell={(cellId) => {
+            cellManager.deleteCell(cellId);
+            setCells([...cellManager.getCells()]);
+          }}
+          onToggleCodeVisibility={(cellId) => {
+            cellManager.toggleCodeVisibility(cellId);
+            setCells([...cellManager.getCells()]);
+          }}
+          onToggleOutputVisibility={(cellId) => {
+            cellManager.toggleOutputVisibility(cellId);
+            setCells([...cellManager.getCells()]);
+          }}
+          onStopGeneration={handleStopGeneration}
           isReady={kernelStatus === 'ready'}
+          cellManager={cellManager}
         />
       </div>
 
@@ -317,12 +454,17 @@ const AgentPanel = ({
         <ChatInput
           onSend={handleSendMessage}
           onStop={handleStopGeneration}
-          disabled={kernelStatus !== 'ready'}
+          disabled={kernelStatus === 'starting'}
           isProcessing={isProcessing}
           kernelStatus={kernelStatus}
-          placeholder="Ask the AI assistant..."
+          placeholder={kernelStatus === 'error' ? "Chat mode only (kernel unavailable)..." : "Ask the AI assistant..."}
         />
       </div>
+
+      <AgentSettings 
+        isOpen={showSettings} 
+        onClose={() => setShowSettings(false)} 
+      />
     </div>
   );
 };

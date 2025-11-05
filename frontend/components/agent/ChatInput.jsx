@@ -71,9 +71,9 @@ const ChatInput = ({
     }
     if (kernelStatus === 'error') {
       return {
-        color: 'text-red-500',
+        color: 'text-orange-500',
         icon: '⚠️',
-        text: 'Kernel Error'
+        text: 'Kernel Unavailable (Chat Only)'
       };
     }
     if (isProcessing) {
@@ -109,7 +109,7 @@ const ChatInput = ({
           onKeyDown={handleKeyDown}
           onInput={handleInput}
           placeholder={placeholder}
-          disabled={disabled || kernelStatus === 'starting' || kernelStatus === 'error'}
+          disabled={disabled || kernelStatus === 'starting'}
           className="agent-chat-input-textarea"
           rows={1}
         />
@@ -126,7 +126,7 @@ const ChatInput = ({
           ) : (
             <button
               onClick={handleSend}
-              disabled={!message.trim() || disabled || kernelStatus === 'starting' || kernelStatus === 'error'}
+              disabled={!message.trim() || disabled || kernelStatus === 'starting'}
               className="agent-chat-input-button agent-chat-send-button"
               title="Send message (Enter)"
             >
