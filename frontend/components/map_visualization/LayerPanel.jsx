@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import PropTypes from 'prop-types';
 import './LayerPanel.css';
-import DualRangeSlider from '../../DualRangeSlider';
+import DualRangeSlider from '../DualRangeSlider';
+import { getChannelColor } from '../../utils';
+import { isSegmentationExperiment, getSourceExperimentName } from '../../utils/segmentationUtils';
 
 const LayerPanel = ({
   // Map Layers props
@@ -80,7 +82,16 @@ const LayerPanel = ({
   
   // Layer activation props
   activeLayer,
-  setActiveLayer
+  setActiveLayer,
+  
+  // Segmentation props
+  segmentationState,
+  cancelRunningSegmentation,
+  
+  // Segmentation upload props
+  segmentationUploadState,
+  handleSegmentationToSimilaritySearch,
+  cancelSegmentationUpload
 }) => {
   const [showLayerTypeDropdown, setShowLayerTypeDropdown] = useState(false);
   const [newLayerType, setNewLayerType] = useState('quick-scan');
@@ -277,7 +288,8 @@ const LayerPanel = ({
     
     // For real microscope experiments ONLY, also call setActiveExperimentHandler
     // Browse Data layers are remote data and don't need microscope experiment activation
-    if (layerType === 'experiment' && setActiveExperimentHandler) {
+    // Segmentation layers should not trigger experiment activation
+    if (layerType === 'experiment' && !isSegmentationExperiment(layerId) && setActiveExperimentHandler) {
       try {
         await setActiveExperimentHandler(layerId);
         console.log(`[LayerPanel] Set active experiment: ${layerId}`);
@@ -513,42 +525,42 @@ const LayerPanel = ({
                         </button>
                       </div>
                       
-                      {/* Annotation Sublayer */}
+                      {/* Similarity Search Sublayer */}
                       <div className="channel-item channel-item--annotation">
                         <div className="channel-header">
                           <button
                             className="channel-visibility-btn"
                             onClick={() => {
-                              const newVisibility = !(layer.annotationVisible || false);
+                              const newVisibility = !(layer.similaritySearchVisible || false);
                               setLayers(prev => prev.map(l => 
                                 l.id === layer.id 
-                                  ? { ...l, annotationVisible: newVisibility }
+                                  ? { ...l, similaritySearchVisible: newVisibility }
                                   : l
                               ));
                               
-                              // If enabling annotation layer, activate the parent layer and open annotation dropdown
+                              // If enabling similarity search layer, activate the parent layer and open similarity search dropdown
                               if (newVisibility) {
                                 setActiveLayer(layer.id);
-                                // Trigger annotation activation through a custom event
-                                const event = new CustomEvent('annotationLayerActivated', {
+                                // Trigger similarity search layer activation through a custom event
+                                const event = new CustomEvent('similaritySearchLayerActivated', {
                                   detail: { layerId: layer.id, layerType: layer.type }
                                 });
                                 window.dispatchEvent(event);
                               } else {
-                                // If disabling annotation layer, trigger deactivation event
-                                const event = new CustomEvent('annotationLayerDeactivated', {
+                                // If disabling similarity search layer, trigger deactivation event
+                                const event = new CustomEvent('similaritySearchLayerDeactivated', {
                                   detail: { layerId: layer.id, layerType: layer.type }
                                 });
                                 window.dispatchEvent(event);
                               }
                             }}
-                            title={layer.annotationVisible ? "Hide annotation layer" : "Show annotation layer"}
+                            title={layer.similaritySearchVisible ? "Hide similarity search layer" : "Show similarity search layer"}
                           >
-                            <i className={`fas fa-eye${layer.annotationVisible ? '' : '-slash'}`}></i>
+                            <i className={`fas fa-eye${layer.similaritySearchVisible ? '' : '-slash'}`}></i>
                           </button>
                           <span className="channel-name">
                             <i className="fas fa-draw-polygon mr-2 text-blue-400"></i>
-                            Annotations
+                            Similarity Search
                           </span>
                           <span className="channel-color-indicator" style={{ backgroundColor: '#3B82F6' }}></span>
                         </div>
@@ -628,8 +640,19 @@ const LayerPanel = ({
           <>
             {isLoadingExperiments ? (
               <div className="loading-text">Loading experiments...</div>
-            ) : (
-              experiments.map((exp) => {
+            ) : (() => {
+              // Filter out segmentation experiments and create mapping
+              const regularExperiments = experiments.filter(exp => !isSegmentationExperiment(exp.name));
+              const segmentationExperiments = experiments.filter(exp => isSegmentationExperiment(exp.name));
+              
+              // Create mapping: parent experiment name -> segmentation experiment
+              const segmentationMap = {};
+              segmentationExperiments.forEach(segExp => {
+                const parentName = getSourceExperimentName(segExp.name);
+                segmentationMap[parentName] = segExp;
+              });
+              
+              return regularExperiments.map((exp) => {
                 const isVisible = visibleExperiments.includes(exp.name);
                 const isActive = exp.name === activeExperiment;
                 return (
@@ -639,11 +662,27 @@ const LayerPanel = ({
                       className="layer-visibility-btn"
                       onClick={() => {
                         if (isVisible) {
-                          // Hide experiment
-                          setVisibleExperiments(prev => prev.filter(name => name !== exp.name));
+                          // Hide experiment and its segmentation layer (if exists)
+                          setVisibleExperiments(prev => {
+                            const filtered = prev.filter(name => name !== exp.name);
+                            // Also hide segmentation layer if it exists
+                            const segExp = segmentationMap[exp.name];
+                            if (segExp) {
+                              return filtered.filter(name => name !== segExp.name);
+                            }
+                            return filtered;
+                          });
                         } else {
-                          // Show experiment
-                          setVisibleExperiments(prev => [...prev, exp.name]);
+                          // Show experiment and automatically show its segmentation layer (if exists)
+                          setVisibleExperiments(prev => {
+                            const updated = [...prev, exp.name];
+                            // Also automatically show segmentation layer if it exists
+                            const segExp = segmentationMap[exp.name];
+                            if (segExp && !prev.includes(segExp.name)) {
+                              updated.push(segExp.name);
+                            }
+                            return updated;
+                          });
                         }
                       }}
                       title={isVisible ? "Hide experiment" : "Show experiment"}
@@ -756,45 +795,194 @@ const LayerPanel = ({
                               Normal Scan
                             </button>
                           )}
+                          {/* Upload Zarr Dataset button */}
+                          <button 
+                            className="upload-btn"
+                            onClick={() => {
+                              if (isSimulatedMicroscope || !microscopeControlService) return;
+                              // Trigger upload zarr dataset event
+                              const event = new CustomEvent('uploadZarrDataset', {
+                                detail: { experimentName: exp.name }
+                              });
+                              window.dispatchEvent(event);
+                            }}
+                            disabled={isSimulatedMicroscope || !microscopeControlService}
+                            title="Upload experiment data to artifact manager"
+                          >
+                            <i className="fas fa-cloud-upload-alt mr-1"></i>
+                            Upload Dataset
+                          </button>
+                          {/* Segment Experiment / Cancel Segmentation button */}
+                          <button 
+                            className="segment-btn"
+                            onClick={async () => {
+                              if (isSimulatedMicroscope || !microscopeControlService) return;
+                              
+                              // Check if segmentation is running for this experiment
+                              const isRunning = segmentationState?.isRunning && 
+                                                segmentationState?.experimentName === exp.name;
+                              
+                              if (isRunning) {
+                                // Cancel running segmentation
+                                if (cancelRunningSegmentation) {
+                                  await cancelRunningSegmentation();
+                                }
+                              } else {
+                                // Trigger segment experiment event
+                                const event = new CustomEvent('segmentExperiment', {
+                                  detail: { experimentName: exp.name }
+                                });
+                                window.dispatchEvent(event);
+                              }
+                            }}
+                            disabled={isSimulatedMicroscope || !microscopeControlService}
+                            title={
+                              segmentationState?.isRunning && segmentationState?.experimentName === exp.name
+                                ? "Cancel running segmentation"
+                                : "Run automated cell segmentation on this experiment"
+                            }
+                          >
+                            <i className={`fas mr-1 ${segmentationState?.isRunning && segmentationState?.experimentName === exp.name ? 'fa-times' : 'fa-cut'}`}></i>
+                            {segmentationState?.isRunning && segmentationState?.experimentName === exp.name
+                              ? 'Cancel Segmentation'
+                              : 'Segment Experiment'}
+                          </button>
                         </div>
                       </div>
                       
-                      {/* Annotation Sublayer for Experiments */}
+                      {/* Segmentation Layer (if exists) */}
+                      {segmentationMap[exp.name] && (
+                        <div className="channel-item channel-item--segmentation">
+                          <div className="channel-header">
+                            <button
+                              className="channel-visibility-btn"
+                              onClick={() => {
+                                // Toggle segmentation visibility
+                                const segExp = segmentationMap[exp.name];
+                                const isVisible = visibleExperiments.includes(segExp.name);
+                                if (isVisible) {
+                                  setVisibleExperiments(prev => prev.filter(name => name !== segExp.name));
+                                } else {
+                                  setVisibleExperiments(prev => [...prev, segExp.name]);
+                                }
+                              }}
+                              title={visibleExperiments.includes(segmentationMap[exp.name].name) ? "Hide segmentation" : "Show segmentation"}
+                            >
+                              <i className={`fas fa-eye${visibleExperiments.includes(segmentationMap[exp.name].name) ? '' : '-slash'}`}></i>
+                            </button>
+                            <span className="channel-name">
+                              <i className="fas fa-cut"></i>
+                              Segmentation
+                            </span>
+                            <div className="segmentation-actions">
+                              {/* Upload to Similarity Search Button */}
+                              {segmentationUploadState?.isProcessing && 
+                               segmentationUploadState?.sourceExperimentName === exp.name ? (
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    className="segmentation-action-btn"
+                                    disabled
+                                    title="Processing segmentation results"
+                                  >
+                                    <i className="fas fa-spinner fa-spin" style={{ fontSize: '0.8em' }}></i>
+                                    <span className="ml-1" style={{ fontSize: '0.75em' }}>
+                                      Processing {segmentationUploadState.currentPolygon}/{segmentationUploadState.totalPolygons}
+                                    </span>
+                                  </button>
+                                  <button
+                                    className="segmentation-action-btn segmentation-action-btn--delete"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (cancelSegmentationUpload) {
+                                        cancelSegmentationUpload();
+                                      }
+                                    }}
+                                    title="Stop processing"
+                                  >
+                                    <i className="fas fa-stop"></i>
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  className="segmentation-action-btn"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const sourceExp = exp.name;
+                                    if (handleSegmentationToSimilaritySearch) {
+                                      handleSegmentationToSimilaritySearch(sourceExp);
+                                    }
+                                  }}
+                                  disabled={segmentationUploadState?.isProcessing}
+                                  title="Upload segmentation results to similarity search"
+                                >
+                                  <i className="fas fa-upload"></i>
+                                </button>
+                              )}
+                              <button
+                                className="segmentation-action-btn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setExperimentToReset(segmentationMap[exp.name].name);
+                                  setShowClearCanvasConfirmation(true);
+                                }}
+                                title="Reset segmentation data"
+                              >
+                                <i className="fas fa-undo"></i>
+                              </button>
+                              <button
+                                className="segmentation-action-btn segmentation-action-btn--delete"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setExperimentToDelete(segmentationMap[exp.name].name);
+                                  setShowDeleteConfirmation(true);
+                                }}
+                                title="Delete segmentation layer"
+                              >
+                                <i className="fas fa-trash"></i>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Similarity Search Sublayer for Experiments */}
                       <div className="channel-item channel-item--annotation">
                         <div className="channel-header">
                           <button
                             className="channel-visibility-btn"
                             onClick={() => {
-                              const newVisibility = !(exp.annotationVisible || false);
-                              // Update experiment annotation visibility (we'll need to track this in parent component)
-                              const event = new CustomEvent('experimentAnnotationToggled', {
-                                detail: { experimentName: exp.name, annotationVisible: newVisibility }
+                              const newVisibility = !(exp.similaritySearchVisible || false);
+                              // Update experiment similarity search visibility immediately for UI responsiveness
+                              exp.similaritySearchVisible = newVisibility;
+                              // Update experiment similarity search visibility (we'll need to track this in parent component)
+                              const event = new CustomEvent('experimentSimilaritySearchToggled', {
+                                detail: { experimentName: exp.name, similaritySearchVisible: newVisibility }
                               });
                               window.dispatchEvent(event);
                               
-                              // If enabling annotation layer, activate the experiment and open annotation dropdown
+                              // If enabling similarity search layer, activate the experiment and open similarity search dropdown
                               if (newVisibility) {
                                 setActiveLayer(exp.name);
-                                // Trigger annotation activation through a custom event
-                                const activationEvent = new CustomEvent('annotationLayerActivated', {
+                                // Trigger similarity search layer activation through a custom event
+                                const activationEvent = new CustomEvent('similaritySearchLayerActivated', {
                                   detail: { layerId: exp.name, layerType: 'experiment' }
                                 });
                                 window.dispatchEvent(activationEvent);
                               } else {
-                                // If disabling annotation layer, trigger deactivation event
-                                const deactivationEvent = new CustomEvent('annotationLayerDeactivated', {
+                                // If disabling similarity search layer, trigger deactivation event
+                                const deactivationEvent = new CustomEvent('similaritySearchLayerDeactivated', {
                                   detail: { layerId: exp.name, layerType: 'experiment' }
                                 });
                                 window.dispatchEvent(deactivationEvent);
                               }
                             }}
-                            title={exp.annotationVisible ? "Hide annotation layer" : "Show annotation layer"}
+                            title={exp.similaritySearchVisible ? "Hide similarity search layer" : "Show similarity search layer"}
                           >
-                            <i className={`fas fa-eye${exp.annotationVisible ? '' : '-slash'}`}></i>
+                            <i className={`fas fa-eye${exp.similaritySearchVisible ? '' : '-slash'}`}></i>
                           </button>
                           <span className="channel-name">
                             <i className="fas fa-draw-polygon mr-2 text-blue-400"></i>
-                            Annotations
+                            Similarity Search
                           </span>
                           <span className="channel-color-indicator" style={{ backgroundColor: '#3B82F6' }}></span>
                         </div>
@@ -806,15 +994,7 @@ const LayerPanel = ({
                           {Object.entries(visibleLayers.channels).map(([channel, isVisible]) => {
                             const isLastChannel = isLastSelectedChannel(channel, isVisible);
                             
-                            const defaultColors = {
-                              'BF LED matrix full': '#FFFFFF',
-                              'Fluorescence 405 nm Ex': '#8A2BE2',
-                              'Fluorescence 488 nm Ex': '#00FF00',
-                              'Fluorescence 561 nm Ex': '#FFFF00',
-                              'Fluorescence 638 nm Ex': '#FF0000',
-                              'Fluorescence 730 nm Ex': '#FF69B4',
-                            };
-                            const channelColor = defaultColors[channel] || '#FFFFFF';
+                            const channelColor = getChannelColor(channel);
                             
                             return (
                               <div key={channel} className="channel-item">
@@ -890,8 +1070,8 @@ const LayerPanel = ({
                   )}
                 </div>
                 );
-              })
-            )}
+              });
+            })()}
           </>
         )}
 
@@ -983,7 +1163,27 @@ LayerPanel.propTypes = {
   
   // Layer activation props
   activeLayer: PropTypes.string,
-  setActiveLayer: PropTypes.func
+  setActiveLayer: PropTypes.func,
+  
+  // Segmentation props
+  segmentationState: PropTypes.shape({
+    isRunning: PropTypes.bool,
+    experimentName: PropTypes.string,
+    progress: PropTypes.object,
+    error: PropTypes.string
+  }),
+  cancelRunningSegmentation: PropTypes.func,
+  
+  // Segmentation upload props
+  segmentationUploadState: PropTypes.shape({
+    isProcessing: PropTypes.bool,
+    currentPolygon: PropTypes.number,
+    totalPolygons: PropTypes.number,
+    error: PropTypes.string,
+    sourceExperimentName: PropTypes.string
+  }),
+  handleSegmentationToSimilaritySearch: PropTypes.func,
+  cancelSegmentationUpload: PropTypes.func
 };
 
 export default LayerPanel;

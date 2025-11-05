@@ -1,18 +1,22 @@
 import React, { useRef, useEffect, useCallback } from 'react';
 import PropTypes from 'prop-types';
 
-const SimilarAnnotationRenderer = ({
+const SimilarityResultsRenderer = ({
   containerRef,
-  similarAnnotations = [],
+  similarityResults = [],
   isVisible = true,
   mapScale,
   mapPan,
   stageDimensions,
   pixelsPerMm,
   wellInfoMap = {},
-  className = ""
+  className = "",
+  isDrawingMode = false,
+  isMapBrowsingMode = false,
+  onResultClick = null
 }) => {
   const canvasRef = useRef(null);
+  const convertedResultsRef = useRef([]);
 
   // Convert stage coordinates to display coordinates (reuse from AnnotationCanvas)
   const stageToDisplayCoords = useCallback((stageX_mm, stageY_mm) => {
@@ -69,9 +73,9 @@ const SimilarAnnotationRenderer = ({
     ];
   }, []);
 
-  // Convert similar annotation data to renderable format
-  const convertSimilarAnnotation = useCallback((similarAnnotation, index) => {
-    const props = similarAnnotation.properties || similarAnnotation;
+  // Convert similarity result data to renderable format
+  const convertSimilarityResult = useCallback((similarityResult, index) => {
+    const props = similarityResult.properties || similarityResult;
     const metadata = props.metadata || '';
     
     // Parse metadata
@@ -107,7 +111,7 @@ const SimilarAnnotationRenderer = ({
       return null;
     }
 
-    // Determine annotation type and extract points
+    // Determine shape type and extract points
     let points = [];
     let type = 'unknown';
     
@@ -128,34 +132,114 @@ const SimilarAnnotationRenderer = ({
       wellRelativeToStageCoords(point.x, point.y, wellInfo)
     );
 
+    // Extract UUID for use as ID
+    const extractUUID = (resultObj) => {
+      if (resultObj.uuid) return resultObj.uuid;
+      if (resultObj.id) return resultObj.id;
+      if (resultObj._uuid) return resultObj._uuid;
+      if (resultObj.properties) {
+        const props = resultObj.properties;
+        if (props.uuid) return props.uuid;
+        if (props.id) return props.id;
+      }
+      return null;
+    };
+    
+    const objectUUID = extractUUID(similarityResult);
+
     return {
-      id: props.image_id || `similar_${Date.now()}`,
+      id: objectUUID || props.image_id || `similar_${Date.now()}`,
       type,
       points: stagePoints,
       wellId,
-      description: props.description || 'Similar annotation',
-      similarityScore: similarAnnotation.metadata?.score || 0,
+      description: props.description || 'Similarity result',
+      similarityScore: similarityResult.metadata?.score || 0,
       rank: index + 1, // Rank is 1-based index
-      strokeColor: '#ff6b35', // Orange color for similar annotations
+      strokeColor: '#ff6b35', // Orange color for similarity results
       strokeWidth: 2,
       fillColor: 'rgba(255, 107, 53, 0.1)', // Semi-transparent orange fill
-      isSimilar: true
+      isSimilar: true,
+      // Store original result data for info window
+      originalData: similarityResult
     };
   }, [wellInfoMap, parseWktPolygon, parseBoundingBox, wellRelativeToStageCoords]);
 
-  // Draw similar annotation on canvas
-  const drawSimilarAnnotation = useCallback((ctx, annotation) => {
-    const displayPoints = annotation.points.map(p => stageToDisplayCoords(p.x, p.y));
+  // Check if a point is inside a result shape (point-in-polygon detection)
+  const isPointInResult = useCallback((point, result) => {
+    const displayPoints = result.points.map(p => stageToDisplayCoords(p.x, p.y));
     
-    ctx.strokeStyle = annotation.strokeColor;
-    ctx.lineWidth = annotation.strokeWidth;
-    ctx.fillStyle = annotation.fillColor;
+    switch (result.type) {
+      case 'rectangle':
+        if (displayPoints.length >= 4) {
+          const xs = displayPoints.map(p => p.x);
+          const ys = displayPoints.map(p => p.y);
+          const minX = Math.min(...xs);
+          const maxX = Math.max(...xs);
+          const minY = Math.min(...ys);
+          const maxY = Math.max(...ys);
+          return point.x >= minX && point.x <= maxX && point.y >= minY && point.y <= maxY;
+        }
+        break;
+      case 'polygon':
+        // Use ray casting algorithm for point-in-polygon
+        if (displayPoints.length >= 3) {
+          let inside = false;
+          for (let i = 0, j = displayPoints.length - 1; i < displayPoints.length; j = i++) {
+            if (((displayPoints[i].y > point.y) !== (displayPoints[j].y > point.y)) &&
+                (point.x < (displayPoints[j].x - displayPoints[i].x) * (point.y - displayPoints[i].y) / (displayPoints[j].y - displayPoints[i].y) + displayPoints[i].x)) {
+              inside = !inside;
+            }
+          }
+          return inside;
+        }
+        break;
+    }
+    return false;
+  }, [stageToDisplayCoords]);
+
+  // Handle canvas click
+  const handleCanvasClick = useCallback((e) => {
+    // Allow clicks when map browsing is active (even if drawing mode is on)
+    const canClick = onResultClick && (isMapBrowsingMode || !isDrawingMode);
+    
+    if (!canClick) return;
+    
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    const rect = canvas.getBoundingClientRect();
+    const clickPoint = {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
+    };
+    
+    // Find which result was clicked (check in reverse order to prioritize top-most)
+    for (let i = convertedResultsRef.current.length - 1; i >= 0; i--) {
+      const result = convertedResultsRef.current[i];
+      if (isPointInResult(clickPoint, result)) {
+        // Call the callback with the original result data and click position
+        onResultClick(result.originalData, {
+          x: e.clientX,
+          y: e.clientY
+        });
+        return;
+      }
+    }
+  }, [onResultClick, isDrawingMode, isMapBrowsingMode, isPointInResult]);
+
+  // Draw similarity result on canvas
+  const drawSimilarityResult = useCallback((ctx, result) => {
+    const displayPoints = result.points.map(p => stageToDisplayCoords(p.x, p.y));
+    
+    ctx.strokeStyle = result.strokeColor;
+    ctx.lineWidth = result.strokeWidth;
+    ctx.fillStyle = result.fillColor;
     ctx.globalAlpha = 0.8; // Slightly transparent
     ctx.setLineDash([8, 4]); // Dashed line to distinguish from regular annotations
     
     ctx.beginPath();
     
-    switch (annotation.type) {
+    switch (result.type) {
       case 'rectangle':
         if (displayPoints.length >= 4) {
           const [p1, p2, p3] = displayPoints; // top-left, top-right, bottom-right
@@ -206,7 +290,7 @@ const SimilarAnnotationRenderer = ({
       ctx.fillStyle = 'white';
       ctx.textAlign = 'center';
       ctx.fillText(
-        `#${annotation.rank || '?'}`,
+        `#${result.rank || '?'}`,
         pinX,
         pinY - 1
       );
@@ -217,7 +301,7 @@ const SimilarAnnotationRenderer = ({
     ctx.setLineDash([]);
   }, [stageToDisplayCoords]);
 
-  // Render similar annotations
+  // Render similarity results
   useEffect(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
@@ -234,63 +318,103 @@ const SimilarAnnotationRenderer = ({
 
     resizeCanvas();
 
-    const renderSimilarAnnotations = () => {
+    const renderSimilarityResults = () => {
       const ctx = canvas.getContext('2d');
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // Convert and draw similar annotations
-      similarAnnotations.forEach((similarAnnotation, index) => {
-        const convertedAnnotation = convertSimilarAnnotation(similarAnnotation, index);
-        if (convertedAnnotation) {
-          drawSimilarAnnotation(ctx, convertedAnnotation);
+      // Convert and draw similarity results, storing them for click detection
+      const converted = [];
+      similarityResults.forEach((similarityResult, index) => {
+        const convertedResult = convertSimilarityResult(similarityResult, index);
+        if (convertedResult) {
+          converted.push(convertedResult);
+          drawSimilarityResult(ctx, convertedResult);
         }
       });
+      
+      // Store converted results for click detection
+      convertedResultsRef.current = converted;
     };
 
-    renderSimilarAnnotations();
+    renderSimilarityResults();
 
     // Set up resize observer
     const resizeObserver = new ResizeObserver(() => {
       resizeCanvas();
-      renderSimilarAnnotations();
+      renderSimilarityResults();
     });
     resizeObserver.observe(container);
 
     return () => {
       resizeObserver.disconnect();
     };
-  }, [similarAnnotations, isVisible, convertSimilarAnnotation, drawSimilarAnnotation, containerRef]);
+  }, [similarityResults, isVisible, convertSimilarityResult, drawSimilarityResult, containerRef]);
 
-  if (!isVisible || similarAnnotations.length === 0) {
+  // Set up click event listener
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const handleClick = (e) => {
+      handleCanvasClick(e);
+    };
+
+    // Allow clicks when map browsing is active (even if drawing mode is on)
+    const canClick = (isMapBrowsingMode || !isDrawingMode) && onResultClick;
+    
+    if (canClick) {
+      canvas.addEventListener('click', handleClick, true); // Use capture phase
+    }
+
+    return () => {
+      canvas.removeEventListener('click', handleClick, true);
+    };
+  }, [handleCanvasClick, onResultClick, isDrawingMode, isMapBrowsingMode]);
+
+  if (!isVisible || similarityResults.length === 0) {
     return null;
   }
 
+  // Enable pointer events when map browsing is active OR when not in drawing mode
+  const pointerEventsEnabled = (isMapBrowsingMode || !isDrawingMode) && !!onResultClick;
+  
+  const handleDirectClick = (e) => {
+    e.stopPropagation(); // Prevent event from bubbling
+    handleCanvasClick(e);
+  };
+  
   return (
     <canvas
       ref={canvasRef}
-      className={`absolute inset-0 pointer-events-none ${className}`}
+      className={`absolute inset-0 ${className}`}
+      onClick={handleDirectClick}
       style={{
-        zIndex: 1001, // Above regular annotations but below UI elements
-        pointerEvents: 'none', // Don't interfere with map interactions
+        zIndex: 1002, // Higher than AnnotationCanvas (1000) to ensure it's on top
+        pointerEvents: pointerEventsEnabled ? 'auto' : 'none', // Enable clicks when map browsing or not drawing
+        cursor: pointerEventsEnabled ? 'pointer' : 'default',
         top: 0,
         left: 0,
         width: '100%',
-        height: '100%'
+        height: '100%',
+        position: 'absolute'
       }}
     />
   );
 };
 
-SimilarAnnotationRenderer.propTypes = {
+SimilarityResultsRenderer.propTypes = {
   containerRef: PropTypes.object.isRequired,
-  similarAnnotations: PropTypes.array,
+  similarityResults: PropTypes.array,
   isVisible: PropTypes.bool,
   mapScale: PropTypes.number.isRequired,
   mapPan: PropTypes.object.isRequired,
   stageDimensions: PropTypes.object.isRequired,
   pixelsPerMm: PropTypes.number.isRequired,
   wellInfoMap: PropTypes.object,
-  className: PropTypes.string
+  className: PropTypes.string,
+  isDrawingMode: PropTypes.bool,
+  isMapBrowsingMode: PropTypes.bool,
+  onResultClick: PropTypes.func
 };
 
-export default SimilarAnnotationRenderer;
+export default SimilarityResultsRenderer;

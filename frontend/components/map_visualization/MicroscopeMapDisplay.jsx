@@ -1,15 +1,32 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, useImperativeHandle, forwardRef } from 'react';
 import PropTypes from 'prop-types';
-import { useValidatedNumberInput, isSquidPlusMicroscope, isSimulatedMicroscope, getMicroscopeConfig } from '../utils'; // Import validation utilities
-import ArtifactZarrLoader from '../utils/artifactZarrLoader.js';
-import LayerPanel from './microscope/map/LayerPanel';
-import useExperimentZarrManager from './microscope/map/ExperimentZarrManager';
-import TileProcessingManager from './microscope/map/TileProcessingManager';
-import QuickScanConfig from './microscope/controls/QuickScanConfig';
-import NormalScanConfig from './microscope/controls/NormalScanConfig';
-import AnnotationPanel from './annotation/AnnotationPanel';
-import AnnotationCanvas from './annotation/AnnotationCanvas';
-import SimilarAnnotationRenderer from './annotation/SimilarAnnotationRenderer';
+import { useValidatedNumberInput, isSquidPlusMicroscope, isSimulatedMicroscope, getMicroscopeConfig } from '../../utils'; // Import validation utilities
+import ArtifactZarrLoader from '../../utils/artifactZarrLoader.js';
+import LayerPanel from './LayerPanel';
+import useExperimentZarrManager from './ExperimentZarrManager';
+import TileProcessingManager from './TileProcessingManager';
+import QuickScanConfig from '../microscope_acquisition/QuickScanConfig';
+import NormalScanConfig from '../microscope_acquisition/NormalScanConfig';
+import SimilaritySearchPanel from '../similarity_search/SimilaritySearchPanel';
+import AnnotationCanvas from '../similarity_search/AnnotationCanvas';
+import SimilarityResultsRenderer from '../similarity_search/SimilarityResultsRenderer';
+import SimilarityResultInfoWindow from '../similarity_search/SimilarityResultInfoWindow';
+import { 
+  startSegmentation, 
+  getSegmentationStatus, 
+  cancelSegmentation, 
+  buildChannelConfigs,
+  formatProgressMessage,
+  formatErrorMessage,
+  isSegmentationRunning,
+  isSegmentationCompleted,
+  isSegmentationFailed,
+  getSegmentationExperimentName,
+  isSegmentationExperiment,
+  getSourceExperimentName,
+  fetchSegmentationPolygons,
+  batchProcessSegmentationPolygons
+} from '../../utils/segmentationUtils.js';
 import './MicroscopeMapDisplay.css';
 
 const MicroscopeMapDisplay = forwardRef(({
@@ -73,6 +90,7 @@ const MicroscopeMapDisplay = forwardRef(({
   const mapContainerRef = useRef(null);
   const canvasRef = useRef(null);
   const mapVideoRef = useRef(null);
+  const artifactZarrLoaderRef = useRef(null);
   
   // Check if using simulated microscope - disable scanning features
   const isSimulatedMicroscopeSelected = isSimulatedMicroscope(selectedMicroscopeId);
@@ -198,26 +216,59 @@ const MicroscopeMapDisplay = forwardRef(({
     uploading: false
   });
 
+  // Segmentation state management
+  const [segmentationState, setSegmentationState] = useState({
+    isRunning: false,
+    experimentName: null,
+    progress: null,
+    error: null
+  });
+  const segmentationPollingRef = useRef(null);
+
+  // Segmentation to similarity search state
+  const [segmentationUploadState, setSegmentationUploadState] = useState({
+    isProcessing: false,
+    currentPolygon: 0,
+    totalPolygons: 0,
+    error: null,
+    sourceExperimentName: null
+  });
+  const [showSegmentationConfirmModal, setShowSegmentationConfirmModal] = useState(false);
+  const [completedSegmentationExperiment, setCompletedSegmentationExperiment] = useState(null);
+  const segmentationUploadCancelRef = useRef(false);
+
   // Layer dropdown state
   const [isLayerDropdownOpen, setIsLayerDropdownOpen] = useState(false);
   const layerDropdownRef = useRef(null);
 
   // Annotation system state
-  const [isAnnotationDropdownOpen, setIsAnnotationDropdownOpen] = useState(false);
+  const [isSimilaritySearchDropdownOpen, setIsSimilaritySearchDropdownOpen] = useState(false);
   const [isDrawingMode, setIsDrawingMode] = useState(false);
   const [currentAnnotationTool, setCurrentAnnotationTool] = useState('select');
-  const [isMapBrowsingMode, setIsMapBrowsingMode] = useState(false);
+  const [isMapBrowsingMode, setIsMapBrowsingMode] = useState(true); // Default to enabled
   const [annotationStrokeColor, setAnnotationStrokeColor] = useState('#ff0000');
   const [annotationStrokeWidth, setAnnotationStrokeWidth] = useState(2);
   const [annotationFillColor, setAnnotationFillColor] = useState('transparent');
   const [annotationDescription, setAnnotationDescription] = useState('');
   const [annotations, setAnnotations] = useState([]);
-  const annotationDropdownRef = useRef(null);
+  const similaritySearchDropdownRef = useRef(null);
 
-  // Similar annotations state
-  const [similarAnnotations, setSimilarAnnotations] = useState([]);
-  const [showSimilarAnnotations, setShowSimilarAnnotations] = useState(false);
-  const [similarAnnotationWellMap, setSimilarAnnotationWellMap] = useState({});
+  // Similarity results state
+  const [similarityResults, setSimilarityResults] = useState([]);
+  const [showSimilarityResults, setShowSimilarityResults] = useState(false);
+  const [similarityResultsWellMap, setSimilarityResultsWellMap] = useState({});
+  
+  // Similarity result info window state (for clickable results)
+  const [selectedSimilarityResult, setSelectedSimilarityResult] = useState(null);
+  const [similarityResultInfoWindowPosition, setSimilarityResultInfoWindowPosition] = useState({ x: 0, y: 0 });
+  const [showSimilarityResultInfoWindow, setShowSimilarityResultInfoWindow] = useState(false);
+  
+  // Similarity search state (moved from SimilaritySearchPanel)
+  const [similaritySearchResults, setSimilaritySearchResults] = useState([]);
+  const [showSimilarityPanel, setShowSimilarityPanel] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
+  const [textSearchQuery, setTextSearchQuery] = useState('');
+  const [searchType, setSearchType] = useState(null); // 'image' or 'text'
 
   // Layer visibility management (moved early to avoid dependency issues)
   const [visibleLayers, setVisibleLayers] = useState({
@@ -579,28 +630,6 @@ const MicroscopeMapDisplay = forwardRef(({
     return layerContrastSettings[layerId] || { min: 0, max: 255 };
   }, [layerContrastSettings]);
 
-  const initializeZarrChannelsFromMetadata = useCallback((channelMetadata) => {
-    if (!channelMetadata || !channelMetadata.activeChannels) return;
-    
-    const newConfigs = {};
-    channelMetadata.activeChannels.forEach(channel => {
-      newConfigs[channel.label] = {
-        enabled: true, // Auto-enable all active channels as requested
-        min: channel.window.start,
-        max: channel.window.end,
-        color: channel.color,
-        index: channel.index,
-        coefficient: channel.coefficient,
-        family: channel.family
-      };
-    });
-    
-    console.log(`🎨 Initialized ${Object.keys(newConfigs).length} zarr channels:`, Object.keys(newConfigs));
-    setZarrChannelConfigs(newConfigs);
-    setAvailableZarrChannels(channelMetadata.activeChannels);
-    setIsMultiChannelMode(Object.keys(newConfigs).length > 1);
-  }, []);
-
   const shouldUseMultiChannelLoading = useCallback(() => {
     // For browse data layer: use zarr channels
     const browseDataLayer = getBrowseDataLayer();
@@ -753,7 +782,7 @@ const MicroscopeMapDisplay = forwardRef(({
     // This ensures the embedding uses the same processed image data as the preview
   }, [appendLog, detectWellForAnnotation, mapPan, canvasRef]);
 
-  // Handle embedding generation from AnnotationPanel
+  // Handle embedding generation from SimilaritySearchPanel
   const handleEmbeddingsGenerated = useCallback((annotationId, embeddings) => {
     // Set embedding status to completed
     setEmbeddingStatus(prev => ({
@@ -845,14 +874,14 @@ const MicroscopeMapDisplay = forwardRef(({
     return null;
   }, [getWellPlateConfig, getWellPlateLayout, wellPaddingMm]);
 
-  // Similar annotation handlers
-  const handleSimilarAnnotationsUpdate = useCallback((newSimilarAnnotations) => {
-    setSimilarAnnotations(newSimilarAnnotations);
+  // Similarity result handlers
+  const handleSimilarityResultsUpdate = useCallback((newSimilarityResults) => {
+    setSimilarityResults(newSimilarityResults);
     
-    // Build well map for similar annotations
+    // Build well map for similarity results
     const wellMap = {};
-    newSimilarAnnotations.forEach((similarAnnotation, index) => {
-      const props = similarAnnotation.properties || similarAnnotation;
+    newSimilarityResults.forEach((similarityResult, index) => {
+      const props = similarityResult.properties || similarityResult;
       const metadata = props.metadata || '';
       
       let parsedMetadata = {};
@@ -868,7 +897,7 @@ const MicroscopeMapDisplay = forwardRef(({
               .replace(/None/g, 'null');
             parsedMetadata = JSON.parse(jsonString);
           } catch (error) {
-            console.error('Error parsing similar annotation metadata:', error);
+            console.error('Error parsing similarity result metadata:', error);
             parsedMetadata = { raw: metadata };
           }
         }
@@ -888,33 +917,106 @@ const MicroscopeMapDisplay = forwardRef(({
       }
     });
     
-    setSimilarAnnotationWellMap(wellMap);
-    setShowSimilarAnnotations(true);
+    setSimilarityResultsWellMap(wellMap);
+    setShowSimilarityResults(true);
     
-    console.log('🔍 Built well map for similar annotations:', wellMap);
+    console.log('🔍 Built well map for similarity results:', wellMap);
     console.log('🔍 Available well IDs:', Object.keys(wellMap));
     
     if (appendLog) {
-      appendLog(`Showing ${newSimilarAnnotations.length} similar annotations on map`);
+      appendLog(`Showing ${newSimilarityResults.length} similarity results on map`);
     }
   }, [getWellInfoById, appendLog]);
 
-  // Cleanup similar annotations when window is closed
-  const handleSimilarAnnotationsCleanup = useCallback(() => {
-    setSimilarAnnotations([]);
-    setSimilarAnnotationWellMap({});
-    setShowSimilarAnnotations(false);
+  // Cleanup similarity results when window is closed
+  const handleSimilarityResultsCleanup = useCallback(() => {
+    setSimilaritySearchResults([]);
+    setSimilarityResultsWellMap({});
+    setShowSimilarityResults(false);
+    // Also close similarity result info window
+    setShowSimilarityResultInfoWindow(false);
+    setSelectedSimilarityResult(null);
     
     if (appendLog) {
-      appendLog('Cleared similar annotations from map');
+      appendLog('Cleared similarity results from map');
     }
   }, [appendLog]);
 
-  // Note: handleClearSimilarAnnotations is available for future use
-  // const handleClearSimilarAnnotations = useCallback(() => {
-  //   setSimilarAnnotations([]);
-  //   setSimilarAnnotationWellMap({});
-  //   setShowSimilarAnnotations(false);
+  // Handle clicking on a similarity result to show info window
+  const handleSimilarityResultClick = useCallback((result, clickPosition) => {
+    // Get container bounds for window positioning
+    const containerBounds = mapContainerRef.current?.getBoundingClientRect();
+    
+    // Calculate window position near the click, adjusted for screen edges
+    const windowWidth = 280;
+    const windowHeight = 350;
+    const padding = 20;
+    
+    let windowX = clickPosition.x + 10; // Offset slightly from cursor
+    let windowY = clickPosition.y + 10;
+    
+    if (containerBounds) {
+      // Adjust if would overflow right edge
+      if (windowX + windowWidth + padding > containerBounds.right) {
+        windowX = containerBounds.right - windowWidth - padding;
+      }
+      // Adjust if would overflow left edge
+      if (windowX < containerBounds.left + padding) {
+        windowX = containerBounds.left + padding;
+      }
+      // Adjust if would overflow bottom edge
+      if (windowY + windowHeight + padding > containerBounds.bottom) {
+        windowY = containerBounds.bottom - windowHeight - padding;
+      }
+      // Adjust if would overflow top edge
+      if (windowY < containerBounds.top + padding) {
+        windowY = containerBounds.top + padding;
+      }
+    }
+    
+    setSelectedSimilarityResult(result);
+    setSimilarityResultInfoWindowPosition({ x: windowX, y: windowY });
+    setShowSimilarityResultInfoWindow(true);
+    
+    // Extract UUID from result object
+    const extractUUID = (resultObj) => {
+      if (resultObj.uuid) return resultObj.uuid;
+      if (resultObj.id) return resultObj.id;
+      if (resultObj._uuid) return resultObj._uuid;
+      if (resultObj.properties) {
+        const props = resultObj.properties;
+        if (props.uuid) return props.uuid;
+        if (props.id) return props.id;
+      }
+      return null;
+    };
+    
+    const objectUUID = extractUUID(result);
+    
+    if (appendLog) {
+      appendLog(`Opened info window for similarity result: ${objectUUID || 'unknown'}`);
+    }
+  }, [appendLog]);
+
+  // Convert collection name to valid Weaviate class name (no hyphens, starts with uppercase)
+  const convertToValidCollectionName = useCallback((name) => {
+    // Split by hyphens and capitalize each word, then join
+    let valid = name.split('-').map(word => 
+      word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+    ).join('');
+    
+    // Ensure it starts with uppercase letter
+    if (!valid[0] || !valid[0].match(/[A-Z]/)) {
+      valid = 'A' + valid.slice(1);
+    }
+    return valid;
+  }, []);
+
+  // Note: handleClearSimilarityResults is available for future use
+  // const handleClearSimilarityResults = useCallback(() => {
+  //   setSimilarityResults([]);
+  //   setSimilarityResultsWellMap({});
+  //   setShowSimilarityResults(false);
   //   
   //   if (appendLog) {
   //     appendLog('Cleared similar annotations from map');
@@ -990,23 +1092,583 @@ const MicroscopeMapDisplay = forwardRef(({
     renderDialogs,
   } = experimentManager;
 
+
+  // Function to refresh experiment data after segmentation completion
+  const refreshExperimentData = useCallback(async () => {
+    if (!microscopeControlService || !activeExperiment) return;
+    
+    try {
+      // Reload experiments to get updated list including segmentation results
+      const result = await microscopeControlService.list_experiments();
+      if (result.success !== false) {
+        // Check if segmentation experiment was created
+        const segmentationExpName = getSegmentationExperimentName(activeExperiment);
+        const segmentationExp = result.experiments.find(exp => exp.name === segmentationExpName);
+        
+        if (segmentationExp) {
+          console.log(`🔬 Segmentation experiment found: ${segmentationExpName}`);
+          // The experiment manager will handle updating the experiments list
+          // We just need to trigger a refresh of the current experiment's channels
+          if (appendLog) {
+            appendLog(`Segmentation results available in experiment: ${segmentationExpName}`);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error refreshing experiment data:', error);
+      if (appendLog) {
+        appendLog(`Error refreshing experiment data: ${error.message}`);
+      }
+    }
+  }, [microscopeControlService, activeExperiment, appendLog]);
+
+  const initializeZarrChannelsFromMetadata = useCallback((channelMetadata) => {
+    if (!channelMetadata || !channelMetadata.activeChannels) return;
+    
+    const newConfigs = {};
+    const activeChannels = [...channelMetadata.activeChannels];
+    
+    // Check if this is a segmentation experiment and add Segmentation channel
+    const isSegmentationExp = isSegmentationExperiment(activeExperiment);
+    if (isSegmentationExp) {
+      // Add Segmentation channel for segmentation experiments
+      const segmentationChannel = {
+        label: 'Segmentation',
+        window: { start: 0, end: 255 },
+        color: '#8b5cf6', // Purple color for segmentation
+        index: activeChannels.length,
+        coefficient: 1.0,
+        family: 'segmentation'
+      };
+      activeChannels.push(segmentationChannel);
+    }
+    
+    activeChannels.forEach(channel => {
+      newConfigs[channel.label] = {
+        enabled: true, // Auto-enable all active channels as requested
+        min: channel.window.start,
+        max: channel.window.end,
+        color: channel.color,
+        index: channel.index,
+        coefficient: channel.coefficient,
+        family: channel.family
+      };
+    });
+    
+    console.log(`🎨 Initialized ${Object.keys(newConfigs).length} zarr channels:`, Object.keys(newConfigs));
+    if (isSegmentationExp) {
+      console.log(`🔬 Segmentation experiment detected - added Segmentation channel`);
+    }
+    setZarrChannelConfigs(newConfigs);
+    setAvailableZarrChannels(activeChannels);
+    setIsMultiChannelMode(Object.keys(newConfigs).length > 1);
+  }, [activeExperiment]);
+
+  // Segmentation polling functions
+  // Define stopSegmentationPolling first to avoid circular dependency
+  const stopSegmentationPolling = useCallback(() => {
+    if (segmentationPollingRef.current) {
+      clearInterval(segmentationPollingRef.current);
+      segmentationPollingRef.current = null;
+    }
+  }, []);
+
+  const startSegmentationPolling = useCallback(() => {
+    if (segmentationPollingRef.current) {
+      clearInterval(segmentationPollingRef.current);
+    }
+
+    segmentationPollingRef.current = setInterval(async () => {
+      if (!microscopeControlService) {
+        return;
+      }
+
+      try {
+        const status = await getSegmentationStatus(microscopeControlService);
+        
+        // Stop polling if segmentation is not running (check API status, not state)
+        if (status.success && !isSegmentationRunning(status.state) && !isSegmentationCompleted(status.state) && !isSegmentationFailed(status.state)) {
+          stopSegmentationPolling();
+          return;
+        }
+        
+        if (status.success) {
+          const isRunning = isSegmentationRunning(status.state);
+          const experimentName = status.progress?.source_experiment || null;
+          
+          setSegmentationState(prev => ({
+            ...prev,
+            isRunning: isRunning,
+            experimentName: experimentName,
+            progress: status.progress,
+            error: null
+          }));
+
+          // Ensure segmentation layer is visible when segmentation is running
+          if (isRunning && experimentName) {
+            const segmentationExpName = getSegmentationExperimentName(experimentName);
+            
+            // Check if already visible - skip reload to prevent refreshing
+            setVisibleExperiments(prev => {
+              const segVisible = prev.includes(segmentationExpName);
+              if (segVisible) {
+                // Already visible, skip reload
+                return prev;
+              }
+              
+              // Not visible yet, reload experiments and add it
+              loadExperiments().then(() => {
+                setTimeout(() => {
+                  const segExp = experiments.find(exp => exp.name === segmentationExpName);
+                  
+                  if (segExp) {
+                    setVisibleExperiments(current => {
+                      const parentVisible = current.includes(experimentName);
+                      const currentSegVisible = current.includes(segmentationExpName);
+                      
+                      if (parentVisible && !currentSegVisible) {
+                        return [...current, segmentationExpName];
+                      }
+                      return current;
+                    });
+                  }
+                }, 500);
+              });
+              
+              return prev;
+            });
+          }
+
+          // Only log progress if still running (no notification to avoid spam)
+          if (isRunning) {
+            // Log progress but don't show notification
+            const progressMessage = formatProgressMessage(status.progress);
+            if (appendLog) {
+              appendLog(`Segmentation progress: ${progressMessage}`);
+            }
+          }
+
+          // Check if segmentation is complete
+          if (isSegmentationCompleted(status.state)) {
+            stopSegmentationPolling();
+            setSegmentationState(prev => ({
+              ...prev,
+              isRunning: false,
+              progress: status.progress
+            }));
+
+            showNotification(
+              `Segmentation completed! Processed ${status.progress?.total_wells || 0} wells`,
+              'success'
+            );
+            if (appendLog) {
+              appendLog(`Segmentation completed successfully`);
+            }
+
+            // Refresh experiment data to show segmentation results
+            if (refreshExperimentData) {
+              await refreshExperimentData();
+            }
+
+            // Show modal to ask if user wants to upload to similarity search
+            const sourceExperiment = status.progress?.source_experiment;
+            if (sourceExperiment) {
+              setCompletedSegmentationExperiment(sourceExperiment);
+              setShowSegmentationConfirmModal(true);
+            }
+          } else if (isSegmentationFailed(status.state)) {
+            stopSegmentationPolling();
+            setSegmentationState(prev => ({
+              ...prev,
+              isRunning: false,
+              error: status.errorMessage,
+              experimentName: status.progress?.source_experiment || prev.experimentName
+            }));
+
+            const errorMessage = formatErrorMessage(status.errorMessage, status.progress?.source_experiment);
+            showNotification(errorMessage, 'error');
+            if (appendLog) {
+              appendLog(`Segmentation failed: ${status.errorMessage}`);
+            }
+          }
+        } else {
+          console.error('Failed to get segmentation status:', status.error);
+        }
+      } catch (error) {
+        console.error('Error polling segmentation status:', error);
+        if (appendLog) {
+          appendLog(`Error checking segmentation status: ${error.message}`);
+        }
+      }
+    }, 5000); // Poll every 5 seconds
+  }, [microscopeControlService, showNotification, appendLog, refreshExperimentData, stopSegmentationPolling]);
+
+  const cancelRunningSegmentation = useCallback(async () => {
+    if (!microscopeControlService || !segmentationState.isRunning) {
+      return;
+    }
+
+    try {
+      const result = await cancelSegmentation(microscopeControlService);
+      
+      if (result.success) {
+        stopSegmentationPolling();
+        setSegmentationState({
+          isRunning: false,
+          experimentName: null,
+          progress: null,
+          error: null
+        });
+
+        showNotification('Segmentation cancelled', 'info');
+        if (appendLog) {
+          appendLog('Segmentation cancelled by user');
+        }
+      } else {
+        showNotification(`Failed to cancel segmentation: ${result.error}`, 'error');
+        if (appendLog) {
+          appendLog(`Failed to cancel segmentation: ${result.error}`);
+        }
+      }
+    } catch (error) {
+      console.error('Error cancelling segmentation:', error);
+      showNotification(`Error cancelling segmentation: ${error.message}`, 'error');
+      if (appendLog) {
+        appendLog(`Error cancelling segmentation: ${error.message}`);
+      }
+    }
+  }, [microscopeControlService, segmentationState.isRunning, stopSegmentationPolling, showNotification, appendLog]);
+
+  // Cancel segmentation upload processing
+  const cancelSegmentationUpload = useCallback(() => {
+    segmentationUploadCancelRef.current = true;
+    setSegmentationUploadState(prev => ({
+      ...prev,
+      isProcessing: false,
+      error: 'Cancelled by user'
+    }));
+    showNotification('Processing cancelled', 'info');
+    if (appendLog) {
+      appendLog('Segmentation upload cancelled by user');
+    }
+  }, [showNotification, appendLog]);
+
+  // Handler for processing segmentation results to similarity search
+  const handleSegmentationToSimilaritySearch = useCallback(async (sourceExperimentName) => {
+    if (!microscopeControlService || !sourceExperimentName) {
+      showNotification('Missing required services or experiment name', 'error');
+      return;
+    }
+
+    // Reset cancellation flag
+    segmentationUploadCancelRef.current = false;
+
+    try {
+      setSegmentationUploadState({
+        isProcessing: true,
+        currentPolygon: 0,
+        totalPolygons: 0,
+        error: null,
+        sourceExperimentName
+      });
+
+      if (appendLog) {
+        appendLog(`Starting segmentation to similarity search for: ${sourceExperimentName}`);
+      }
+
+      // Step 1: Fetch polygons
+      const polygonsResult = await fetchSegmentationPolygons(microscopeControlService, sourceExperimentName);
+      
+      if (!polygonsResult.success) {
+        throw new Error(polygonsResult.error || 'Failed to fetch polygons');
+      }
+
+      if (polygonsResult.polygons.length === 0) {
+        showNotification('No polygons found in segmentation results', 'warning');
+        setSegmentationUploadState(prev => ({ ...prev, isProcessing: false }));
+        return;
+      }
+
+      setSegmentationUploadState(prev => ({
+        ...prev,
+        totalPolygons: polygonsResult.totalCount
+      }));
+
+      if (appendLog) {
+        appendLog(`Found ${polygonsResult.totalCount} polygons to process`);
+      }
+
+      // Step 2: Delete existing Weaviate application if it exists, then create a new one
+      const collectionName = 'Agentlens';  // Use correct collection name (capital A)
+      const applicationId = sourceExperimentName;
+      
+      const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
+      
+      // Try to delete existing application (if it exists)
+      if (appendLog) {
+        appendLog(`Deleting existing Weaviate application: ${applicationId}`);
+      }
+      
+      const deleteParams = new URLSearchParams({
+        collection_name: collectionName,
+        application_id: applicationId
+      });
+      
+      const deleteResponse = await fetch(
+        `/agent-lens/apps/${serviceId}/similarity/applications/delete?${deleteParams}`,
+        { method: 'DELETE' }
+      );
+      
+      if (deleteResponse.ok) {
+        const deleteResult = await deleteResponse.json();
+        if (appendLog) {
+          appendLog(`Deleted existing application: ${applicationId} (removed ${deleteResult.result?.successful || 0} objects)`);
+        }
+      } else {
+        const errorText = await deleteResponse.text().catch(() => 'Unknown error');
+        let errorMessage = errorText.toLowerCase();
+        
+        // Parse JSON error if present
+        try {
+          const errorJson = JSON.parse(errorText);
+          if (errorJson.detail) {
+            errorMessage = errorJson.detail.toLowerCase();
+          }
+        } catch (e) {
+          // Not JSON, use text as-is
+        }
+        
+        if (deleteResponse.status === 404 || errorMessage.includes('does not exist')) {
+          if (appendLog) {
+            appendLog(`Application ${applicationId} does not exist, will create new one`);
+          }
+        } else {
+          throw new Error(`Failed to delete existing application ${applicationId}: ${errorText}`);
+        }
+      }
+      
+      // Create the application (whether it existed before or not)
+      if (appendLog) {
+        appendLog(`Creating Weaviate application: ${applicationId}`);
+      }
+      
+      const createParams = new URLSearchParams({
+        collection_name: collectionName,
+        description: `Application for experiment ${applicationId}`,
+        application_id: applicationId
+      });
+      
+      const createResponse = await fetch(
+        `/agent-lens/apps/${serviceId}/similarity/collections?${createParams}`,
+        { method: 'POST' }
+      );
+      
+      if (!createResponse.ok) {
+        const errorText = await createResponse.text().catch(() => 'Unknown error');
+        throw new Error(`Failed to create application ${applicationId}: ${errorText}`);
+      }
+      
+      if (appendLog) {
+        appendLog(`Created application: ${applicationId}`);
+      }
+
+      // Step 3: Get channel configurations for image extraction
+      const channelConfigs = zarrChannelConfigs;
+      const enabledChannels = Object.entries(visibleLayers.channels)
+        .filter(([channelName, isVisible]) => isVisible)
+        .map(([channelName]) => ({ 
+          channelName, 
+          label: channelName 
+        }));
+
+      if (enabledChannels.length === 0) {
+        throw new Error('No visible channels found for image extraction');
+      }
+
+      // Step 4: Process polygons
+      const services = {
+        microscopeControlService,
+        artifactZarrLoader: artifactZarrLoaderRef.current
+      };
+
+      const onProgress = (current, total, successful, failed) => {
+        // Check for cancellation
+        if (segmentationUploadCancelRef.current) {
+          return;
+        }
+        setSegmentationUploadState(prev => ({
+          ...prev,
+          currentPolygon: current,
+          totalPolygons: total
+        }));
+      };
+
+      // Check for cancellation before processing
+      if (segmentationUploadCancelRef.current) {
+        return;
+      }
+
+      const processResult = await batchProcessSegmentationPolygons(
+        polygonsResult.polygons,
+        sourceExperimentName,
+        services,
+        channelConfigs,
+        enabledChannels,
+        onProgress,
+        getWellInfoById
+      );
+
+      // Check for cancellation after processing
+      if (segmentationUploadCancelRef.current) {
+        return;
+      }
+
+      if (appendLog) {
+        appendLog(`Processed ${processResult.successfulCount}/${processResult.totalCount} polygons`);
+      }
+
+      // Step 5: Upload to Weaviate using individual inserts
+      // Using individual insert() calls instead of insert_many() because:
+      // - insert_many() doesn't work with custom vectors through RPC
+      // - Individual inserts accept properties and vector as separate parameters
+      // serviceId is already defined above
+      let uploadedCount = 0;
+      let failedCount = 0;
+
+      // Process each annotation individually
+      for (let i = 0; i < processResult.processedAnnotations.length; i++) {
+        // Check for cancellation before each insert
+        if (segmentationUploadCancelRef.current) {
+          break;
+        }
+
+        const processed = processResult.processedAnnotations[i];
+        
+        try {
+          // Prepare single object
+          const queryParams = new URLSearchParams({
+            collection_name: collectionName,
+            application_id: applicationId,
+            image_id: processed.annotation.id,
+            description: processed.annotation.description,
+            metadata: JSON.stringify(processed.metadata),
+            dataset_id: applicationId
+          });
+
+          const requestBody = new FormData();
+          requestBody.append('image_embedding', JSON.stringify(processed.embeddings.imageEmbedding));
+          if (processed.previewImage) {
+            requestBody.append('preview_image', processed.previewImage);
+          }
+
+          const insertResponse = await fetch(
+            `/agent-lens/apps/${serviceId}/similarity/insert?${queryParams}`,
+            {
+              method: 'POST',
+              body: requestBody
+            }
+          );
+
+          if (insertResponse.ok) {
+            await insertResponse.json(); // Result not needed, just confirm success
+            uploadedCount++;
+            if (appendLog && (i + 1) % 10 === 0) {
+              appendLog(`Uploaded ${i + 1}/${processResult.processedAnnotations.length} cells`);
+            }
+          } else {
+            const errorText = await insertResponse.text();
+            console.error(`Failed to upload cell ${i + 1} (${processed.annotation.id}):`, errorText);
+            failedCount++;
+          }
+        } catch (error) {
+          console.error(`Error uploading cell ${i + 1} (${processed.annotation.id}):`, error);
+          failedCount++;
+        }
+      }
+
+      // Step 6: Show completion notification
+      const totalFailed = processResult.failedCount + failedCount;
+      const totalProcessed = processResult.totalCount;
+      
+      if (totalFailed > 0) {
+        showNotification(
+          `Processed ${uploadedCount}/${totalProcessed} cells (${totalFailed} failed)`,
+          'warning'
+        );
+      } else {
+        showNotification(
+          `Successfully uploaded ${uploadedCount} cells to similarity search`,
+          'success'
+        );
+      }
+
+      if (appendLog) {
+        appendLog(`Segmentation to similarity search complete: ${uploadedCount} uploaded, ${totalFailed} failed`);
+      }
+
+    } catch (error) {
+      console.error('Error in segmentation to similarity search:', error);
+      showNotification(`Failed to process segmentation: ${error.message}`, 'error');
+      if (appendLog) {
+        appendLog(`Error processing segmentation: ${error.message}`);
+      }
+      
+      setSegmentationUploadState(prev => ({
+        ...prev,
+        error: error.message
+      }));
+    } finally {
+      // Reset cancellation flag
+      segmentationUploadCancelRef.current = false;
+      setSegmentationUploadState(prev => ({
+        ...prev,
+        isProcessing: false
+      }));
+    }
+  }, [
+    microscopeControlService,
+    zarrChannelConfigs,
+    visibleLayers.channels,
+    artifactZarrLoaderRef,
+    getWellInfoById,
+    showNotification,
+    appendLog
+  ]);
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      stopSegmentationPolling();
+    };
+  }, [stopSegmentationPolling]);
+
   // Multi-layer experiment visibility state
   const [visibleExperiments, setVisibleExperiments] = useState([]);
 
   // Auto-show active experiment when it changes (backwards compatibility)
   // Only triggers when activeExperiment changes, not when visibleExperiments changes
   useEffect(() => {
-    if (activeExperiment) {
+    if (activeExperiment && experiments && experiments.length > 0) {
       setVisibleExperiments(prev => {
         // Only add if not already visible
         if (!prev.includes(activeExperiment)) {
           console.log(`[Auto-show] Adding active experiment to visible list: ${activeExperiment}`);
-          return [...prev, activeExperiment];
+          const updated = [...prev, activeExperiment];
+          
+          // Also automatically show segmentation layer if it exists
+          const segmentationExpName = getSegmentationExperimentName(activeExperiment);
+          const segmentationExp = experiments.find(exp => exp.name === segmentationExpName);
+          if (segmentationExp && !prev.includes(segmentationExpName)) {
+            console.log(`[Auto-show] Also adding segmentation layer to visible list: ${segmentationExpName}`);
+            updated.push(segmentationExpName);
+          }
+          
+          return updated;
         }
         return prev;
       });
     }
-  }, [activeExperiment]); // Removed visibleExperiments dependency to prevent auto-re-showing
+  }, [activeExperiment, experiments]); // Added experiments dependency to check for segmentation layers
 
   // Clean up visibleExperiments when experiments are deleted
   useEffect(() => {
@@ -1817,69 +2479,37 @@ const MicroscopeMapDisplay = forwardRef(({
     return `${bounds.topLeft.x.toFixed(1)}_${bounds.topLeft.y.toFixed(1)}_${bounds.bottomRight.x.toFixed(1)}_${bounds.bottomRight.y.toFixed(1)}_${scale}_${normalizedChannel}_${expName}`;
   }, []);
 
-  // Memoize visible tiles with smart cleanup strategy  
+  // Memoize visible tiles - simplified for FREE_PAN, keep gradual resolution for HISTORICAL
   const visibleTiles = useMemo(() => {
-    const browseDataLayer = getBrowseDataLayer();
-    const scanDataLayer = getScanDataLayer();
-    const hasScanResults = visibleLayers.scanResults && visibleExperiments.length > 0;
+    if (!stitchedTiles || stitchedTiles.length === 0) return [];
     
-    if (!browseDataLayer && !scanDataLayer && !hasScanResults) return [];
+    const isHistoricalDataMode = getBrowseDataLayer() !== 'none';
     
-    // Determine current channel configuration
-    const useMultiChannel = shouldUseMultiChannelLoading();
-    
-    // For multi-layer support, we need different channel strings for different tile types
-    const browseChannelString = useMultiChannel && browseDataLayer ? 
-      getEnabledZarrChannels().map(ch => ch.channelName).sort().join(',') : 
-      getChannelString();
-    const scanChannelString = getChannelString(); // Always use microscope channels for scan data
-    
-    
-    // 🚀 REDUCED LOGGING: Only log when NOT interacting to prevent infinite loops
-    const shouldLogDetails = !isZooming && !isPanning; // Only log when not interacting
-    if (shouldLogDetails) {
-      console.log(`🔍 [visibleTiles] Multi-layer filtering logic:`, {
-        useMultiChannel,
-        isHistoricalDataMode,
-        browseChannelString,
-        scanChannelString,
-        scaleLevel,
-        totalTiles: stitchedTiles.length,
-        visibleExperiments: visibleExperiments,
-        activeExperiment: activeExperiment,
-        browseDataMatching: stitchedTiles.filter(tile => tile.channel === browseChannelString).length,
-        scanDataMatching: stitchedTiles.filter(tile => tile.channel === scanChannelString).length
+    // FREE_PAN mode: Simple filtering - just return tiles matching current scale
+    if (!isHistoricalDataMode) {
+      const filteredTiles = stitchedTiles.filter(tile => {
+        // Match scale only
+        return tile.scale === scaleLevel;
       });
       
-      // DEBUG: Show all tile channels and experiment names
-      console.log(`🔍 [visibleTiles] All tiles details:`, stitchedTiles.map(tile => ({
-        experiment: tile.experimentName,
-        channel: tile.channel,
-        scale: tile.scale,
-        isMultiChannel: tile.metadata?.isMultiChannel
-      })));
+      console.log(`🔍 [visibleTiles] FREE_PAN: ${filteredTiles.length} tiles at scale ${scaleLevel}`);
+      return filteredTiles;
     }
-    
-    // 🎨 MULTI-SCALE RENDERING: Show both old and new scale tiles during loading transitions
+
+    // HISTORICAL mode: Keep gradual resolution switching logic
     const currentScaleTiles = stitchedTiles.filter(tile => tile.scale === scaleLevel);
     
-    // 🚀 REDUCED LOGGING: Only log if detailed logging is enabled
-    if (shouldLogDetails) {
-      console.log(`🔍 [visibleTiles] Current scale tiles found:`, currentScaleTiles.length);
-    }
-    
+    console.log(`🔍 [visibleTiles] HISTORICAL: ${currentScaleTiles.length} tiles at scale ${scaleLevel}`);
+
     if (currentScaleTiles.length > 0) {
-      // Check if current scale tiles are still loading (have partial tiles)
+      // Check if tiles are still loading (have partial tiles)
       const partialTiles = currentScaleTiles.filter(tile => tile.isPartial);
-      
-      // Calculate average loading progress
       const avgProgress = partialTiles.length > 0 ?
         partialTiles.reduce((sum, tile) => sum + (tile.loadingProgress || 0), 0) / partialTiles.length :
         1.0;
       
-      // 🎨 GRADUAL REPLACEMENT: If new tiles are still loading (<80% complete), show old scale tiles too
+      // 🎨 GRADUAL REPLACEMENT: Show old scale tiles if new ones aren't ready
       if (partialTiles.length > 0 && avgProgress < 0.8) {
-        // Find the closest other scale (usually the previous scale before zoom)
         const otherScales = [...new Set(stitchedTiles.map(tile => tile.scale))]
           .filter(s => s !== scaleLevel)
           .sort((a, b) => Math.abs(a - scaleLevel) - Math.abs(b - scaleLevel));
@@ -1888,37 +2518,29 @@ const MicroscopeMapDisplay = forwardRef(({
           const fallbackScale = otherScales[0];
           const fallbackTiles = stitchedTiles.filter(tile => tile.scale === fallbackScale);
           
-          if (shouldLogDetails && fallbackTiles.length > 0) {
-            console.log(`🎨 [visibleTiles] Showing ${fallbackTiles.length} scale ${fallbackScale} tiles under ${currentScaleTiles.length} loading scale ${scaleLevel} tiles (${Math.round(avgProgress * 100)}% complete)`);
+          if (fallbackTiles.length > 0) {
+            console.log(`🎨 [visibleTiles] HISTORICAL: Using fallback scale ${fallbackScale} (${fallbackTiles.length} tiles) while loading scale ${scaleLevel}`);
+            return [...fallbackTiles, ...currentScaleTiles];
           }
-          
-          // Return both old tiles (background) and new tiles (foreground with alpha)
-          // Z-index will ensure proper layering
-          return [...fallbackTiles, ...currentScaleTiles];
         }
       }
       
-      // If tiles are mostly complete or no fallback available, only show current scale
       return currentScaleTiles;
     }
     
-    // If no tiles at current scale, find the closest available scale (lower resolution preferred)
+    // No tiles at current scale - find closest available scale
     const availableScales = [...new Set(stitchedTiles.map(tile => tile.scale))]
       .sort((a, b) => Math.abs(a - scaleLevel) - Math.abs(b - scaleLevel));
     
     if (availableScales.length > 0) {
       const closestScale = availableScales[0];
       const fallbackTiles = stitchedTiles.filter(tile => tile.scale === closestScale);
-      
-      if (shouldLogDetails && fallbackTiles.length > 0) {
-        console.log(`[visibleTiles] No tiles for scale ${scaleLevel}, using ${fallbackTiles.length} tiles from closest scale ${closestScale}`);
-      }
-      
+      console.log(`🔍 [visibleTiles] HISTORICAL: Using closest scale ${closestScale} (${fallbackTiles.length} tiles)`);
       return fallbackTiles;
     }
     
     return [];
-  }, [stitchedTiles, scaleLevel, visibleLayers.channels, visibleLayers.scanResults, shouldUseMultiChannelLoading, getEnabledZarrChannels, getSelectedChannels, getChannelString, visibleExperiments, activeExperiment, isZooming, isPanning, getBrowseDataLayer, getScanDataLayer]); // Added interaction state dependencies for proper logging control
+  }, [stitchedTiles, scaleLevel, getBrowseDataLayer]);
 
   const addOrUpdateTile = useCallback((newTile) => {
     setStitchedTiles(prevTiles => {
@@ -1941,8 +2563,10 @@ const MicroscopeMapDisplay = forwardRef(({
 
   const cleanupOldTiles = useCallback((currentScale, activeChannel, maxTilesPerScale = 20) => {
     setStitchedTiles(prevTiles => {
-      // SIMPLIFIED: Only filter by scale to allow different layer types to coexist
-      const currentTiles = prevTiles.filter(tile => tile.scale === currentScale);
+      // FREE_PAN mode: No tile caching or cleanup - tiles are managed directly by addOrUpdateTile
+      if (mapViewMode === 'FREE_PAN') {
+        return prevTiles; // No cleanup in FREE_PAN mode
+      }
       
       // For historical mode, be more conservative with cleanup to prevent map clearing during zoom
       if (isHistoricalDataMode) {
@@ -1960,6 +2584,9 @@ const MicroscopeMapDisplay = forwardRef(({
           console.log(`[cleanupOldTiles] Historical mode: Scale level changing from ${lastTileRequestRef.current.scaleLevel} to ${scaleLevel}, preserving all existing tiles to prevent blackout`);
           return prevTiles; // Keep all existing tiles during scale changes
         }
+        
+        // SIMPLIFIED: Only filter by scale to allow different layer types to coexist
+        const currentTiles = prevTiles.filter(tile => tile.scale === currentScale);
         
         // In historical mode, if there are no tiles for current scale, keep all existing tiles
         // to prevent the map from clearing during zoom operations
@@ -1983,27 +2610,25 @@ const MicroscopeMapDisplay = forwardRef(({
           console.log(`[cleanupOldTiles] Historical mode: New tiles loading (${Math.round(avgProgress * 100)}%), preserving old scale tiles`);
           return prevTiles; // Keep all tiles including old scales during loading
         }
+        
+        // SIMPLIFIED: Keep tiles from other scales regardless of channel to allow coexistence
+        const otherTiles = prevTiles.filter(tile => tile.scale !== currentScale)
+          .slice(-maxTilesPerScale); // Just limit total number of tiles
+        
+        return [...currentTiles, ...otherTiles];
       }
       
-      // SIMPLIFIED: Keep tiles from other scales regardless of channel to allow coexistence
+      // Default behavior: Keep tiles from other scales regardless of channel to allow coexistence
+      const currentTiles = prevTiles.filter(tile => tile.scale === currentScale);
       const otherTiles = prevTiles.filter(tile => tile.scale !== currentScale)
         .slice(-maxTilesPerScale); // Just limit total number of tiles
       
       return [...currentTiles, ...otherTiles];
     });
-  }, [isHistoricalDataMode, scaleLevel]);
+  }, [mapViewMode, isHistoricalDataMode, scaleLevel, isZooming, isPanning, currentOperation, getTileKey]);
 
-  // Effect to clean up old tiles when channel changes  
-  useEffect(() => {
-    if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults) {
-      // Trigger cleanup of old tiles after a delay to allow new ones to load
-      const cleanupTimer = setTimeout(() => {
-        cleanupOldTiles(scaleLevel, getChannelString());
-      }, 300);
-      
-      return () => clearTimeout(cleanupTimer);
-    }
-  }, [visibleLayers.channels, mapViewMode, visibleLayers.scanResults, scaleLevel, cleanupOldTiles, getChannelString]);
+  // Note: Channel change cleanup is now handled automatically in loadStitchedTiles()
+  // Tiles are marked for replacement when new ones are loaded, and removed after loading completes
 
 
 
@@ -2441,7 +3066,7 @@ const MicroscopeMapDisplay = forwardRef(({
     return { x: displayX, y: displayY };
   }, [mapViewMode, stageDimensions, pixelsPerMm, mapScale, effectivePan]);
 
-  // Note: wellRelativeToStageCoords is implemented in SimilarAnnotationRenderer
+  // Note: wellRelativeToStageCoords is implemented in SimilarityResultsRenderer
   // const wellRelativeToStageCoords = useCallback((wellRelativeX, wellRelativeY, wellInfo) => {
   //   return {
   //     x: wellInfo.centerX + wellRelativeX,
@@ -2926,41 +3551,24 @@ const MicroscopeMapDisplay = forwardRef(({
   }, [rectangleStart, rectangleEnd, isRectangleSelection, displayToStageCoords, scanParameters.dx_mm, scanParameters.dy_mm, isSimulatedMicroscopeSelected, isHistoricalDataMode, dragSelectedWell, stageToRelativeCoords, appendLog]);
 
 
-
-  // Click outside handler for layer dropdown - DISABLED to prevent auto-collapse
-  // useEffect(() => {
-  //   const handleClickOutside = (event) => {
-  //     if (layerDropdownRef.current && !layerDropdownRef.current.contains(event.target)) {
-  //       setIsLayerDropdownOpen(false);
-  //     }
-  //   };
-
-  //   if (isLayerDropdownOpen) {
-  //     document.addEventListener('mousedown', handleClickOutside);
-  //     return () => {
-  //       document.removeEventListener('mousedown', handleClickOutside);
-  //     };
-  //   }
-  // }, [isLayerDropdownOpen]);
-
-  // Click outside handler for annotation dropdown
+  // Click outside handler for similarity search dropdown
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (annotationDropdownRef.current && !annotationDropdownRef.current.contains(event.target)) {
+      if (similaritySearchDropdownRef.current && !similaritySearchDropdownRef.current.contains(event.target)) {
         // Don't close dropdown if we're in drawing mode - user needs to see the tools
         if (!isDrawingMode) {
-          setIsAnnotationDropdownOpen(false);
+          setIsSimilaritySearchDropdownOpen(false);
         }
       }
     };
 
-    if (isAnnotationDropdownOpen) {
+    if (isSimilaritySearchDropdownOpen) {
       document.addEventListener('mousedown', handleClickOutside);
       return () => {
         document.removeEventListener('mousedown', handleClickOutside);
       };
     }
-  }, [isAnnotationDropdownOpen, isDrawingMode]);
+  }, [isSimilaritySearchDropdownOpen, isDrawingMode]);
 
   // Disable conflicting interactions when entering drawing mode (but keep dropdown open)
   useEffect(() => {
@@ -2971,79 +3579,245 @@ const MicroscopeMapDisplay = forwardRef(({
       setRectangleEnd(null);
       setDragSelectedWell(null);
       if (appendLog) {
-        appendLog('Entered annotation drawing mode - map interactions disabled');
+        appendLog('Entered similarity search drawing mode - map interactions disabled');
       }
     } else if (!isDrawingMode && appendLog) {
-      appendLog('Exited annotation drawing mode - map interactions enabled');
+      appendLog('Exited similarity search drawing mode - map interactions enabled');
     }
   }, [isDrawingMode, appendLog]);
 
-  // Handle annotation layer activation events from LayerPanel
+  // Handle similarity search layer activation events from LayerPanel
   useEffect(() => {
-    const handleAnnotationLayerActivated = (event) => {
+    const handleSimilaritySearchLayerActivated = (event) => {
       const { layerId, layerType } = event.detail;
-      console.log(`[MicroscopeMapDisplay] Annotation layer activated: ${layerId} (${layerType})`);
+      console.log(`[MicroscopeMapDisplay] Similarity search layer activated: ${layerId} (${layerType})`);
       
       // Set the active layer
       setActiveLayer(layerId);
       
-      // Open the annotation dropdown
-      setIsAnnotationDropdownOpen(true);
+      // Update layer similarity search visibility to true
+      if (layerType === 'experiment') {
+        // For experiment layers, dispatch experimentSimilaritySearchToggled event
+        const toggleEvent = new CustomEvent('experimentSimilaritySearchToggled', {
+          detail: { experimentName: layerId, similaritySearchVisible: true }
+        });
+        window.dispatchEvent(toggleEvent);
+      } else {
+        // For regular layers, update similarity search visibility in layers state
+        setLayers(prev => prev.map(layer => 
+          layer.id === layerId 
+            ? { ...layer, similaritySearchVisible: true }
+            : layer
+        ));
+      }
+      
+      // Open the similarity search dropdown
+      setIsSimilaritySearchDropdownOpen(true);
       
       // Automatically enable drawing mode
       setIsDrawingMode(true);
       
       // Show notification
-      showNotification('Annotation layer activated. You can now draw annotations.', 'success');
+      showNotification('Similarity search layer activated. You can now draw annotations to search for similar cells.', 'success');
     };
 
-    const handleExperimentAnnotationToggled = (event) => {
-      const { experimentName, annotationVisible } = event.detail;
-      console.log(`[MicroscopeMapDisplay] Experiment annotation toggled: ${experimentName} = ${annotationVisible}`);
+    const handleExperimentSimilaritySearchToggled = (event) => {
+      const { experimentName, similaritySearchVisible } = event.detail;
+      console.log(`[MicroscopeMapDisplay] Experiment similarity search toggled: ${experimentName} = ${similaritySearchVisible}`);
       
-      // If annotation layer is being disabled, close annotation panel and exit drawing mode
-      if (!annotationVisible) {
-        setIsAnnotationDropdownOpen(false);
-        setIsDrawingMode(false);
-        showNotification('Annotation layer disabled. Exiting annotation mode.', 'info');
+      // Update experiment similarity search visibility in experiments array
+      // Direct mutation is needed here for immediate UI update since experiments are props
+      const experiment = experiments.find(exp => exp.name === experimentName);
+      if (experiment) {
+        experiment.similaritySearchVisible = similaritySearchVisible;
       }
       
-      // Update experiment annotation visibility in experiments state
-      // This will be handled by the parent component that manages experiments
+      // If similarity search layer is being disabled, close similarity search panel and exit drawing mode
+      if (!similaritySearchVisible) {
+        setIsSimilaritySearchDropdownOpen(false);
+        setIsDrawingMode(false);
+        showNotification('Similarity search layer disabled. Exiting similarity search mode.', 'info');
+      }
     };
 
-    const handleAnnotationLayerDeactivated = (event) => {
+    const handleSimilaritySearchLayerDeactivated = (event) => {
       const { layerId, layerType } = event.detail;
-      console.log(`[MicroscopeMapDisplay] Annotation layer deactivated: ${layerId} (${layerType})`);
+      console.log(`[MicroscopeMapDisplay] Similarity search layer deactivated: ${layerId} (${layerType})`);
       
-      // Close annotation panel and exit drawing mode
-      setIsAnnotationDropdownOpen(false);
+      // Update layer similarity search visibility to false
+      if (layerType === 'experiment') {
+        // For experiment layers, dispatch experimentSimilaritySearchToggled event
+        const toggleEvent = new CustomEvent('experimentSimilaritySearchToggled', {
+          detail: { experimentName: layerId, similaritySearchVisible: false }
+        });
+        window.dispatchEvent(toggleEvent);
+      } else {
+        // For regular layers, update similarity search visibility in layers state
+        setLayers(prev => prev.map(layer => 
+          layer.id === layerId 
+            ? { ...layer, similaritySearchVisible: false }
+            : layer
+        ));
+      }
+      
+      // Close similarity search panel and exit drawing mode
+      setIsSimilaritySearchDropdownOpen(false);
       setIsDrawingMode(false);
-      showNotification('Annotation layer disabled. Exiting annotation mode.', 'info');
+      showNotification('Similarity search layer disabled. Exiting similarity search mode.', 'info');
     };
 
     // Add event listeners
-    window.addEventListener('annotationLayerActivated', handleAnnotationLayerActivated);
-    window.addEventListener('experimentAnnotationToggled', handleExperimentAnnotationToggled);
-    window.addEventListener('annotationLayerDeactivated', handleAnnotationLayerDeactivated);
+    window.addEventListener('similaritySearchLayerActivated', handleSimilaritySearchLayerActivated);
+    window.addEventListener('experimentSimilaritySearchToggled', handleExperimentSimilaritySearchToggled);
+    window.addEventListener('similaritySearchLayerDeactivated', handleSimilaritySearchLayerDeactivated);
 
     return () => {
-      window.removeEventListener('annotationLayerActivated', handleAnnotationLayerActivated);
-      window.removeEventListener('experimentAnnotationToggled', handleExperimentAnnotationToggled);
-      window.removeEventListener('annotationLayerDeactivated', handleAnnotationLayerDeactivated);
+      window.removeEventListener('similaritySearchLayerActivated', handleSimilaritySearchLayerActivated);
+      window.removeEventListener('experimentSimilaritySearchToggled', handleExperimentSimilaritySearchToggled);
+      window.removeEventListener('similaritySearchLayerDeactivated', handleSimilaritySearchLayerDeactivated);
     };
-  }, [setActiveLayer, showNotification]);
+  }, [setActiveLayer, setLayers, showNotification, experiments]);
 
-  // Auto-disable other layers when annotation panel is opened for better annotation accuracy
+  // Handle upload zarr dataset events from LayerPanel
   useEffect(() => {
-    if (isAnnotationDropdownOpen && activeLayer) {
+    const handleUploadZarrDataset = async (event) => {
+      const { experimentName } = event.detail;
+      
+      if (!microscopeControlService) {
+        showNotification('Microscope service not available', 'error');
+        return;
+      }
+
+      try {
+        showNotification(`Starting upload of experiment: ${experimentName}`, 'info');
+        if (appendLog) {
+          appendLog(`Starting upload of experiment: ${experimentName}`);
+        }
+
+        // Call the microscope service upload_zarr_dataset method
+        const result = await microscopeControlService.upload_zarr_dataset(
+          experimentName,
+          `Experiment ${experimentName} uploaded from Agent-Lens`,
+          true // include_acquisition_settings
+        );
+
+        if (result.success) {
+          showNotification(
+            `Successfully uploaded ${result.total_wells} wells (${result.total_size_mb.toFixed(2)} MB) to dataset: ${result.dataset_name}`,
+            'success'
+          );
+          if (appendLog) {
+            appendLog(`Upload successful: ${result.dataset_name} with ${result.total_wells} wells`);
+          }
+        } else {
+          throw new Error(result.message || 'Upload failed');
+        }
+      } catch (error) {
+        console.error('Upload zarr dataset error:', error);
+        showNotification(`Upload failed: ${error.message}`, 'error');
+        if (appendLog) {
+          appendLog(`Upload failed: ${error.message}`);
+        }
+      }
+    };
+
+    // Add event listener
+    window.addEventListener('uploadZarrDataset', handleUploadZarrDataset);
+
+    return () => {
+      window.removeEventListener('uploadZarrDataset', handleUploadZarrDataset);
+    };
+  }, [microscopeControlService, showNotification, appendLog]);
+
+  // Segmentation event handler
+  useEffect(() => {
+    const handleSegmentExperiment = async (event) => {
+      const { experimentName } = event.detail;
+      
+      if (!microscopeControlService) {
+        showNotification('Microscope service not available', 'error');
+        return;
+      }
+
+      if (segmentationState.isRunning) {
+        showNotification('Segmentation is already running', 'warning');
+        return;
+      }
+
+      try {
+        // Build channel configurations from current UI state
+        const channelConfigs = buildChannelConfigs(
+          visibleLayers.channels,
+          getLayerContrastSettings,
+          experimentName
+        );
+
+        if (channelConfigs.length === 0) {
+          showNotification('No visible channels found for segmentation', 'error');
+          return;
+        }
+
+        // Start segmentation
+        showNotification(`Starting segmentation for experiment: ${experimentName}`, 'info');
+        if (appendLog) {
+          appendLog(`Starting segmentation for experiment: ${experimentName} with ${channelConfigs.length} channels`);
+        }
+
+        const result = await startSegmentation(
+          microscopeControlService,
+          experimentName,
+          channelConfigs
+        );
+
+        if (result.success) {
+          // Update segmentation state
+          setSegmentationState({
+            isRunning: true,
+            experimentName: experimentName,
+            progress: null,
+            error: null
+          });
+
+          showNotification(
+            `Segmentation started! Processing ${result.totalWells} wells`,
+            'success'
+          );
+          if (appendLog) {
+            appendLog(`Segmentation started: ${result.message}`);
+          }
+
+          // Start polling for status updates
+          startSegmentationPolling();
+        } else {
+          throw new Error(result.error || 'Failed to start segmentation');
+        }
+      } catch (error) {
+        console.error('Segmentation start error:', error);
+        showNotification(`Segmentation failed: ${error.message}`, 'error');
+        if (appendLog) {
+          appendLog(`Segmentation failed: ${error.message}`);
+        }
+      }
+    };
+
+    // Add event listener
+    window.addEventListener('segmentExperiment', handleSegmentExperiment);
+
+    return () => {
+      window.removeEventListener('segmentExperiment', handleSegmentExperiment);
+    };
+  }, [microscopeControlService, showNotification, appendLog, segmentationState.isRunning, visibleLayers.channels, getLayerContrastSettings]);
+
+  // Auto-disable other layers when similarity search panel is opened for better annotation accuracy
+  useEffect(() => {
+    if (isSimilaritySearchDropdownOpen && activeLayer) {
       // Check if activeLayer is an experiment (not in layers array)
       const isExperimentLayer = experiments.some(exp => exp.name === activeLayer);
       
       if (isExperimentLayer) {
         // For experiment layers, don't modify layer visibility since experiments are managed separately
         if (appendLog) {
-          appendLog(`Annotation mode: Using experiment layer ${activeLayer} - no layer visibility changes needed`);
+          appendLog(`Similarity search mode: Using experiment layer ${activeLayer} - no layer visibility changes needed`);
         }
         return;
       }
@@ -3062,22 +3836,22 @@ const MicroscopeMapDisplay = forwardRef(({
       ));
       
       if (appendLog) {
-        appendLog(`Annotation mode: Disabled other layers, keeping only active layer: ${activeLayer}`);
+        appendLog(`Similarity search mode: Disabled other layers, keeping only active layer: ${activeLayer}`);
       }
       
       // Store the previous states for restoration
       return () => {
-        // Restore previous layer visibility when annotation panel closes
+        // Restore previous layer visibility when similarity search panel closes
         setLayers(prev => prev.map(layer => ({
           ...layer,
           visible: currentLayerStates[layer.id] !== undefined ? currentLayerStates[layer.id] : layer.visible
         })));
         if (appendLog) {
-          appendLog('Annotation mode: Restored previous layer visibility states');
+          appendLog('Similarity search mode: Restored previous layer visibility states');
         }
       };
     }
-  }, [isAnnotationDropdownOpen, activeLayer, setLayers, experiments, appendLog]); // Removed layers dependency to prevent infinite loop
+  }, [isSimilaritySearchDropdownOpen, activeLayer, setLayers, experiments, appendLog]); // Removed layers dependency to prevent infinite loop
 
   // Load experiments when microscope service becomes available
   useEffect(() => {
@@ -3095,6 +3869,51 @@ const MicroscopeMapDisplay = forwardRef(({
     }
   }, [experiments]);
 
+  // Check segmentation status when Layer dropdown opens
+  const checkSegmentationStatus = useCallback(async () => {
+    if (!microscopeControlService || isSimulatedMicroscopeSelected) return;
+    
+    try {
+      const status = await getSegmentationStatus(microscopeControlService);
+      
+      if (status.success) {
+        const isRunning = status.state === 'running';
+        const experimentName = isRunning && status.progress ? status.progress.source_experiment : null;
+        
+        // Update state if segmentation is running
+        if (isRunning) {
+          setSegmentationState(prev => ({
+            ...prev,
+            isRunning: true,
+            experimentName: experimentName,
+            progress: status.progress,
+            error: null
+          }));
+          
+          // Start polling if not already polling
+          if (!segmentationPollingRef.current) {
+            startSegmentationPolling();
+          }
+        } else if (status.state === 'completed' || status.state === 'failed' || status.state === 'idle') {
+          // If segmentation is done or idle, update state accordingly
+          setSegmentationState(prev => ({
+            ...prev,
+            isRunning: false,
+            progress: status.progress,
+            error: status.state === 'failed' ? status.errorMessage : null
+          }));
+          
+          // Stop polling if segmentation is done
+          if (status.state === 'completed' || status.state === 'failed') {
+            stopSegmentationPolling();
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error checking segmentation status:', error);
+    }
+  }, [microscopeControlService, isSimulatedMicroscopeSelected, startSegmentationPolling, stopSegmentationPolling]);
+
   useEffect(() => {
     if (isLayerDropdownOpen && !isSimulatedMicroscopeSelected && !hasExperimentsRef.current) {
       console.log('[Layer Dropdown] Loading experiments for first time');
@@ -3106,7 +3925,12 @@ const MicroscopeMapDisplay = forwardRef(({
     } else if (isLayerDropdownOpen && !isSimulatedMicroscopeSelected && hasExperimentsRef.current) {
       console.log('[Layer Dropdown] Experiments already loaded, skipping refresh');
     }
-  }, [isLayerDropdownOpen, isSimulatedMicroscopeSelected]); // Removed function dependencies to prevent infinite loops
+    
+    // Check segmentation status when Layer dropdown opens
+    if (isLayerDropdownOpen && !isSimulatedMicroscopeSelected) {
+      checkSegmentationStatus();
+    }
+  }, [isLayerDropdownOpen, isSimulatedMicroscopeSelected, checkSegmentationStatus]); // Removed function dependencies to prevent infinite loops
 
   // Cleanup timeouts on unmount
   useEffect(() => {
@@ -3270,6 +4094,179 @@ const MicroscopeMapDisplay = forwardRef(({
 
   // Add state for selected dataset in historical mode
   const [selectedHistoricalDataset, setSelectedHistoricalDataset] = useState(null);
+
+  // Text search handler (moved from SimilaritySearchPanel)
+  // Note: This must be defined AFTER all dependencies are declared (experiments, selectedHistoricalDataset, etc.)
+  const handleTextSearch = useCallback(async () => {
+    if (!textSearchQuery.trim()) {
+      showNotification('Please enter a search query.', 'warning');
+      return;
+    }
+
+    // Get dataset ID for application ID - support both historical datasets and experiments
+    let applicationId = selectedHistoricalDataset?.id;
+    
+    // If no historical dataset, check if we're using an experiment layer
+    if (!applicationId && activeLayer && experiments.length > 0) {
+      const experiment = experiments.find(exp => exp.name === activeLayer);
+      if (experiment) {
+        applicationId = experiment.name; // Use experiment name as application ID
+      }
+    }
+    
+    if (!applicationId) {
+      showNotification('No dataset or experiment selected. Cannot search for similar cells.', 'warning');
+      return;
+    }
+
+    setIsSearching(true);
+    setSimilaritySearchResults([]);
+    setShowSimilarityPanel(true);
+    setSearchType('text');
+
+    try {
+      const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
+      
+      // Prepare query parameters
+      const queryParams = new URLSearchParams({
+        collection_name: convertToValidCollectionName('agent-lens'),
+        application_id: applicationId,
+        query_text: textSearchQuery.trim(),
+        limit: '10'
+      });
+      
+      const response = await fetch(`/agent-lens/apps/${serviceId}/similarity/search/text?${queryParams}`, {
+        method: 'POST'
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        
+        if (result.success && result.results) {
+          // Handle different result formats from Weaviate
+          let results = result.results;
+          
+          // If results has an 'objects' property, extract it
+          if (results.objects && Array.isArray(results.objects)) {
+            results = results.objects;
+          }
+          
+          // If results is not an array, try to extract objects from it
+          if (!Array.isArray(results) && results.objects) {
+            results = results.objects;
+          }
+          
+          // Final validation
+          if (!Array.isArray(results)) {
+            results = results ? [results] : [];
+          }
+          
+          setSimilaritySearchResults(results);
+          showNotification(`Found ${results.length} similar annotation(s)`, 'success');
+        } else {
+          console.error('No results found:', result);
+          setSimilaritySearchResults([]);
+          showNotification('No similar annotations found.', 'info');
+        }
+      } else {
+        console.error('Text search failed:', await response.text());
+        showNotification('Failed to search for similar cells.', 'error');
+      }
+    } catch (error) {
+      console.error('Error searching for similar cells:', error);
+      showNotification('Error searching for similar cells: ' + error.message, 'error');
+    } finally {
+      setIsSearching(false);
+    }
+  }, [textSearchQuery, selectedHistoricalDataset, activeLayer, experiments, convertToValidCollectionName, showNotification]);
+
+  // Image similarity search handler (for Find Similar button in SimilaritySearchPanel)
+  const handleFindSimilar = useCallback(async (annotation) => {
+    if (!annotation.embeddings?.imageEmbedding) {
+      showNotification('This annotation does not have embeddings. Cannot search for similar cells.', 'warning');
+      return;
+    }
+
+    // Get dataset ID for application ID - support both historical datasets and experiments
+    let applicationId = selectedHistoricalDataset?.id;
+    
+    // If no historical dataset, check if we're using an experiment layer
+    if (!applicationId && activeLayer && experiments.length > 0) {
+      const experiment = experiments.find(exp => exp.name === activeLayer);
+      if (experiment) {
+        applicationId = experiment.name; // Use experiment name as application ID
+      }
+    }
+    
+    if (!applicationId) {
+      showNotification('No dataset or experiment selected. Cannot search for similar cells.', 'warning');
+      return;
+    }
+
+    setIsSearching(true);
+    setSimilaritySearchResults([]);
+    setShowSimilarityPanel(true);
+    setSearchType('image');
+
+    try {
+      const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
+      
+      // Prepare query parameters
+      const queryParams = new URLSearchParams({
+        collection_name: convertToValidCollectionName('agent-lens'),
+        application_id: applicationId,
+        limit: '10',
+        include_vector: 'false'
+      });
+      
+      const response = await fetch(`/agent-lens/apps/${serviceId}/similarity/search/vector?${queryParams}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(annotation.embeddings.imageEmbedding)
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        
+        if (result.success && result.results) {
+          // Handle different result formats from Weaviate
+          let results = result.results;
+          
+          // If results has an 'objects' property, extract it
+          if (results.objects && Array.isArray(results.objects)) {
+            results = results.objects;
+          }
+          
+          // If results is not an array, try to extract objects from it
+          if (!Array.isArray(results) && results.objects) {
+            results = results.objects;
+          }
+          
+          // Final validation
+          if (!Array.isArray(results)) {
+            results = results ? [results] : [];
+          }
+          
+          setSimilaritySearchResults(results);
+          showNotification(`Found ${results.length} similar annotation(s)`, 'success');
+        } else {
+          console.error('No results found:', result);
+          setSimilaritySearchResults([]);
+          showNotification('No similar annotations found.', 'info');
+        }
+      } else {
+        console.error('Similarity search failed:', await response.text());
+        showNotification('Failed to search for similar cells.', 'error');
+      }
+    } catch (error) {
+      console.error('Error searching for similar cells:', error);
+      showNotification('Error searching for similar cells: ' + error.message, 'error');
+    } finally {
+      setIsSearching(false);
+    }
+  }, [selectedHistoricalDataset, activeLayer, experiments, convertToValidCollectionName, showNotification]);
   
   // Helper function to get current channel information for annotations
   const getCurrentChannelInfo = useCallback(() => {
@@ -3404,8 +4401,6 @@ const MicroscopeMapDisplay = forwardRef(({
 
   
   // Initialize ArtifactZarrLoader for historical data
-  const artifactZarrLoaderRef = useRef(null);
-  
   // Initialize the loader when component mounts
   useEffect(() => {
     if (!artifactZarrLoaderRef.current) {
@@ -3524,13 +4519,36 @@ const MicroscopeMapDisplay = forwardRef(({
   const loadStitchedTiles = useCallback(async () => {
     console.log('[loadStitchedTiles] Called - checking conditions');
     
-    // 🚀 REQUEST CANCELLATION: Only cancel if we're starting a significantly different request
-    // Calculate bounds first to generate consistent request key
+    // 🚫 CRITICAL FIX: ALWAYS cancel ALL requests FIRST before doing anything else
+    // This is the simplest and most reliable way to prevent parallel loading
+    console.log('🚫 [loadStitchedTiles] Step 1: Cancelling ALL existing requests before starting new load');
+    
+    // Cancel cancellable request if it exists
+    if (currentCancellableRequest) {
+      const cancelledCount = currentCancellableRequest.cancel();
+      console.log(`🚫 [loadStitchedTiles] Cancelled ${cancelledCount} cancellable requests`);
+      setCurrentCancellableRequest(null);
+    }
+    
+    // ALWAYS cancel ALL artifact loader requests, regardless of currentCancellableRequest
+    if (artifactZarrLoaderRef.current) {
+      const artifactCancelledCount = artifactZarrLoaderRef.current.cancelAllRequests();
+      console.log(`🚫 [loadStitchedTiles] Cancelled ${artifactCancelledCount} artifact loader requests`);
+    }
+    
+    // Clear all request tracking
+    activeTileRequestsRef.current.clear();
+    browseDataRequestsRef.current.clear();
+    scanDataRequestsRef.current.clear();
+    console.log('✅ [loadStitchedTiles] All requests cancelled and tracking cleared');
+    
+    // Now proceed with checks
     if (!canvasRef.current) {
       console.log('[loadStitchedTiles] Canvas not ready, skipping');
       return;
     }
     
+    // Calculate request key for tracking (but don't use it for cancellation decisions)
     const earlyScaleLevel = Math.max(0, Math.min(4, Math.round(Math.log2(mapScale / 0.25))));
     const earlyActiveChannel = getSelectedChannels()[0] || 'BF LED matrix full';
     const currentViewBounds = {
@@ -3538,37 +4556,8 @@ const MicroscopeMapDisplay = forwardRef(({
       bottomRight: { x: mapPan.x + canvasRef.current.width / (2 * mapScale), y: mapPan.y + canvasRef.current.height / (2 * mapScale) }
     };
     const currentRequestKey = getTileKey(currentViewBounds, earlyScaleLevel, earlyActiveChannel, selectedHistoricalDataset?.name || 'historical');
-    const shouldCancelPrevious = lastRequestKey && lastRequestKey !== currentRequestKey;
     
-    if (shouldCancelPrevious && currentCancellableRequest) {
-      const cancelledCount = currentCancellableRequest.cancel();
-      console.log(`🚫 loadStitchedTiles: Cancelled ${cancelledCount} pending requests (new area)`);
-      setCurrentCancellableRequest(null);
-      
-      // 🚀 CRITICAL FIX: Also cancel ALL active requests in the artifact loader when moving to new area
-      if (artifactZarrLoaderRef.current) {
-        const artifactCancelledCount = artifactZarrLoaderRef.current.cancelAllRequests();
-        console.log(`🚫 loadStitchedTiles: Cancelled ${artifactCancelledCount} active artifact requests (new area)`);
-      }
-    } else if (!shouldCancelPrevious && currentCancellableRequest) {
-      console.log(`🔄 loadStitchedTiles: Request for same area already in progress, checking if it should be cancelled anyway`);
-      // Cancel anyway if the request is very old (over 30 seconds)
-      if (currentCancellableRequest.startTime && (Date.now() - currentCancellableRequest.startTime > 30000)) {
-        console.log(`🚫 loadStitchedTiles: Cancelling old request (over 30s old)`);
-        const cancelledCount = currentCancellableRequest.cancel();
-        console.log(`🚫 loadStitchedTiles: Cancelled ${cancelledCount} old requests`);
-        setCurrentCancellableRequest(null);
-        
-        if (artifactZarrLoaderRef.current) {
-          const artifactCancelledCount = artifactZarrLoaderRef.current.cancelAllRequests();
-          console.log(`🚫 loadStitchedTiles: Cancelled ${artifactCancelledCount} old artifact requests`);
-        }
-      } else {
-        return; // Don't start duplicate requests for the same area
-      }
-    }
-    
-    // Update request tracking at the start to prevent duplicate requests
+    // Update request tracking for logging purposes
     setLastRequestKey(currentRequestKey);
     
     // Clear active requests to prevent conflicts - only clear legacy for compatibility
@@ -3583,7 +4572,7 @@ const MicroscopeMapDisplay = forwardRef(({
     
     // 🚀 PERFORMANCE OPTIMIZATION: Throttle tile loading attempts to prevent CPU overload
     const now = Date.now();
-    const MIN_LOAD_INTERVAL = 300; // Minimum 0.3 seconds between tile load attempts
+    const MIN_LOAD_INTERVAL = 1000; // Minimum 1 second between tile load attempts
     if (now - lastTileLoadAttemptRef.current < MIN_LOAD_INTERVAL) {
       console.log('[loadStitchedTiles] Throttling tile load attempt - too soon since last attempt');
       return;
@@ -4200,6 +5189,8 @@ const MicroscopeMapDisplay = forwardRef(({
         return;
       }
       
+      const activeChannel = getChannelString();
+      
       // Get enabled channels for FREE_PAN mode
       const enabledChannels = getSelectedChannels().map(channelName => ({
         label: channelName,
@@ -4211,6 +5202,10 @@ const MicroscopeMapDisplay = forwardRef(({
         microscopeControlService,
         artifactZarrLoader: null // Not needed for FREE_PAN mode
       };
+      
+      // Track which tiles to remove - only for experiments that successfully load new tiles
+      // Map from experiment name to Set of tile keys to remove for that experiment
+      const tilesToRemoveByExperiment = new Map();
       
       // Load tiles for each experiment
       for (const experimentName of experimentsToLoad) {
@@ -4250,6 +5245,7 @@ const MicroscopeMapDisplay = forwardRef(({
           
           if (processedTile && processedTile.data) {
             console.log(`🎨 FREE_PAN: Successfully processed tile for experiment ${experimentName} with ${processedTile.channelsUsed?.length || 0} channels`);
+            
             const newTile = {
               data: processedTile.data,
               bounds: processedTile.bounds,
@@ -4263,6 +5259,38 @@ const MicroscopeMapDisplay = forwardRef(({
               experimentName: experimentName || null // Add experiment name to real microscope tiles (null if no experiment)
             };
             
+            // CRITICAL FIX: Mark old tiles for removal BEFORE adding new tile
+            // Only mark tiles for THIS specific experiment that have the same key as the new tile
+            // addOrUpdateTile will handle replacement, but we want to remove OTHER tiles from this experiment
+            // that don't match (e.g., from previous pan/zoom positions)
+            if (mapViewMode === 'FREE_PAN') {
+              const newTileKey = getTileKey(newTile.bounds, newTile.scale, newTile.channel, newTile.experimentName);
+              const experimentTileKeys = new Set();
+              
+              // Only mark old tiles from THIS experiment that match scale/channel but have different keys
+              stitchedTiles.forEach(tile => {
+                const matchesScale = tile.scale === scaleLevel;
+                const matchesChannel = tile.channel === activeChannel;
+                const matchesThisExperiment = 
+                  (experimentName === null && tile.experimentName === null) || 
+                  (experimentName !== null && tile.experimentName === experimentName);
+                
+                // Only mark tiles for this specific experiment that don't match the new tile key
+                if (matchesScale && matchesChannel && matchesThisExperiment) {
+                  const tileKey = getTileKey(tile.bounds, tile.scale, tile.channel, tile.experimentName);
+                  // Don't mark if it's the same key - addOrUpdateTile will handle replacement
+                  if (tileKey !== newTileKey) {
+                    experimentTileKeys.add(tileKey);
+                  }
+                }
+              });
+              
+              // Store tile keys to remove for this experiment (only if we successfully loaded)
+              if (experimentTileKeys.size > 0) {
+                tilesToRemoveByExperiment.set(experimentName, experimentTileKeys);
+              }
+            }
+            
             addOrUpdateTile(newTile);
           } else {
             console.warn(`🎨 FREE_PAN: TileProcessingManager returned empty tile for experiment ${experimentName}, channels: "${getChannelString()}"`);
@@ -4275,8 +5303,34 @@ const MicroscopeMapDisplay = forwardRef(({
         }
       }
       
-      // Clean up old tiles for this scale/channel combination to prevent memory bloat
-      cleanupOldTiles(scaleLevel, getChannelString());
+      // Combine all tile keys to remove from all successfully loaded experiments
+      const oldTileKeysToRemove = new Set();
+      tilesToRemoveByExperiment.forEach((tileKeys, experimentName) => {
+        tileKeys.forEach(key => oldTileKeysToRemove.add(key));
+      });
+      
+      // FREE_PAN mode: Remove old tiles IMMEDIATELY after new tiles are loaded
+      // Only remove tiles for experiments that successfully loaded new tiles
+      if (mapViewMode === 'FREE_PAN' && oldTileKeysToRemove.size > 0) {
+        console.log(`🎨 FREE_PAN: Removing ${oldTileKeysToRemove.size} old tiles IMMEDIATELY after loading`);
+        
+        setStitchedTiles(prevTiles => {
+          const filteredTiles = prevTiles.filter(tile => {
+            const tileKey = getTileKey(tile.bounds, tile.scale, tile.channel, tile.experimentName);
+            if (oldTileKeysToRemove.has(tileKey)) {
+              return false; // Remove old tile
+            }
+            return true; // Keep all other tiles
+          });
+          
+          const removedCount = prevTiles.length - filteredTiles.length;
+          console.log(`🎨 FREE_PAN: ✅ Removed ${removedCount} old tiles, ${filteredTiles.length} tiles remaining`);
+          
+          return filteredTiles;
+        });
+      } else if (mapViewMode === 'FREE_PAN') {
+        console.log(`🎨 FREE_PAN: No old tiles to remove (first load or no matching tiles)`);
+      }
       
       if (appendLog) {
         appendLog(`Loaded tiles for ${experimentsToLoad.length} experiments at scale ${scaleLevel}, region (${clampedTopLeft.x.toFixed(1)}, ${clampedTopLeft.y.toFixed(1)}) to (${clampedBottomRight.x.toFixed(1)}, ${clampedBottomRight.y.toFixed(1)})`);
@@ -4326,7 +5380,13 @@ const MicroscopeMapDisplay = forwardRef(({
   }, [visibleExperiments]);
 
   // Effect to load tiles when visible experiments change
+  // Skip entirely during active interactions to prevent performance issues
   useEffect(() => {
+    // Early exit: Don't even run the effect if user is interacting
+    if (isPanning || isZooming) {
+      return;
+    }
+    
     const scanDataLayer = getScanDataLayer();
     const hasScanResults = visibleLayers.scanResults && visibleExperiments.length > 0;
     if (mapViewMode === 'FREE_PAN' && (scanDataLayer || hasScanResults)) {
@@ -4335,12 +5395,6 @@ const MicroscopeMapDisplay = forwardRef(({
       // Check if microscope service is available
       if (!microscopeControlService || isSimulatedMicroscopeSelected) {
         console.log('[Visible Experiments] Skipping - no microscope service or simulated mode');
-        return;
-      }
-      
-      // Don't load tiles while user is actively interacting
-      if (isPanning || isZooming) {
-        console.log('[Visible Experiments] Skipping - user is actively interacting (panning:', isPanning, 'zooming:', isZooming, ')');
         return;
       }
       
@@ -4396,7 +5450,7 @@ const MicroscopeMapDisplay = forwardRef(({
         console.log(`[Experiment Change] No real experiment change detected - UI update only`);
       }
     }
-  }, [visibleExperiments, activeExperiment, mapViewMode, getScanDataLayer, visibleLayers.scanResults, microscopeControlService, isSimulatedMicroscopeSelected, scaleLevel, stitchedTiles, getChannelString, isPanning, isZooming, appendLog, setNeedsTileReload]); // Updated to use layer-based logic
+  }, [visibleExperiments, activeExperiment, mapViewMode, getScanDataLayer, visibleLayers.scanResults, microscopeControlService, isSimulatedMicroscopeSelected, stitchedTiles, getChannelString, isPanning, isZooming, appendLog, setNeedsTileReload]); // Removed scaleLevel from deps - checked via lastTileRequestRef
 
   // Debounce tile loading - only load after user stops interacting for 1 second
   const scheduleTileUpdate = useCallback((source = 'unknown') => {
@@ -4427,7 +5481,7 @@ const MicroscopeMapDisplay = forwardRef(({
     canvasUpdateTimerRef.current = setTimeout(() => {
       console.log(`[scheduleTileUpdate] Timer fired from ${source} - calling loadStitchedTiles`);
       loadStitchedTiles();
-    }, 300); // Wait 0.3 second after user stops
+    }, 1000); // Wait 1 second after user stops
     console.log(`[scheduleTileUpdate] New timer scheduled for 300ms (source: ${source})`);
   }, [loadStitchedTiles]);
 
@@ -4464,23 +5518,18 @@ const MicroscopeMapDisplay = forwardRef(({
   const lastTileRequestRef = useRef({ panX: 0, panY: 0, scale: 0, scaleLevel: 0, timestamp: 0 });
   
   useEffect(() => {
-    if (mapViewMode !== 'FREE_PAN' || !visibleLayers.scanResults) {
-      console.log('[Tile Loading] Skipping - not in FREE_PAN mode or scan results not visible');
-      return;
-    }
-
-    // Don't trigger tile loading if user is actively interacting
+    // Early exit: Don't even run the effect if user is interacting
+    // This prevents the effect from running on every zoom/pan change
     if (isPanning || isZooming) {
-      console.log('[Tile Loading] Skipping - user is actively interacting (panning:', isPanning, 'zooming:', isZooming, ')');
       return;
     }
-
-    // REMOVED: Don't prevent cancellation when tiles are loading - this creates deadlock!
-    // The scheduleTileUpdate function now handles cancellation properly
+    
+    if (mapViewMode !== 'FREE_PAN' || !visibleLayers.scanResults) {
+      return;
+    }
 
     const container = mapContainerRef.current;
     if (!container) {
-      console.log('[Tile Loading] Skipping - no container reference');
       return;
     }
 
@@ -4500,17 +5549,6 @@ const MicroscopeMapDisplay = forwardRef(({
     const timeSinceLastRequest = Date.now() - lastRequest.timestamp;
     const minTimeBetweenRequests = 500; // 500ms minimum between requests
     
-    console.log('[Tile Loading] Checking conditions:', {
-      panChangeX: panChangeX.toFixed(1),
-      panChangeY: panChangeY.toFixed(1),
-      scaleChange: scaleChange.toFixed(3),
-      significantPanChange,
-      significantScaleChange,
-      timeSinceLastRequest: timeSinceLastRequest + 'ms',
-      minTimeBetweenRequests: minTimeBetweenRequests + 'ms',
-      willTrigger: (significantPanChange || significantScaleChange) && timeSinceLastRequest > minTimeBetweenRequests
-    });
-    
     if ((significantPanChange || significantScaleChange) && timeSinceLastRequest > minTimeBetweenRequests) {
       console.log('[Tile Loading] TRIGGERING tile update - significant change detected');
       
@@ -4525,19 +5563,17 @@ const MicroscopeMapDisplay = forwardRef(({
       
       // Schedule tile update
       scheduleTileUpdate('tile-loading-effect');
-    } else {
-      console.log('[Tile Loading] Skipping - no significant change or too soon since last request');
     }
-  }, [
-    mapViewMode, 
-    visibleLayers.scanResults, 
-    isPanning, 
-    isZooming, 
-    mapPan.x, 
-    mapPan.y, 
-    mapScale, 
-    scheduleTileUpdate
-  ]);
+    }, [
+      mapViewMode, 
+      visibleLayers.scanResults, 
+      isPanning, 
+      isZooming, 
+      scheduleTileUpdate
+      // Removed mapPan.x, mapPan.y, mapScale, scaleLevel from deps
+      // These are checked via lastTileRequestRef to prevent effect from running on every change
+      // Effect only runs when isPanning/isZooming changes from true->false
+    ]);
 
   // 🚀 REQUEST CANCELLATION: Cleanup effect for cancellable requests (only on actual unmount)
   useEffect(() => {
@@ -4608,18 +5644,6 @@ const MicroscopeMapDisplay = forwardRef(({
       loadStitchedTiles();
     }
   }, [needsTileReload, mapViewMode, getBrowseDataLayer, getScanDataLayer, visibleLayers.scanResults, visibleExperiments, loadStitchedTiles, isZooming, isPanning, isBrowseDataLoading, isScanDataLoading]);
-
-  // 🚀 SIMPLIFIED: Only cleanup tiles when scale changes, don't trigger new tile loading
-  // This prevents the endless loop while still cleaning up memory
-  useEffect(() => {
-    const scanDataLayer = getScanDataLayer();
-    if (mapViewMode === 'FREE_PAN' && scanDataLayer) {
-      const activeChannel = getChannelString();
-      console.log('[scaleLevel cleanup] Cleaning up old tiles for memory management');
-      cleanupOldTiles(scaleLevel, activeChannel);
-      // Tiles will be loaded only when user pans/zooms significantly
-    }
-  }, [scaleLevel, mapViewMode, getScanDataLayer, cleanupOldTiles, getChannelString]); // Updated to use layer-based logic
 
 
   if (!isOpen) return null;
@@ -4847,10 +5871,49 @@ const MicroscopeMapDisplay = forwardRef(({
                       // Layer activation props
                       activeLayer={activeLayer}
                       setActiveLayer={setActiveLayer}
+                      
+                      // Segmentation props
+                      segmentationState={segmentationState}
+                      cancelRunningSegmentation={cancelRunningSegmentation}
+                      
+                      // Segmentation upload props
+                      segmentationUploadState={segmentationUploadState}
+                      handleSegmentationToSimilaritySearch={handleSegmentationToSimilaritySearch}
+                      cancelSegmentationUpload={cancelSegmentationUpload}
                     />
                   </div>
                 )}
               </div>
+              
+              {/* Text search input - only show when similarity search layer is active */}
+              {isSimilaritySearchDropdownOpen && activeLayer && (
+                <div className="relative ml-2">
+                  <div className="flex items-center space-x-1">
+                    <input
+                      type="text"
+                      value={textSearchQuery}
+                      onChange={(e) => setTextSearchQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && textSearchQuery.trim() && !isSearching) {
+                          handleTextSearch();
+                        }
+                      }}
+                      placeholder="Search for similar cells..."
+                      className="px-2 py-1 text-xs bg-gray-800 text-white border border-gray-600 rounded focus:outline-none focus:border-blue-500"
+                      style={{ width: '200px' }}
+                      disabled={isSearching}
+                    />
+                    <button
+                      onClick={handleTextSearch}
+                      disabled={!textSearchQuery.trim() || isSearching}
+                      className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded flex items-center"
+                      title="Search for similar cells using text"
+                    >
+                      <i className={`fas ${isSearching ? 'fa-spinner fa-spin' : 'fa-search'}`}></i>
+                    </button>
+                  </div>
+                </div>
+              )}
             </>
           )}
           
@@ -4866,10 +5929,10 @@ const MicroscopeMapDisplay = forwardRef(({
         <div className="flex items-center space-x-2">
           {mapViewMode === 'FREE_PAN' && (
             <>
-              {/* Annotation panel - now controlled by layer panel */}
-              <div className="relative mr-4" ref={annotationDropdownRef}>
-                <div className={`absolute top-full right-0 mt-1 z-20 ${isAnnotationDropdownOpen ? 'block' : 'hidden'}`}>
-                  <AnnotationPanel
+              {/* Similarity search panel - now controlled by layer panel */}
+              <div className="relative mr-4" ref={similaritySearchDropdownRef}>
+                <div className={`absolute top-full right-0 mt-3 z-20 ${isSimilaritySearchDropdownOpen ? 'block' : 'hidden'}`}>
+                  <SimilaritySearchPanel
                       isDrawingMode={isDrawingMode}
                       setIsDrawingMode={setIsDrawingMode}
                       currentTool={currentAnnotationTool}
@@ -4889,7 +5952,7 @@ const MicroscopeMapDisplay = forwardRef(({
                       onClearAllAnnotations={handleClearAllAnnotations}
                       onExportAnnotations={handleExportAnnotations}
                       wellInfoMap={annotationWellMap}
-                      similarAnnotationWellMap={similarAnnotationWellMap}
+                      similarityResultsWellMap={similarityResultsWellMap}
                       getWellInfoById={getWellInfoById}
                       embeddingStatus={embeddingStatus}
                       mapScale={mapScale}
@@ -4908,12 +5971,12 @@ const MicroscopeMapDisplay = forwardRef(({
                       wellPlateType={wellPlateType}
                       timepoint={0}
                       onEmbeddingsGenerated={handleEmbeddingsGenerated}
-                      onSimilarAnnotationsUpdate={handleSimilarAnnotationsUpdate}
-                      // Similar annotations state and controls
-                      similarAnnotations={similarAnnotations}
-                      showSimilarAnnotations={showSimilarAnnotations}
-                      setShowSimilarAnnotations={setShowSimilarAnnotations}
-                      onSimilarAnnotationsCleanup={handleSimilarAnnotationsCleanup}
+                      onSimilarityResultsUpdate={handleSimilarityResultsUpdate}
+                      // Similarity results state and controls
+                      similarityResults={similarityResults}
+                      showSimilarityResults={showSimilarityResults}
+                      setShowSimilarityResults={setShowSimilarityResults}
+                      onSimilarityResultsCleanup={handleSimilarityResultsCleanup}
                       // Navigation functions
                       navigateToCoordinates={navigateToCoordinates}
                       goBackToPreviousPosition={goBackToPreviousPosition}
@@ -4924,6 +5987,16 @@ const MicroscopeMapDisplay = forwardRef(({
                       activeLayer={activeLayer}
                       layers={layers}
                       experiments={experiments}
+                      // Similarity search handler
+                      onFindSimilar={handleFindSimilar}
+                      // Similarity search results props
+                      showSimilarityPanel={showSimilarityPanel}
+                      similaritySearchResults={similaritySearchResults}
+                      isSearching={isSearching}
+                      searchType={searchType}
+                      textSearchQuery={textSearchQuery}
+                      setShowSimilarityPanel={setShowSimilarityPanel}
+                      setSimilaritySearchResults={setSimilaritySearchResults}
                     />
                 </div>
               </div>
@@ -4973,7 +6046,21 @@ const MicroscopeMapDisplay = forwardRef(({
           const experimentsToShow = visibleExperiments.length > 0 ? visibleExperiments : (activeExperiment ? [activeExperiment] : []);
           const experimentIndex = tile.experimentName ? experimentsToShow.indexOf(tile.experimentName) : -1;
           const baseZIndex = 1;
-          const experimentZIndex = experimentIndex >= 0 ? experimentIndex + baseZIndex : baseZIndex;
+          let experimentZIndex = experimentIndex >= 0 ? experimentIndex + baseZIndex : baseZIndex;
+          
+          // 🎨 SEGMENTATION LAYER Z-INDEX: Ensure segmentation layers always appear above their parent experiment
+          if (tile.experimentName && isSegmentationExperiment(tile.experimentName)) {
+            const parentExperimentName = getSourceExperimentName(tile.experimentName);
+            const parentIndex = experimentsToShow.indexOf(parentExperimentName);
+            // If parent experiment is visible, ensure segmentation has higher z-index
+            // Add a large offset (100) to segmentation layers to ensure they're always on top
+            if (parentIndex >= 0) {
+              experimentZIndex = parentIndex + baseZIndex + 100; // Segmentation always 100 units above parent
+            } else {
+              // Parent not visible, but still give segmentation a high z-index
+              experimentZIndex = baseZIndex + 100;
+            }
+          }
           
           // 🎨 SCALE-BASED Z-INDEX: Higher resolution (scale 0) > Lower resolution (scale 4)
           // Each scale level gets 10 z-index units to allow for experiment layering
@@ -5000,7 +6087,8 @@ const MicroscopeMapDisplay = forwardRef(({
                 style={{
                   objectFit: 'fill', // Fill the container exactly, matching the calculated dimensions
                   objectPosition: 'top left', // Ensure alignment with top-left corner
-                  display: 'block' // Remove any inline spacing
+                  display: 'block', // Remove any inline spacing
+                  opacity: tile.experimentName && isSegmentationExperiment(tile.experimentName) ? 0.5 : 1.0 // Fixed transparency for segmentation masks
                 }}
               />
               
@@ -5054,19 +6142,31 @@ const MicroscopeMapDisplay = forwardRef(({
            channelInfo={getCurrentChannelInfo()}
          />
          
-         {/* Similar Annotations Renderer - only in FREE_PAN mode */}
-         {mapViewMode === 'FREE_PAN' && (
-           <SimilarAnnotationRenderer
-             containerRef={mapContainerRef}
-             similarAnnotations={similarAnnotations}
-             isVisible={showSimilarAnnotations}
-             mapScale={mapScale}
-             mapPan={effectivePan}
-             stageDimensions={stageDimensions}
-             pixelsPerMm={pixelsPerMm}
-             wellInfoMap={similarAnnotationWellMap}
-           />
-         )}
+        {/* Similarity Results Renderer - only in FREE_PAN mode */}
+        {mapViewMode === 'FREE_PAN' && (
+          <SimilarityResultsRenderer
+            containerRef={mapContainerRef}
+            similarityResults={similarityResults}
+            isVisible={showSimilarityResults}
+            mapScale={mapScale}
+            mapPan={effectivePan}
+            stageDimensions={stageDimensions}
+            pixelsPerMm={pixelsPerMm}
+            wellInfoMap={similarityResultsWellMap}
+            isDrawingMode={isDrawingMode}
+            isMapBrowsingMode={isMapBrowsingMode}
+            onResultClick={handleSimilarityResultClick}
+          />
+        )}
+        
+        {/* Similarity Result Info Window - shows details when clicking results */}
+        <SimilarityResultInfoWindow
+          result={selectedSimilarityResult}
+          position={similarityResultInfoWindowPosition}
+          isVisible={showSimilarityResultInfoWindow}
+          onClose={() => setShowSimilarityResultInfoWindow(false)}
+          containerBounds={mapContainerRef.current?.getBoundingClientRect()}
+        />
         
         {/* Rectangle selection active indicator */}
         {mapViewMode === 'FREE_PAN' && isRectangleSelection && !rectangleStart && !isScanInProgress && !isQuickScanInProgress && (
@@ -5784,6 +6884,62 @@ const MicroscopeMapDisplay = forwardRef(({
 
       {/* Real-time chunk loading progress overlay */}
       {renderRealTimeProgress()}
+
+      {/* Segmentation to Similarity Search Confirmation Modal */}
+      {showSegmentationConfirmModal && completedSegmentationExperiment && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-800 border border-gray-600 rounded-lg shadow-xl max-w-md w-full text-white">
+            {/* Modal Header */}
+            <div className="flex items-center p-4 border-b border-gray-600">
+              <i className="fas fa-question-circle text-blue-400 mr-3 text-xl"></i>
+              <h3 className="text-lg font-semibold text-gray-200">
+                Use Segmentation for Similarity Search?
+              </h3>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-4">
+              <p className="text-gray-300 mb-4">
+                Segmentation is complete for experiment: <strong>{completedSegmentationExperiment}</strong>
+              </p>
+              <p className="text-gray-400 mb-4 text-sm">
+                Would you like to process the segmented cells and upload them to the similarity search system?
+                This will extract cell images and create embeddings for searching.
+              </p>
+              {segmentationUploadState.totalPolygons > 0 && (
+                <p className="text-gray-400 text-sm">
+                  This may take a few minutes for large datasets.
+                </p>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex justify-end space-x-3 p-4 border-t border-gray-600">
+              <button
+                onClick={() => {
+                  setShowSegmentationConfirmModal(false);
+                  setCompletedSegmentationExperiment(null);
+                }}
+                className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded transition"
+                disabled={segmentationUploadState.isProcessing}
+              >
+                Later
+              </button>
+              <button
+                onClick={() => {
+                  setShowSegmentationConfirmModal(false);
+                  handleSegmentationToSimilaritySearch(completedSegmentationExperiment);
+                }}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded transition flex items-center"
+                disabled={segmentationUploadState.isProcessing}
+              >
+                <i className="fas fa-check mr-2"></i>
+                Yes, Process
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       
     </div>
   );

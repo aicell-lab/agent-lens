@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
-import './AnnotationPanel.css';
+import './SimilaritySearchPanel.css';
 import AnnotationDetailsWindow from './AnnotationDetailsWindow';
 import { generateAnnotationData, exportAnnotationsToJson } from '../../utils/annotationUtils';
 import { extractAnnotationImageRegion, extractAnnotationImageRegionAdvanced } from '../../utils/annotationEmbeddingService';
@@ -345,7 +345,7 @@ AnnotationImagePreview.propTypes = {
   experiments: PropTypes.array
 };
 
-const AnnotationPanel = ({
+const SimilaritySearchPanel = ({
   isDrawingMode,
   currentTool,
   setCurrentTool,
@@ -360,7 +360,7 @@ const AnnotationPanel = ({
   onClearAllAnnotations,
   onExportAnnotations,
   wellInfoMap = {}, // Map of annotation IDs to well information
-  similarAnnotationWellMap = {}, // Map of well IDs to well information for similar annotations
+  similarityResultsWellMap = {}, // Map of well IDs to well information for similarity results
   getWellInfoById = null, // Function to get well info by well ID
   embeddingStatus = {}, // Map of annotation IDs to embedding status
   mapScale = null, // Current map scale for image extraction
@@ -383,13 +383,13 @@ const AnnotationPanel = ({
   // Map browsing state
   isMapBrowsingMode = false,
   setIsMapBrowsingMode = null,
-  // Similar annotation map rendering
-  onSimilarAnnotationsUpdate = null,
-  // Similar annotations state and controls
-  similarAnnotations = [],
-  showSimilarAnnotations = false,
-  setShowSimilarAnnotations = null,
-  onSimilarAnnotationsCleanup = null,
+  // Similarity results map rendering
+  onSimilarityResultsUpdate = null,
+  // Similarity results state and controls
+  similarityResults = [],
+  showSimilarityResults = false,
+  setShowSimilarityResults = null,
+  onSimilarityResultsCleanup = null,
   // Navigation functions
   navigateToCoordinates = null,
   goBackToPreviousPosition = null,
@@ -399,7 +399,17 @@ const AnnotationPanel = ({
   // Layer activation props
   activeLayer = null,
   layers = [],
-  experiments = []
+  experiments = [],
+  // Similarity search handler
+  onFindSimilar = null,
+  // Similarity search results props
+  showSimilarityPanel = false,
+  similaritySearchResults = [],
+  isSearching = false,
+  searchType = null, // 'image' or 'text'
+  textSearchQuery = '',
+  setShowSimilarityPanel = null,
+  setSimilaritySearchResults = null
 }) => {
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [activeColorType, setActiveColorType] = useState('stroke'); // 'stroke' or 'fill'
@@ -407,23 +417,31 @@ const AnnotationPanel = ({
   const [showDetailsWindow, setShowDetailsWindow] = useState(false);
   const [detailsWindowPosition, setDetailsWindowPosition] = useState({ x: 100, y: 100 });
   
-  // Similarity search states
-  const [similarityResults, setSimilarityResults] = useState([]);
-  const [showSimilarityPanel, setShowSimilarityPanel] = useState(false);
-  const [isSearching, setIsSearching] = useState(false);
-  
   // Load all annotations states
   const [isLoadingAllAnnotations, setIsLoadingAllAnnotations] = useState(false);
   const [loadedAnnotationsCount, setLoadedAnnotationsCount] = useState(0);
-  
-  // Text search states
-  const [searchType, setSearchType] = useState(null); // 'image' or 'text'
-  const [textSearchQuery, setTextSearchQuery] = useState('');
+  const [availableApplications, setAvailableApplications] = useState([]);
+  const [selectedApplicationId, setSelectedApplicationId] = useState(null);
+  const [isLoadingApplications, setIsLoadingApplications] = useState(false);
+  const [showApplicationList, setShowApplicationList] = useState(false);
 
   // Helper functions for layer management
   const getActiveLayerInfo = () => {
-    if (!activeLayer || !layers.length) return null;
-    return layers.find(layer => layer.id === activeLayer);
+    if (!activeLayer) return null;
+    // First check regular layers
+    if (layers.length > 0) {
+      const layerInfo = layers.find(layer => layer.id === activeLayer);
+      if (layerInfo) return layerInfo;
+    }
+    // Then check experiments
+    if (experiments.length > 0) {
+      const experiment = experiments.find(exp => exp.name === activeLayer);
+      if (experiment) {
+        // Return a layer-like object for experiments
+        return { id: experiment.name, type: 'experiment' };
+      }
+    }
+    return null;
   };
 
   const getActiveLayerType = () => {
@@ -436,27 +454,6 @@ const AnnotationPanel = ({
   };
 
 
-  const getLayerDisplayName = () => {
-    const layerInfo = getActiveLayerInfo();
-    
-    // If no layer info found in layers array, check if it's an experiment
-    if (!layerInfo && activeLayer && experiments.length > 0) {
-      const experiment = experiments.find(exp => exp.name === activeLayer);
-      if (experiment) {
-        return `Experiment: ${experiment.name}`;
-      }
-    }
-    
-    if (!layerInfo) return 'Unknown Layer';
-    
-    if (layerInfo.type === 'load-server' && selectedHistoricalDataset) {
-      return '';
-    } else if (layerInfo.type === 'experiment') {
-      return `Experiment: ${layerInfo.name || 'Experiment'}`;
-    }
-    
-    return layerInfo.name || 'Layer';
-  };
 
   const tools = [
     { id: 'rectangle', name: 'Rectangle', icon: 'fa-square', tooltip: 'Draw rectangles' },
@@ -682,9 +679,71 @@ const AnnotationPanel = ({
     }
   };
 
-  const handleLoadAllAnnotations = async () => {
+  const handleLoadApplicationList = async () => {
+    // Get dataset ID for prefix - support both historical datasets and experiments
+    let prefix = selectedHistoricalDataset?.id;
+    
+    // If no historical dataset, check if we're using an experiment layer
+    if (!prefix && activeLayer && experiments.length > 0) {
+      const experiment = experiments.find(exp => exp.name === activeLayer);
+      if (experiment) {
+        prefix = experiment.name;
+      }
+    }
+    
+    if (!prefix) {
+      alert('No dataset or experiment selected. Cannot load annotation applications.');
+      return;
+    }
+
+    setIsLoadingApplications(true);
+    
+    try {
+      const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
+      
+      // Prepare query parameters
+      const queryParams = new URLSearchParams({
+        collection_name: convertToValidCollectionName('agent-lens'),
+        prefix: prefix,
+        limit: '1000'
+      });
+      
+      const response = await fetch(`/agent-lens/apps/${serviceId}/similarity/list-applications?${queryParams}`, {
+        method: 'GET'
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        
+        if (result.success && result.applications) {
+          console.log(`📋 Found ${result.applications.length} annotation application(s)`);
+          setAvailableApplications(result.applications);
+          setShowApplicationList(true);
+          
+          // Auto-select first application if none selected
+          if (!selectedApplicationId && result.applications.length > 0) {
+            setSelectedApplicationId(result.applications[0].application_id);
+          }
+        } else {
+          console.error('No applications found:', result);
+          setAvailableApplications([]);
+          alert('No annotation applications found.');
+        }
+      } else {
+        console.error('Load applications failed:', await response.text());
+        alert('Failed to load annotation applications from database.');
+      }
+    } catch (error) {
+      console.error('Error loading applications:', error);
+      alert('Error loading applications: ' + error.message);
+    } finally {
+      setIsLoadingApplications(false);
+    }
+  };
+
+  const handleLoadAllAnnotations = async (specificApplicationId = null) => {
     // Get dataset ID for application ID - support both historical datasets and experiments
-    let applicationId = selectedHistoricalDataset?.id;
+    let applicationId = specificApplicationId || selectedApplicationId || selectedHistoricalDataset?.id;
     
     // If no historical dataset, check if we're using an experiment layer
     if (!applicationId && activeLayer && experiments.length > 0) {
@@ -695,8 +754,14 @@ const AnnotationPanel = ({
     }
     
     if (!applicationId) {
-      alert('No dataset or experiment selected. Cannot load annotations.');
-      return;
+      // If no specific application ID, try to load all with prefix matching
+      const prefix = selectedHistoricalDataset?.id || (activeLayer && experiments.find(exp => exp.name === activeLayer)?.name);
+      if (!prefix) {
+        alert('No dataset or experiment selected. Cannot load annotations.');
+        return;
+      }
+      // Use prefix matching to load all
+      applicationId = prefix;
     }
 
     setIsLoadingAllAnnotations(true);
@@ -704,12 +769,17 @@ const AnnotationPanel = ({
     try {
       const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
       
+      // Determine if we should use prefix matching (if applicationId matches the base prefix)
+      const basePrefix = selectedHistoricalDataset?.id || (activeLayer && experiments.find(exp => exp.name === activeLayer)?.name);
+      const usePrefixMatch = basePrefix && (applicationId === basePrefix || applicationId.startsWith(basePrefix + '_'));
+      
       // Prepare query parameters
       const queryParams = new URLSearchParams({
         collection_name: convertToValidCollectionName('agent-lens'),
         application_id: applicationId,
         limit: '1000',
-        include_vector: 'false'
+        include_vector: 'false',
+        use_prefix_match: usePrefixMatch ? 'true' : 'false'
       });
       
       const response = await fetch(`/agent-lens/apps/${serviceId}/similarity/fetch-all?${queryParams}`, {
@@ -722,15 +792,20 @@ const AnnotationPanel = ({
         if (result.success && result.annotations) {
           console.log(`📥 Loaded ${result.annotations.length} annotations from Weaviate`);
           
-          // Update similar annotations to display all loaded annotations on the map
-          if (onSimilarAnnotationsUpdate) {
-            onSimilarAnnotationsUpdate(result.annotations);
+          // Update similarity results to display all loaded results on the map
+          if (onSimilarityResultsUpdate) {
+            onSimilarityResultsUpdate(result.annotations);
             setLoadedAnnotationsCount(result.annotations.length);
           }
           
-          // Show the annotations on the map
-          if (setShowSimilarAnnotations) {
-            setShowSimilarAnnotations(true);
+          // Show the results on the map
+          if (setShowSimilarityResults) {
+            setShowSimilarityResults(true);
+          }
+          
+          // Update selected application ID if we loaded a specific one
+          if (specificApplicationId) {
+            setSelectedApplicationId(specificApplicationId);
           }
           
           alert(`Successfully loaded ${result.annotations.length} annotation(s) from the database.`);
@@ -750,169 +825,9 @@ const AnnotationPanel = ({
     }
   };
 
-  const handleFindSimilar = async (annotation) => {
-    if (!annotation.embeddings?.imageEmbedding) {
-      alert('This annotation does not have embeddings. Cannot search for similar annotations.');
-      return;
-    }
-
-    // Get dataset ID for application ID - support both historical datasets and experiments
-    let applicationId = selectedHistoricalDataset?.id;
-    
-    // If no historical dataset, check if we're using an experiment layer
-    if (!applicationId && activeLayer && experiments.length > 0) {
-      const experiment = experiments.find(exp => exp.name === activeLayer);
-      if (experiment) {
-        applicationId = experiment.name; // Use experiment name as application ID
-      }
-    }
-    
-    if (!applicationId) {
-      alert('No dataset or experiment selected. Cannot search for similar annotations.');
-      return;
-    }
-
-    setIsSearching(true);
-    setSimilarityResults([]);
-    setShowSimilarityPanel(true);
-    setSearchType('image');
-
-    try {
-      const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
-      
-      // Prepare query parameters
-      const queryParams = new URLSearchParams({
-        collection_name: convertToValidCollectionName('agent-lens'),
-        application_id: applicationId,
-        limit: '10',
-        include_vector: 'false'
-      });
-      
-      const response = await fetch(`/agent-lens/apps/${serviceId}/similarity/search/vector?${queryParams}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(annotation.embeddings.imageEmbedding)
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        
-        if (result.success && result.results) {
-          // Handle different result formats from Weaviate
-          let results = result.results;
-          
-          // If results has an 'objects' property, extract it
-          if (results.objects && Array.isArray(results.objects)) {
-            results = results.objects;
-          }
-          
-          // If results is not an array, try to extract objects from it
-          if (!Array.isArray(results) && results.objects) {
-            results = results.objects;
-          }
-          
-          // Final validation
-          if (!Array.isArray(results)) {
-            results = results ? [results] : [];
-          }
-          
-          setSimilarityResults(results);
-        } else {
-          console.error('No results found:', result);
-          setSimilarityResults([]);
-        }
-      } else {
-        console.error('Similarity search failed:', await response.text());
-        alert('Failed to search for similar annotations.');
-      }
-    } catch (error) {
-      console.error('Error searching for similar annotations:', error);
-      alert('Error searching for similar annotations: ' + error.message);
-    } finally {
-      setIsSearching(false);
-    }
-  };
-
-  const handleTextSearch = async () => {
-    if (!textSearchQuery.trim()) {
-      alert('Please enter a search query.');
-      return;
-    }
-
-    // Get dataset ID for application ID - support both historical datasets and experiments
-    let applicationId = selectedHistoricalDataset?.id;
-    
-    // If no historical dataset, check if we're using an experiment layer
-    if (!applicationId && activeLayer && experiments.length > 0) {
-      const experiment = experiments.find(exp => exp.name === activeLayer);
-      if (experiment) {
-        applicationId = experiment.name; // Use experiment name as application ID
-      }
-    }
-    
-    if (!applicationId) {
-      alert('No dataset or experiment selected. Cannot search for annotations.');
-      return;
-    }
-
-    setIsSearching(true);
-    setSimilarityResults([]);
-    setShowSimilarityPanel(true);
-    setSearchType('text');
-
-    try {
-      const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
-      
-      // Prepare query parameters
-      const queryParams = new URLSearchParams({
-        collection_name: convertToValidCollectionName('agent-lens'),
-        application_id: applicationId,
-        query_text: textSearchQuery.trim(),
-        limit: '10'
-      });
-      
-      const response = await fetch(`/agent-lens/apps/${serviceId}/similarity/search/text?${queryParams}`, {
-        method: 'POST'
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        
-        if (result.success && result.results) {
-          // Handle different result formats from Weaviate
-          let results = result.results;
-          
-          // If results has an 'objects' property, extract it
-          if (results.objects && Array.isArray(results.objects)) {
-            results = results.objects;
-          }
-          
-          // If results is not an array, try to extract objects from it
-          if (!Array.isArray(results) && results.objects) {
-            results = results.objects;
-          }
-          
-          // Final validation
-          if (!Array.isArray(results)) {
-            results = results ? [results] : [];
-          }
-          
-          setSimilarityResults(results);
-        } else {
-          console.error('No results found:', result);
-          setSimilarityResults([]);
-        }
-      } else {
-        console.error('Text search failed:', await response.text());
-        alert('Failed to search for annotations.');
-      }
-    } catch (error) {
-      console.error('Error searching for annotations:', error);
-      alert('Error searching for annotations: ' + error.message);
-    } finally {
-      setIsSearching(false);
+  const handleFindSimilar = (annotation) => {
+    if (onFindSimilar) {
+      onFindSimilar(annotation);
     }
   };
 
@@ -945,29 +860,67 @@ const AnnotationPanel = ({
   };
 
   return (
-    <div className="annotation-panel">
+    <div className="similarity-search-panel">
       {/* Header */}
-      <div className="annotation-panel-header">
+      <div className="similarity-search-panel-header">
         <div className="flex items-center space-x-2">
           <i className="fas fa-draw-polygon text-blue-400"></i>
-          <span className="font-medium">Annotations</span>
-          {/* Active Layer Display */}
-          {activeLayer && getLayerDisplayName() && (
-            <span className="text-xs text-blue-300 ml-2 px-2 py-1 bg-blue-900 rounded">
-              {getLayerDisplayName()}
-            </span>
-          )}
+          <span className="font-medium text-sm">Similarity Search</span>
+          {/* Close button to deactivate similarity search layer */}
+          <button
+            onClick={() => {
+              // Clear all annotations when closing
+              if (onClearAllAnnotations) {
+                onClearAllAnnotations();
+              }
+              // Clean up similarity search results
+              if (setShowSimilarityPanel) {
+                setShowSimilarityPanel(false);
+              }
+              if (setSimilaritySearchResults) {
+                setSimilaritySearchResults([]);
+              }
+              // Clean up similarity results from map
+              if (onSimilarityResultsCleanup) {
+                onSimilarityResultsCleanup();
+              }
+              // Trigger deactivation event to close similarity search layer and update visibility
+              const event = new CustomEvent('similaritySearchLayerDeactivated', {
+                detail: { layerId: activeLayer, layerType: getActiveLayerType() }
+              });
+              window.dispatchEvent(event);
+            }}
+            className="ml-auto text-red-400 hover:text-red-300 transition-colors"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px' }}
+            title="Close similarity search panel, clear annotations and similarity results, and deactivate similarity search layer"
+          >
+            <i className="fas fa-times"></i>
+          </button>
           {/* Dataset ID Display for Browse Data layers */}
           {isBrowseDataLayer() && selectedHistoricalDataset?.id && (
             <span className="text-xs text-gray-500 ml-2">
               Dataset: {selectedHistoricalDataset.id}
             </span>
           )}
+          {/* Load Applications List Button */}
+          <span 
+            className="text-xs text-blue-400 ml-2 px-2 py-1 bg-blue-900 rounded cursor-pointer hover:bg-blue-800 transition-colors" 
+            title="Click to see available similarity search applications"
+            onClick={handleLoadApplicationList}
+            style={{ 
+              pointerEvents: isLoadingApplications ? 'none' : 'auto',
+              opacity: isLoadingApplications ? 0.6 : 1 
+            }}
+          >
+            <i className={`fas ${isLoadingApplications ? 'fa-spinner fa-spin' : 'fa-list'} mr-1`}></i>
+            {isLoadingApplications ? 'Loading...' : 'List Apps'}
+          </span>
+          
           {/* Load All Button / Loaded Annotations Indicator */}
           <span 
             className="text-xs text-green-400 ml-2 px-2 py-1 bg-green-900 rounded cursor-pointer hover:bg-green-800 transition-colors" 
             title={loadedAnnotationsCount > 0 ? "Loaded annotations from database" : "Click to load all annotations from database"}
-            onClick={handleLoadAllAnnotations}
+            onClick={() => handleLoadAllAnnotations()}
             style={{ 
               pointerEvents: isLoadingAllAnnotations ? 'none' : 'auto',
               opacity: isLoadingAllAnnotations ? 0.6 : 1 
@@ -979,8 +932,413 @@ const AnnotationPanel = ({
         </div>
       </div>
 
+      {/* Annotation Applications List */}
+      {showApplicationList && availableApplications.length > 0 && (
+        <div className="annotation-section" style={{ marginBottom: '10px', border: '1px solid #3b82f6', borderRadius: '4px', padding: '8px' }}>
+          <div className="annotation-section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>
+              <i className="fas fa-list text-blue-400 mr-2"></i>
+              Annotation Applications ({availableApplications.length})
+            </span>
+            <button
+              onClick={() => setShowApplicationList(false)}
+              className="text-xs text-gray-400 hover:text-gray-200"
+              style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+              title="Close application list"
+            >
+              <i className="fas fa-times"></i>
+            </button>
+          </div>
+          <div style={{ marginTop: '8px', maxHeight: '200px', overflowY: 'auto' }}>
+            {availableApplications.map((app) => (
+              <div
+                key={app.application_id}
+                onClick={() => handleLoadAllAnnotations(app.application_id)}
+                style={{
+                  padding: '8px',
+                  marginBottom: '4px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  backgroundColor: selectedApplicationId === app.application_id ? '#1e40af' : '#1e3a8a',
+                  border: selectedApplicationId === app.application_id ? '2px solid #60a5fa' : '1px solid #3b82f6',
+                  transition: 'all 0.2s',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center'
+                }}
+                onMouseEnter={(e) => {
+                  if (selectedApplicationId !== app.application_id) {
+                    e.currentTarget.style.backgroundColor = '#2563eb';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (selectedApplicationId !== app.application_id) {
+                    e.currentTarget.style.backgroundColor = '#1e3a8a';
+                  }
+                }}
+                title={`Click to load annotations from ${app.application_id}`}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <i className={`fas ${selectedApplicationId === app.application_id ? 'fa-check-circle' : 'fa-circle'} text-blue-400`}></i>
+                  <span style={{ fontSize: '12px', color: '#e0e7ff' }}>{app.application_id}</span>
+                </div>
+                <span style={{ fontSize: '11px', color: '#93c5fd' }}>
+                  {app.annotation_count} annotation{app.annotation_count !== 1 ? 's' : ''}
+                </span>
+              </div>
+            ))}
+          </div>
+          {selectedApplicationId && (
+            <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #3b82f6', fontSize: '11px', color: '#93c5fd' }}>
+              <i className="fas fa-info-circle mr-1"></i>
+              Selected: <strong>{selectedApplicationId}</strong>
+            </div>
+          )}
+        </div>
+      )}
+
       {isDrawingMode && (
         <>
+          {/* Similar Annotations */}
+          {showSimilarityPanel && (
+            <div className="annotation-section">
+              <div className="annotation-section-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <i className="fas fa-search"></i>
+                  <span>
+                    {searchType === 'text' 
+                      ? (() => {
+                          // Check if it's a UUID search
+                          if (textSearchQuery.startsWith('uuid: ')) {
+                            const uuid = textSearchQuery.substring(6); // Remove "uuid: " prefix
+                            const truncatedUuid = uuid.length > 10 ? `${uuid.substring(0, 10)}...` : uuid;
+                            return `Similar Results (UUID: "${truncatedUuid}")`;
+                          }
+                          return `Similar Results (Text: "${textSearchQuery}")`;
+                        })()
+                      : 'Similar Results (Image)'}
+                  </span>
+                </div>
+                <div className="similarity-results-actions" style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '6px',
+                  marginLeft: 'auto'
+                }}>
+                  {/* Go back button */}
+                  {goBackToPreviousPosition && hasPreviousPosition && (
+                    <button
+                      onClick={goBackToPreviousPosition}
+                      className="similarity-go-back-btn"
+                      style={{
+                        backgroundColor: '#374151',
+                        color: '#d1d5db',
+                        border: '1px solid #4b5563',
+                        padding: '3px 6px',
+                        borderRadius: '4px',
+                        fontSize: '10px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '3px',
+                        fontWeight: '500'
+                      }}
+                      title="Go back to previous map position"
+                    >
+                      <i className="fas fa-arrow-left"></i>
+                      Go Back
+                    </button>
+                  )}
+                  {/* Map Toggle - only show if we have similarity results on the map */}
+                  {similarityResults.length > 0 && setShowSimilarityResults && (
+                    <button
+                      onClick={() => setShowSimilarityResults(!showSimilarityResults)}
+                      className={`similarity-toggle-btn ${
+                        showSimilarityResults ? 'active' : ''
+                      }`}
+                      style={{
+                        backgroundColor: showSimilarityResults ? '#f59e0b' : '#374151',
+                        color: '#d1d5db',
+                        border: '1px solid #4b5563',
+                        padding: '3px 6px',
+                        borderRadius: '4px',
+                        fontSize: '10px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '3px',
+                        fontWeight: '500'
+                      }}
+                      title={`${showSimilarityResults ? 'Hide' : 'Show'} similarity results on map`}
+                    >
+                      <i className="fas fa-map-marker-alt"></i>
+                      Map ({similarityResults.length})
+                      <i className={`fas ${showSimilarityResults ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                    </button>
+                  )}
+                  
+                  {/* Show on Map button - for new search results */}
+                  {onSimilarityResultsUpdate && similaritySearchResults.length > 0 && (
+                    <button
+                      className="similarity-show-map-btn"
+                      onClick={() => {
+                        onSimilarityResultsUpdate(similaritySearchResults);
+                        // Enable map browsing when showing results on map
+                        if (setIsMapBrowsingMode) {
+                          setIsMapBrowsingMode(true);
+                        }
+                      }}
+                      style={{
+                        backgroundColor: '#374151',
+                        color: '#d1d5db',
+                        border: '1px solid #4b5563',
+                        padding: '3px 6px',
+                        borderRadius: '4px',
+                        fontSize: '10px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '3px',
+                        fontWeight: '500'
+                      }}
+                      title="Show similarity results on the map"
+                    >
+                      <i className="fas fa-map-marker-alt"></i>
+                      Show on Map
+                    </button>
+                  )}
+                  
+                  {/* Close button with cleanup */}
+                  <button
+                    className="similarity-close-btn"
+                    onClick={() => {
+                      if (setShowSimilarityPanel) {
+                        setShowSimilarityPanel(false);
+                      }
+                      // Clean up similarity results from map when closing the window
+                      if (onSimilarityResultsCleanup) {
+                        onSimilarityResultsCleanup();
+                      }
+                      // Clean up similarity search results
+                      if (setSimilaritySearchResults) {
+                        setSimilaritySearchResults([]);
+                      }
+                      // Trigger deactivation event to update layer visibility icon
+                      const layerType = getActiveLayerType();
+                      const event = new CustomEvent('similaritySearchLayerDeactivated', {
+                        detail: { layerId: activeLayer, layerType: layerType }
+                      });
+                      window.dispatchEvent(event);
+                    }}
+                    title="Close similarity search and clear map"
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#ccc',
+                      cursor: 'pointer',
+                      padding: '2px',
+                      fontSize: '14px'
+                    }}
+                  >
+                    <i className="fas fa-times"></i>
+                  </button>
+                </div>
+              </div>
+              
+              <div className="similarity-results-content">
+                {isSearching ? (
+                  <div className="similarity-loading">
+                    <i className="fas fa-spinner fa-spin"></i>
+                    <div>Searching for similar results...</div>
+                  </div>
+                ) : similaritySearchResults.length > 0 ? (
+                  <div className="similarity-results-list">
+                    {similaritySearchResults.map((result, index) => {
+                      const props = result.properties || result;
+                      const metadata = props.metadata || '';
+                      
+                      let parsedMetadata = {};
+                      if (typeof metadata === 'string') {
+                        try {
+                          parsedMetadata = JSON.parse(metadata);
+                        } catch {
+                          try {
+                            const jsonString = metadata
+                              .replace(/'/g, '"')
+                              .replace(/True/g, 'true')
+                              .replace(/False/g, 'false')
+                              .replace(/None/g, 'null');
+                            parsedMetadata = JSON.parse(jsonString);
+                          } catch (error) {
+                            console.error('Both JSON and Python dict parsing failed:', error);
+                            parsedMetadata = { raw: metadata };
+                          }
+                        }
+                      } else {
+                        parsedMetadata = metadata;
+                      }
+                      
+                      // Extract UUID from result object
+                      const extractUUID = (resultObj) => {
+                        if (resultObj.uuid) return resultObj.uuid;
+                        if (resultObj.id) return resultObj.id;
+                        if (resultObj._uuid) return resultObj._uuid;
+                        // Try accessing via properties
+                        if (resultObj.properties) {
+                          const props = resultObj.properties;
+                          if (props.uuid) return props.uuid;
+                          if (props.id) return props.id;
+                        }
+                        return null;
+                      };
+                      
+                      const objectUUID = extractUUID(result);
+                      
+                      return (
+                        <div key={index} className="similarity-result-item-embedded">
+                          {/* Preview Image */}
+                          {props.preview_image && (
+                            <img 
+                              src={`data:image/png;base64,${props.preview_image}`} 
+                              alt="Preview" 
+                              className="similarity-preview-image-small"
+                            />
+                          )}
+                          
+                          {/* Content */}
+                          <div className="similarity-result-content-embedded">
+                            <div className="similarity-result-title-embedded">
+                              {props.description || 'No description'}
+                            </div>
+                            <div className="similarity-result-id-embedded">
+                              {objectUUID || 'Unknown'}
+                            </div>
+                            {parsedMetadata && Object.keys(parsedMetadata).length > 0 && (
+                              <div className="similarity-result-metadata-embedded">
+                                <strong>Well:</strong> {parsedMetadata.well_id || 'Unknown'}
+                                {(parsedMetadata.polygon_wkt || parsedMetadata.bbox) && (
+                                  <> - {extractCoordinate(parsedMetadata)}</>
+                                )}
+                                <br/>
+                                <strong>Type:</strong> {parsedMetadata.annotation_type || 'Unknown'}<br/>
+                                {parsedMetadata.timestamp && (
+                                  <>
+                                    <strong>Time:</strong> {new Date(parsedMetadata.timestamp).toLocaleString()}<br/>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                            {result.metadata?.score && (
+                              <div className="similarity-result-score-embedded">
+                                Similarity: {(result.metadata.score * 100).toFixed(1)}%
+                              </div>
+                            )}
+                            
+                            {/* Go to button */}
+                            {navigateToCoordinates && parsedMetadata && (parsedMetadata.polygon_wkt || parsedMetadata.bbox) && (
+                              <div className="similarity-result-actions-embedded" style={{ marginTop: '8px' }}>
+                                <button
+                                  onClick={() => {
+                                    // Extract well-relative coordinates from metadata
+                                    let wellRelativeX, wellRelativeY;
+                                    
+                                    if (parsedMetadata.polygon_wkt) {
+                                      // For polygon annotations, get the first coordinate
+                                      const match = parsedMetadata.polygon_wkt.match(/POLYGON\(\(([^)]+)\)\)/);
+                                      if (match && match[1]) {
+                                        const firstCoord = match[1].split(',')[0].trim();
+                                        const [x, y] = firstCoord.split(' ').map(coord => parseFloat(coord));
+                                        wellRelativeX = x;
+                                        wellRelativeY = y;
+                                      }
+                                    } else if (parsedMetadata.bbox && Array.isArray(parsedMetadata.bbox)) {
+                                      // For bbox annotations, use the center of the bounding box
+                                      const [x, y, width, height] = parsedMetadata.bbox;
+                                      wellRelativeX = x + width / 2;
+                                      wellRelativeY = y + height / 2;
+                                    }
+                                    
+                                    if (wellRelativeX !== undefined && wellRelativeY !== undefined && parsedMetadata.well_id) {
+                                      // Get well information - try similarityResultsWellMap first, then use getWellInfoById
+                                      let wellInfo = similarityResultsWellMap[parsedMetadata.well_id];
+                                      
+                                      // If not in similarityResultsWellMap, try to get it dynamically
+                                      if (!wellInfo && getWellInfoById) {
+                                        wellInfo = getWellInfoById(parsedMetadata.well_id);
+                                      }
+                                      
+                                      if (wellInfo) {
+                                        // Convert well-relative coordinates to stage coordinates
+                                        const stageX = wellInfo.centerX + wellRelativeX;
+                                        const stageY = wellInfo.centerY + wellRelativeY;
+                                        
+                                        console.log(`✅ Navigating to well-relative coords (${wellRelativeX.toFixed(3)}, ${wellRelativeY.toFixed(3)}) in well ${parsedMetadata.well_id}`);
+                                        console.log(`✅ Well center: (${wellInfo.centerX.toFixed(3)}, ${wellInfo.centerY.toFixed(3)})`);
+                                        console.log(`✅ Stage coords: (${stageX.toFixed(3)}, ${stageY.toFixed(3)})`);
+                                        
+                                        // Automatically show similarity results on map if not already shown
+                                        if (onSimilarityResultsUpdate && similaritySearchResults.length > 0 && !showSimilarityResults) {
+                                          console.log('🗺️ Auto-triggering similarity results render on map');
+                                          onSimilarityResultsUpdate(similaritySearchResults);
+                                        }
+                                        
+                                        // Enable map browsing when navigating to annotation
+                                        if (setIsMapBrowsingMode) {
+                                          setIsMapBrowsingMode(true);
+                                        }
+                                        
+                                        // Navigate to the coordinates while preserving current zoom level
+                                        navigateToCoordinates(stageX, stageY, currentZoomLevel, currentScaleLevel);
+                                      } else {
+                                        console.warn(`❌ No well info found for well ${parsedMetadata.well_id}`);
+                                        console.warn(`Available wells in similarityResultsWellMap:`, Object.keys(similarityResultsWellMap));
+                                      }
+                                    }
+                                  }}
+                                  className="similarity-go-to-btn"
+                                  style={{
+                                    backgroundColor: '#059669',
+                                    color: 'white',
+                                    border: '1px solid #10b981',
+                                    padding: '4px 8px',
+                                    borderRadius: '4px',
+                                    fontSize: '10px',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    fontWeight: '500',
+                                    transition: 'background-color 0.2s'
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    e.target.style.backgroundColor = '#047857';
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.target.style.backgroundColor = '#059669';
+                                  }}
+                                  title="Go to this annotation on the map"
+                                >
+                                  <i className="fas fa-map-marker-alt"></i>
+                                  Go to
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="similarity-empty-embedded">
+                    <i className="fas fa-search"></i>
+                    <h4>No Similar Results Found</h4>
+                    <p>Try creating more annotations or check if the current annotation has embeddings.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Drawing Tools */}
           <div className="annotation-section">
             <div className="annotation-section-title">Drawing Tools</div>
@@ -1003,146 +1361,8 @@ const AnnotationPanel = ({
             </div>
           </div>
 
-          {/* Style Controls */}
-          <div className="annotation-section">
-            <div className="annotation-section-title">Style</div>
-            
-            {/* Stroke Color */}
-            <div className="style-control">
-              <label>Stroke Color:</label>
-              <div className="color-control">
-                <button
-                  className="color-swatch"
-                  style={{ backgroundColor: strokeColor }}
-                  onClick={() => {
-                    setActiveColorType('stroke');
-                    setShowColorPicker(!showColorPicker);
-                  }}
-                  title="Change stroke color"
-                />
-                <span className="color-value">{strokeColor}</span>
-              </div>
-            </div>
-
-            {/* Fill Color */}
-            <div className="style-control">
-              <label>Fill Color:</label>
-              <div className="color-control">
-                <button
-                  className="color-swatch"
-                  style={{ 
-                    backgroundColor: fillColor === 'transparent' ? '#ffffff' : fillColor,
-                    backgroundImage: fillColor === 'transparent' ? 
-                      'linear-gradient(45deg, #ccc 25%, transparent 25%), linear-gradient(-45deg, #ccc 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #ccc 75%), linear-gradient(-45deg, transparent 75%, #ccc 75%)' : 'none',
-                    backgroundSize: '8px 8px',
-                    backgroundPosition: '0 0, 0 4px, 4px -4px, -4px 0px'
-                  }}
-                  onClick={() => {
-                    setActiveColorType('fill');
-                    setShowColorPicker(!showColorPicker);
-                  }}
-                  title="Change fill color"
-                />
-                <span className="color-value">{fillColor}</span>
-              </div>
-            </div>
-
-            {/* Stroke Width */}
-            <div className="style-control">
-              <label>Stroke Width:</label>
-              <div className="stroke-width-control">
-                <input
-                  type="range"
-                  min="1"
-                  max="10"
-                  value={strokeWidth}
-                  onChange={(e) => setStrokeWidth(parseInt(e.target.value))}
-                  className="stroke-width-slider"
-                />
-                <span className="stroke-width-value">{strokeWidth}px</span>
-              </div>
-            </div>
-
-            {/* Text Search */}
-            <div className="style-control">
-              <label>Text Search:</label>
-              <div className="text-search-container">
-                <textarea
-                  value={textSearchQuery}
-                  onChange={(e) => setTextSearchQuery(e.target.value)}
-                  placeholder="Search annotations (e.g., 'round cell')"
-                  className="description-input"
-                  rows="2"
-                  maxLength="200"
-                />
-                <button
-                  onClick={handleTextSearch}
-                  className="text-search-button"
-                  disabled={!textSearchQuery.trim() || isSearching}
-                  title="Search for similar annotations using text"
-                >
-                  <i className="fas fa-search"></i>
-                  {isSearching ? 'Searching...' : 'Search'}
-                </button>
-              </div>
-            </div>
-
-            {/* Color Picker */}
-            {showColorPicker && (
-              <div className="color-picker-overlay">
-                <div className="color-picker">
-                  <div className="color-picker-header">
-                    <span>Choose {activeColorType} color</span>
-                    <button 
-                      onClick={() => setShowColorPicker(false)}
-                      className="color-picker-close"
-                    >
-                      <i className="fas fa-times"></i>
-                    </button>
-                  </div>
-                  
-                  {/* Preset Colors */}
-                  <div className="preset-colors">
-                    {presetColors.map(color => (
-                      <button
-                        key={color}
-                        className="preset-color"
-                        style={{ backgroundColor: color }}
-                        onClick={() => handleColorChange(color, activeColorType)}
-                        title={color}
-                      />
-                    ))}
-                    {activeColorType === 'fill' && (
-                      <button
-                        className="preset-color transparent-color"
-                        onClick={() => handleColorChange('transparent', activeColorType)}
-                        title="Transparent"
-                      >
-                        <i className="fas fa-ban"></i>
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Custom Color Input */}
-                  <div className="custom-color">
-                    <label>Custom color:</label>
-                    <input
-                      type="color"
-                      value={activeColorType === 'stroke' ? strokeColor : fillColor === 'transparent' ? '#ffffff' : fillColor}
-                      onChange={(e) => handleColorChange(e.target.value, activeColorType)}
-                      className="color-input"
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
           {/* Annotation List */}
           <div className="annotation-section">
-            <div className="annotation-section-title">
-              Annotations ({annotations.length})
-            </div>
             {annotations.length === 0 ? (
               <div className="no-annotations">No annotations yet</div>
             ) : (
@@ -1236,8 +1456,7 @@ const AnnotationPanel = ({
                               border: 'none',
                               borderRadius: '3px'
                             }}
-                            title="Find similar annotations"
-                            disabled={isSearching}
+                            title="Find similar results"
                           >
                             <i className="fas fa-search"></i>
                           </button>
@@ -1256,295 +1475,6 @@ const AnnotationPanel = ({
               </div>
             )}
           </div>
-
-          {/* Similar Annotations */}
-          {showSimilarityPanel && (
-            <div className="annotation-section">
-              <div className="annotation-section-title">
-                <i className="fas fa-search"></i>
-                {searchType === 'text' 
-                  ? `Similar Annotations (Text: "${textSearchQuery}")` 
-                  : 'Similar Annotations (Image)'}
-                <div className="similarity-results-actions">
-                  {/* Go back button */}
-                  {goBackToPreviousPosition && hasPreviousPosition && (
-                    <button
-                      onClick={goBackToPreviousPosition}
-                      className="similarity-go-back-btn"
-                      style={{
-                        backgroundColor: '#374151',
-                        color: '#d1d5db',
-                        border: '1px solid #4b5563',
-                        padding: '3px 6px',
-                        borderRadius: '4px',
-                        fontSize: '10px',
-                        cursor: 'pointer',
-                        marginRight: '6px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '3px',
-                        fontWeight: '500'
-                      }}
-                      title="Go back to previous map position"
-                    >
-                      <i className="fas fa-arrow-left"></i>
-                      Go Back
-                    </button>
-                  )}
-                  {/* Map Toggle - only show if we have similar annotations on the map */}
-                  {similarAnnotations.length > 0 && setShowSimilarAnnotations && (
-                    <button
-                      onClick={() => setShowSimilarAnnotations(!showSimilarAnnotations)}
-                      className={`similarity-toggle-btn ${
-                        showSimilarAnnotations ? 'active' : ''
-                      }`}
-                      style={{
-                        backgroundColor: showSimilarAnnotations ? '#f59e0b' : '#374151',
-                        color: '#d1d5db',
-                        border: '1px solid #4b5563',
-                        padding: '3px 6px',
-                        borderRadius: '4px',
-                        fontSize: '10px',
-                        cursor: 'pointer',
-                        marginRight: '6px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '3px',
-                        fontWeight: '500'
-                      }}
-                      title={`${showSimilarAnnotations ? 'Hide' : 'Show'} similar annotations on map`}
-                    >
-                      <i className="fas fa-map-marker-alt"></i>
-                      Map ({similarAnnotations.length})
-                      <i className={`fas ${showSimilarAnnotations ? 'fa-eye-slash' : 'fa-eye'}`}></i>
-                    </button>
-                  )}
-                  
-                  {/* Show on Map button - for new search results */}
-                  {onSimilarAnnotationsUpdate && similarityResults.length > 0 && (
-                    <button
-                      className="similarity-show-map-btn"
-                      onClick={() => {
-                        onSimilarAnnotationsUpdate(similarityResults);
-                      }}
-                      style={{
-                        backgroundColor: '#374151',
-                        color: '#d1d5db',
-                        border: '1px solid #4b5563',
-                        padding: '3px 6px',
-                        borderRadius: '4px',
-                        fontSize: '10px',
-                        cursor: 'pointer',
-                        marginRight: '6px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '3px',
-                        fontWeight: '500'
-                      }}
-                      title="Show similar annotations on the map"
-                    >
-                      <i className="fas fa-map-marker-alt"></i>
-                      Show on Map
-                    </button>
-                  )}
-                  
-                  {/* Close button with cleanup */}
-                  <button
-                    className="similarity-close-btn"
-                    onClick={() => {
-                      setShowSimilarityPanel(false);
-                      // Clean up similar annotations from map when closing the window
-                      if (onSimilarAnnotationsCleanup) {
-                        onSimilarAnnotationsCleanup();
-                      }
-                    }}
-                    title="Close similarity search and clear map"
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      color: '#ccc',
-                      cursor: 'pointer',
-                      padding: '2px',
-                      fontSize: '14px'
-                    }}
-                  >
-                    <i className="fas fa-times"></i>
-                  </button>
-                </div>
-              </div>
-              
-              <div className="similarity-results-content">
-                {isSearching ? (
-                  <div className="similarity-loading">
-                    <i className="fas fa-spinner fa-spin"></i>
-                    <div>Searching for similar annotations...</div>
-                  </div>
-                ) : similarityResults.length > 0 ? (
-                  <div className="similarity-results-list">
-                    {similarityResults.map((result, index) => {
-                      const props = result.properties || result;
-                      const metadata = props.metadata || '';
-                      
-                      let parsedMetadata = {};
-                      if (typeof metadata === 'string') {
-                        try {
-                          parsedMetadata = JSON.parse(metadata);
-                        } catch {
-                          try {
-                            const jsonString = metadata
-                              .replace(/'/g, '"')
-                              .replace(/True/g, 'true')
-                              .replace(/False/g, 'false')
-                              .replace(/None/g, 'null');
-                            parsedMetadata = JSON.parse(jsonString);
-                          } catch (error) {
-                            console.error('Both JSON and Python dict parsing failed:', error);
-                            parsedMetadata = { raw: metadata };
-                          }
-                        }
-                      } else {
-                        parsedMetadata = metadata;
-                      }
-                      
-                      return (
-                        <div key={index} className="similarity-result-item-embedded">
-                          {/* Preview Image */}
-                          {props.preview_image && (
-                            <img 
-                              src={`data:image/png;base64,${props.preview_image}`} 
-                              alt="Preview" 
-                              className="similarity-preview-image-small"
-                            />
-                          )}
-                          
-                          {/* Content */}
-                          <div className="similarity-result-content-embedded">
-                            <div className="similarity-result-title-embedded">
-                              {props.description || 'No description'}
-                            </div>
-                            <div className="similarity-result-id-embedded">
-                              {props.image_id || 'Unknown'}
-                            </div>
-                            {parsedMetadata && Object.keys(parsedMetadata).length > 0 && (
-                              <div className="similarity-result-metadata-embedded">
-                                <strong>Well:</strong> {parsedMetadata.well_id || 'Unknown'}
-                                {(parsedMetadata.polygon_wkt || parsedMetadata.bbox) && (
-                                  <> - {extractCoordinate(parsedMetadata)}</>
-                                )}
-                                <br/>
-                                <strong>Type:</strong> {parsedMetadata.annotation_type || 'Unknown'}<br/>
-                                {parsedMetadata.timestamp && (
-                                  <>
-                                    <strong>Time:</strong> {new Date(parsedMetadata.timestamp).toLocaleString()}<br/>
-                                  </>
-                                )}
-                              </div>
-                            )}
-                            {result.metadata?.score && (
-                              <div className="similarity-result-score-embedded">
-                                Similarity: {(result.metadata.score * 100).toFixed(1)}%
-                              </div>
-                            )}
-                            
-                            {/* Go to button */}
-                            {navigateToCoordinates && parsedMetadata && (parsedMetadata.polygon_wkt || parsedMetadata.bbox) && (
-                              <div className="similarity-result-actions-embedded" style={{ marginTop: '8px' }}>
-                                <button
-                                  onClick={() => {
-                                    // Extract well-relative coordinates from metadata
-                                    let wellRelativeX, wellRelativeY;
-                                    
-                                    if (parsedMetadata.polygon_wkt) {
-                                      // For polygon annotations, get the first coordinate
-                                      const match = parsedMetadata.polygon_wkt.match(/POLYGON\(\(([^)]+)\)\)/);
-                                      if (match && match[1]) {
-                                        const firstCoord = match[1].split(',')[0].trim();
-                                        const [x, y] = firstCoord.split(' ').map(coord => parseFloat(coord));
-                                        wellRelativeX = x;
-                                        wellRelativeY = y;
-                                      }
-                                    } else if (parsedMetadata.bbox && Array.isArray(parsedMetadata.bbox)) {
-                                      // For bbox annotations, use the center of the bounding box
-                                      const [x, y, width, height] = parsedMetadata.bbox;
-                                      wellRelativeX = x + width / 2;
-                                      wellRelativeY = y + height / 2;
-                                    }
-                                    
-                                    if (wellRelativeX !== undefined && wellRelativeY !== undefined && parsedMetadata.well_id) {
-                                      // Get well information - try similarAnnotationWellMap first, then use getWellInfoById
-                                      let wellInfo = similarAnnotationWellMap[parsedMetadata.well_id];
-                                      
-                                      // If not in similarAnnotationWellMap, try to get it dynamically
-                                      if (!wellInfo && getWellInfoById) {
-                                        wellInfo = getWellInfoById(parsedMetadata.well_id);
-                                      }
-                                      
-                                      if (wellInfo) {
-                                        // Convert well-relative coordinates to stage coordinates
-                                        const stageX = wellInfo.centerX + wellRelativeX;
-                                        const stageY = wellInfo.centerY + wellRelativeY;
-                                        
-                                        console.log(`✅ Navigating to well-relative coords (${wellRelativeX.toFixed(3)}, ${wellRelativeY.toFixed(3)}) in well ${parsedMetadata.well_id}`);
-                                        console.log(`✅ Well center: (${wellInfo.centerX.toFixed(3)}, ${wellInfo.centerY.toFixed(3)})`);
-                                        console.log(`✅ Stage coords: (${stageX.toFixed(3)}, ${stageY.toFixed(3)})`);
-                                        
-                                        // Automatically show similar annotations on map if not already shown
-                                        if (onSimilarAnnotationsUpdate && similarityResults.length > 0 && similarAnnotations.length === 0) {
-                                          console.log('🗺️ Auto-triggering similar annotations render on map');
-                                          onSimilarAnnotationsUpdate(similarityResults);
-                                        }
-                                        
-                                        // Navigate to the coordinates while preserving current zoom level
-                                        navigateToCoordinates(stageX, stageY, currentZoomLevel, currentScaleLevel);
-                                      } else {
-                                        console.warn(`❌ No well info found for well ${parsedMetadata.well_id}`);
-                                        console.warn(`Available wells in similarAnnotationWellMap:`, Object.keys(similarAnnotationWellMap));
-                                      }
-                                    }
-                                  }}
-                                  className="similarity-go-to-btn"
-                                  style={{
-                                    backgroundColor: '#059669',
-                                    color: 'white',
-                                    border: '1px solid #10b981',
-                                    padding: '4px 8px',
-                                    borderRadius: '4px',
-                                    fontSize: '10px',
-                                    cursor: 'pointer',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '4px',
-                                    fontWeight: '500',
-                                    transition: 'background-color 0.2s'
-                                  }}
-                                  onMouseEnter={(e) => {
-                                    e.target.style.backgroundColor = '#047857';
-                                  }}
-                                  onMouseLeave={(e) => {
-                                    e.target.style.backgroundColor = '#059669';
-                                  }}
-                                  title="Go to this annotation on the map"
-                                >
-                                  <i className="fas fa-map-marker-alt"></i>
-                                  Go to
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="similarity-empty-embedded">
-                    <i className="fas fa-search"></i>
-                    <h4>No Similar Annotations Found</h4>
-                    <p>Try creating more annotations or check if the current annotation has embeddings.</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
 
           {/* Actions */}
           <div className="annotation-section">
@@ -1598,7 +1528,7 @@ const AnnotationPanel = ({
   );
 };
 
-AnnotationPanel.propTypes = {
+SimilaritySearchPanel.propTypes = {
   isDrawingMode: PropTypes.bool.isRequired,
   setIsDrawingMode: PropTypes.func.isRequired,
   currentTool: PropTypes.string.isRequired,
@@ -1616,7 +1546,7 @@ AnnotationPanel.propTypes = {
   onClearAllAnnotations: PropTypes.func.isRequired,
   onExportAnnotations: PropTypes.func.isRequired,
   wellInfoMap: PropTypes.object, // Map of annotation IDs to well information
-  similarAnnotationWellMap: PropTypes.object, // Map of well IDs to well information for similar annotations
+  similarityResultsWellMap: PropTypes.object, // Map of well IDs to well information for similarity results
   getWellInfoById: PropTypes.func, // Function to get well info by well ID
   embeddingStatus: PropTypes.object, // Map of annotation IDs to embedding status
   mapScale: PropTypes.object, // Current map scale for image extraction
@@ -1638,13 +1568,13 @@ AnnotationPanel.propTypes = {
   // Map browsing state
   isMapBrowsingMode: PropTypes.bool,
   setIsMapBrowsingMode: PropTypes.func,
-  // Similar annotation map rendering
-  onSimilarAnnotationsUpdate: PropTypes.func,
-  // Similar annotations state and controls
-  similarAnnotations: PropTypes.array,
-  showSimilarAnnotations: PropTypes.bool,
-  setShowSimilarAnnotations: PropTypes.func,
-  onSimilarAnnotationsCleanup: PropTypes.func,
+  // Similarity results map rendering
+  onSimilarityResultsUpdate: PropTypes.func,
+  // Similarity results state and controls
+  similarityResults: PropTypes.array,
+  showSimilarityResults: PropTypes.bool,
+  setShowSimilarityResults: PropTypes.func,
+  onSimilarityResultsCleanup: PropTypes.func,
   // Navigation functions
   navigateToCoordinates: PropTypes.func,
   goBackToPreviousPosition: PropTypes.func,
@@ -1654,7 +1584,17 @@ AnnotationPanel.propTypes = {
   // Layer activation props
   activeLayer: PropTypes.string,
   layers: PropTypes.array,
-  experiments: PropTypes.array
+  experiments: PropTypes.array,
+  // Similarity search handler
+  onFindSimilar: PropTypes.func,
+  // Similarity search results props
+  showSimilarityPanel: PropTypes.bool,
+  similaritySearchResults: PropTypes.array,
+  isSearching: PropTypes.bool,
+  searchType: PropTypes.string,
+  textSearchQuery: PropTypes.string,
+  setShowSimilarityPanel: PropTypes.func,
+  setSimilaritySearchResults: PropTypes.func
 };
 
-export default AnnotationPanel;
+export default SimilaritySearchPanel;

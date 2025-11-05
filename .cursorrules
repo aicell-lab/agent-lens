@@ -156,16 +156,15 @@ const chunkUrl = `${baseUrl}${channel}/scale${scale}/${y}.zip?path=${x}`;
 ### 3.1. File Organization
 ```
 agent_lens/                 # Main Python package
-├── __main__.py            # Entry point with CLI argument parsing
-├── log.py                 # Logging configuration
+├── __init__.py           # Package initialization
+├── __main__.py           # Entry point with CLI argument parsing
+├── log.py                # Logging configuration
 ├── register_frontend_service.py  # Frontend ASGI service registration
-├── register_similarity_search_service.py  # Similarity search service
-├── utils/                 # Utility modules
-│   ├── artifact_manager.py    # Data storage and Zarr tile management
-│   ├── register_sam_service.py  # SAM segmentation service registration
-│   └── weaviate_search.py     # Similarity search utilities
+└── utils/                # Utility modules
+    ├── artifact_manager.py    # Data storage and Zarr tile management
+    └── weaviate_search.py     # Similarity search utilities
 
-tests/                     # Pytest test files (project root level)
+tests/                     # Test suite (project root level)
 ├── test-frontend-components/  # Frontend component tests
 │   ├── README.md                           # Test documentation
 │   ├── run_tests.js                        # Main test runner
@@ -179,46 +178,49 @@ tests/                     # Pytest test files (project root level)
 ├── test_frontend_service.py  # Frontend service tests (Playwright)
 ├── test_frontend_integration.js  # Frontend integration tests
 ├── test_artifact_zarr_loader.js  # Artifact Zarr loader tests
-└── run_js_tests.sh       # JavaScript test runner script
+├── run_js_tests.sh       # JavaScript test runner script
+└── package.json          # JavaScript test dependencies
 
 frontend/                  # React application
+├── index.html            # HTML entry point
 ├── main.jsx              # Root React component
 ├── main.css              # Global styles with input validation CSS classes
+├── vite.config.mjs       # Vite build configuration
+├── package.json          # Frontend dependencies and scripts
 ├── components/           # Reusable UI components
-│   ├── annotation/       # Image annotation system
+│   ├── similarity_search/       # Similarity search and annotation system
 │   │   ├── AnnotationCanvas.jsx      # Canvas for drawing annotations
 │   │   ├── AnnotationDetailsWindow.jsx  # Annotation details modal
-│   │   ├── AnnotationPanel.css       # Annotation panel styles
-│   │   ├── AnnotationPanel.jsx       # Main annotation control panel
-│   │   └── SimilarAnnotationRenderer.jsx  # Similar annotation rendering
-│   ├── microscope/       # Microscope-specific components
-│   │   ├── controls/     # Microscope control interfaces
-│   │   │   ├── NormalScanConfig.css  # Normal scan configuration styles
-│   │   │   ├── NormalScanConfig.jsx  # Normal scan configuration panel
-│   │   │   ├── QuickScanConfig.css   # Quick scan configuration styles
-│   │   │   └── QuickScanConfig.jsx   # Quick scan configuration panel
-│   │   └── map/          # Microscope map and data visualization
-│   │       ├── ExperimentZarrManager.jsx     # OME-Zarr experiment data management
-│   │       ├── LayerPanel.css               # Layer panel styles
-│   │       ├── LayerPanel.jsx               # Layer control panel
-│   │       ├── README_TileProcessingManager.md  # Tile processing documentation
-│   │       └── TileProcessingManager.jsx    # Tile processing and caching
+│   │   ├── SimilaritySearchPanel.css  # Similarity search panel styles
+│   │   ├── SimilaritySearchPanel.jsx  # Main similarity search control panel
+│   │   ├── SimilarityResultInfoWindow.jsx  # Similarity result info window
+│   │   ├── SimilarityResultsRenderer.jsx  # Similar annotation rendering
+│   │   └── SimilarAnnotationRenderer.jsx  # Similar annotation rendering (legacy)
+│   ├── microscope_acquisition/  # Scan configuration and task management
+│   │   ├── NormalScanConfig.css  # Normal scan configuration styles
+│   │   ├── NormalScanConfig.jsx  # Normal scan configuration panel
+│   │   ├── QuickScanConfig.css   # Quick scan configuration styles
+│   │   ├── QuickScanConfig.jsx   # Quick scan configuration panel
+│   │   ├── ImagingTasksModal.css # Imaging tasks modal styles
+│   │   └── ImagingTasksModal.jsx # Time-lapse imaging task management
+│   ├── map_visualization/       # Data viewing and display
+│   │   ├── ExperimentZarrManager.jsx     # OME-Zarr experiment data management
+│   │   ├── LayerPanel.css               # Layer panel styles
+│   │   ├── LayerPanel.jsx               # Layer control panel
+│   │   ├── MicroscopeMapDisplay.css      # Microscope map display styles
+│   │   ├── MicroscopeMapDisplay.jsx      # Main microscope map visualization
+│   │   ├── README_TileProcessingManager.md  # Tile processing documentation
+│   │   └── TileProcessingManager.jsx    # Tile processing and caching
 │   ├── CameraSettings.jsx        # Camera configuration component
 │   ├── ChannelSettings.jsx       # Channel configuration component
 │   ├── ChatbotButton.jsx         # AI chatbot interface button
 │   ├── ControlButton.jsx         # Generic control button component
 │   ├── DualRangeSlider.jsx       # Dual range slider component
 │   ├── ImageJPanel.jsx           # ImageJ integration panel
-│   ├── ImageSearchPanel.css      # Image search panel styles
-│   ├── ImageSearchPanel.jsx      # Image similarity search interface
-│   ├── ImagingTasksModal.css     # Imaging tasks modal styles
-│   ├── ImagingTasksModal.jsx     # Time-lapse imaging task management
 │   ├── IncubatorControl.jsx      # Automated incubator control
 │   ├── LoginPrompt.jsx           # User authentication prompt
 │   ├── LogSection.jsx            # System logs display
 │   ├── MicroscopeControlPanel.jsx    # Main microscope control interface
-│   ├── MicroscopeMapDisplay.css      # Microscope map display styles
-│   ├── MicroscopeMapDisplay.jsx      # Main microscope map visualization
 │   ├── Notification.jsx              # User notification system
 │   ├── SampleSelector.jsx            # Sample management and transfer
 │   ├── Sidebar.css                   # Main sidebar styles
@@ -229,8 +231,11 @@ frontend/                  # React application
 │   ├── annotationUtils.js     # Annotation utility functions
 │   └── previewImageUtils.js   # Image preview utilities
 ├── utils.jsx            # Utility functions, service connections, and input validation
-├── package.json         # Frontend dependencies and scripts
-└── vite.config.mjs      # Vite build configuration
+└── favicon/              # Application icons and metadata
+    ├── apple-touch-icon.png
+    ├── favicon.ico
+    ├── favicon.svg
+    └── [other icon files]
 
 docker/                   # Containerization
 ├── docker-compose-agent-lens-app.yml  # Main application compose
@@ -242,13 +247,21 @@ scripts/                  # Development and deployment scripts
 ├── run_frontend_tests.py # Frontend service test runner
 ├── setup_dev.sh         # Development setup script
 ├── docker_start.sh      # Docker startup script
-└── run_dev.sh           # Development server script
+├── run_dev.sh           # Development server script
+└── test_zarr_loading.js  # Zarr loading test utilities
 
 performance-analysis/     # Performance analysis tools
 ├── README.md            # Performance analysis documentation
 ├── chunk_performance_analysis.js  # Chunk loading performance tests
 ├── server_processing_bottleneck_analysis.js  # Server bottleneck analysis
 └── parallel_curl_test.sh  # Parallel request testing
+
+Root files:
+├── pyproject.toml       # Python project configuration and dependencies
+├── package-lock.json    # NPM dependency lock file
+├── LICENSE              # MIT License
+├── README.md            # Project documentation
+└── eslint.config.mjs    # ESLint configuration
 ```
 
 ### 3.2. Coding Standards & Best Practices

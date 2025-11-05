@@ -12,10 +12,26 @@ services:
       - REEF_WORKSPACE_TOKEN=${REEF_WORKSPACE_TOKEN}
       - HYPHA_AGENTS_TOKEN=${HYPHA_AGENTS_TOKEN}
       # CLIP models are automatically preloaded in Docker mode for faster similarity search
+      - NVIDIA_VISIBLE_DEVICES=all  # Make GPU visible to container
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility  # Enable GPU compute capabilities
     labels:
       - "autoheal.enable=true"
     volumes:
       - agent-lens-cache:/app/.cache
+    # GPU support: Use runtime for docker-compose, or deploy.resources for docker swarm
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+      restart_policy:
+        condition: on-failure
+        delay: 20s
+        max_attempts: 3
+        window: 120s
     healthcheck:
       test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/agent-lens/services/probes/readiness-agent-lens | jq -e '.status == \"ok\"'"]
       interval: 120s
@@ -24,12 +40,6 @@ services:
       start_period: 120s
     restart: on-failure
     stop_grace_period: 30s
-    deploy:
-      restart_policy:
-        condition: on-failure
-        delay: 20s
-        max_attempts: 3
-        window: 120s
     security_opt:
       - no-new-privileges:true
     cap_drop:

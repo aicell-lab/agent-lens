@@ -1,5 +1,5 @@
 import React from 'react';
-import { useValidatedNumberInput, getInputValidationClasses } from '../../../utils';
+import { useValidatedNumberInput, getInputValidationClasses } from '../../utils';
 import './QuickScanConfig.css';
 
 const QuickScanConfig = ({

@@ -71,7 +71,7 @@ class TileProcessingManagerTest {
   createMockServices() {
     return {
       microscopeControlService: {
-        get_stitched_region: async (centerX, centerY, width_mm, height_mm, wellPlateType, scaleLevel, channel, timepoint, wellPaddingMm, outputFormat) => {
+        get_stitched_region: async (channel) => {
           // Simulate successful response
           return {
             success: true,
@@ -85,7 +85,7 @@ class TileProcessingManagerTest {
         }
       },
       artifactZarrLoader: {
-        getWellRegion: async (wellId, centerX, centerY, width_mm, height_mm, channel, scaleLevel, timepoint, datasetId, outputFormat) => {
+        getWellRegion: async () => {
           // Simulate successful response with proper structure
           return {
             success: true,
@@ -114,7 +114,7 @@ class TileProcessingManagerTest {
       
       const __filename = fileURLToPath(import.meta.url);
       const __dirname = path.dirname(__filename);
-      const tileProcessingManagerPath = path.join(__dirname, '../../frontend/components/microscope/map/TileProcessingManager.jsx');
+      const tileProcessingManagerPath = path.join(__dirname, '../../frontend/components/map_visualization/TileProcessingManager.jsx');
       
       // Read the JSX file and create a JS version for testing
       const jsxContent = fs.readFileSync(tileProcessingManagerPath, 'utf8');
@@ -122,7 +122,14 @@ class TileProcessingManagerTest {
       // Convert JSX to JS by removing React import and changing export
       const jsContent = jsxContent
         .replace(/import React from 'react';/g, '// React import removed for Node.js testing')
-        .replace(/export default new TileProcessingManager\(\);/g, 'export default TileProcessingManager;');
+        .replace(/export default new TileProcessingManager\(\);/g, 'export default TileProcessingManager;')
+        // Replace CHANNEL_COLORS import with inline constant to avoid importing .jsx in Node
+        // Match any import path ending with utils (../../utils, ../../../utils, etc.)
+        // Pattern: matches import { CHANNEL_COLORS } from '../../utils' or similar
+        .replace(
+          /import\s*\{\s*CHANNEL_COLORS\s*\}\s*from\s*['"]\.\.\/(?:\.\.\/)*utils['"];?/,
+          "const CHANNEL_COLORS = {\n  'BF LED matrix full': '#FFFFFF',\n  'Fluorescence 405 nm Ex': '#8000FF',\n  'Fluorescence 488 nm Ex': '#00FF00',\n  'Fluorescence 561 nm Ex': '#FFFF00',\n  'Fluorescence 638 nm Ex': '#FF0000',\n  'Fluorescence 730 nm Ex': '#FF00FF',\n};"
+        );
       
       // Write temporary JS file
       const tempJsPath = path.join(__dirname, 'TileProcessingManager.temp.js');
@@ -140,7 +147,7 @@ class TileProcessingManagerTest {
         fs.unlinkSync(tempJsPath);
       } catch (error) {
         // Clean up temporary file even if import fails
-        try { fs.unlinkSync(tempJsPath); } catch {}
+        try { fs.unlinkSync(tempJsPath); } catch { /* ignore cleanup error */ }
         throw error;
       }
 

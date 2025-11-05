@@ -60,24 +60,28 @@
 }
 
 /* Scrollbar styling for long content */
-.annotation-details-window ::-webkit-scrollbar {
-  width: 6px;
+.annotation-details-window ::-webkit-scrollbar,
+.similarity-result-content ::-webkit-scrollbar {
+  width: 12px;
 }
 
-.annotation-details-window ::-webkit-scrollbar-track {
+.annotation-details-window ::-webkit-scrollbar-track,
+.similarity-result-content ::-webkit-scrollbar-track {
   background: #374151;
-  border-radius: 3px;
+  border-radius: 6px;
 }
 
-.annotation-details-window ::-webkit-scrollbar-thumb {
+.annotation-details-window ::-webkit-scrollbar-thumb,
+.similarity-result-content ::-webkit-scrollbar-thumb {
   background: #6b7280;
-  border-radius: 3px;
+  border-radius: 6px;
 }
 
-.annotation-details-window ::-webkit-scrollbar-thumb:hover {
+.annotation-details-window ::-webkit-scrollbar-thumb:hover,
+.similarity-result-content ::-webkit-scrollbar-thumb:hover {
   background: #9ca3af;
 }
-.annotation-panel {
+.similarity-search-panel {
   background: rgba(0, 0, 0, 0.9);
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 8px;
@@ -90,7 +94,7 @@
 }
 
 /* Header */
-.annotation-panel-header {
+.similarity-search-panel-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -599,23 +603,23 @@
 }
 
 /* Scrollbar Styling */
-.annotation-panel::-webkit-scrollbar,
+.similarity-search-panel::-webkit-scrollbar,
 .annotation-list::-webkit-scrollbar {
   width: 6px;
 }
 
-.annotation-panel::-webkit-scrollbar-track,
+.similarity-search-panel::-webkit-scrollbar-track,
 .annotation-list::-webkit-scrollbar-track {
   background: rgba(255, 255, 255, 0.05);
 }
 
-.annotation-panel::-webkit-scrollbar-thumb,
+.similarity-search-panel::-webkit-scrollbar-thumb,
 .annotation-list::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.2);
   border-radius: 3px;
 }
 
-.annotation-panel::-webkit-scrollbar-thumb:hover,
+.similarity-search-panel::-webkit-scrollbar-thumb:hover,
 .annotation-list::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.3);
 }
@@ -808,7 +812,7 @@
 
 /* Responsive Design */
 @media (max-width: 768px) {
-  .annotation-panel {
+  .similarity-search-panel {
     width: 280px;
     max-height: 500px;
   }

@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import PropTypes from 'prop-types';
+import { isSegmentationExperiment } from '../../utils/segmentationUtils';
 
 /**
  * useExperimentZarrManager - React hook for managing local experiment zarr fileset operations
@@ -93,7 +94,10 @@ const useExperimentZarrManager = ({
     try {
       const result = await microscopeControlService.set_active_experiment(experimentName);
       if (result.success !== false) {
-        if (showNotification) showNotification(`Activated experiment: ${experimentName}`, 'success');
+        // Skip notification for segmentation layers (they're sub-layers, not main experiments)
+        if (showNotification && !isSegmentationExperiment(experimentName)) {
+          showNotification(`Activated experiment: ${experimentName}`, 'success');
+        }
         if (appendLog) appendLog(`Set active experiment: ${experimentName}`);
         await loadExperiments(); // Refresh the list
         if (onExperimentChange) {
