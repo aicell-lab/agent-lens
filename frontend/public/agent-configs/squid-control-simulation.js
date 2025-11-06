@@ -51,15 +51,26 @@ The Python kernel has already been initialized with the following variables avai
    - Channels: 0=Brightfield, 11=405nm, 12=488nm, 13=561nm, 14=638nm, 15=730nm
    - Returns image URL that can be used for analysis
 
-3. **Status & Info:**
-   - Get status: \`await microscope.get_status()\`
-   - Get configuration: \`await microscope.get_microscope_configuration()\`
+3. **Normal Scan (Grid Acquisition):**
+   - Start scan: \`await microscope.scan_start(saved_data_type="full_zarr", action_ID="scan_123", start_x_mm=0.0, start_y_mm=0.0, Nx=5, Ny=5, dx_mm=1.0, dy_mm=1.0, illumination_settings=[{"channel": 0, "exposure_time": 100, "intensity": 50}], wells_to_scan=["A1", "B2"], well_plate_type="96", well_padding_mm=0.5, experiment_name="my_experiment", uploading=True, do_contrast_autofocus=True, do_reflection_af=False, timepoint=0)\`
+   - Parameters: start_x_mm/start_y_mm (grid origin), Nx/Ny (grid size), dx_mm/dy_mm (step size), illumination_settings (list of channel configs), wells_to_scan (optional well list), experiment_name (for data organization), uploading (auto-upload to artifact manager), do_contrast_autofocus/do_reflection_af (autofocus options)
+   - Returns: {"success": True, ...} - Check scan_status in get_status() for progress (state: "idle"/"running"/"completed"/"failed")
 
-4. **Autofocus:**
+4. **Status:**
+   - Get status: \`await microscope.get_status()\`
+     Returns: Dict with current_x, current_y, current_z (positions in mm), is_illumination_on, current_channel, scan_status (state, saved_data_type, error_message), and intensity/exposure pairs for each channel
+
+5. **Autofocus:**
    - Contrast autofocus: \`await microscope.contrast_autofocus()\`
    - Reflection autofocus: \`await microscope.reflection_autofocus()\`
 
-5. **Similarity Search (REST API):**
+6. **Vision Inspection:**
+   The microscope is equipped with a vision-inspection tool that allows the AI to visually analyze captured images.
+   - Inspect images: \`await microscope.inspect_tool(images=[{"http_url": image_url, "title": "brightfield_view"}], query="How confluent are these cells?", context_description="Microscope brightfield image")\`
+   - Use cases: Assess cell morphology/confluency, detect focus/illumination issues, describe phenotypes/anomalies, answer questions about captured images
+   - Example: After capturing an image, use inspect_tool to analyze it: \`image_url = await microscope.snap(channel=0); result = await microscope.inspect_tool(images=[{"http_url": image_url, "title": "sample"}], query="Are these cells healthy?", context_description="Live cell culture")\`
+
+7. **Similarity Search (REST API):**
    Use Python requests or aiohttp to make HTTP calls. The \`base_url\` variable is automatically injected by the frontend.
    Example:
    \`\`\`python
