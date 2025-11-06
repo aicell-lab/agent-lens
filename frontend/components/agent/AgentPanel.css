@@ -396,31 +396,31 @@
 }
 
 .code-cell-editor-wrapper {
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 }
 
 .code-cell-toolbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 12px;
+  padding: 4px 8px;
   background: #f9fafb;
   border: 1px solid #e5e7eb;
   border-bottom: none;
-  border-radius: 6px 6px 0 0;
+  border-radius: 4px 4px 0 0;
 }
 
 .code-cell-info {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .code-language-badge {
-  padding: 2px 8px;
+  padding: 1px 6px;
   background: #e5e7eb;
-  border-radius: 4px;
-  font-size: 11px;
+  border-radius: 3px;
+  font-size: 9px;
   font-weight: 500;
   color: #6b7280;
   text-transform: uppercase;
@@ -432,14 +432,14 @@
 }
 
 .cell-action-button {
-  padding: 4px 8px;
+  padding: 2px 6px;
   border: none;
   background: transparent;
   color: #6b7280;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: 3px;
   transition: all 0.2s ease;
-  font-size: 12px;
+  font-size: 10px;
 }
 
 .cell-action-button:hover {
@@ -476,31 +476,31 @@
 
 .code-cell-editor {
   border: 1px solid #e5e7eb;
-  border-radius: 0 0 6px 6px;
+  border-radius: 0 0 4px 4px;
   overflow: hidden;
 }
 
 .code-cell-collapsed {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
+  gap: 6px;
+  padding: 4px 8px;
   background: #f9fafb;
   border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  margin-bottom: 8px;
+  border-radius: 4px;
+  margin-bottom: 4px;
 }
 
 .show-code-button {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
+  gap: 4px;
+  padding: 2px 6px;
   border: none;
   background: transparent;
   color: #6b7280;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 10px;
 }
 
 .show-code-button:hover {
@@ -510,13 +510,13 @@
 }
 
 .execution-counter-inline {
-  font-size: 12px;
+  font-size: 10px;
   color: #6b7280;
   font-weight: 500;
 }
 
 .code-cell-output-wrapper {
-  margin-top: 8px;
+  margin-top: 4px;
 }
 
 /* Cell operations toolbar */
@@ -565,33 +565,33 @@
 
 .execution-counter {
   display: inline-block;
-  padding: 2px 8px;
-  margin-bottom: 8px;
+  padding: 1px 6px;
+  margin-bottom: 4px;
   background: #e5e7eb;
-  border-radius: 4px;
-  font-size: 12px;
+  border-radius: 3px;
+  font-size: 10px;
   color: #6b7280;
   font-weight: 500;
 }
 
 /* Jupyter Output Styles */
 .jupyter-output-container {
-  padding: 12px;
+  padding: 6px 8px;
   background: #f9fafb;
   border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  max-height: 600px;
+  border-radius: 4px;
+  max-height: 400px;
   overflow-y: auto;
 }
 
 .output-text-group,
 .output-html-group,
 .output-image-group {
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 }
 
 .output-item {
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 }
 
 .output-item:last-child {
@@ -602,12 +602,19 @@
   position: relative;
 }
 
+.output-text {
+  font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  margin: 0;
+}
+
 .output-line,
 .output-multiline {
   margin: 0;
   font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .ansi-processed {
@@ -627,14 +634,14 @@
 }
 
 .output-expand-button {
-  margin-top: 8px;
-  padding: 4px 8px;
+  margin-top: 4px;
+  padding: 2px 6px;
   background: #e5e7eb;
   border: none;
-  border-radius: 4px;
+  border-radius: 3px;
   color: #6b7280;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 10px;
   transition: all 0.2s ease;
 }
 
@@ -644,11 +651,11 @@
 }
 
 .output-html {
-  margin: 8px 0;
+  margin: 4px 0;
 }
 
 .output-image {
-  margin: 8px 0;
+  margin: 4px 0;
   text-align: center;
 }
 
@@ -660,25 +667,17 @@
 }
 
 .output-svg {
-  margin: 8px 0;
+  margin: 4px 0;
 }
 
 .output-rendered-dom {
-  margin: 8px 0;
-}
-
-.output-item {
-  margin-bottom: 8px;
-}
-
-.output-item:last-child {
-  margin-bottom: 0;
+  margin: 4px 0;
 }
 
 .output-stdout,
 .output-stderr {
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: 11px;
+  line-height: 1.4;
   white-space: pre-wrap;
   word-wrap: break-word;
   margin: 0;
@@ -695,12 +694,12 @@
 .execution-status {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  margin-top: 8px;
+  gap: 6px;
+  padding: 4px 8px;
+  margin-top: 4px;
   background: #fef3c7;
-  border-radius: 6px;
-  font-size: 13px;
+  border-radius: 4px;
+  font-size: 10px;
   color: #92400e;
 }
 

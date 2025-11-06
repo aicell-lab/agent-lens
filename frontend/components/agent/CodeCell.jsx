@@ -29,7 +29,7 @@ const CodeCell = ({
   isReady = false
 }) => {
   const [codeValue, setCodeValue] = useState(code);
-  const [editorHeight, setEditorHeight] = useState(120);
+  const [editorHeight, setEditorHeight] = useState(80);
   const editorRef = useRef(null);
 
   // Update local value when prop changes
@@ -69,7 +69,7 @@ const CodeCell = ({
     editor.updateOptions({
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
-      fontSize: 13,
+      fontSize: 11,
       lineNumbers: 'on',
       wordWrap: 'on',
       automaticLayout: true
@@ -78,7 +78,7 @@ const CodeCell = ({
     // Auto-resize editor
     const updateHeight = () => {
       const lineCount = editor.getModel().getLineCount();
-      const newHeight = Math.max(120, Math.min(lineCount * 20 + 20, 600));
+      const newHeight = Math.max(80, Math.min(lineCount * 16 + 16, 400));
       setEditorHeight(newHeight);
     };
 
@@ -145,13 +145,6 @@ const CodeCell = ({
                   <i className="fas fa-play"></i>
                 </button>
               )}
-              <button
-                onClick={handleToggleCodeVisibility}
-                className="cell-action-button toggle-button"
-                title="Hide code"
-              >
-                <i className="fas fa-eye-slash"></i>
-              </button>
               {output && output.length > 0 && (
                 <button
                   onClick={handleToggleOutputVisibility}
@@ -174,7 +167,7 @@ const CodeCell = ({
               options={{
                 minimap: { enabled: false },
                 scrollBeyondLastLine: false,
-                fontSize: 13,
+                fontSize: 11,
                 lineNumbers: 'on',
                 wordWrap: 'on',
                 automaticLayout: true,
@@ -197,6 +190,7 @@ const CodeCell = ({
           <button
             onClick={handleToggleCodeVisibility}
             className="show-code-button"
+            title="Show code"
           >
             <i className="fas fa-code"></i>
             <span>Show code</span>
