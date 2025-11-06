@@ -117,8 +117,8 @@ function extractScript(script) {
 export async function* chatCompletion({
   messages,
   systemPrompt = '',
-  model = 'gpt-4o',
-  temperature = 0.7,
+  model = 'gpt-5',
+  temperature = 1,
   onExecuteCode,
   onMessage,
   onStreaming,

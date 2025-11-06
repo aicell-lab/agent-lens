@@ -210,13 +210,32 @@
 }
 
 .thinking-content {
-  padding-left: 24px;
-  line-height: 1.6;
+  padding-left: 20px;
+  line-height: 1.5;
+  font-size: 13px;
 }
 
 .thinking-content .thinking-paragraph {
-  margin: 8px 0;
+  margin: 6px 0;
 }
+
+.thinking-content h1,
+.thinking-content h2,
+.thinking-content h3,
+.thinking-content h4,
+.thinking-content h5,
+.thinking-content h6 {
+  margin: 8px 0 4px 0;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.thinking-content h1 { font-size: 1.15em; }
+.thinking-content h2 { font-size: 1.1em; }
+.thinking-content h3 { font-size: 1.05em; }
+.thinking-content h4 { font-size: 1.0em; }
+.thinking-content h5 { font-size: 0.95em; }
+.thinking-content h6 { font-size: 0.9em; }
 
 .thinking-content code {
   background: #f3f4f6;
@@ -229,10 +248,11 @@
 .thinking-content .code-block {
   background: #f9fafb;
   border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  padding: 12px;
-  margin: 12px 0;
+  border-radius: 4px;
+  padding: 8px;
+  margin: 8px 0;
   overflow-x: auto;
+  font-size: 11px;
 }
 
 .thinking-stop-button {
@@ -254,16 +274,18 @@
 
 /* Markdown cell */
 .markdown-cell {
-  line-height: 1.6;
+  line-height: 1.5;
   color: #374151;
+  font-size: 13px;
 }
 
 .markdown-content {
-  padding: 12px 0;
+  padding: 8px 0;
+  font-size: 13px;
 }
 
 .markdown-content p {
-  margin: 0 0 12px 0;
+  margin: 0 0 8px 0;
 }
 
 .markdown-content p:last-child {
@@ -276,23 +298,26 @@
 .markdown-content h4,
 .markdown-content h5,
 .markdown-content h6 {
-  margin: 16px 0 8px 0;
+  margin: 8px 0 4px 0;
   font-weight: 600;
-  line-height: 1.25;
+  line-height: 1.3;
 }
 
-.markdown-content h1 { font-size: 1.5em; }
-.markdown-content h2 { font-size: 1.3em; }
-.markdown-content h3 { font-size: 1.1em; }
+.markdown-content h1 { font-size: 1.15em; }
+.markdown-content h2 { font-size: 1.1em; }
+.markdown-content h3 { font-size: 1.05em; }
+.markdown-content h4 { font-size: 1.0em; }
+.markdown-content h5 { font-size: 0.95em; }
+.markdown-content h6 { font-size: 0.9em; }
 
 .markdown-content ul,
 .markdown-content ol {
-  margin: 8px 0;
-  padding-left: 24px;
+  margin: 6px 0;
+  padding-left: 20px;
 }
 
 .markdown-content li {
-  margin: 4px 0;
+  margin: 2px 0;
 }
 
 .markdown-content code {
@@ -307,10 +332,11 @@
 .markdown-content .code-block {
   background: #f9fafb;
   border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  padding: 12px;
-  margin: 12px 0;
+  border-radius: 4px;
+  padding: 8px;
+  margin: 8px 0;
   overflow-x: auto;
+  font-size: 11px;
 }
 
 .markdown-content .code-block code {
@@ -329,11 +355,12 @@
 }
 
 .markdown-content blockquote {
-  border-left: 4px solid #3b82f6;
-  padding-left: 16px;
-  margin: 12px 0;
+  border-left: 3px solid #3b82f6;
+  padding-left: 12px;
+  margin: 8px 0;
   color: #6b7280;
   font-style: italic;
+  font-size: 0.95em;
 }
 
 .markdown-content a {
@@ -347,7 +374,7 @@
 
 .markdown-content .table-wrapper {
   overflow-x: auto;
-  margin: 12px 0;
+  margin: 8px 0;
 }
 
 .markdown-content .markdown-table {
@@ -358,9 +385,10 @@
 
 .markdown-content .markdown-table th,
 .markdown-content .markdown-table td {
-  padding: 8px 12px;
+  padding: 4px 8px;
   border: 1px solid #e5e7eb;
   text-align: left;
+  font-size: 0.9em;
 }
 
 .markdown-content .markdown-table th {

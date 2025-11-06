@@ -249,7 +249,7 @@ const AgentPanel = ({
         messages: history,
         systemPrompt: systemPrompt, // System prompt extracted from system cell
         model: getOpenAIModel(),
-        temperature: 0.7,
+        temperature: 1,
         baseURL: getOpenAIBaseURL(),
         apiKey: getOpenAIApiKey(),
         maxSteps: 10,

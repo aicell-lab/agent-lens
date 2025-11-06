@@ -26,7 +26,7 @@ This directory contains JavaScript integration tests for connecting agent-lens t
    
    # LLM Configuration for Chat Completion
    OPENAI_API_KEY=your_openai_api_key_here
-   LLM_MODEL=gpt-4o
+   LLM_MODEL=gpt-5
    
    # Optional: Custom LLM Base URL (for local models or other providers)
    # LLM_BASE_URL=https://api.openai.com/v1/

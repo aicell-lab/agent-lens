@@ -27,11 +27,11 @@ export function getOpenAIBaseURL() {
 
 /**
  * Get OpenAI model from localStorage
- * @returns {string} Model name or default 'gpt-4o'
+ * @returns {string} Model name or default 'gpt-5'
  */
 export function getOpenAIModel() {
-  if (typeof window === 'undefined') return 'gpt-4o';
-  return localStorage.getItem(STORAGE_MODEL_KEY) || 'gpt-4o';
+  if (typeof window === 'undefined') return 'gpt-5';
+  return localStorage.getItem(STORAGE_MODEL_KEY) || 'gpt-5';
 }
 
 /**

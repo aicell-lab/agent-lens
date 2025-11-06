@@ -12,7 +12,8 @@ const STORAGE_MODEL_KEY = 'agent_lens_openai_model';
 
 // Available OpenAI models
 const AVAILABLE_MODELS = [
-  { value: 'gpt-4o', label: 'GPT-4o (Latest)' },
+  { value: 'gpt-5', label: 'GPT-5 (Latest)' },
+  { value: 'gpt-4o', label: 'GPT-4o' },
   { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
   { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
   { value: 'gpt-4', label: 'GPT-4' },
@@ -21,14 +22,14 @@ const AVAILABLE_MODELS = [
 const AgentSettings = ({ isOpen, onClose }) => {
   const [apiKey, setApiKey] = useState('');
   const [baseURL, setBaseURL] = useState('https://api.openai.com/v1/');
-  const [model, setModel] = useState('gpt-4o');
+  const [model, setModel] = useState('gpt-5');
   const [showKey, setShowKey] = useState(false);
 
   // Load settings from localStorage on mount
   useEffect(() => {
     const savedKey = localStorage.getItem(STORAGE_KEY) || '';
     const savedBaseURL = localStorage.getItem(STORAGE_BASE_URL_KEY) || 'https://api.openai.com/v1/';
-    const savedModel = localStorage.getItem(STORAGE_MODEL_KEY) || 'gpt-4o';
+    const savedModel = localStorage.getItem(STORAGE_MODEL_KEY) || 'gpt-5';
     setApiKey(savedKey);
     setBaseURL(savedBaseURL);
     setModel(savedModel);
@@ -46,7 +47,7 @@ const AgentSettings = ({ isOpen, onClose }) => {
   const handleClear = () => {
     setApiKey('');
     setBaseURL('https://api.openai.com/v1/');
-    setModel('gpt-4o');
+    setModel('gpt-5');
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(STORAGE_BASE_URL_KEY);
     localStorage.removeItem(STORAGE_MODEL_KEY);
@@ -140,7 +141,7 @@ const AgentSettings = ({ isOpen, onClose }) => {
               ))}
             </select>
             <p className="agent-settings-help">
-              Choose the OpenAI model to use for agent interactions. GPT-4o is recommended for best performance.
+              Choose the OpenAI model to use for agent interactions. GPT-5 is recommended for best performance.
             </p>
           </div>
         </div>
