@@ -69,10 +69,44 @@ The Python kernel has already been initialized with the following variables avai
    - Reflection autofocus: \`await microscope.reflection_autofocus()\`
 
 5. **Similarity Search (REST API):**
-   - Get current application: GET /agent-lens/apps/agent-lens/similarity/current-application
-   - Search by text: /agent-lens/apps/agent-lens/similarity/search/text?query_text=dark%20cells&limit=10
-   - Search by UUID: /agent-lens/apps/agent-lens/similarity/search/text?query_text=uuid:%20abc-123-def&limit=10
-   - Note: Application ID is set automatically when embeddings are reset in the UI
+   Use Python requests or aiohttp to make HTTP calls. The \`base_url\` variable is automatically injected by the frontend.
+   Example:
+   \`\`\`python
+   import requests
+   # base_url is already set (injected by frontend)
+   # Example: https://hypha.aicell.io/agent-lens/apps/agent-lens/similarity
+   
+   **Search Endpoints (application_id optional - uses current active app):**
+   - Get current application: GET {base_url}/current-application
+     Example: \`response = requests.get(f"{base_url}/current-application")\`
+     Returns: {"success": True, "application_id": "...", "collection_name": "Agentlens"}
+   
+   - Search by text: POST {base_url}/search/text?query_text=dark%20cells&limit=10
+     Example: \`response = requests.post(f"{base_url}/search/text", params={"query_text": "dark cells", "limit": 10})\`
+     Returns: {"success": True, "results": [...], "query": "...", "query_type": "text", "count": N}
+     Each result contains: image_id, description, metadata, preview_image, similarity_score, etc.
+   
+   - Search by UUID: POST {base_url}/search/text?query_text=uuid:%20abc-123-def&limit=10
+     Example: \`response = requests.post(f"{base_url}/search/text", params={"query_text": "uuid: abc-123-def", "limit": 10})\`
+     Returns: {"success": True, "results": [...], "query": "...", "query_type": "uuid", "uuid": "...", "count": N}
+     Finds similar annotations to the one with the given UUID
+   
+   - Search by image: POST {base_url}/search/image (multipart/form-data with image file)
+     Example: \`with open("image.png", "rb") as f: response = requests.post(f"{base_url}/search/image", files={"image": f})\`
+     Returns: {"success": True, "results": [...], "count": N}
+   
+   **Fetch & List Endpoints (require application_id parameter):**
+   - Fetch all annotations: GET {base_url}/fetch-all?application_id=experiment-123&limit=1000
+     Example: \`response = requests.get(f"{base_url}/fetch-all", params={"application_id": "experiment-123", "limit": 1000})\`
+     Returns: {"success": True, "annotations": [...], "total": N}
+     Gets all annotations for a specific application/experiment
+   
+   - List applications: GET {base_url}/list-applications?prefix=experiment&limit=1000
+     Example: \`response = requests.get(f"{base_url}/list-applications", params={"prefix": "experiment", "limit": 1000})\`
+     Returns: {"success": True, "applications": [...], "total": N}
+     Lists all annotation applications, optionally filtered by prefix
+   
+   **Note:** The \`base_url\` variable is automatically set by the frontend based on the current environment. Application ID is set automatically when embeddings are reset in the UI. For search endpoints, you can omit application_id to use the current active application.
 
 **Safety Guidelines:**
 1. Always check current status before moving

@@ -38,6 +38,43 @@ function injectToken(code, token) {
 }
 
 /**
+ * Get the similarity search base URL based on current window location
+ * @returns {string} - Base URL for similarity search endpoints
+ */
+function getSimilarityBaseUrl() {
+  // Determine service ID based on URL (same logic as used in SimilaritySearchPanel)
+  const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
+  
+  // Construct base URL: origin + pathname + /apps/{serviceId}/similarity
+  const baseUrl = `${window.location.origin}${window.location.pathname.replace(/\/$/, '')}/apps/${serviceId}/similarity`;
+  return baseUrl;
+}
+
+/**
+ * Inject base_url variable into Python code for similarity search API
+ * @param {string} code - Python code string
+ * @returns {string} - Code with base_url variable injected
+ */
+function injectBaseUrl(code) {
+  const escapedBaseUrl = getSimilarityBaseUrl().replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  
+  // Replace existing base_url if present
+  if (code.includes('base_url =')) {
+    return code.replace(/base_url\s*=\s*["'][^"']*["']/g, `base_url = "${escapedBaseUrl}"`);
+  }
+  
+  // Inject after server connection (standard pattern in all configs)
+  const serverPattern = /(server\s*=\s*await\s+connect_to_server\s*\([^)]*\)\s*)/;
+  const match = code.match(serverPattern);
+  if (match) {
+    const index = code.indexOf(match[0]) + match[0].length;
+    return `${code.substring(0, index)}\n\n# Similarity search API base URL (injected by frontend)\nbase_url = "${escapedBaseUrl}"\n${code.substring(index)}`;
+  }
+  
+  return code;
+}
+
+/**
  * Normalize microscope ID by removing workspace prefix
  * @param {string} microscopeId - Microscope ID (e.g., 'agent-lens/squid-control-simulation' or 'squid-control-simulation')
  * @returns {string} - Normalized ID (e.g., 'squid-control-simulation')
@@ -93,6 +130,9 @@ export async function loadAgentConfig(microscopeId, token = null) {
     // Inject token if provided
     systemCellCode = injectToken(systemCellCode, token);
     
+    // Inject base_url for similarity search API
+    systemCellCode = injectBaseUrl(systemCellCode);
+    
     return systemCellCode;
     
   } catch (error) {
@@ -134,6 +174,9 @@ async function loadDefaultConfig(token = null) {
     
     // Inject token if provided
     systemCellCode = injectToken(systemCellCode, token);
+    
+    // Inject base_url for similarity search API
+    systemCellCode = injectBaseUrl(systemCellCode);
     
     return systemCellCode;
     
@@ -181,6 +224,11 @@ print(SYSTEM_PROMPT)
 `;
   
   // Inject token if provided
-  return injectToken(code, token);
+  let modifiedCode = injectToken(code, token);
+  
+  // Inject base_url for similarity search API
+  modifiedCode = injectBaseUrl(modifiedCode);
+  
+  return modifiedCode;
 }
 
