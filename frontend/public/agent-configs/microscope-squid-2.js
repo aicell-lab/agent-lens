@@ -68,10 +68,6 @@ The Python kernel has already been initialized with the following variables avai
    - Contrast autofocus: \`await microscope.contrast_autofocus()\`
    - Reflection autofocus: \`await microscope.reflection_autofocus()\`
 
-5. **Advanced Features (Squid+ only):**
-   - Switch objective: \`await microscope.switch_objective('10x', move_z=True)\`
-   - Set filter wheel: \`await microscope.set_filter_wheel_position(1)\`
-
 **Safety Guidelines:**
 1. Always check current status before moving
 2. Start with small movements to verify safety

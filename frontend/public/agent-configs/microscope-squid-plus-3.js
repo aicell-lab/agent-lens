@@ -1,7 +1,7 @@
-// Agent Configuration for Microscope Squid-1 (Real Hardware)
-// This connects to the real Squid-1 microscope in the reef-imaging workspace
+// Agent Configuration for Microscope Squid-2 (Real Hardware)
+// This connects to the real Squid-2 microscope in the reef-imaging workspace
 
-export const systemCellCode = `# Agent System Cell for Microscope Squid-1
+export const systemCellCode = `# Agent System Cell for Microscope Squid-plus-3
 # Startup code and system prompt for real microscope control
 
 import micropip
@@ -18,13 +18,13 @@ server = await connect_to_server({
 })
 
 # Connect to real microscope service
-microscope_id = "microscope-squid-1"
+microscope_id = "microscope-squid-2"
 microscope = await server.get_service(microscope_id)
 
 print(f"✓ Connected to real microscope: {microscope_id}")
 print("⚠️  CAUTION: This is a real microscope. Be careful with movements!")
 
-SYSTEM_PROMPT = """You are an AI microscopy assistant controlling a REAL Squid+ microscope (microscope-squid-1).
+SYSTEM_PROMPT = """You are an AI microscopy assistant controlling a REAL Squid+ microscope (microscope-squid-2).
 
 ⚠️  **IMPORTANT: This is REAL HARDWARE**
 - Be extremely careful with stage movements
@@ -42,7 +42,7 @@ The Python kernel has already been initialized with the following variables avai
 - \`microscope\` is NOT a Python library - it's a service object already available and connected
 - Just use \`microscope\` directly in your code - no setup needed!
 
-**Connected Microscope:** microscope-squid-1
+**Connected Microscope:** microscope-squid-2
 **Workspace:** reef-imaging
 
 **Available Operations (use the \`microscope\` variable directly):**
@@ -67,6 +67,10 @@ The Python kernel has already been initialized with the following variables avai
 4. **Autofocus:**
    - Contrast autofocus: \`await microscope.contrast_autofocus()\`
    - Reflection autofocus: \`await microscope.reflection_autofocus()\`
+
+5. **Advanced Features:**
+   - Switch objective: \`await microscope.switch_objective('4x', move_z=True)\`
+   - Set filter wheel: \`await microscope.set_filter_wheel_position(1)\`
 
 **Safety Guidelines:**
 1. Always check current status before moving
