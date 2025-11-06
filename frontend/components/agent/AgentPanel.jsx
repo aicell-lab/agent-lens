@@ -76,41 +76,11 @@ const AgentPanel = ({
           appendLog('[AgentPanel] No token available, will use login() in system cell');
         }
 
-        // Load agent configuration with token injection (do this BEFORE kernel init)
-        // This way we can extract the system prompt even if kernel initialization fails
+        // Load agent configuration with token injection
         const systemCellCode = await loadAgentConfig(selectedMicroscopeId, token || null);
         if (!mounted) return;
         
         appendLog(`[AgentPanel] Loaded agent config for ${selectedMicroscopeId}`);
-        
-        // Extract SYSTEM_PROMPT from the system cell code (do this BEFORE kernel init)
-        const systemPromptMatch = systemCellCode.match(/SYSTEM_PROMPT\s*=\s*"""([\s\S]*?)"""/);
-        if (systemPromptMatch && systemPromptMatch[1]) {
-          const extractedPrompt = systemPromptMatch[1].trim();
-          setSystemPrompt(extractedPrompt);
-          appendLog(`[AgentPanel] Extracted system prompt from config (${extractedPrompt.length} characters)`);
-          console.log('[AgentPanel] Extracted system prompt:', extractedPrompt.substring(0, 100) + '...');
-          console.log('[AgentPanel] System prompt state set to:', extractedPrompt.length, 'characters');
-        } else {
-          appendLog('[AgentPanel] No SYSTEM_PROMPT found in config, using default');
-          console.warn('[AgentPanel] SYSTEM_PROMPT pattern not found in code. First 500 chars:', systemCellCode.substring(0, 500));
-          console.warn('[AgentPanel] Looking for pattern: SYSTEM_PROMPT = """..."""');
-          console.warn('[AgentPanel] Code length:', systemCellCode.length);
-          // Check if SYSTEM_PROMPT exists at all
-          if (systemCellCode.includes('SYSTEM_PROMPT')) {
-            console.warn('[AgentPanel] SYSTEM_PROMPT found in code but regex failed');
-            const altMatch = systemCellCode.match(/SYSTEM_PROMPT\s*=\s*["']{3}([\s\S]*?)["']{3}/);
-            if (altMatch) {
-              console.log('[AgentPanel] Alternative regex matched!');
-              const extractedPrompt = altMatch[1].trim();
-              setSystemPrompt(extractedPrompt);
-            } else {
-              setSystemPrompt('');
-            }
-          } else {
-            setSystemPrompt('');
-          }
-        }
 
         // Get Hypha server connection for kernel
         const server = await hyphaManager.getServer('hypha-agents');
@@ -142,11 +112,44 @@ const AgentPanel = ({
         
         appendLog('[AgentPanel] Executing system cell...');
         
-        // Execute system cell
+        // Execute system cell and extract system prompt from printed output
         try {
+          // Collect all stdout outputs during execution
+          let systemPromptOutput = '';
+          
           await cellManager.executeCell(systemCellId, async (code, callbacks) => {
-            return await kernelManager.executePython(code, callbacks);
+            // Wrap the callbacks to capture stdout for system prompt extraction
+            const originalOnOutput = callbacks.onOutput;
+            const wrappedCallbacks = {
+              ...callbacks,
+              onOutput: (output) => {
+                // Collect stdout outputs (system prompt is printed to stdout)
+                if (output.type === 'stdout' && output.content) {
+                  systemPromptOutput += output.content;
+                }
+                // Also call original callback
+                if (originalOnOutput) {
+                  originalOnOutput(output);
+                }
+              }
+            };
+            return await kernelManager.executePython(code, wrappedCallbacks);
           });
+          
+          // Extract system prompt from the printed output
+          // The system prompt is printed via print(SYSTEM_PROMPT) in the system cell
+          if (systemPromptOutput.trim()) {
+            // The system prompt is the printed output from the system cell
+            // It may contain other print statements before it, so we look for the SYSTEM_PROMPT content
+            // Typically it's the last large block of text printed
+            const extractedPrompt = systemPromptOutput.trim();
+            setSystemPrompt(extractedPrompt);
+            appendLog(`[AgentPanel] Extracted system prompt from execution output (${extractedPrompt.length} characters)`);
+            console.log('[AgentPanel] System prompt extracted from execution:', extractedPrompt.substring(0, 100) + '...');
+          } else {
+            appendLog('[AgentPanel] No output from system cell, system prompt may be empty');
+            setSystemPrompt('');
+          }
           
           // Update cells after execution
           setCells([...cellManager.getCells()]);
@@ -158,6 +161,9 @@ const AgentPanel = ({
         } catch (error) {
           console.error('[AgentPanel] System cell execution error:', error);
           appendLog(`[AgentPanel] System cell execution error: ${error.message}`);
+          
+          // System prompt will remain empty if execution fails
+          setSystemPrompt('');
           
           if (showNotification) {
             showNotification('Agent initialization warning: System cell execution failed', 'warning');
