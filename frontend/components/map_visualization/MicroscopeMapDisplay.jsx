@@ -1527,42 +1527,42 @@ const MicroscopeMapDisplay = forwardRef(({
         appendLog(`Processed ${processResult.successfulCount}/${processResult.totalCount} polygons`);
       }
 
-      // Step 5: Upload to Weaviate using individual inserts
-      // Using individual insert() calls instead of insert_many() because:
-      // - insert_many() doesn't work with custom vectors through RPC
-      // - Individual inserts accept properties and vector as separate parameters
-      // serviceId is already defined above
+      // Step 5: Upload to Weaviate using batch inserts
       let uploadedCount = 0;
       let failedCount = 0;
+      const insertBatchSize = 30; // Match extraction batch size
 
-      // Process each annotation individually
-      for (let i = 0; i < processResult.processedAnnotations.length; i++) {
-        // Check for cancellation before each insert
+      // Process annotations in batches
+      for (let batchStart = 0; batchStart < processResult.processedAnnotations.length; batchStart += insertBatchSize) {
+        // Check for cancellation before each batch
         if (segmentationUploadCancelRef.current) {
           break;
         }
 
-        const processed = processResult.processedAnnotations[i];
-        
+        const batchEnd = Math.min(batchStart + insertBatchSize, processResult.processedAnnotations.length);
+        const batch = processResult.processedAnnotations.slice(batchStart, batchEnd);
+
         try {
-          // Prepare single object
-          const queryParams = new URLSearchParams({
-            collection_name: collectionName,
-            application_id: applicationId,
+          // Prepare objects for batch insertion
+          const objects = batch.map(processed => ({
             image_id: processed.annotation.id,
             description: processed.annotation.description,
-            metadata: JSON.stringify(processed.metadata),
-            dataset_id: applicationId
+            metadata: processed.metadata,
+            dataset_id: applicationId,
+            vector: processed.embeddings.imageEmbedding,
+            preview_image: processed.previewImage || null
+          }));
+
+          const queryParams = new URLSearchParams({
+            collection_name: collectionName,
+            application_id: applicationId
           });
 
           const requestBody = new FormData();
-          requestBody.append('image_embedding', JSON.stringify(processed.embeddings.imageEmbedding));
-          if (processed.previewImage) {
-            requestBody.append('preview_image', processed.previewImage);
-          }
+          requestBody.append('objects_json', JSON.stringify(objects));
 
           const insertResponse = await fetch(
-            `/agent-lens/apps/${serviceId}/similarity/insert?${queryParams}`,
+            `/agent-lens/apps/${serviceId}/similarity/insert-many?${queryParams}`,
             {
               method: 'POST',
               body: requestBody
@@ -1570,19 +1570,19 @@ const MicroscopeMapDisplay = forwardRef(({
           );
 
           if (insertResponse.ok) {
-            await insertResponse.json(); // Result not needed, just confirm success
-            uploadedCount++;
-            if (appendLog && (i + 1) % 10 === 0) {
-              appendLog(`Uploaded ${i + 1}/${processResult.processedAnnotations.length} cells`);
+            const result = await insertResponse.json();
+            uploadedCount += batch.length;
+            if (appendLog) {
+              appendLog(`Uploaded batch ${Math.floor(batchStart / insertBatchSize) + 1} (${batchEnd}/${processResult.processedAnnotations.length} cells)`);
             }
           } else {
             const errorText = await insertResponse.text();
-            console.error(`Failed to upload cell ${i + 1} (${processed.annotation.id}):`, errorText);
-            failedCount++;
+            console.error(`Failed to upload batch ${Math.floor(batchStart / insertBatchSize) + 1}:`, errorText);
+            failedCount += batch.length;
           }
         } catch (error) {
-          console.error(`Error uploading cell ${i + 1} (${processed.annotation.id}):`, error);
-          failedCount++;
+          console.error(`Error uploading batch ${Math.floor(batchStart / insertBatchSize) + 1}:`, error);
+          failedCount += batch.length;
         }
       }
 
