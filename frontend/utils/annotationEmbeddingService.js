@@ -328,6 +328,43 @@ export async function generateImageEmbedding(imageBlob) {
 }
 
 /**
+ * Generate image embeddings from multiple image blobs in batch
+ * @param {Array<Blob>} imageBlobs - Array of image blobs
+ * @returns {Promise<Array<Array<number>|null>>} Array of embedding vectors (null for failed images)
+ */
+export async function generateImageEmbeddingBatch(imageBlobs) {
+  try {
+    if (!imageBlobs || imageBlobs.length === 0) {
+      return [];
+    }
+
+    const formData = new FormData();
+    imageBlobs.forEach((blob, index) => {
+      formData.append('images', blob, `annotation_region_${index}.png`);
+    });
+
+    // Use the current page URL as base, which should be the frontend service URL
+    const baseUrl = window.location.origin + window.location.pathname.replace(/\/$/, '');
+    const response = await fetch(`${baseUrl}/embedding/image-batch`, {
+      method: 'POST',
+      body: formData
+    });
+
+    if (!response.ok) {
+      throw new Error(`Batch image embedding API error: ${response.status}`);
+    }
+
+    const result = await response.json();
+    
+    // Convert results to array of embeddings (null for failed)
+    return result.results.map(r => r?.embedding || null);
+  } catch (error) {
+    console.error('Error generating batch image embeddings:', error);
+    throw error;
+  }
+}
+
+/**
  * Generate text embedding from annotation description
  * @param {string} description - Annotation description text
  * @returns {Promise<Array<number>>} Text embedding vector

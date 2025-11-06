@@ -478,7 +478,43 @@ export const processSegmentationPolygon = async (
 };
 
 /**
- * Batch process all polygons with progress tracking
+ * Extract image regions in batch using get_stitched_region_batch
+ * @param {Array} regions - Array of region specification objects
+ * @param {Object} microscopeControlService - Microscope control service
+ * @returns {Promise<Object>} Result with success flag, results array, and count
+ */
+export const batchExtractRegions = async (regions, microscopeControlService) => {
+  try {
+    if (!microscopeControlService || !microscopeControlService.get_stitched_region_batch) {
+      throw new Error('Microscope control service with get_stitched_region_batch method is required');
+    }
+
+    if (!regions || regions.length === 0) {
+      return {
+        success: true,
+        results: [],
+        count: 0
+      };
+    }
+
+    console.log(`[SegmentationUtils] Batch extracting ${regions.length} regions`);
+    
+    const result = await microscopeControlService.get_stitched_region_batch(regions);
+    
+    if (result && result.success) {
+      console.log(`[SegmentationUtils] Batch extraction complete: ${result.count} regions processed`);
+      return result;
+    } else {
+      throw new Error(result?.message || 'Batch extraction failed');
+    }
+  } catch (error) {
+    console.error('[SegmentationUtils] Error in batch region extraction:', error);
+    throw error;
+  }
+};
+
+/**
+ * Batch process all polygons with progress tracking using batch operations
  * @param {Array} polygons - Array of polygon objects
  * @param {string} sourceExperimentName - Name of the source experiment
  * @param {Object} services - Object containing microscopeControlService and artifactZarrLoader
@@ -486,6 +522,7 @@ export const processSegmentationPolygon = async (
  * @param {Array} enabledChannels - Array of enabled channels
  * @param {Function} onProgress - Callback function for progress updates (current, total, successful, failed)
  * @param {Function} getWellInfoById - Function to get well information by well ID
+ * @param {number} batchSize - Batch size for processing (default: 30)
  * @returns {Promise<Object>} Result with processed annotations and statistics
  */
 export const batchProcessSegmentationPolygons = async (
@@ -495,71 +532,218 @@ export const batchProcessSegmentationPolygons = async (
   channelConfigs,
   enabledChannels,
   onProgress,
-  getWellInfoById
+  getWellInfoById,
+  batchSize = 30
 ) => {
   const processedAnnotations = [];
   const failedPolygons = [];
   let successfulCount = 0;
   let failedCount = 0;
 
-  console.log(`[SegmentationUtils] Starting batch processing of ${polygons.length} polygons`);
+  console.log(`[SegmentationUtils] Starting batch processing of ${polygons.length} polygons with batch size ${batchSize}`);
 
-  for (let i = 0; i < polygons.length; i++) {
-    const polygon = polygons[i];
+  // Process polygons in batches
+  for (let batchStart = 0; batchStart < polygons.length; batchStart += batchSize) {
+    const batchEnd = Math.min(batchStart + batchSize, polygons.length);
+    const batch = polygons.slice(batchStart, batchEnd);
     
-    try {
-      // Get well information
-      const wellInfo = getWellInfoById(polygon.well_id);
-      if (!wellInfo) {
-        console.warn(`[SegmentationUtils] No well info found for ${polygon.well_id}, skipping polygon ${i}`);
-        failedCount++;
-        failedPolygons.push({
-          index: i,
-          wellId: polygon.well_id,
-          error: 'Well info not found'
-        });
-        if (onProgress) {
-          onProgress(i + 1, polygons.length, successfulCount, failedCount);
+    console.log(`[SegmentationUtils] Processing batch ${Math.floor(batchStart / batchSize) + 1} (polygons ${batchStart + 1}-${batchEnd})`);
+
+    // Prepare batch data: reuse logic from processSegmentationPolygon
+    const batchData = [];
+    const regions = [];
+
+    for (let i = 0; i < batch.length; i++) {
+      const polygon = batch[i];
+      const globalIndex = batchStart + i;
+      
+      try {
+        const wellInfo = getWellInfoById(polygon.well_id);
+        if (!wellInfo) {
+          failedCount++;
+          failedPolygons.push({ index: globalIndex, wellId: polygon.well_id, error: 'Well info not found' });
+          continue;
         }
+
+        // Reuse polygon preparation logic
+        const wellRelativePoints = parseWktPolygon(polygon.polygon_wkt);
+        if (wellRelativePoints.length < 3) {
+          throw new Error('Invalid polygon - needs at least 3 points');
+        }
+
+        const stagePoints = wellRelativePoints.map(point => 
+          wellRelativeToStageCoords(point.x, point.y, wellInfo)
+        );
+
+        const annotation = {
+          id: `${sourceExperimentName}_cell_${globalIndex}`,
+          type: 'polygon',
+          points: stagePoints,
+          description: `Cell from ${sourceExperimentName} well ${polygon.well_id}`,
+          timestamp: Date.now()
+        };
+
+        // Calculate bounding box for region extraction
+        const xValues = stagePoints.map(p => p.x);
+        const yValues = stagePoints.map(p => p.y);
+        const width = Math.max(...xValues) - Math.min(...xValues);
+        const height = Math.max(...yValues) - Math.min(...yValues);
+        const centerX = (Math.min(...xValues) + Math.max(...xValues)) / 2;
+        const centerY = (Math.min(...yValues) + Math.max(...yValues)) / 2;
+
+        const channelName = enabledChannels.length > 0 
+          ? (enabledChannels[0].label || enabledChannels[0].channelName || enabledChannels[0].name || 'BF LED matrix full')
+          : 'BF LED matrix full';
+
+        regions.push({
+          center_x_mm: centerX,
+          center_y_mm: centerY,
+          width_mm: Math.max(width, 0.1),
+          height_mm: Math.max(height, 0.1),
+          well_plate_type: wellInfo.wellPlateType || '96',
+          scale_level: 0,
+          channel_name: channelName,
+          timepoint: 0,
+          well_padding_mm: 0,
+          experiment_name: sourceExperimentName
+        });
+
+        batchData.push({ polygon, annotation, wellInfo, globalIndex });
+
+      } catch (error) {
+        failedCount++;
+        failedPolygons.push({ index: globalIndex, wellId: polygon.well_id, error: error.message });
+      }
+    }
+
+    if (regions.length === 0) {
+      if (onProgress) onProgress(batchEnd, polygons.length, successfulCount, failedCount);
+      continue;
+    }
+
+    try {
+      // Batch extract regions
+      const extractionResult = await batchExtractRegions(regions, services.microscopeControlService);
+      if (!extractionResult.success || !extractionResult.results) {
+        throw new Error('Batch region extraction failed');
+      }
+
+      // Convert extraction results to blobs
+      const imageBlobs = [];
+      const validBatchData = [];
+
+      for (let i = 0; i < extractionResult.results.length; i++) {
+        const extractionData = extractionResult.results[i];
+        if (!extractionData?.success || !extractionData.data) {
+          failedCount++;
+          failedPolygons.push({ 
+            index: batchData[i].globalIndex, 
+            wellId: batchData[i].polygon.well_id, 
+            error: 'Region extraction failed' 
+          });
+          continue;
+        }
+
+        // Convert base64 to blob
+        try {
+          let base64Data = extractionData.data.replace(/^data:image\/\w+;base64,/, '');
+          const binaryString = atob(base64Data);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let j = 0; j < binaryString.length; j++) {
+            bytes[j] = binaryString.charCodeAt(j);
+          }
+          imageBlobs.push(new Blob([bytes], { type: 'image/png' }));
+          validBatchData.push(batchData[i]);
+        } catch (error) {
+          failedCount++;
+          failedPolygons.push({ 
+            index: batchData[i].globalIndex, 
+            wellId: batchData[i].polygon.well_id, 
+            error: 'Failed to convert extracted image' 
+          });
+        }
+      }
+
+      if (imageBlobs.length === 0) {
+        if (onProgress) onProgress(batchEnd, polygons.length, successfulCount, failedCount);
         continue;
       }
 
-      // Process the polygon
-      const result = await processSegmentationPolygon(
-        polygon,
-        sourceExperimentName,
-        wellInfo,
-        services,
-        channelConfigs,
-        enabledChannels,
-        i
+      // Batch generate embeddings
+      const { generateImageEmbeddingBatch, generateTextEmbedding } = await import('./annotationEmbeddingService');
+      const { generatePreviewFromDataUrl } = await import('./previewImageUtils');
+
+      const imageEmbeddings = await generateImageEmbeddingBatch(imageBlobs);
+      const textEmbeddings = await Promise.all(
+        validBatchData.map(d => generateTextEmbedding(d.annotation.description))
       );
 
-      if (result.success) {
-        processedAnnotations.push(result);
-        successfulCount++;
-      } else {
-        failedPolygons.push({
-          index: i,
-          wellId: polygon.well_id,
-          error: result.error
+      // Process results - reuse metadata/preview logic from processSegmentationPolygon
+      for (let i = 0; i < validBatchData.length; i++) {
+        const data = validBatchData[i];
+        const imageEmbedding = imageEmbeddings[i];
+
+        if (!imageEmbedding) {
+          failedCount++;
+          failedPolygons.push({ 
+            index: data.globalIndex, 
+            wellId: data.polygon.well_id, 
+            error: 'Image embedding generation failed' 
+          });
+          continue;
+        }
+
+        // Generate preview
+        let previewImage = null;
+        try {
+          const dataUrl = await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.readAsDataURL(imageBlobs[i]);
+          });
+          previewImage = await generatePreviewFromDataUrl(dataUrl);
+        } catch (error) {
+          console.warn(`[SegmentationUtils] Failed to generate preview:`, error);
+        }
+
+        // Reuse metadata structure from processSegmentationPolygon
+        const metadata = {
+          annotation_id: data.annotation.id,
+          well_id: data.polygon.well_id,
+          annotation_type: 'polygon',
+          timestamp: new Date().toISOString(),
+          polygon_wkt: data.polygon.polygon_wkt,
+          source: 'segmentation'
+        };
+
+        processedAnnotations.push({
+          success: true,
+          annotation: data.annotation,
+          metadata: metadata,
+          embeddings: {
+            imageEmbedding,
+            textEmbedding: textEmbeddings[i],
+            extractedImageDataUrl: null
+          },
+          previewImage: previewImage
         });
-        failedCount++;
+
+        successfulCount++;
       }
 
     } catch (error) {
-      console.error(`[SegmentationUtils] Unexpected error processing polygon ${i}:`, error);
-      failedPolygons.push({
-        index: i,
-        wellId: polygon.well_id,
-        error: error.message
-      });
-      failedCount++;
+      console.error(`[SegmentationUtils] Error processing batch:`, error);
+      for (let i = 0; i < batch.length; i++) {
+        const globalIndex = batchStart + i;
+        if (!failedPolygons.find(f => f.index === globalIndex)) {
+          failedCount++;
+          failedPolygons.push({ index: globalIndex, wellId: batch[i].well_id, error: error.message });
+        }
+      }
     }
 
-    // Report progress
     if (onProgress) {
-      onProgress(i + 1, polygons.length, successfulCount, failedCount);
+      onProgress(batchEnd, polygons.length, successfulCount, failedCount);
     }
   }
 

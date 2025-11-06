@@ -132,6 +132,66 @@ def get_frontend_api():
             logger.error(traceback.format_exc())
             raise HTTPException(status_code=500, detail=str(e))
 
+    @app.post("/embedding/image-batch")
+    async def generate_image_embedding_batch(images: List[UploadFile] = File(...)):
+        """Generate CLIP image embeddings from multiple uploaded images in batch.
+
+        Args:
+            images: List of image files to process
+
+        Returns:
+            dict: JSON object with success flag, results array, and count
+                {
+                    "success": True,
+                    "results": [
+                        {"success": True, "embedding": [...], "dimension": 512, "model": "ViT-B/32"},
+                        None,  # if failed
+                        {"success": True, "embedding": [...], "dimension": 512, "model": "ViT-B/32"},
+                    ],
+                    "count": 3
+                }
+        """
+        try:
+            if not images or len(images) == 0:
+                raise HTTPException(status_code=400, detail="At least one image is required")
+            
+            from agent_lens.utils.weaviate_search import generate_image_embedding
+            results = []
+            
+            for image in images:
+                try:
+                    if not image.content_type or not image.content_type.startswith("image/"):
+                        results.append(None)
+                        continue
+                    
+                    image_bytes = await image.read()
+                    if not image_bytes:
+                        results.append(None)
+                        continue
+                    
+                    embedding = await generate_image_embedding(image_bytes)
+                    results.append({
+                        "success": True,
+                        "embedding": embedding,
+                        "dimension": len(embedding),
+                        "model": "ViT-B/32"
+                    })
+                except Exception as e:
+                    logger.error(f"Error generating embedding for image {image.filename}: {e}")
+                    results.append(None)
+            
+            return {
+                "success": True,
+                "results": results,
+                "count": len(results)
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error generating batch image embeddings: {e}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
+
     @app.post("/embedding/text")
     async def generate_text_embedding_endpoint(text: str):
         """Generate a CLIP text embedding from a text input.
