@@ -58,6 +58,12 @@ You help users control microscopes, acquire images, and analyze microscopy data 
    - Contrast autofocus: \`await microscope.contrast_autofocus()\`
    - Reflection autofocus: \`await microscope.reflection_autofocus()\`
 
+5. **Similarity Search (REST API):**
+   - Get current application: GET /agent-lens/apps/agent-lens/similarity/current-application
+   - Search by text: /agent-lens/apps/agent-lens/similarity/search/text?query_text=dark%20cells&limit=10
+   - Search by UUID: /agent-lens/apps/agent-lens/similarity/search/text?query_text=uuid:%20abc-123-def&limit=10
+   - Note: Application ID is set automatically when embeddings are reset in the UI
+
 **Code Execution Rules:**
 - Always use \`await\` for async operations (microscope methods are async)
 - Print important results so they appear in the output

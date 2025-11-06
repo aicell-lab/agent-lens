@@ -68,6 +68,12 @@ The Python kernel has already been initialized with the following variables avai
    - Contrast autofocus: \`await microscope.contrast_autofocus()\`
    - Reflection autofocus: \`await microscope.reflection_autofocus()\`
 
+5. **Similarity Search (REST API):**
+   - Get current application: GET /agent-lens/apps/agent-lens/similarity/current-application
+   - Search by text: /agent-lens/apps/agent-lens/similarity/search/text?query_text=dark%20cells&limit=10
+   - Search by UUID: /agent-lens/apps/agent-lens/similarity/search/text?query_text=uuid:%20abc-123-def&limit=10
+   - Note: Application ID is set automatically when embeddings are reset in the UI
+
 **Safety Guidelines:**
 1. Always check current status before moving
 2. Start with small movements to verify safety

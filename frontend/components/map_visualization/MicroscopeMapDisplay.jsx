@@ -1472,6 +1472,28 @@ const MicroscopeMapDisplay = forwardRef(({
         appendLog(`Created application: ${applicationId}`);
       }
 
+      // Set this as the current active application
+      const setCurrentAppParams = new URLSearchParams({
+        application_id: applicationId
+      });
+      
+      const setCurrentAppResponse = await fetch(
+        `/agent-lens/apps/${serviceId}/similarity/current-application?${setCurrentAppParams}`,
+        { method: 'POST' }
+      );
+      
+      if (setCurrentAppResponse.ok) {
+        if (appendLog) {
+          appendLog(`Set ${applicationId} as current active application`);
+        }
+      } else {
+        // Non-critical error, just log it
+        const errorText = await setCurrentAppResponse.text().catch(() => 'Unknown error');
+        if (appendLog) {
+          appendLog(`Warning: Could not set current application: ${errorText}`);
+        }
+      }
+
       // Step 3: Get channel configurations for image extraction
       const channelConfigs = zarrChannelConfigs;
       const enabledChannels = Object.entries(visibleLayers.channels)
