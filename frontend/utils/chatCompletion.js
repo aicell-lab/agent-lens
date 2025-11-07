@@ -78,12 +78,13 @@ Create data visualization chart.
 🚨 **CRITICAL: Write SHORT scripts (MAX 25 lines) and execute ONE AT A TIME** 🚨
 
 **WORKFLOW:**
-1. Write ONE short script (≤25 lines) with <py-script> tags
-2. Execute and WAIT for <observation> with results
-3. Read the observation carefully
-4. Write NEXT short script based on results
-5. Repeat until task complete
-6. Use <returnToUser> when finished
+1. Think about the approach using <thoughts> tags
+2. Write ONE short script (≤25 lines) with <py-script> tags
+3. Execute and WAIT for <observation> with results
+4. Read the observation carefully
+5. Write NEXT short script based on results
+6. Repeat until task complete
+7. Use <returnToUser> when finished
 
 **Script Requirements:**
 - Clear, well-commented code

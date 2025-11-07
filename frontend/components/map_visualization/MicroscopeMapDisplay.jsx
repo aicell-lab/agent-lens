@@ -1700,7 +1700,9 @@ const MicroscopeMapDisplay = forwardRef(({
     artifactZarrLoaderRef,
     getWellInfoById,
     showNotification,
-    appendLog
+    appendLog,
+    getLayerContrastSettings,
+    activeExperiment
   ]);
 
   // Cleanup polling on unmount
