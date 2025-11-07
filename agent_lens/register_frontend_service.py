@@ -30,6 +30,7 @@ logger = setup_logging("agent_lens_frontend_service.log")
 
 # -------------------- CLIP Embedding Helpers --------------------
 # Lazy-load CLIP model for generating embeddings
+# Note: CPU thread configuration is handled in weaviate_search.py
 device = "cuda" if torch.cuda.is_available() else "cpu"
 _clip_model = None
 _clip_preprocess = None

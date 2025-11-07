@@ -26,6 +26,15 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 _clip_model = None
 _clip_preprocess = None
 
+# Configure CPU threads for PyTorch when using CPU
+if device == "cpu":
+    cpu_count = os.cpu_count() or 1
+    # Use N-2 threads to leave 2 cores for OS and other processes
+    # Minimum 1 thread, maximum all available threads
+    num_threads = max(1, cpu_count - 2) if cpu_count > 2 else cpu_count
+    torch.set_num_threads(num_threads)
+    logger.info(f"CPU mode: Configured PyTorch to use {num_threads} threads (out of {cpu_count} available cores)")
+
 def _load_clip_model():
     """Load CLIP ViT-B/32 model lazily and cache it in memory."""
     global _clip_model, _clip_preprocess

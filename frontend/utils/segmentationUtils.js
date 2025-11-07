@@ -478,15 +478,15 @@ export const processSegmentationPolygon = async (
 };
 
 /**
- * Extract image regions in batch using get_stitched_region_batch
+ * Extract image regions in batch using get_stitched_regions_batch
  * @param {Array} regions - Array of region specification objects
  * @param {Object} microscopeControlService - Microscope control service
  * @returns {Promise<Object>} Result with success flag, results array, and count
  */
 export const batchExtractRegions = async (regions, microscopeControlService) => {
   try {
-    if (!microscopeControlService || !microscopeControlService.get_stitched_region_batch) {
-      throw new Error('Microscope control service with get_stitched_region_batch method is required');
+    if (!microscopeControlService || !microscopeControlService.get_stitched_regions_batch) {
+      throw new Error('Microscope control service with get_stitched_regions_batch method is required');
     }
 
     if (!regions || regions.length === 0) {
@@ -499,7 +499,7 @@ export const batchExtractRegions = async (regions, microscopeControlService) => 
 
     console.log(`[SegmentationUtils] Batch extracting ${regions.length} regions`);
     
-    const result = await microscopeControlService.get_stitched_region_batch(regions);
+    const result = await microscopeControlService.get_stitched_regions_batch(regions);
     
     if (result && result.success) {
       console.log(`[SegmentationUtils] Batch extraction complete: ${result.count} regions processed`);
