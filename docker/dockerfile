@@ -73,6 +73,7 @@ COPY --chown=agent_lens:agent_lens frontend/utils.jsx ./frontend/
 
 # Configure npm and install frontend dependencies
 RUN npm config set prefix '/home/agent_lens/.npm-global' && \
+    npm install --prefix frontend patch-package && \
     npm install --prefix frontend && \
     npm install --prefix frontend react-color html2canvas && \
     cd frontend && \
