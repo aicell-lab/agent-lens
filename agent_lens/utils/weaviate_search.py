@@ -374,7 +374,7 @@ class WeaviateSimilarityService:
         return actual_results
     
     async def fetch_all_annotations(self, collection_name: str, application_id: str,
-                                   limit: int = 1000, include_vector: bool = False,
+                                   limit: int = 100000, include_vector: bool = False,
                                    use_prefix_match: bool = False) -> List[Dict[str, Any]]:
         """
         Fetch all annotations from a collection without vector search.
@@ -541,7 +541,7 @@ class WeaviateSimilarityService:
             raise RuntimeError("Not connected to Weaviate service")
         
         try:
-            # Try to fetch object by UUID directly
+            # TODO: Try to fetch object by UUID directly
             # Weaviate typically supports fetching by UUID through the data.get method
             try:
                 result = await self.weaviate_service.data.get(
@@ -564,7 +564,7 @@ class WeaviateSimilarityService:
                 results = await self.weaviate_service.query.fetch_objects(
                     collection_name=collection_name,
                     application_id=application_id,
-                    limit=1000,
+                    limit=100000,
                     return_properties=["image_id", "description", "metadata", "dataset_id", "file_path", "preview_image"],
                     include_vector=include_vector
                 )

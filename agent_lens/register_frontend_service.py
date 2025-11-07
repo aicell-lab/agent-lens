@@ -1095,7 +1095,7 @@ def get_frontend_api():
     async def fetch_all_annotations(
         collection_name: str,
         application_id: str,
-        limit: int = 1000,
+        limit: int = 100000,
         include_vector: bool = False,
         use_prefix_match: bool = True
     ):
