@@ -594,10 +594,17 @@ export const batchProcessSegmentationPolygons = async (
         // Calculate bounding box for region extraction
         const xValues = stagePoints.map(p => p.x);
         const yValues = stagePoints.map(p => p.y);
-        const width = Math.max(...xValues) - Math.min(...xValues);
-        const height = Math.max(...yValues) - Math.min(...yValues);
+        const rawWidth = Math.max(...xValues) - Math.min(...xValues);
+        const rawHeight = Math.max(...yValues) - Math.min(...yValues);
         const centerX = (Math.min(...xValues) + Math.max(...xValues)) / 2;
         const centerY = (Math.min(...yValues) + Math.max(...yValues)) / 2;
+
+        // Add small percentage-based padding (5%) to ensure we capture cell edges
+        // Use much smaller minimum (0.01mm instead of 0.1mm) to avoid excessive padding for small cells
+        const paddingPercent = 0.05; // 5% padding
+        const minSize = 0.01; // 0.01mm minimum (10x smaller than before)
+        const width = Math.max(rawWidth * (1 + paddingPercent), minSize);
+        const height = Math.max(rawHeight * (1 + paddingPercent), minSize);
 
         const channelName = enabledChannels.length > 0 
           ? (enabledChannels[0].label || enabledChannels[0].channelName || enabledChannels[0].name || 'BF LED matrix full')
@@ -606,8 +613,8 @@ export const batchProcessSegmentationPolygons = async (
         regions.push({
           center_x_mm: centerX,
           center_y_mm: centerY,
-          width_mm: Math.max(width, 0.1),
-          height_mm: Math.max(height, 0.1),
+          width_mm: width,
+          height_mm: height,
           well_plate_type: wellInfo.wellPlateType || '96',
           scale_level: 0,
           channel_name: channelName,
