@@ -1525,6 +1525,9 @@ const MicroscopeMapDisplay = forwardRef(({
         }));
       };
 
+      // Create cancellation check function
+      const shouldCancel = () => segmentationUploadCancelRef.current;
+
       // Check for cancellation before processing
       if (segmentationUploadCancelRef.current) {
         return;
@@ -1537,11 +1540,16 @@ const MicroscopeMapDisplay = forwardRef(({
         channelConfigs,
         enabledChannels,
         onProgress,
-        getWellInfoById
+        getWellInfoById,
+        30, // batchSize
+        shouldCancel // Pass cancellation check function
       );
 
       // Check for cancellation after processing
       if (segmentationUploadCancelRef.current) {
+        if (appendLog) {
+          appendLog('Processing cancelled by user');
+        }
         return;
       }
 
@@ -1629,16 +1637,30 @@ const MicroscopeMapDisplay = forwardRef(({
       }
 
     } catch (error) {
-      console.error('Error in segmentation to similarity search:', error);
-      showNotification(`Failed to process segmentation: ${error.message}`, 'error');
-      if (appendLog) {
-        appendLog(`Error processing segmentation: ${error.message}`);
+      // Check if this was a cancellation
+      if (error.message === 'Processing cancelled by user' || segmentationUploadCancelRef.current) {
+        console.log('Segmentation processing cancelled by user');
+        showNotification('Processing cancelled', 'info');
+        if (appendLog) {
+          appendLog('Segmentation upload cancelled by user');
+        }
+        setSegmentationUploadState(prev => ({
+          ...prev,
+          error: 'Cancelled by user',
+          isProcessing: false
+        }));
+      } else {
+        console.error('Error in segmentation to similarity search:', error);
+        showNotification(`Failed to process segmentation: ${error.message}`, 'error');
+        if (appendLog) {
+          appendLog(`Error processing segmentation: ${error.message}`);
+        }
+        
+        setSegmentationUploadState(prev => ({
+          ...prev,
+          error: error.message
+        }));
       }
-      
-      setSegmentationUploadState(prev => ({
-        ...prev,
-        error: error.message
-      }));
     } finally {
       // Reset cancellation flag
       segmentationUploadCancelRef.current = false;

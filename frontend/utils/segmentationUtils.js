@@ -523,6 +523,7 @@ export const batchExtractRegions = async (regions, microscopeControlService) => 
  * @param {Function} onProgress - Callback function for progress updates (current, total, successful, failed)
  * @param {Function} getWellInfoById - Function to get well information by well ID
  * @param {number} batchSize - Batch size for processing (default: 30)
+ * @param {Function} shouldCancel - Optional function that returns true if processing should be cancelled
  * @returns {Promise<Object>} Result with processed annotations and statistics
  */
 export const batchProcessSegmentationPolygons = async (
@@ -533,7 +534,8 @@ export const batchProcessSegmentationPolygons = async (
   enabledChannels,
   onProgress,
   getWellInfoById,
-  batchSize = 30
+  batchSize = 30,
+  shouldCancel = null
 ) => {
   const processedAnnotations = [];
   const failedPolygons = [];
@@ -544,6 +546,12 @@ export const batchProcessSegmentationPolygons = async (
 
   // Process polygons in batches
   for (let batchStart = 0; batchStart < polygons.length; batchStart += batchSize) {
+    // Check for cancellation at the start of each batch
+    if (shouldCancel && shouldCancel()) {
+      console.log(`[SegmentationUtils] Processing cancelled by user at batch ${Math.floor(batchStart / batchSize) + 1}`);
+      throw new Error('Processing cancelled by user');
+    }
+
     const batchEnd = Math.min(batchStart + batchSize, polygons.length);
     const batch = polygons.slice(batchStart, batchEnd);
     
