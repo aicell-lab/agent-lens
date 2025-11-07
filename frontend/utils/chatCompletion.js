@@ -14,9 +14,10 @@ function generateId() {
 
 /**
  * Response instructions for the AI agent
+ * Based on hypha-agents pattern, optimized for clarity and token efficiency
+ * These instructions MUST be placed FIRST in the system prompt
  */
-const RESPONSE_INSTRUCTIONS = `
-You are a powerful coding assistant capable of solving complex tasks by writing and executing Python code.
+const RESPONSE_INSTRUCTIONS = `You are a powerful coding assistant capable of solving complex tasks by writing and executing Python code.
 You will be given a task and must methodically analyze, plan, and execute Python code to achieve the goal.
 
 **FUNDAMENTAL REQUIREMENT: ALWAYS USE CODE AND TOOLS**
@@ -72,12 +73,36 @@ Create data visualization chart.
 
 **ALWAYS USE TAGS - NO EXCEPTIONS!**
 
-### 2. **Code Execution Phase**  
-Write Python code within <py-script> tags with a unique ID. Always include:
+### 2. **Code Execution Phase - ITERATIVE WORKFLOW**
+
+🚨 **CRITICAL: Write SHORT scripts (MAX 25 lines) and execute ONE AT A TIME** 🚨
+
+**WORKFLOW:**
+1. Write ONE short script (≤25 lines) with <py-script> tags
+2. Execute and WAIT for <observation> with results
+3. Read the observation carefully
+4. Write NEXT short script based on results
+5. Repeat until task complete
+6. Use <returnToUser> when finished
+
+**Script Requirements:**
 - Clear, well-commented code
 - **Essential: Use \`print()\` statements** to output results, variables, and progress updates
 - Only printed output becomes available in subsequent observations
 - Error handling where appropriate
+- **MAXIMUM 25 LINES** - if longer, break into multiple scripts!
+
+**Why Short Scripts?**
+- You can see intermediate results and adjust your approach
+- Errors are easier to debug
+- You can verify each step before proceeding
+- The system can provide feedback between steps
+
+**FORBIDDEN:**
+❌ Scripts longer than 25 lines - ALWAYS break them down!
+❌ Trying to do everything in one script
+❌ Long loops that do many operations
+❌ Markdown code blocks (\`\`\`...\`\`\`) - these will NOT execute!
 
 Example:
 <py-script id="load_data">
@@ -258,7 +283,9 @@ export async function* chatCompletion({
     const controller = abortController || new AbortController();
     const { signal } = controller;
 
-    systemPrompt = (systemPrompt || '') + RESPONSE_INSTRUCTIONS;
+    // CRITICAL: Place RESPONSE_INSTRUCTIONS FIRST to ensure the model follows the format
+    // The domain-specific system prompt comes after, so format requirements take priority
+    systemPrompt = RESPONSE_INSTRUCTIONS + '\n\n' + (systemPrompt || '');
     
     const openai = new OpenAI({
       baseURL,
@@ -474,12 +501,35 @@ export async function* chatCompletion({
             });
           }
         } else {
-          // No proper tags - send reminder
-          const reminder = `You MUST use proper tags in your responses. Every response should start with <thoughts> and then use either <py-script> to execute code or <returnToUser> to conclude.`;
+          // No proper tags - send explicit reminder with format example
+          const reminder = `🚨 CRITICAL: You MUST use the required tags in your responses!
+
+Your response MUST follow this exact format:
+
+<thoughts>
+Brief planning steps.
+</thoughts>
+
+<py-script id="unique_id">
+# Your code here
+</py-script>
+
+OR when finished:
+
+<returnToUser commit="ids">
+Final answer.
+</returnToUser>
+
+**FORBIDDEN:** Plain text explanations, markdown code blocks, or responses without tags.
+
+Your previous response was rejected because it didn't use the required tags:
+"${accumulatedResponse.substring(0, 200)}${accumulatedResponse.length > 200 ? '...' : ''}"
+
+Please provide a new response using the required <thoughts> and <py-script> or <returnToUser> tags.`;
           
           messages.push({
             role: 'user',
-            content: `${reminder}\n\nYour previous response: "${accumulatedResponse}"\n\nPlease provide a proper response using the required tags.`
+            content: reminder
           });
         }
 

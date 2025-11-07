@@ -522,7 +522,7 @@ export const batchExtractRegions = async (regions, microscopeControlService) => 
  * @param {Array} enabledChannels - Array of enabled channels
  * @param {Function} onProgress - Callback function for progress updates (current, total, successful, failed)
  * @param {Function} getWellInfoById - Function to get well information by well ID
- * @param {number} batchSize - Batch size for processing (default: 30)
+ * @param {number} batchSize - Batch size for processing (default: 60)
  * @param {Function} shouldCancel - Optional function that returns true if processing should be cancelled
  * @returns {Promise<Object>} Result with processed annotations and statistics
  */
@@ -534,7 +534,7 @@ export const batchProcessSegmentationPolygons = async (
   enabledChannels,
   onProgress,
   getWellInfoById,
-  batchSize = 30,
+  batchSize = 60,
   shouldCancel = null
 ) => {
   const processedAnnotations = [];
@@ -543,6 +543,13 @@ export const batchProcessSegmentationPolygons = async (
   let failedCount = 0;
 
   console.log(`[SegmentationUtils] Starting batch processing of ${polygons.length} polygons with batch size ${batchSize}`);
+  console.log(`[SegmentationUtils] Channel configs:`, channelConfigs);
+  console.log(`[SegmentationUtils] Enabled channels (${enabledChannels.length}):`, enabledChannels);
+
+  // Import TileProcessingManager singleton instance for proper multi-channel processing
+  const tileProcessor = (await import('../components/map_visualization/TileProcessingManager.jsx')).default;
+  // Import CHANNEL_COLORS for fallback color lookup
+  const { CHANNEL_COLORS } = await import('../utils.jsx');
 
   // Process polygons in batches
   for (let batchStart = 0; batchStart < polygons.length; batchStart += batchSize) {
@@ -559,7 +566,13 @@ export const batchProcessSegmentationPolygons = async (
 
     // Prepare batch data: reuse logic from processSegmentationPolygon
     const batchData = [];
-    const regions = [];
+    const regionsPerChannel = {}; // Group regions by channel for batch extraction
+
+    // Initialize regions array for each enabled channel
+    enabledChannels.forEach(channel => {
+      const channelName = channel.label || channel.channelName || channel.name;
+      regionsPerChannel[channelName] = [];
+    });
 
     for (let i = 0; i < batch.length; i++) {
       const polygon = batch[i];
@@ -606,21 +619,26 @@ export const batchProcessSegmentationPolygons = async (
         const width = Math.max(rawWidth * (1 + paddingPercent), minSize);
         const height = Math.max(rawHeight * (1 + paddingPercent), minSize);
 
-        const channelName = enabledChannels.length > 0 
-          ? (enabledChannels[0].label || enabledChannels[0].channelName || enabledChannels[0].name || 'BF LED matrix full')
-          : 'BF LED matrix full';
-
-        regions.push({
+        // Create region specification (same for all channels, only channelName differs)
+        const regionSpec = {
           center_x_mm: centerX,
           center_y_mm: centerY,
           width_mm: width,
           height_mm: height,
           well_plate_type: wellInfo.wellPlateType || '96',
           scale_level: 0,
-          channel_name: channelName,
           timepoint: 0,
           well_padding_mm: 0,
           experiment_name: sourceExperimentName
+        };
+
+        // Add this region to all enabled channels
+        enabledChannels.forEach(channel => {
+          const channelName = channel.label || channel.channelName || channel.name;
+          regionsPerChannel[channelName].push({
+            ...regionSpec,
+            channel_name: channelName
+          });
         });
 
         batchData.push({ polygon, annotation, wellInfo, globalIndex });
@@ -631,69 +649,128 @@ export const batchProcessSegmentationPolygons = async (
       }
     }
 
-    if (regions.length === 0) {
+    if (batchData.length === 0) {
       if (onProgress) onProgress(batchEnd, polygons.length, successfulCount, failedCount);
       continue;
     }
 
     try {
-      // Batch extract regions
-      const extractionResult = await batchExtractRegions(regions, services.microscopeControlService);
-      if (!extractionResult.success || !extractionResult.results) {
-        throw new Error('Batch region extraction failed');
+      // Step 1: Extract regions for ALL channels in batch
+      console.log(`[SegmentationUtils] Extracting ${batchData.length} regions for ${enabledChannels.length} channels`);
+      
+      const channelExtractionResults = {};
+      for (const [channelName, regions] of Object.entries(regionsPerChannel)) {
+        if (regions.length > 0) {
+          console.log(`[SegmentationUtils] Batch extracting channel: ${channelName} (${regions.length} regions)`);
+          const extractionResult = await batchExtractRegions(regions, services.microscopeControlService);
+          
+          if (!extractionResult.success || !extractionResult.results) {
+            console.warn(`[SegmentationUtils] Channel ${channelName} extraction failed`);
+            continue;
+          }
+          
+          channelExtractionResults[channelName] = extractionResult.results;
+        }
       }
 
-      // Convert extraction results to blobs
-      const imageBlobs = [];
+      // Step 2: Process each polygon - apply contrast, merge channels, generate embeddings
+      const { generateImageEmbeddingBatch, generateTextEmbedding } = await import('./annotationEmbeddingService');
+      const { generatePreviewFromDataUrl } = await import('./previewImageUtils');
+
+      const mergedImageBlobs = [];
       const validBatchData = [];
 
-      for (let i = 0; i < extractionResult.results.length; i++) {
-        const extractionData = extractionResult.results[i];
-        if (!extractionData?.success || !extractionData.data) {
-          failedCount++;
-          failedPolygons.push({ 
-            index: batchData[i].globalIndex, 
-            wellId: batchData[i].polygon.well_id, 
-            error: 'Region extraction failed' 
-          });
-          continue;
-        }
-
-        // Convert base64 to blob
+      for (let i = 0; i < batchData.length; i++) {
         try {
-          let base64Data = extractionData.data.replace(/^data:image\/\w+;base64,/, '');
-          const binaryString = atob(base64Data);
-          const bytes = new Uint8Array(binaryString.length);
-          for (let j = 0; j < binaryString.length; j++) {
-            bytes[j] = binaryString.charCodeAt(j);
+          const data = batchData[i];
+          
+          // Process all channels for this polygon
+          const channelDataArray = [];
+          
+          for (const channel of enabledChannels) {
+            const channelName = channel.label || channel.channelName || channel.name;
+            const channelResults = channelExtractionResults[channelName];
+            
+            if (!channelResults || !channelResults[i] || !channelResults[i].success) {
+              console.warn(`[SegmentationUtils] Missing data for channel ${channelName}, polygon ${i}`);
+              continue;
+            }
+            
+            const extractionData = channelResults[i];
+            const dataUrl = extractionData.data.startsWith('data:') 
+              ? extractionData.data 
+              : `data:image/png;base64,${extractionData.data}`;
+            
+            // Get channel config (with min/max settings)
+            const channelConfig = channelConfigs[channelName] || { min: 0, max: 255 };
+            const color = channelConfig.color || CHANNEL_COLORS[channelName] || '#FFFFFF';
+            
+            // Apply contrast adjustment and color tinting (reuse TileProcessingManager logic)
+            const processedDataUrl = await tileProcessor.applyContrastAdjustment(
+              dataUrl, 
+              channelConfig, 
+              color,
+              { alphaThreshold: 5, enableAlphaMasking: true }
+            );
+            
+            channelDataArray.push({
+              channelName,
+              data: processedDataUrl,
+              color,
+              config: channelConfig
+            });
           }
-          imageBlobs.push(new Blob([bytes], { type: 'image/png' }));
-          validBatchData.push(batchData[i]);
+          
+          if (channelDataArray.length === 0) {
+            throw new Error('No valid channel data for polygon');
+          }
+          
+          // Step 3: Merge channels using TileProcessingManager logic
+          let mergedDataUrl;
+          if (channelDataArray.length === 1) {
+            // Single channel - no merging needed
+            mergedDataUrl = channelDataArray[0].data;
+          } else {
+            // Multiple channels - merge using additive blending
+            const dummyTileRequest = { 
+              bounds: null, 
+              width_mm: 0, 
+              height_mm: 0, 
+              scaleLevel: 0 
+            };
+            const mergedTile = await tileProcessor.mergeChannels(channelDataArray, dummyTileRequest, {});
+            mergedDataUrl = mergedTile.data;
+          }
+          
+          // Convert merged data URL to blob
+          const mergedBlob = await dataUrlToBlob(mergedDataUrl);
+          mergedImageBlobs.push(mergedBlob);
+          validBatchData.push(data);
+          
         } catch (error) {
+          console.error(`[SegmentationUtils] Error processing polygon ${i}:`, error);
           failedCount++;
           failedPolygons.push({ 
             index: batchData[i].globalIndex, 
             wellId: batchData[i].polygon.well_id, 
-            error: 'Failed to convert extracted image' 
+            error: error.message 
           });
         }
       }
 
-      if (imageBlobs.length === 0) {
+      if (mergedImageBlobs.length === 0) {
         if (onProgress) onProgress(batchEnd, polygons.length, successfulCount, failedCount);
         continue;
       }
 
-      // Batch generate embeddings
-      const { generateImageEmbeddingBatch, generateTextEmbedding } = await import('./annotationEmbeddingService');
-      const { generatePreviewFromDataUrl } = await import('./previewImageUtils');
-
-      const imageEmbeddings = await generateImageEmbeddingBatch(imageBlobs);
+      // Step 4: Generate embeddings from merged images
+      console.log(`[SegmentationUtils] Generating embeddings for ${mergedImageBlobs.length} merged images`);
+      const imageEmbeddings = await generateImageEmbeddingBatch(mergedImageBlobs);
       const textEmbeddings = await Promise.all(
         validBatchData.map(d => generateTextEmbedding(d.annotation.description))
       );
 
-      // Process results - reuse metadata/preview logic from processSegmentationPolygon
+      // Step 5: Process results - create final annotation objects
       for (let i = 0; i < validBatchData.length; i++) {
         const data = validBatchData[i];
         const imageEmbedding = imageEmbeddings[i];
@@ -714,14 +791,14 @@ export const batchProcessSegmentationPolygons = async (
           const dataUrl = await new Promise((resolve) => {
             const reader = new FileReader();
             reader.onload = () => resolve(reader.result);
-            reader.readAsDataURL(imageBlobs[i]);
+            reader.readAsDataURL(mergedImageBlobs[i]);
           });
           previewImage = await generatePreviewFromDataUrl(dataUrl);
         } catch (error) {
           console.warn(`[SegmentationUtils] Failed to generate preview:`, error);
         }
 
-        // Reuse metadata structure from processSegmentationPolygon
+        // Create metadata
         const metadata = {
           annotation_id: data.annotation.id,
           well_id: data.polygon.well_id,
@@ -773,4 +850,36 @@ export const batchProcessSegmentationPolygons = async (
     totalCount: polygons.length
   };
 };
+
+/**
+ * Helper function to convert data URL to blob
+ * @param {string} dataUrl - Data URL string
+ * @returns {Promise<Blob>} Image blob
+ */
+function dataUrlToBlob(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      
+      canvas.toBlob((blob) => {
+        if (blob) {
+          resolve(blob);
+        } else {
+          reject(new Error('Failed to create blob from data URL'));
+        }
+      }, 'image/png');
+    };
+    
+    img.onerror = () => {
+      reject(new Error('Failed to load image from data URL'));
+    };
+    
+    img.src = dataUrl;
+  });
+}
 

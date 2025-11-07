@@ -1494,14 +1494,38 @@ const MicroscopeMapDisplay = forwardRef(({
         }
       }
 
-      // Step 3: Get channel configurations for image extraction
-      const channelConfigs = zarrChannelConfigs;
+      // Step 3: Get channel configurations for image extraction (use UI contrast settings, not defaults)
+      const channelConfigs = {};
       const enabledChannels = Object.entries(visibleLayers.channels)
         .filter(([channelName, isVisible]) => isVisible)
         .map(([channelName]) => ({ 
           channelName, 
           label: channelName 
         }));
+      
+      // Build channelConfigs from actual UI contrast settings (layerContrastSettings)
+      // IMPORTANT: Use activeExperiment (which could be the segmentation experiment) to look up contrast settings
+      // because users adjust contrast on the segmentation layer, not the source layer
+      const experimentForContrast = activeExperiment || sourceExperimentName;
+      console.log(`[SegmentationUpload] Using experiment for contrast lookup: ${experimentForContrast} (active: ${activeExperiment}, source: ${sourceExperimentName})`);
+      
+      enabledChannels.forEach(channel => {
+        const channelName = channel.label || channel.channelName || channel.name;
+        const layerId = `${experimentForContrast}-${channelName}`;
+        const layerContrast = getLayerContrastSettings(layerId);
+        
+        // Get color from zarrChannelConfigs or defaults
+        const zarrConfig = zarrChannelConfigs[channelName] || {};
+        
+        channelConfigs[channelName] = {
+          min: layerContrast.min !== undefined ? layerContrast.min : (zarrConfig.min || 0),
+          max: layerContrast.max !== undefined ? layerContrast.max : (zarrConfig.max || 255),
+          color: zarrConfig.color,
+          enabled: true
+        };
+        
+        console.log(`[SegmentationUpload] Channel ${channelName} layerId: ${layerId}, contrast settings:`, channelConfigs[channelName]);
+      });
 
       if (enabledChannels.length === 0) {
         throw new Error('No visible channels found for image extraction');
@@ -1541,7 +1565,7 @@ const MicroscopeMapDisplay = forwardRef(({
         enabledChannels,
         onProgress,
         getWellInfoById,
-        30, // batchSize
+        60, // batchSize
         shouldCancel // Pass cancellation check function
       );
 
@@ -1560,7 +1584,7 @@ const MicroscopeMapDisplay = forwardRef(({
       // Step 5: Upload to Weaviate using batch inserts
       let uploadedCount = 0;
       let failedCount = 0;
-      const insertBatchSize = 30; // Match extraction batch size
+      const insertBatchSize = 50; // Match extraction batch size
 
       // Process annotations in batches
       for (let batchStart = 0; batchStart < processResult.processedAnnotations.length; batchStart += insertBatchSize) {
