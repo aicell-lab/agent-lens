@@ -612,12 +612,10 @@ export const batchProcessSegmentationPolygons = async (
         const centerX = (Math.min(...xValues) + Math.max(...xValues)) / 2;
         const centerY = (Math.min(...yValues) + Math.max(...yValues)) / 2;
 
-        // Add small percentage-based padding (5%) to ensure we capture cell edges
-        // Use much smaller minimum (0.01mm instead of 0.1mm) to avoid excessive padding for small cells
+        // Add percentage-based padding (5%) to ensure we capture cell edges
         const paddingPercent = 0.05; // 5% padding
-        const minSize = 0.01; // 0.01mm minimum (10x smaller than before)
-        const width = Math.max(rawWidth * (1 + paddingPercent), minSize);
-        const height = Math.max(rawHeight * (1 + paddingPercent), minSize);
+        const width = rawWidth * (1 + paddingPercent);
+        const height = rawHeight * (1 + paddingPercent);
 
         // Create region specification (same for all channels, only channelName differs)
         const regionSpec = {
