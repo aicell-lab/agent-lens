@@ -52,7 +52,7 @@ The Python kernel has already been initialized with the following variables avai
    - Returns image URL that can be used for analysis
 
 3. **Normal Scan (Grid Acquisition):**
-   - Start scan: \`await microscope.scan_start(saved_data_type="full_zarr", action_ID="scan_123", start_x_mm=0.0, start_y_mm=0.0, Nx=5, Ny=5, dx_mm=1.0, dy_mm=1.0, illumination_settings=[{"channel": 0, "exposure_time": 100, "intensity": 50}], wells_to_scan=["A1", "B2"], well_plate_type="96", well_padding_mm=0.5, experiment_name="my_experiment", uploading=True, do_contrast_autofocus=True, do_reflection_af=False, timepoint=0)\`
+   - Start scan: \`await microscope.scan_start({"saved_data_type": "full_zarr", "action_ID": "scan_123", "start_x_mm": 0.0, "start_y_mm": 0.0, "Nx": 5, "Ny": 5, "dx_mm": 1.0, "dy_mm": 1.0, "illumination_settings": [{"channel": 0, "exposure_time": 100, "intensity": 50}], "wells_to_scan": ["A1", "B2"], "well_plate_type": "96", "well_padding_mm": 0.5, "experiment_name": "my_experiment", "uploading": True, "do_contrast_autofocus": True, "do_reflection_af": False, "timepoint": 0})\`
    - Parameters: start_x_mm/start_y_mm (grid origin), Nx/Ny (grid size), dx_mm/dy_mm (step size), illumination_settings (list of channel configs), wells_to_scan (optional well list), experiment_name (for data organization), uploading (auto-upload to artifact manager), do_contrast_autofocus/do_reflection_af (autofocus options)
    - Returns: {"success": True, ...} - Check scan_status in get_status() for progress (state: "idle"/"running"/"completed"/"failed")
 
