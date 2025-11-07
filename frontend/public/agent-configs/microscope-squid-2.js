@@ -69,8 +69,8 @@ The Python kernel has already been initialized with the following variables avai
      Returns: Dict with current_x, current_y, current_z (positions in mm), is_illumination_on, current_channel, scan_status (state, saved_data_type, error_message), and intensity/exposure pairs for each channel
 
 5. **Autofocus:**
+   - Reflection autofocus(Recommended): \`await microscope.reflection_autofocus()\`
    - Contrast autofocus: \`await microscope.contrast_autofocus()\`
-   - Reflection autofocus: \`await microscope.reflection_autofocus()\`
 
 6. **Vision Inspection:**
    The microscope is equipped with a vision-inspection tool that allows the AI to visually analyze captured images.

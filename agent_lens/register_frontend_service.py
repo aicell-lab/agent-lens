@@ -108,11 +108,32 @@ def get_frontend_api():
     agent_configs_dir = os.path.join(dist_dir, "agent-configs")
     if os.path.exists(agent_configs_dir):
         app.mount("/agent-configs", StaticFiles(directory=agent_configs_dir), name="agent-configs")
+    
+    # Mount pypi directory for serving Python wheel files for Pyodide
+    pypi_dir = os.path.join(dist_dir, "pypi")
+    if os.path.exists(pypi_dir):
+        app.mount("/pypi", StaticFiles(directory=pypi_dir), name="pypi")
 
 
     @app.get("/", response_class=HTMLResponse)
     async def root():
         return FileResponse(os.path.join(dist_dir, "index.html"))
+    
+    @app.get("/web-python-kernel.mjs")
+    async def web_python_kernel():
+        """Serve the web-python-kernel module."""
+        return FileResponse(
+            os.path.join(dist_dir, "web-python-kernel.mjs"),
+            media_type="application/javascript"
+        )
+    
+    @app.get("/kernel.worker.js")
+    async def kernel_worker():
+        """Serve the kernel worker script."""
+        return FileResponse(
+            os.path.join(dist_dir, "kernel.worker.js"),
+            media_type="application/javascript"
+        )
 
     @app.post("/embedding/image")
     async def generate_image_embedding(image: UploadFile = File(...)):

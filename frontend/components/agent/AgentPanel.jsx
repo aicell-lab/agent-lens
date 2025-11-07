@@ -82,14 +82,7 @@ const AgentPanel = ({
         
         appendLog(`[AgentPanel] Loaded agent config for ${selectedMicroscopeId}`);
 
-        // Get Hypha server connection for kernel
-        const server = await hyphaManager.getServer('hypha-agents');
-        if (!mounted) return;
-        
-        appendLog('[AgentPanel] Connected to Hypha server');
-        
-        // Initialize kernel (this may fail if deno-app-engine is not available)
-        kernelManager.server = server;
+        // Initialize kernel using local web-python-kernel
         await kernelManager.initialize();
         if (!mounted) return;
         
