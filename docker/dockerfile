@@ -66,6 +66,7 @@ COPY --chown=agent_lens:agent_lens frontend/package*.json frontend/vite.config.m
 COPY --chown=agent_lens:agent_lens frontend/components ./frontend/components
 COPY --chown=agent_lens:agent_lens frontend/utils ./frontend/utils
 COPY --chown=agent_lens:agent_lens frontend/favicon ./frontend/favicon
+COPY --chown=agent_lens:agent_lens frontend/public ./frontend/public
 COPY --chown=agent_lens:agent_lens frontend/index.html ./frontend/
 COPY --chown=agent_lens:agent_lens frontend/main.jsx ./frontend/
 COPY --chown=agent_lens:agent_lens frontend/main.css ./frontend/
