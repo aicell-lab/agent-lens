@@ -5898,6 +5898,9 @@ const MicroscopeMapDisplay = forwardRef(({
                       // Incubator service for fetching sample info
                       incubatorControlService={incubatorControlService}
                       
+                      // Selected microscope ID for determining which microscope's sample to use
+                      selectedMicroscopeId={selectedMicroscopeId}
+                      
                       // Layout props
                       isFovFittedMode={mapViewMode === 'FOV_FITTED'}
                       
