@@ -30,13 +30,14 @@ logger = setup_logging("agent_lens_frontend_service.log")
 
 # -------------------- CLIP Embedding Helpers --------------------
 # Lazy-load CLIP model for generating embeddings
+# Note: CPU thread configuration is handled in weaviate_search.py
 device = "cuda" if torch.cuda.is_available() else "cpu"
 _clip_model = None
 _clip_preprocess = None
 
 # Log GPU information at module load
 if torch.cuda.is_available():
-    logger.info(f"✓ CUDA available - GPU will be used for CLIP model")
+    logger.info("✓ CUDA available - GPU will be used for CLIP model")
     logger.info(f"  CUDA Device: {torch.cuda.get_device_name(0)}")
     logger.info(f"  CUDA Version: {torch.version.cuda}")
     logger.info(f"  PyTorch Version: {torch.__version__}")
@@ -73,6 +74,9 @@ DEFAULT_CHANNEL = "BF_LED_matrix_full"
 # Create a global AgentLensArtifactManager instance
 artifact_manager_instance = AgentLensArtifactManager()
 
+# Global state for current active application (for similarity search)
+current_application_id = None
+
 SERVER_URL = "https://hypha.aicell.io"
 WORKSPACE_TOKEN = os.getenv("WORKSPACE_TOKEN")
 
@@ -99,11 +103,37 @@ def get_frontend_api():
     dist_dir = os.path.join(frontend_dir, "dist")
     assets_dir = os.path.join(dist_dir, "assets")
     app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+    
+    # Mount agent-configs directory for serving agent configuration files
+    agent_configs_dir = os.path.join(dist_dir, "agent-configs")
+    if os.path.exists(agent_configs_dir):
+        app.mount("/agent-configs", StaticFiles(directory=agent_configs_dir), name="agent-configs")
+    
+    # Mount pypi directory for serving Python wheel files for Pyodide
+    pypi_dir = os.path.join(dist_dir, "pypi")
+    if os.path.exists(pypi_dir):
+        app.mount("/pypi", StaticFiles(directory=pypi_dir), name="pypi")
 
 
     @app.get("/", response_class=HTMLResponse)
     async def root():
         return FileResponse(os.path.join(dist_dir, "index.html"))
+    
+    @app.get("/web-python-kernel.mjs")
+    async def web_python_kernel():
+        """Serve the web-python-kernel module."""
+        return FileResponse(
+            os.path.join(dist_dir, "web-python-kernel.mjs"),
+            media_type="application/javascript"
+        )
+    
+    @app.get("/kernel.worker.js")
+    async def kernel_worker():
+        """Serve the kernel worker script."""
+        return FileResponse(
+            os.path.join(dist_dir, "kernel.worker.js"),
+            media_type="application/javascript"
+        )
 
     @app.post("/embedding/image")
     async def generate_image_embedding(image: UploadFile = File(...)):
@@ -124,6 +154,66 @@ def get_frontend_api():
             raise
         except Exception as e:
             logger.error(f"Error generating image embedding: {e}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.post("/embedding/image-batch")
+    async def generate_image_embedding_batch(images: List[UploadFile] = File(...)):
+        """Generate CLIP image embeddings from multiple uploaded images in batch.
+
+        Args:
+            images: List of image files to process
+
+        Returns:
+            dict: JSON object with success flag, results array, and count
+                {
+                    "success": True,
+                    "results": [
+                        {"success": True, "embedding": [...], "dimension": 512, "model": "ViT-B/32"},
+                        None,  # if failed
+                        {"success": True, "embedding": [...], "dimension": 512, "model": "ViT-B/32"},
+                    ],
+                    "count": 3
+                }
+        """
+        try:
+            if not images or len(images) == 0:
+                raise HTTPException(status_code=400, detail="At least one image is required")
+            
+            from agent_lens.utils.weaviate_search import generate_image_embedding
+            results = []
+            
+            for image in images:
+                try:
+                    if not image.content_type or not image.content_type.startswith("image/"):
+                        results.append(None)
+                        continue
+                    
+                    image_bytes = await image.read()
+                    if not image_bytes:
+                        results.append(None)
+                        continue
+                    
+                    embedding = await generate_image_embedding(image_bytes)
+                    results.append({
+                        "success": True,
+                        "embedding": embedding,
+                        "dimension": len(embedding),
+                        "model": "ViT-B/32"
+                    })
+                except Exception as e:
+                    logger.error(f"Error generating embedding for image {image.filename}: {e}")
+                    results.append(None)
+            
+            return {
+                "success": True,
+                "results": results,
+                "count": len(results)
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error generating batch image embeddings: {e}")
             logger.error(traceback.format_exc())
             raise HTTPException(status_code=500, detail=str(e))
 
@@ -467,6 +557,11 @@ def get_frontend_api():
                 valid_collection_name, application_id, f"Application for {description}"
             )
             
+            # Set as current application
+            global current_application_id
+            current_application_id = application_id
+            logger.info(f"Set current application to: {application_id}")
+            
             return {
                 "success": True,
                 "collection_name": valid_collection_name,  # Return the transformed name
@@ -683,11 +778,45 @@ def get_frontend_api():
             logger.error(traceback.format_exc())
             raise HTTPException(status_code=500, detail=str(e))
 
+    @app.get("/similarity/current-application")
+    async def get_current_application():
+        """
+        Get the currently active application ID.
+        
+        Returns:
+            dict: Current application information
+        """
+        global current_application_id
+        return {
+            "success": True,
+            "application_id": current_application_id,
+            "collection_name": WEAVIATE_COLLECTION_NAME
+        }
+
+    @app.post("/similarity/current-application")
+    async def set_current_application(application_id: str):
+        """
+        Set the currently active application ID.
+        
+        Args:
+            application_id (str): Application ID to set as current
+            
+        Returns:
+            dict: Confirmation of the set operation
+        """
+        global current_application_id
+        current_application_id = application_id
+        logger.info(f"Set current application to: {application_id}")
+        return {
+            "success": True,
+            "application_id": current_application_id,
+            "collection_name": WEAVIATE_COLLECTION_NAME
+        }
+
     @app.post("/similarity/search/text")
     async def search_similar_by_text(
-        collection_name: str,
-        application_id: str,
         query_text: str,
+        application_id: str = None,
         limit: int = 10
     ):
         """
@@ -695,9 +824,8 @@ def get_frontend_api():
         Supports uuid: prefix for UUID-based search.
         
         Args:
-            collection_name (str): Name of the collection to search
-            application_id (str): Application ID
             query_text (str): Text query for similarity search, or "uuid: <uuid>" for UUID search
+            application_id (str, optional): Application ID. If not provided, uses current active application
             limit (int): Maximum number of results to return
             
         Returns:
@@ -710,6 +838,17 @@ def get_frontend_api():
             except Exception as e:
                 logger.warning(f"Similarity service not available: {e}")
                 raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            
+            # Use global application_id if not provided
+            global current_application_id
+            if application_id is None:
+                if current_application_id is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="No application_id provided and no active application set. Please set an active application first."
+                    )
+                application_id = current_application_id
+                logger.info(f"Using current application: {application_id}")
             
             # Always use the existing 'Agentlens' collection - never create new collections
             valid_collection_name = WEAVIATE_COLLECTION_NAME
@@ -775,18 +914,16 @@ def get_frontend_api():
 
     @app.post("/similarity/search/image")
     async def search_similar_by_image(
-        collection_name: str,
-        application_id: str,
         image: UploadFile = File(...),
+        application_id: str = None,
         limit: int = 10
     ):
         """
         Search for similar images using image query.
         
         Args:
-            collection_name (str): Name of the collection to search
-            application_id (str): Application ID
             image (UploadFile): Image file for similarity search
+            application_id (str, optional): Application ID. If not provided, uses current active application
             limit (int): Maximum number of results to return
             
         Returns:
@@ -803,13 +940,30 @@ def get_frontend_api():
                 logger.warning(f"Similarity service not available: {e}")
                 raise HTTPException(status_code=503, detail="Similarity search service is not available")
             
+            # Use global application_id if not provided
+            global current_application_id
+            if application_id is None:
+                if current_application_id is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="No application_id provided and no active application set. Please set an active application first."
+                    )
+                application_id = current_application_id
+                logger.info(f"Using current application: {application_id}")
+            
+            # Always use the existing 'Agentlens' collection
+            valid_collection_name = WEAVIATE_COLLECTION_NAME
+            
+            # Extract just the dataset ID part (last part after slash)
+            clean_application_id = application_id.split('/')[-1] if '/' in application_id else application_id
+            
             image_bytes = await image.read()
             if not image_bytes:
                 raise HTTPException(status_code=400, detail="Empty image upload")
             
             results = await similarity_service.search_by_image(
-                collection_name=collection_name,
-                application_id=application_id,
+                collection_name=valid_collection_name,
+                application_id=clean_application_id,
                 image_bytes=image_bytes,
                 limit=limit
             )
@@ -825,9 +979,8 @@ def get_frontend_api():
 
     @app.post("/similarity/search/vector")
     async def search_similar_by_vector(
-        collection_name: str,
-        application_id: str,
         query_vector: List[float],
+        application_id: str = None,
         limit: int = 10,
         include_vector: bool = False
     ):
@@ -835,9 +988,8 @@ def get_frontend_api():
         Search for similar images using vector query.
         
         Args:
-            collection_name (str): Name of the collection to search
-            application_id (str): Application ID
             query_vector (List[float]): Vector for similarity search
+            application_id (str, optional): Application ID. If not provided, uses current active application
             limit (int): Maximum number of results to return
             include_vector (bool): Whether to include vectors in results
             
@@ -851,6 +1003,17 @@ def get_frontend_api():
             except Exception as e:
                 logger.warning(f"Similarity service not available: {e}")
                 raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            
+            # Use global application_id if not provided
+            global current_application_id
+            if application_id is None:
+                if current_application_id is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="No application_id provided and no active application set. Please set an active application first."
+                    )
+                application_id = current_application_id
+                logger.info(f"Using current application: {application_id}")
             
             # Always use the existing 'Agentlens' collection
             valid_collection_name = WEAVIATE_COLLECTION_NAME
@@ -907,6 +1070,12 @@ def get_frontend_api():
                 collection_name=valid_collection_name,
                 application_id=clean_application_id
             )
+            
+            # Clear current application if it was deleted
+            global current_application_id
+            if current_application_id == clean_application_id:
+                current_application_id = None
+                logger.info("Cleared current application (was deleted)")
             
             logger.info(f"Deleted application '{clean_application_id}' from collection '{valid_collection_name}'")
             return {"success": True, "result": result}

@@ -1472,6 +1472,28 @@ const MicroscopeMapDisplay = forwardRef(({
         appendLog(`Created application: ${applicationId}`);
       }
 
+      // Set this as the current active application
+      const setCurrentAppParams = new URLSearchParams({
+        application_id: applicationId
+      });
+      
+      const setCurrentAppResponse = await fetch(
+        `/agent-lens/apps/${serviceId}/similarity/current-application?${setCurrentAppParams}`,
+        { method: 'POST' }
+      );
+      
+      if (setCurrentAppResponse.ok) {
+        if (appendLog) {
+          appendLog(`Set ${applicationId} as current active application`);
+        }
+      } else {
+        // Non-critical error, just log it
+        const errorText = await setCurrentAppResponse.text().catch(() => 'Unknown error');
+        if (appendLog) {
+          appendLog(`Warning: Could not set current application: ${errorText}`);
+        }
+      }
+
       // Step 3: Get channel configurations for image extraction
       const channelConfigs = zarrChannelConfigs;
       const enabledChannels = Object.entries(visibleLayers.channels)
@@ -1503,6 +1525,9 @@ const MicroscopeMapDisplay = forwardRef(({
         }));
       };
 
+      // Create cancellation check function
+      const shouldCancel = () => segmentationUploadCancelRef.current;
+
       // Check for cancellation before processing
       if (segmentationUploadCancelRef.current) {
         return;
@@ -1515,11 +1540,16 @@ const MicroscopeMapDisplay = forwardRef(({
         channelConfigs,
         enabledChannels,
         onProgress,
-        getWellInfoById
+        getWellInfoById,
+        30, // batchSize
+        shouldCancel // Pass cancellation check function
       );
 
       // Check for cancellation after processing
       if (segmentationUploadCancelRef.current) {
+        if (appendLog) {
+          appendLog('Processing cancelled by user');
+        }
         return;
       }
 
@@ -1527,42 +1557,42 @@ const MicroscopeMapDisplay = forwardRef(({
         appendLog(`Processed ${processResult.successfulCount}/${processResult.totalCount} polygons`);
       }
 
-      // Step 5: Upload to Weaviate using individual inserts
-      // Using individual insert() calls instead of insert_many() because:
-      // - insert_many() doesn't work with custom vectors through RPC
-      // - Individual inserts accept properties and vector as separate parameters
-      // serviceId is already defined above
+      // Step 5: Upload to Weaviate using batch inserts
       let uploadedCount = 0;
       let failedCount = 0;
+      const insertBatchSize = 30; // Match extraction batch size
 
-      // Process each annotation individually
-      for (let i = 0; i < processResult.processedAnnotations.length; i++) {
-        // Check for cancellation before each insert
+      // Process annotations in batches
+      for (let batchStart = 0; batchStart < processResult.processedAnnotations.length; batchStart += insertBatchSize) {
+        // Check for cancellation before each batch
         if (segmentationUploadCancelRef.current) {
           break;
         }
 
-        const processed = processResult.processedAnnotations[i];
-        
+        const batchEnd = Math.min(batchStart + insertBatchSize, processResult.processedAnnotations.length);
+        const batch = processResult.processedAnnotations.slice(batchStart, batchEnd);
+
         try {
-          // Prepare single object
-          const queryParams = new URLSearchParams({
-            collection_name: collectionName,
-            application_id: applicationId,
+          // Prepare objects for batch insertion
+          const objects = batch.map(processed => ({
             image_id: processed.annotation.id,
             description: processed.annotation.description,
-            metadata: JSON.stringify(processed.metadata),
-            dataset_id: applicationId
+            metadata: processed.metadata,
+            dataset_id: applicationId,
+            vector: processed.embeddings.imageEmbedding,
+            preview_image: processed.previewImage || null
+          }));
+
+          const queryParams = new URLSearchParams({
+            collection_name: collectionName,
+            application_id: applicationId
           });
 
           const requestBody = new FormData();
-          requestBody.append('image_embedding', JSON.stringify(processed.embeddings.imageEmbedding));
-          if (processed.previewImage) {
-            requestBody.append('preview_image', processed.previewImage);
-          }
+          requestBody.append('objects_json', JSON.stringify(objects));
 
           const insertResponse = await fetch(
-            `/agent-lens/apps/${serviceId}/similarity/insert?${queryParams}`,
+            `/agent-lens/apps/${serviceId}/similarity/insert-many?${queryParams}`,
             {
               method: 'POST',
               body: requestBody
@@ -1570,19 +1600,19 @@ const MicroscopeMapDisplay = forwardRef(({
           );
 
           if (insertResponse.ok) {
-            await insertResponse.json(); // Result not needed, just confirm success
-            uploadedCount++;
-            if (appendLog && (i + 1) % 10 === 0) {
-              appendLog(`Uploaded ${i + 1}/${processResult.processedAnnotations.length} cells`);
+            const result = await insertResponse.json();
+            uploadedCount += batch.length;
+            if (appendLog) {
+              appendLog(`Uploaded batch ${Math.floor(batchStart / insertBatchSize) + 1} (${batchEnd}/${processResult.processedAnnotations.length} cells)`);
             }
           } else {
             const errorText = await insertResponse.text();
-            console.error(`Failed to upload cell ${i + 1} (${processed.annotation.id}):`, errorText);
-            failedCount++;
+            console.error(`Failed to upload batch ${Math.floor(batchStart / insertBatchSize) + 1}:`, errorText);
+            failedCount += batch.length;
           }
         } catch (error) {
-          console.error(`Error uploading cell ${i + 1} (${processed.annotation.id}):`, error);
-          failedCount++;
+          console.error(`Error uploading batch ${Math.floor(batchStart / insertBatchSize) + 1}:`, error);
+          failedCount += batch.length;
         }
       }
 
@@ -1607,16 +1637,30 @@ const MicroscopeMapDisplay = forwardRef(({
       }
 
     } catch (error) {
-      console.error('Error in segmentation to similarity search:', error);
-      showNotification(`Failed to process segmentation: ${error.message}`, 'error');
-      if (appendLog) {
-        appendLog(`Error processing segmentation: ${error.message}`);
+      // Check if this was a cancellation
+      if (error.message === 'Processing cancelled by user' || segmentationUploadCancelRef.current) {
+        console.log('Segmentation processing cancelled by user');
+        showNotification('Processing cancelled', 'info');
+        if (appendLog) {
+          appendLog('Segmentation upload cancelled by user');
+        }
+        setSegmentationUploadState(prev => ({
+          ...prev,
+          error: 'Cancelled by user',
+          isProcessing: false
+        }));
+      } else {
+        console.error('Error in segmentation to similarity search:', error);
+        showNotification(`Failed to process segmentation: ${error.message}`, 'error');
+        if (appendLog) {
+          appendLog(`Error processing segmentation: ${error.message}`);
+        }
+        
+        setSegmentationUploadState(prev => ({
+          ...prev,
+          error: error.message
+        }));
       }
-      
-      setSegmentationUploadState(prev => ({
-        ...prev,
-        error: error.message
-      }));
     } finally {
       // Reset cancellation flag
       segmentationUploadCancelRef.current = false;

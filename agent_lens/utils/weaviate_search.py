@@ -26,6 +26,15 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 _clip_model = None
 _clip_preprocess = None
 
+# Configure CPU threads for PyTorch when using CPU
+if device == "cpu":
+    cpu_count = os.cpu_count() or 1
+    # Use N-2 threads to leave 2 cores for OS and other processes
+    # Minimum 1 thread, maximum all available threads
+    num_threads = max(1, cpu_count - 2) if cpu_count > 2 else cpu_count
+    torch.set_num_threads(num_threads)
+    logger.info(f"CPU mode: Configured PyTorch to use {num_threads} threads (out of {cpu_count} available cores)")
+
 def _load_clip_model():
     """Load CLIP ViT-B/32 model lazily and cache it in memory."""
     global _clip_model, _clip_preprocess
@@ -230,68 +239,95 @@ class WeaviateSimilarityService:
         
         import json
         
-        # Use individual insert() calls for each object
-        # Weaviate's insert_many() doesn't work with custom vectors through RPC because:
-        # - It requires DataObject instances (which can't be serialized through RPC)
-        # - Plain dicts with vectors get wrapped into properties, causing conflicts
-        # Individual insert() calls accept properties and vector as separate parameters, which works correctly
-        inserted_count = 0
-        failed_count = 0
-        errors = []
-        uuids = {}
-        
+        # Prepare objects for insert_many
+        prepared_objects = []
         for obj in objects:
-            try:
-                properties = {
-                    "image_id": obj.get("image_id", ""),
-                    "description": obj.get("description", ""),
-                    "metadata": json.dumps(obj.get("metadata", {})) if obj.get("metadata") else "",
-                    "dataset_id": obj.get("dataset_id", ""),
-                    "file_path": obj.get("file_path", ""),
-                    "preview_image": obj.get("preview_image", "")
-                }
-                
-                vector = obj.get("vector")
-                if vector is None:
-                    vector = await generate_text_embedding(obj.get("description", ""))
-                
-                # Use single insert which properly handles properties and vector separately
-                result = await self.weaviate_service.data.insert(
-                    collection_name=collection_name,
-                    application_id=application_id,
-                    properties=properties,
-                    vector=vector
-                )
+            # Generate vector if not provided
+            vector = obj.get("vector")
+            if vector is None:
+                vector = await generate_text_embedding(obj.get("description", ""))
+            
+            # Prepare object with properties and vector
+            prepared_obj = {
+                "image_id": obj.get("image_id", ""),
+                "description": obj.get("description", ""),
+                "metadata": json.dumps(obj.get("metadata", {})) if obj.get("metadata") else "",
+                "dataset_id": obj.get("dataset_id", ""),
+                "file_path": obj.get("file_path", ""),
+                "preview_image": obj.get("preview_image", ""),
+                "vector": vector
+            }
+            prepared_objects.append(prepared_obj)
+        
+        # Insert all objects at once using insert_many
+        try:
+            result = await self.weaviate_service.data.insert_many(
+                collection_name=collection_name,
+                application_id=application_id,
+                objects=prepared_objects
+            )
+            
+            # Process results to extract UUIDs
+            inserted_count = 0
+            failed_count = 0
+            errors = []
+            uuids = {}
+            
+            # Handle different result formats
+            if isinstance(result, list):
+                results_list = result
+            elif hasattr(result, 'results'):
+                results_list = result.results
+            elif isinstance(result, dict) and 'results' in result:
+                results_list = result['results']
+            else:
+                results_list = [result]
+            
+            # Extract UUIDs from results
+            for i, res in enumerate(results_list):
+                image_id = objects[i].get("image_id", f"object_{i}")
                 
                 # Extract UUID from result
-                if hasattr(result, 'uuid'):
-                    uuid_val = result.uuid
-                elif hasattr(result, 'id'):
-                    uuid_val = result.id
-                elif isinstance(result, dict):
-                    uuid_val = result.get('uuid') or result.get('id')
+                uuid_val = None
+                if hasattr(res, 'uuid'):
+                    uuid_val = res.uuid
+                elif hasattr(res, 'id'):
+                    uuid_val = res.id
+                elif isinstance(res, dict):
+                    uuid_val = res.get('uuid') or res.get('id')
                 else:
-                    uuid_val = str(result)
+                    uuid_val = str(res) if res else None
                 
                 if uuid_val:
-                    uuids[obj.get("image_id", f"object_{inserted_count}")] = str(uuid_val)
-                
-                inserted_count += 1
-            except Exception as e_insert:
-                failed_count += 1
-                error_msg_insert = f"Failed to insert object {obj.get('image_id', 'unknown')}: {str(e_insert)}"
-                errors.append(error_msg_insert)
-                logger.warning(error_msg_insert)
-        
-        logger.info(f"Inserted {inserted_count} images using individual inserts (failed: {failed_count})")
-        
-        return {
-            "inserted_count": inserted_count,
-            "failed_count": failed_count,
-            "errors": errors if errors else None,
-            "uuids": uuids,
-            "has_errors": failed_count > 0
-        }
+                    uuids[image_id] = str(uuid_val)
+                    inserted_count += 1
+                else:
+                    failed_count += 1
+                    error_msg = f"Failed to extract UUID for object {image_id}"
+                    errors.append(error_msg)
+                    logger.warning(error_msg)
+            
+            logger.info(f"Inserted {inserted_count} images using insert_many (failed: {failed_count})")
+            
+            return {
+                "inserted_count": inserted_count,
+                "failed_count": failed_count,
+                "errors": errors if errors else None,
+                "uuids": uuids,
+                "has_errors": failed_count > 0
+            }
+            
+        except Exception as e:
+            # If insert_many fails entirely, log and return error
+            error_msg = f"Failed to insert objects using insert_many: {str(e)}"
+            logger.error(error_msg)
+            return {
+                "inserted_count": 0,
+                "failed_count": len(objects),
+                "errors": [error_msg],
+                "uuids": {},
+                "has_errors": True
+            }
     
     async def search_similar_images(self, collection_name: str, application_id: str,
                                   query_vector: List[float], limit: int = 10,

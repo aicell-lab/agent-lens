@@ -1,6 +1,18 @@
 {
   "type": "module",
-  "name": "agent-lens-tests",
+  "name": "agent-lens",
   "version": "0.0.1",
-  "description": "Test package for Agent-Lens JavaScript tests"
+  "description": "Test package for Agent-Lens JavaScript tests",
+  "scripts": {
+    "test:hypha-agents:integration": "node hypha-agents-integration/test-integration.js",
+    "test:hypha-agents:kernel": "node hypha-agents-integration/test-kernel-service.js",
+    "test:hypha-agents:connection": "node hypha-agents-integration/test-hypha-connection.js"
+  },
+  "devDependencies": {
+    "dotenv": "^16.0.0"
+  },
+  "dependencies": {
+    "hypha-rpc": "^0.20.83",
+    "openai": "^4.0.0"
+  }
 }

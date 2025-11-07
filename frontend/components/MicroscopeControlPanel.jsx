@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import PropTypes from 'prop-types';
-import ChatbotButton from './ChatbotButton';
+// import ChatbotButton from './ChatbotButton'; // Replaced with AgentPanel
+import AgentPanel from './agent/AgentPanel';
 import SampleSelector from './SampleSelector';
 import ImagingTasksModal from './microscope_acquisition/ImagingTasksModal';
 import MicroscopeMapDisplay from './map_visualization/MicroscopeMapDisplay';
@@ -1983,11 +1984,7 @@ const MicroscopeControlPanel = ({
 
       {/* Collapsible Chat Panel - Right Side */}
       <div className={`collapsible-chat-panel ${isRightPanelCollapsed ? 'collapsed' : 'expanded'}`}>
-        <div className="chat-panel-header">
-          <div className="chat-panel-title">
-            <i className="fas fa-comments mr-2"></i>
-            <h3>AI Assistant</h3>
-          </div>
+        <div className="chat-panel-header !pt-0 !mt-0" style={{ paddingTop: 0, marginTop: 0, minHeight: 0, height: 'auto' }}>
           <button 
             onClick={toggleRightPanel}
             className="chat-panel-toggle"
@@ -1997,11 +1994,12 @@ const MicroscopeControlPanel = ({
           </button>
         </div>
         <div className="chat-panel-content">
-          <ChatbotButton 
+          <AgentPanel
             key={selectedMicroscopeId}
-            microscopeControlService={microscopeControlService} 
-            appendLog={appendLog} 
-            microscopeBusy={microscopeBusy}
+            hyphaManager={hyphaManager}
+            selectedMicroscopeId={selectedMicroscopeId}
+            appendLog={appendLog}
+            showNotification={showNotification}
           />
         </div>
       </div>
