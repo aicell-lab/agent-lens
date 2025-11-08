@@ -93,6 +93,76 @@ async def generate_image_embedding(image_bytes: bytes) -> List[float]:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
+async def generate_image_embeddings_batch(image_bytes_list: List[bytes]) -> List[List[float]]:
+    """
+    Generate unit-normalized CLIP embeddings for multiple images in a single batch.
+    This is much faster than processing images individually, especially on GPU.
+    
+    The main optimization is batching the CLIP model inference, which allows the GPU
+    to process multiple images simultaneously and significantly improves throughput.
+    
+    Args:
+        image_bytes_list: List of image byte data to process
+        
+    Returns:
+        List of embedding vectors (same order as input). Returns None for failed images.
+    """
+    from PIL import Image
+    import io
+    
+    if not image_bytes_list:
+        return []
+    
+    model, preprocess = _load_clip_model()
+    batch_tensors = []
+    index_mapping = {}  # Maps batch position to original index
+    
+    try:
+        # Preprocess all images sequentially (CPU-bound, but fast)
+        for idx, img_bytes in enumerate(image_bytes_list):
+            try:
+                with Image.open(io.BytesIO(img_bytes)) as image:
+                    image = image.convert("RGB")
+                    image.thumbnail((224, 224), Image.Resampling.LANCZOS)
+                    preprocessed = preprocess(image)
+                    index_mapping[len(batch_tensors)] = idx
+                    batch_tensors.append(preprocessed)
+            except Exception as e:
+                logger.warning(f"Failed to preprocess image at index {idx}: {e}")
+                # Will be None in results
+        
+        if not batch_tensors:
+            # All images failed preprocessing
+            return [None] * len(image_bytes_list)
+        
+        # Stack all tensors into a single batch
+        batch_tensor = torch.stack(batch_tensors).to(device)
+        
+        # Single batch inference (much faster than individual calls)
+        # This is the key optimization - GPU processes all images at once
+        with torch.no_grad():
+            image_features = model.encode_image(batch_tensor).cpu().numpy()
+        
+        # Normalize features
+        normalized_features = _normalize_features(image_features).astype(np.float32)
+        
+        # Map results back to original order
+        results = [None] * len(image_bytes_list)
+        for batch_idx, original_idx in index_mapping.items():
+            results[original_idx] = normalized_features[batch_idx].tolist()
+        
+        return results
+        
+    except Exception as e:
+        logger.error(f"Error in batch image embedding generation: {e}")
+        return [None] * len(image_bytes_list)
+    finally:
+        # Cleanup
+        if 'batch_tensor' in locals():
+            del batch_tensor
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
 class WeaviateSimilarityService:
     """Service for managing similarity search operations with Weaviate."""
     

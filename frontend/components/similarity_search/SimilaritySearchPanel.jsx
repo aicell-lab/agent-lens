@@ -601,12 +601,7 @@ const SimilaritySearchPanel = ({
           });
           
           if (extractedImageDataUrl) {
-            console.log(`🖼️ Generating preview for annotation ${annotation.id}`);
             previewImage = await generatePreviewFromDataUrl(extractedImageDataUrl);
-            console.log(`🖼️ Preview generated for annotation ${annotation.id}:`, {
-              previewGenerated: !!previewImage,
-              previewSize: previewImage ? previewImage.length : 0
-            });
           } else {
             console.log(`⚠️ No extractedImageDataUrl found for annotation ${annotation.id} - check embeddings generation`);
           }

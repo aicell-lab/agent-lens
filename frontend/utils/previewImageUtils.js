@@ -95,12 +95,6 @@ export const generatePreviewFromDataUrl = async (extractedImageDataUrl) => {
         // Convert to base64 PNG and extract just the base64 part (without data URL prefix)
         const dataUrl = previewCanvas.toDataURL('image/png', 0.8);
         const base64 = dataUrl.split(',')[1]; // Remove "data:image/png;base64," prefix
-        console.log('🖼️ Preview generated successfully:', {
-          originalSize: `${img.width}x${img.height}`,
-          scaledSize: `${scaledWidth.toFixed(1)}x${scaledHeight.toFixed(1)}`,
-          previewSize: base64.length,
-          previewPrefix: base64.substring(0, 30)
-        });
         resolve(base64);
       };
       img.onerror = () => {

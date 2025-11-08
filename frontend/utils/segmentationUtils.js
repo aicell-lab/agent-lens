@@ -675,17 +675,16 @@ export const batchProcessSegmentationPolygons = async (
         }
       }
 
-      // Step 2: Process each polygon - apply contrast, merge channels, generate embeddings
+      // Step 2: Process each polygon in parallel - apply contrast, merge channels, generate embeddings
       const { generateImageEmbeddingBatch, generateTextEmbedding } = await import('./annotationEmbeddingService');
       const { generatePreviewFromDataUrl } = await import('./previewImageUtils');
+      const { applyShapeMaskToImageBlob } = await import('./annotationEmbeddingService');
 
-      const mergedImageBlobs = [];
-      const validBatchData = [];
-
-      for (let i = 0; i < batchData.length; i++) {
+      console.log(`[SegmentationUtils] Processing ${batchData.length} polygons in parallel`);
+      
+      // Process all polygons in parallel
+      const polygonProcessingPromises = batchData.map(async (data, i) => {
         try {
-          const data = batchData[i];
-          
           // Process all channels for this polygon
           const channelDataArray = [];
           
@@ -763,7 +762,6 @@ export const batchProcessSegmentationPolygons = async (
           };
           
           // Apply shape mask to remove neighboring cells
-          const { applyShapeMaskToImageBlob } = await import('./annotationEmbeddingService');
           mergedBlob = await applyShapeMaskToImageBlob(
             mergedBlob, 
             data.annotation, 
@@ -772,19 +770,42 @@ export const batchProcessSegmentationPolygons = async (
             data.wellInfo
           );
           
-          mergedImageBlobs.push(mergedBlob);
-          validBatchData.push(data);
+          return { success: true, blob: mergedBlob, data, index: i };
           
         } catch (error) {
           console.error(`[SegmentationUtils] Error processing polygon ${i}:`, error);
+          return { 
+            success: false, 
+            error: error.message, 
+            index: i, 
+            globalIndex: data.globalIndex, 
+            wellId: data.polygon.well_id 
+          };
+        }
+      });
+      
+      // Wait for all polygons to be processed in parallel
+      const polygonResults = await Promise.all(polygonProcessingPromises);
+      
+      // Separate successful and failed results
+      const mergedImageBlobs = [];
+      const validBatchData = [];
+      
+      for (const result of polygonResults) {
+        if (result.success) {
+          mergedImageBlobs.push(result.blob);
+          validBatchData.push(result.data);
+        } else {
           failedCount++;
           failedPolygons.push({ 
-            index: batchData[i].globalIndex, 
-            wellId: batchData[i].polygon.well_id, 
-            error: error.message 
+            index: result.globalIndex, 
+            wellId: result.wellId, 
+            error: result.error 
           });
         }
       }
+      
+      console.log(`[SegmentationUtils] Parallel processing complete: ${mergedImageBlobs.length} successful, ${failedCount} failed`);
 
       if (mergedImageBlobs.length === 0) {
         if (onProgress) onProgress(batchEnd, polygons.length, successfulCount, failedCount);

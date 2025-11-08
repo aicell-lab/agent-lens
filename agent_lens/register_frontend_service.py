@@ -160,6 +160,9 @@ def get_frontend_api():
     @app.post("/embedding/image-batch")
     async def generate_image_embedding_batch(images: List[UploadFile] = File(...)):
         """Generate CLIP image embeddings from multiple uploaded images in batch.
+        
+        This endpoint uses optimized batch processing for significantly faster
+        embedding generation, especially when using GPU acceleration.
 
         Args:
             images: List of image files to process
@@ -180,30 +183,44 @@ def get_frontend_api():
             if not images or len(images) == 0:
                 raise HTTPException(status_code=400, detail="At least one image is required")
             
-            from agent_lens.utils.weaviate_search import generate_image_embedding
-            results = []
+            from agent_lens.utils.weaviate_search import generate_image_embeddings_batch
             
-            for image in images:
+            # Read all images first and filter valid ones
+            image_bytes_list = []
+            valid_indices = []  # Track which original indices are valid
+            
+            for idx, image in enumerate(images):
                 try:
                     if not image.content_type or not image.content_type.startswith("image/"):
-                        results.append(None)
                         continue
                     
                     image_bytes = await image.read()
                     if not image_bytes:
-                        results.append(None)
                         continue
                     
-                    embedding = await generate_image_embedding(image_bytes)
-                    results.append({
+                    image_bytes_list.append(image_bytes)
+                    valid_indices.append(idx)
+                except Exception as e:
+                    logger.warning(f"Error reading image {image.filename}: {e}")
+                    continue
+            
+            if not image_bytes_list:
+                raise HTTPException(status_code=400, detail="No valid images found in upload")
+            
+            # Process all images in a single batch (much faster!)
+            embeddings = await generate_image_embeddings_batch(image_bytes_list)
+            
+            # Map results back to original order
+            results = [None] * len(images)
+            for valid_idx, embedding in zip(valid_indices, embeddings):
+                if embedding is not None:
+                    results[valid_idx] = {
                         "success": True,
                         "embedding": embedding,
                         "dimension": len(embedding),
                         "model": "ViT-B/32"
-                    })
-                except Exception as e:
-                    logger.error(f"Error generating embedding for image {image.filename}: {e}")
-                    results.append(None)
+                    }
+                # else: results[valid_idx] remains None
             
             return {
                 "success": True,

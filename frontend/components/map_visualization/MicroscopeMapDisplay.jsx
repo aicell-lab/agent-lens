@@ -3951,6 +3951,10 @@ const MicroscopeMapDisplay = forwardRef(({
     }
   }, [experiments]);
 
+  // Track previous dropdown state to detect when it opens (not just when it's open)
+  const prevLayerDropdownOpenRef = useRef(false);
+  const checkSegmentationStatusRef = useRef(null);
+
   // Check segmentation status when Layer dropdown opens
   const checkSegmentationStatus = useCallback(async () => {
     if (!microscopeControlService || isSimulatedMicroscopeSelected) return;
@@ -3996,23 +4000,36 @@ const MicroscopeMapDisplay = forwardRef(({
     }
   }, [microscopeControlService, isSimulatedMicroscopeSelected, startSegmentationPolling, stopSegmentationPolling]);
 
+  // Keep ref updated with latest callback
   useEffect(() => {
-    if (isLayerDropdownOpen && !isSimulatedMicroscopeSelected && !hasExperimentsRef.current) {
-      console.log('[Layer Dropdown] Loading experiments for first time');
-      loadExperiments();
-      // Also get experiment info for the active experiment
-      if (activeExperiment) {
-        getExperimentInfo(activeExperiment);
-      }
-    } else if (isLayerDropdownOpen && !isSimulatedMicroscopeSelected && hasExperimentsRef.current) {
-      console.log('[Layer Dropdown] Experiments already loaded, skipping refresh');
-    }
+    checkSegmentationStatusRef.current = checkSegmentationStatus;
+  }, [checkSegmentationStatus]);
+
+  useEffect(() => {
+    // Only run when dropdown state actually changes, not on every render
+    const dropdownJustOpened = isLayerDropdownOpen && !prevLayerDropdownOpenRef.current;
     
-    // Check segmentation status when Layer dropdown opens
-    if (isLayerDropdownOpen && !isSimulatedMicroscopeSelected) {
-      checkSegmentationStatus();
+    // Update ref for next comparison
+    prevLayerDropdownOpenRef.current = isLayerDropdownOpen;
+    
+    if (!isSimulatedMicroscopeSelected) {
+      // Load experiments only when dropdown first opens and we don't have them yet
+      if (dropdownJustOpened && !hasExperimentsRef.current) {
+        console.log('[Layer Dropdown] Loading experiments for first time');
+        loadExperiments();
+        // Also get experiment info for the active experiment
+        if (activeExperiment) {
+          getExperimentInfo(activeExperiment);
+        }
+      }
+      
+      // Check segmentation status only when dropdown first opens (not on every render)
+      // Use ref to avoid dependency on checkSegmentationStatus which changes frequently
+      if (dropdownJustOpened && checkSegmentationStatusRef.current) {
+        checkSegmentationStatusRef.current();
+      }
     }
-  }, [isLayerDropdownOpen, isSimulatedMicroscopeSelected, checkSegmentationStatus]); // Removed function dependencies to prevent infinite loops
+  }, [isLayerDropdownOpen, isSimulatedMicroscopeSelected, loadExperiments, activeExperiment, getExperimentInfo]);
 
   // Cleanup timeouts on unmount
   useEffect(() => {
