@@ -430,6 +430,10 @@ const MicroscopeMapDisplay = forwardRef(({
       setIsScanInProgress(false);
       setIsQuickScanInProgress(false);
       
+      // Unlock hardware when scan completes or fails
+      if (setMicroscopeBusy) setMicroscopeBusy(false);
+      if (setCurrentOperation) setCurrentOperation(null);
+      
       // If scan just completed successfully, refresh results and show notification
       if (scanJustCompleted) {
         if (state === 'completed') {
