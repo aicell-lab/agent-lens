@@ -422,7 +422,11 @@ export const processSegmentationPolygon = async (
       services,
       channelConfigs,
       enabledChannels,
-      { sourceExperiment: sourceExperimentName }
+      { 
+        sourceExperiment: sourceExperimentName,
+        datasetId: sourceExperimentName,  // Ensure correct experiment is used
+        experimentName: sourceExperimentName  // Pass experiment name for tile loading
+      }
     );
 
     // Convert to data URL for preview generation
@@ -741,7 +745,33 @@ export const batchProcessSegmentationPolygons = async (
           }
           
           // Convert merged data URL to blob
-          const mergedBlob = await dataUrlToBlob(mergedDataUrl);
+          let mergedBlob = await dataUrlToBlob(mergedDataUrl);
+          
+          // Step 4: Apply polygon mask to isolate the cell and remove neighboring cells
+          // Calculate annotation bounds for masking
+          const xValues = data.annotation.points.map(p => p.x);
+          const yValues = data.annotation.points.map(p => p.y);
+          const annotationBounds = {
+            centerX: (Math.min(...xValues) + Math.max(...xValues)) / 2,
+            centerY: (Math.min(...yValues) + Math.max(...yValues)) / 2,
+            width: Math.max(...xValues) - Math.min(...xValues),
+            height: Math.max(...yValues) - Math.min(...yValues),
+            minX: Math.min(...xValues),
+            maxX: Math.max(...xValues),
+            minY: Math.min(...yValues),
+            maxY: Math.max(...yValues)
+          };
+          
+          // Apply shape mask to remove neighboring cells
+          const { applyShapeMaskToImageBlob } = await import('./annotationEmbeddingService');
+          mergedBlob = await applyShapeMaskToImageBlob(
+            mergedBlob, 
+            data.annotation, 
+            annotationBounds, 
+            'FREE_PAN',  // Mode for stage coordinates
+            data.wellInfo
+          );
+          
           mergedImageBlobs.push(mergedBlob);
           validBatchData.push(data);
           

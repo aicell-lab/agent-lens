@@ -1508,10 +1508,10 @@ const MicroscopeMapDisplay = forwardRef(({
         }));
       
       // Build channelConfigs from actual UI contrast settings (layerContrastSettings)
-      // IMPORTANT: Use activeExperiment (which could be the segmentation experiment) to look up contrast settings
-      // because users adjust contrast on the segmentation layer, not the source layer
-      const experimentForContrast = activeExperiment || sourceExperimentName;
-      console.log(`[SegmentationUpload] Using experiment for contrast lookup: ${experimentForContrast} (active: ${activeExperiment}, source: ${sourceExperimentName})`);
+      // IMPORTANT: Always use sourceExperimentName for contrast settings and data extraction
+      // The segmentation experiment doesn't have its own channel data - it only has polygon overlays
+      const experimentForContrast = sourceExperimentName;
+      console.log(`[SegmentationUpload] Using source experiment for contrast lookup: ${experimentForContrast} (active: ${activeExperiment})`);
       
       enabledChannels.forEach(channel => {
         const channelName = channel.label || channel.channelName || channel.name;
