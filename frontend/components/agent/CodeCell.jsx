@@ -29,7 +29,7 @@ const CodeCell = ({
   isReady = false
 }) => {
   const [codeValue, setCodeValue] = useState(code);
-  const [editorHeight, setEditorHeight] = useState(80);
+  const [editorHeight, setEditorHeight] = useState(50);
   const editorRef = useRef(null);
 
   // Update local value when prop changes
@@ -69,16 +69,19 @@ const CodeCell = ({
     editor.updateOptions({
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
-      fontSize: 11,
+      fontSize: 10,
+      lineHeight: 16,
       lineNumbers: 'on',
       wordWrap: 'on',
-      automaticLayout: true
+      automaticLayout: true,
+      padding: { top: 4, bottom: 4 }
     });
 
     // Auto-resize editor
     const updateHeight = () => {
       const lineCount = editor.getModel().getLineCount();
-      const newHeight = Math.max(80, Math.min(lineCount * 16 + 16, 400));
+      // Reduced minimum height and tighter line spacing for more compact cells
+      const newHeight = Math.max(50, Math.min(lineCount * 14 + 8, 400));
       setEditorHeight(newHeight);
     };
 
@@ -167,11 +170,13 @@ const CodeCell = ({
               options={{
                 minimap: { enabled: false },
                 scrollBeyondLastLine: false,
-                fontSize: 11,
+                fontSize: 10,
+                lineHeight: 16,
                 lineNumbers: 'on',
                 wordWrap: 'on',
                 automaticLayout: true,
-                readOnly: role === 'system' && !isActive
+                readOnly: role === 'system' && !isActive,
+                padding: { top: 4, bottom: 4 }
               }}
             />
           </div>

@@ -72,7 +72,8 @@ export class CellManager {
         trusted: true,
         isNew: type === 'code',
         isEditing: false,
-        isCodeVisible: true,
+        // Hide code by default for system cells
+        isCodeVisible: role !== 'system',
         isOutputVisible: true,
         parent: parent,
         staged: false
@@ -304,7 +305,8 @@ export class CellManager {
           trusted: true,
           isNew: type === 'code',
           isEditing: false,
-          isCodeVisible: true,
+          // Hide code by default for system cells
+          isCodeVisible: role !== 'system',
           isOutputVisible: true,
           parent: parent,
           staged: false

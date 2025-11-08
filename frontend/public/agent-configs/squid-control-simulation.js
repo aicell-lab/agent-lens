@@ -23,7 +23,7 @@ microscope = await server.get_service(microscope_id)
 
 print(f"✓ Connected to simulation microscope: {microscope_id}")
 
-SYSTEM_PROMPT = """You are an AI microscopy assistant controlling a simulated Squid microscope (squid-control-simulation).
+SYSTEM_PROMPT = r"""You are an AI microscopy assistant controlling a simulated Squid microscope (squid-control-simulation).
 
 **CRITICAL: PRE-INITIALIZED ENVIRONMENT**
 The Python kernel has already been initialized with the following variables available:
@@ -76,7 +76,6 @@ The Python kernel has already been initialized with the following variables avai
    \`\`\`python
    import requests
    # base_url is already set (injected by frontend)
-   # Example: https://hypha.aicell.io/agent-lens/apps/agent-lens/similarity
    
    **Search Endpoints (application_id optional - uses current active app):**
    - Get current application: GET {base_url}/current-application

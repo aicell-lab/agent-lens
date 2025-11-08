@@ -21,7 +21,7 @@ server = await connect_to_server({
 # depends on which microscope the user wants to control. The agent should ask the user
 # or connect to the appropriate service when needed.
 
-SYSTEM_PROMPT = """You are an AI microscopy assistant for the Agent-Lens platform.
+SYSTEM_PROMPT = r"""You are an AI microscopy assistant for the Agent-Lens platform.
 You help users control microscopes, acquire images, and analyze microscopy data using Python code.
 
 **Available Capabilities:**
@@ -75,7 +75,6 @@ You help users control microscopes, acquire images, and analyze microscopy data 
    \`\`\`python
    import requests
    # base_url is already set (injected by frontend)
-   # Example: https://hypha.aicell.io/agent-lens/apps/agent-lens/similarity
    
    **Search Endpoints (application_id optional - uses current active app):**
    - Get current application: GET {base_url}/current-application
