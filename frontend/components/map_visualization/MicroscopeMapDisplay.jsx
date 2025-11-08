@@ -346,6 +346,7 @@ const MicroscopeMapDisplay = forwardRef(({
   const [isLoadingCanvas, setIsLoadingCanvas] = useState(false);
   const [needsTileReload, setNeedsTileReload] = useState(false); // Flag to trigger tile loading after refresh
   const canvasUpdateTimerRef = useRef(null);
+  const visibleExperimentsRef = useRef([]); // Ref to track visible experiments for segmentation refresh
   
   // Independent request queues for different layer types
   const browseDataRequestsRef = useRef(new Set()); // Track browse data requests (historical)
@@ -1208,47 +1209,42 @@ const MicroscopeMapDisplay = forwardRef(({
             error: null
           }));
 
-          // Ensure segmentation layer is visible when segmentation is running
-          if (isRunning && experimentName) {
-            const segmentationExpName = getSegmentationExperimentName(experimentName);
-            
-            // Check if already visible - skip reload to prevent refreshing
-            setVisibleExperiments(prev => {
-              const segVisible = prev.includes(segmentationExpName);
-              if (segVisible) {
-                // Already visible, skip reload
-                return prev;
-              }
-              
-              // Not visible yet, reload experiments and add it
-              loadExperiments().then(() => {
-                setTimeout(() => {
-                  const segExp = experiments.find(exp => exp.name === segmentationExpName);
-                  
-                  if (segExp) {
-                    setVisibleExperiments(current => {
-                      const parentVisible = current.includes(experimentName);
-                      const currentSegVisible = current.includes(segmentationExpName);
-                      
-                      if (parentVisible && !currentSegVisible) {
-                        return [...current, segmentationExpName];
-                      }
-                      return current;
-                    });
-                  }
-                }, 500);
-              });
-              
-              return prev;
-            });
-          }
-
           // Only log progress if still running (no notification to avoid spam)
           if (isRunning) {
             // Log progress but don't show notification
             const progressMessage = formatProgressMessage(status.progress);
             if (appendLog) {
               appendLog(`Segmentation progress: ${progressMessage}`);
+            }
+            
+            // Ensure segmentation layer exists in UI (but not visible) when segmentation is running
+            // Also refresh it if user manually set it visible
+            if (experimentName) {
+              const segmentationExpName = getSegmentationExperimentName(experimentName);
+              
+              // Check if segmentation experiment already exists in the experiments list
+              const segExpExists = experiments.find(exp => exp.name === segmentationExpName);
+              
+              if (!segExpExists) {
+                // Not in experiments list yet, reload experiments to make it available in UI
+                loadExperiments().then(() => {
+                  setTimeout(() => {
+                    const segExp = experiments.find(exp => exp.name === segmentationExpName);
+                    if (segExp) {
+                      console.log(`[Segmentation] Segmentation layer now available in UI: ${segmentationExpName} (not visible until user enables it)`);
+                    }
+                  }, 500);
+                });
+              }
+              
+              // Refresh segmentation layer every 5 seconds if user manually set it visible
+              const currentVisible = visibleExperimentsRef.current;
+              const isSegmentationVisible = currentVisible.includes(segmentationExpName);
+              if (isSegmentationVisible) {
+                // Trigger tile reload to refresh segmentation layer
+                setNeedsTileReload(true);
+                console.log(`[Segmentation Refresh] Refreshing visible segmentation layer: ${segmentationExpName}`);
+              }
             }
           }
 
@@ -1305,7 +1301,7 @@ const MicroscopeMapDisplay = forwardRef(({
         }
       }
     }, 5000); // Poll every 5 seconds
-  }, [microscopeControlService, showNotification, appendLog, refreshExperimentData, stopSegmentationPolling]);
+  }, [microscopeControlService, showNotification, appendLog, refreshExperimentData, stopSegmentationPolling, getSegmentationExperimentName, experiments, loadExperiments]);
 
   const cancelRunningSegmentation = useCallback(async () => {
     if (!microscopeControlService || !segmentationState.isRunning) {
@@ -1718,6 +1714,11 @@ const MicroscopeMapDisplay = forwardRef(({
 
   // Multi-layer experiment visibility state
   const [visibleExperiments, setVisibleExperiments] = useState([]);
+  
+  // Keep ref in sync with state
+  useEffect(() => {
+    visibleExperimentsRef.current = visibleExperiments;
+  }, [visibleExperiments]);
 
   // Auto-show active experiment when it changes (backwards compatibility)
   // Only triggers when activeExperiment changes, not when visibleExperiments changes
@@ -1727,22 +1728,12 @@ const MicroscopeMapDisplay = forwardRef(({
         // Only add if not already visible
         if (!prev.includes(activeExperiment)) {
           console.log(`[Auto-show] Adding active experiment to visible list: ${activeExperiment}`);
-          const updated = [...prev, activeExperiment];
-          
-          // Also automatically show segmentation layer if it exists
-          const segmentationExpName = getSegmentationExperimentName(activeExperiment);
-          const segmentationExp = experiments.find(exp => exp.name === segmentationExpName);
-          if (segmentationExp && !prev.includes(segmentationExpName)) {
-            console.log(`[Auto-show] Also adding segmentation layer to visible list: ${segmentationExpName}`);
-            updated.push(segmentationExpName);
-          }
-          
-          return updated;
+          return [...prev, activeExperiment];
         }
         return prev;
       });
     }
-  }, [activeExperiment, experiments]); // Added experiments dependency to check for segmentation layers
+  }, [activeExperiment, experiments]);
 
   // Clean up visibleExperiments when experiments are deleted
   useEffect(() => {
