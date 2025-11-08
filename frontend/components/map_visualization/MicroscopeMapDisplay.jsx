@@ -2614,14 +2614,31 @@ const MicroscopeMapDisplay = forwardRef(({
         getTileKey(tile.bounds, tile.scale, tile.channel, tile.experimentName) === tileKey
       );
       
+      // 🧹 CLEANUP LOWER SCALES: When adding a tile at a new scale, remove tiles from lower scales
+      // This prevents blackouts during zoom by ensuring only current scale tiles are visible
+      const tilesWithoutLowerScales = prevTiles.filter(tile => tile.scale >= newTile.scale);
+      
+      if (tilesWithoutLowerScales.length < prevTiles.length) {
+        const removedCount = prevTiles.length - tilesWithoutLowerScales.length;
+        console.log(`🧹 Removed ${removedCount} tiles from lower scales (< ${newTile.scale})`);
+      }
+      
       if (existingIndex >= 0) {
-        // Update existing tile
-        const updatedTiles = [...prevTiles];
-        updatedTiles[existingIndex] = newTile;
-        return updatedTiles;
+        // Update existing tile (find new index after filtering)
+        const newIndex = tilesWithoutLowerScales.findIndex(tile => 
+          getTileKey(tile.bounds, tile.scale, tile.channel, tile.experimentName) === tileKey
+        );
+        if (newIndex >= 0) {
+          const updatedTiles = [...tilesWithoutLowerScales];
+          updatedTiles[newIndex] = newTile;
+          return updatedTiles;
+        } else {
+          // Tile was from lower scale and got filtered out, add as new
+          return [...tilesWithoutLowerScales, newTile];
+        }
       } else {
         // Add new tile
-        return [...prevTiles, newTile];
+        return [...tilesWithoutLowerScales, newTile];
       }
     });
   }, [getTileKey]);
