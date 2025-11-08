@@ -150,7 +150,8 @@ export async function extractAnnotationImageRegionAdvanced(
       datasetId: metadata.datasetId,
       wellPlateType: metadata.wellPlateType || '96',
       wellPaddingMm: 0,
-      bounds: regionBounds
+      bounds: regionBounds,
+      experimentName: metadata.experimentName || metadata.sourceExperiment || metadata.datasetId // Ensure experiment name is passed
     };
 
     console.log(`🎨 AdvancedAnnotationExtraction: Tile request:`, tileRequest);
@@ -541,7 +542,7 @@ function applyShapeMaskToCanvas(sourceCanvas, displayPoints, offsetX, offsetY, p
  * @param {Object} wellInfo - Well information (for HISTORICAL mode)
  * @returns {Promise<Blob>} Masked image blob
  */
-async function applyShapeMaskToImageBlob(imageBlob, annotation, annotationBounds, mode, wellInfo) {
+export async function applyShapeMaskToImageBlob(imageBlob, annotation, annotationBounds, mode, wellInfo) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {

@@ -374,7 +374,7 @@ class WeaviateSimilarityService:
         return actual_results
     
     async def fetch_all_annotations(self, collection_name: str, application_id: str,
-                                   limit: int = 100000, include_vector: bool = False,
+                                   limit: int = 10000, include_vector: bool = False,
                                    use_prefix_match: bool = False) -> List[Dict[str, Any]]:
         """
         Fetch all annotations from a collection without vector search.
@@ -564,7 +564,7 @@ class WeaviateSimilarityService:
                 results = await self.weaviate_service.query.fetch_objects(
                     collection_name=collection_name,
                     application_id=application_id,
-                    limit=100000,
+                    limit=10000,
                     return_properties=["image_id", "description", "metadata", "dataset_id", "file_path", "preview_image"],
                     include_vector=include_vector
                 )

@@ -76,14 +76,28 @@ export const generatePreviewFromDataUrl = async (extractedImageDataUrl) => {
         previewCanvas.width = 50;
         previewCanvas.height = 50;
         
-        // Draw image scaled to 50x50
-        previewCtx.drawImage(img, 0, 0, 50, 50);
+        // Fill with black background
+        previewCtx.fillStyle = 'black';
+        previewCtx.fillRect(0, 0, 50, 50);
+        
+        // Calculate scaling to fit image within 50x50 while maintaining aspect ratio
+        const scale = Math.min(50 / img.width, 50 / img.height);
+        const scaledWidth = img.width * scale;
+        const scaledHeight = img.height * scale;
+        
+        // Center the image in the 50x50 canvas
+        const offsetX = (50 - scaledWidth) / 2;
+        const offsetY = (50 - scaledHeight) / 2;
+        
+        // Draw image scaled and centered with black padding
+        previewCtx.drawImage(img, offsetX, offsetY, scaledWidth, scaledHeight);
         
         // Convert to base64 PNG and extract just the base64 part (without data URL prefix)
         const dataUrl = previewCanvas.toDataURL('image/png', 0.8);
         const base64 = dataUrl.split(',')[1]; // Remove "data:image/png;base64," prefix
         console.log('🖼️ Preview generated successfully:', {
           originalSize: `${img.width}x${img.height}`,
+          scaledSize: `${scaledWidth.toFixed(1)}x${scaledHeight.toFixed(1)}`,
           previewSize: base64.length,
           previewPrefix: base64.substring(0, 30)
         });

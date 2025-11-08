@@ -72,7 +72,8 @@ export class CellManager {
         trusted: true,
         isNew: type === 'code',
         isEditing: false,
-        isCodeVisible: true,
+        // Hide code by default for system cells
+        isCodeVisible: role !== 'system',
         isOutputVisible: true,
         parent: parent,
         staged: false
@@ -240,6 +241,25 @@ export class CellManager {
   }
 
   /**
+   * Hide code and output in the previous Python code cell (excluding system cells)
+   * @param {string} currentCellId - The ID of the current cell
+   */
+  hidePreviousCodeCell(currentCellId) {
+    const currentCellIndex = this.cells.findIndex(c => c.id === currentCellId);
+    if (currentCellIndex === -1 || currentCellIndex === 0) return;
+
+    // Find the most recent previous code cell (excluding system cells)
+    for (let i = currentCellIndex - 1; i >= 0; i--) {
+      const cell = this.cells[i];
+      if (cell.type === 'code' && cell.role !== 'system' && cell.metadata) {
+        cell.metadata.isCodeVisible = false;
+        cell.metadata.isOutputVisible = false;
+        return;
+      }
+    }
+  }
+
+  /**
    * Toggle output visibility
    */
   toggleOutputVisibility(id) {
@@ -304,7 +324,8 @@ export class CellManager {
           trusted: true,
           isNew: type === 'code',
           isEditing: false,
-          isCodeVisible: true,
+          // Hide code by default for system cells
+          isCodeVisible: role !== 'system',
           isOutputVisible: true,
           parent: parent,
           staged: false

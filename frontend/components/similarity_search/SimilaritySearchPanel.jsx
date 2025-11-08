@@ -705,7 +705,7 @@ const SimilaritySearchPanel = ({
       const queryParams = new URLSearchParams({
         collection_name: convertToValidCollectionName('agent-lens'),
         prefix: prefix,
-        limit: '1000'
+        limit: '10000'
       });
       
       const response = await fetch(`/agent-lens/apps/${serviceId}/similarity/list-applications?${queryParams}`, {
@@ -777,7 +777,7 @@ const SimilaritySearchPanel = ({
       const queryParams = new URLSearchParams({
         collection_name: convertToValidCollectionName('agent-lens'),
         application_id: applicationId,
-        limit: '1000',
+        limit: '10000',
         include_vector: 'false',
         use_prefix_match: usePrefixMatch ? 'true' : 'false'
       });

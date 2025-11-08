@@ -255,6 +255,8 @@ const AgentPanel = ({
           const existingCell = cellManager.findCell(c => c.id === completionId);
           if (!existingCell) {
             cellManager.updateCellById(completionId, scriptContent, 'code', 'assistant', userCellId);
+            // Hide code in previous Python cell after creating new one
+            cellManager.hidePreviousCodeCell(completionId);
             setCells([...cellManager.getCells()]);
           } else if (existingCell.content !== scriptContent) {
             cellManager.updateCellContent(completionId, scriptContent);

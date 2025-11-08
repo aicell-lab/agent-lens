@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import PropTypes from 'prop-types';
 import './LayerPanel.css';
 import DualRangeSlider from '../DualRangeSlider';
-import { getChannelColor } from '../../utils';
+import { getChannelColor, getMicroscopeNumber } from '../../utils';
 import { isSegmentationExperiment, getSourceExperimentName } from '../../utils/segmentationUtils';
 
 const LayerPanel = ({
@@ -45,6 +45,9 @@ const LayerPanel = ({
   
   // Incubator service for fetching sample info
   incubatorControlService,
+  
+  // Selected microscope ID for determining which microscope's sample to use
+  selectedMicroscopeId,
   
   // Layout props
   isFovFittedMode = false,
@@ -169,15 +172,26 @@ const LayerPanel = ({
       // Fetch sample information from incubator service
       let sampleId = null;
       
-      if (incubatorControlService && !isSimulatedMicroscope) {
+      if (incubatorControlService && !isSimulatedMicroscope && selectedMicroscopeId) {
         try {
-          const allSlotInfo = await incubatorControlService.get_slot_information();
-          const loadedSample = allSlotInfo?.find(slot => 
-            slot.location === 'microscope1' || slot.location === 'microscope2'
-          );
-          if (loadedSample?.name) {
-            sampleId = loadedSample.name;
-            console.log(`[LayerPanel] Found loaded sample: ${sampleId}`);
+          // Get the microscope number for the currently selected microscope
+          const currentMicroscopeNumber = getMicroscopeNumber(selectedMicroscopeId);
+          const targetLocation = currentMicroscopeNumber ? `microscope${currentMicroscopeNumber}` : null;
+          
+          if (targetLocation) {
+            const allSlotInfo = await incubatorControlService.get_slot_information();
+            // Only look for samples on the currently selected microscope
+            const loadedSample = allSlotInfo?.find(slot => 
+              slot.location === targetLocation
+            );
+            if (loadedSample?.name) {
+              sampleId = loadedSample.name;
+              console.log(`[LayerPanel] Found loaded sample on ${targetLocation}: ${sampleId}`);
+            } else {
+              console.log(`[LayerPanel] No sample found on ${targetLocation}`);
+            }
+          } else {
+            console.log(`[LayerPanel] Could not determine microscope number from selectedMicroscopeId: ${selectedMicroscopeId}`);
           }
         } catch (error) {
           console.log(`[LayerPanel] Failed to fetch incubator info:`, error);
@@ -1122,6 +1136,9 @@ LayerPanel.propTypes = {
   
   // Incubator service for fetching sample info
   incubatorControlService: PropTypes.object,
+  
+  // Selected microscope ID for determining which microscope's sample to use
+  selectedMicroscopeId: PropTypes.string,
   
   // Layout props
   isFovFittedMode: PropTypes.bool,

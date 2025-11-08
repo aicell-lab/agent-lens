@@ -346,6 +346,7 @@ const MicroscopeMapDisplay = forwardRef(({
   const [isLoadingCanvas, setIsLoadingCanvas] = useState(false);
   const [needsTileReload, setNeedsTileReload] = useState(false); // Flag to trigger tile loading after refresh
   const canvasUpdateTimerRef = useRef(null);
+  const visibleExperimentsRef = useRef([]); // Ref to track visible experiments for segmentation refresh
   
   // Independent request queues for different layer types
   const browseDataRequestsRef = useRef(new Set()); // Track browse data requests (historical)
@@ -429,6 +430,10 @@ const MicroscopeMapDisplay = forwardRef(({
       // Clear both scan states when not running
       setIsScanInProgress(false);
       setIsQuickScanInProgress(false);
+      
+      // Unlock hardware when scan completes or fails
+      if (setMicroscopeBusy) setMicroscopeBusy(false);
+      if (setCurrentOperation) setCurrentOperation(null);
       
       // If scan just completed successfully, refresh results and show notification
       if (scanJustCompleted) {
@@ -1204,47 +1209,42 @@ const MicroscopeMapDisplay = forwardRef(({
             error: null
           }));
 
-          // Ensure segmentation layer is visible when segmentation is running
-          if (isRunning && experimentName) {
-            const segmentationExpName = getSegmentationExperimentName(experimentName);
-            
-            // Check if already visible - skip reload to prevent refreshing
-            setVisibleExperiments(prev => {
-              const segVisible = prev.includes(segmentationExpName);
-              if (segVisible) {
-                // Already visible, skip reload
-                return prev;
-              }
-              
-              // Not visible yet, reload experiments and add it
-              loadExperiments().then(() => {
-                setTimeout(() => {
-                  const segExp = experiments.find(exp => exp.name === segmentationExpName);
-                  
-                  if (segExp) {
-                    setVisibleExperiments(current => {
-                      const parentVisible = current.includes(experimentName);
-                      const currentSegVisible = current.includes(segmentationExpName);
-                      
-                      if (parentVisible && !currentSegVisible) {
-                        return [...current, segmentationExpName];
-                      }
-                      return current;
-                    });
-                  }
-                }, 500);
-              });
-              
-              return prev;
-            });
-          }
-
           // Only log progress if still running (no notification to avoid spam)
           if (isRunning) {
             // Log progress but don't show notification
             const progressMessage = formatProgressMessage(status.progress);
             if (appendLog) {
               appendLog(`Segmentation progress: ${progressMessage}`);
+            }
+            
+            // Ensure segmentation layer exists in UI (but not visible) when segmentation is running
+            // Also refresh it if user manually set it visible
+            if (experimentName) {
+              const segmentationExpName = getSegmentationExperimentName(experimentName);
+              
+              // Check if segmentation experiment already exists in the experiments list
+              const segExpExists = experiments.find(exp => exp.name === segmentationExpName);
+              
+              if (!segExpExists) {
+                // Not in experiments list yet, reload experiments to make it available in UI
+                loadExperiments().then(() => {
+                  setTimeout(() => {
+                    const segExp = experiments.find(exp => exp.name === segmentationExpName);
+                    if (segExp) {
+                      console.log(`[Segmentation] Segmentation layer now available in UI: ${segmentationExpName} (not visible until user enables it)`);
+                    }
+                  }, 500);
+                });
+              }
+              
+              // Refresh segmentation layer every 5 seconds if user manually set it visible
+              const currentVisible = visibleExperimentsRef.current;
+              const isSegmentationVisible = currentVisible.includes(segmentationExpName);
+              if (isSegmentationVisible) {
+                // Trigger tile reload to refresh segmentation layer
+                setNeedsTileReload(true);
+                console.log(`[Segmentation Refresh] Refreshing visible segmentation layer: ${segmentationExpName}`);
+              }
             }
           }
 
@@ -1301,7 +1301,7 @@ const MicroscopeMapDisplay = forwardRef(({
         }
       }
     }, 5000); // Poll every 5 seconds
-  }, [microscopeControlService, showNotification, appendLog, refreshExperimentData, stopSegmentationPolling]);
+  }, [microscopeControlService, showNotification, appendLog, refreshExperimentData, stopSegmentationPolling, getSegmentationExperimentName, experiments, loadExperiments]);
 
   const cancelRunningSegmentation = useCallback(async () => {
     if (!microscopeControlService || !segmentationState.isRunning) {
@@ -1494,14 +1494,38 @@ const MicroscopeMapDisplay = forwardRef(({
         }
       }
 
-      // Step 3: Get channel configurations for image extraction
-      const channelConfigs = zarrChannelConfigs;
+      // Step 3: Get channel configurations for image extraction (use UI contrast settings, not defaults)
+      const channelConfigs = {};
       const enabledChannels = Object.entries(visibleLayers.channels)
         .filter(([channelName, isVisible]) => isVisible)
         .map(([channelName]) => ({ 
           channelName, 
           label: channelName 
         }));
+      
+      // Build channelConfigs from actual UI contrast settings (layerContrastSettings)
+      // IMPORTANT: Always use sourceExperimentName for contrast settings and data extraction
+      // The segmentation experiment doesn't have its own channel data - it only has polygon overlays
+      const experimentForContrast = sourceExperimentName;
+      console.log(`[SegmentationUpload] Using source experiment for contrast lookup: ${experimentForContrast} (active: ${activeExperiment})`);
+      
+      enabledChannels.forEach(channel => {
+        const channelName = channel.label || channel.channelName || channel.name;
+        const layerId = `${experimentForContrast}-${channelName}`;
+        const layerContrast = getLayerContrastSettings(layerId);
+        
+        // Get color from zarrChannelConfigs or defaults
+        const zarrConfig = zarrChannelConfigs[channelName] || {};
+        
+        channelConfigs[channelName] = {
+          min: layerContrast.min !== undefined ? layerContrast.min : (zarrConfig.min || 0),
+          max: layerContrast.max !== undefined ? layerContrast.max : (zarrConfig.max || 255),
+          color: zarrConfig.color,
+          enabled: true
+        };
+        
+        console.log(`[SegmentationUpload] Channel ${channelName} layerId: ${layerId}, contrast settings:`, channelConfigs[channelName]);
+      });
 
       if (enabledChannels.length === 0) {
         throw new Error('No visible channels found for image extraction');
@@ -1541,7 +1565,7 @@ const MicroscopeMapDisplay = forwardRef(({
         enabledChannels,
         onProgress,
         getWellInfoById,
-        30, // batchSize
+        60, // batchSize
         shouldCancel // Pass cancellation check function
       );
 
@@ -1560,7 +1584,7 @@ const MicroscopeMapDisplay = forwardRef(({
       // Step 5: Upload to Weaviate using batch inserts
       let uploadedCount = 0;
       let failedCount = 0;
-      const insertBatchSize = 30; // Match extraction batch size
+      const insertBatchSize = 50; // Match extraction batch size
 
       // Process annotations in batches
       for (let batchStart = 0; batchStart < processResult.processedAnnotations.length; batchStart += insertBatchSize) {
@@ -1676,7 +1700,9 @@ const MicroscopeMapDisplay = forwardRef(({
     artifactZarrLoaderRef,
     getWellInfoById,
     showNotification,
-    appendLog
+    appendLog,
+    getLayerContrastSettings,
+    activeExperiment
   ]);
 
   // Cleanup polling on unmount
@@ -1688,6 +1714,11 @@ const MicroscopeMapDisplay = forwardRef(({
 
   // Multi-layer experiment visibility state
   const [visibleExperiments, setVisibleExperiments] = useState([]);
+  
+  // Keep ref in sync with state
+  useEffect(() => {
+    visibleExperimentsRef.current = visibleExperiments;
+  }, [visibleExperiments]);
 
   // Auto-show active experiment when it changes (backwards compatibility)
   // Only triggers when activeExperiment changes, not when visibleExperiments changes
@@ -1697,22 +1728,12 @@ const MicroscopeMapDisplay = forwardRef(({
         // Only add if not already visible
         if (!prev.includes(activeExperiment)) {
           console.log(`[Auto-show] Adding active experiment to visible list: ${activeExperiment}`);
-          const updated = [...prev, activeExperiment];
-          
-          // Also automatically show segmentation layer if it exists
-          const segmentationExpName = getSegmentationExperimentName(activeExperiment);
-          const segmentationExp = experiments.find(exp => exp.name === segmentationExpName);
-          if (segmentationExp && !prev.includes(segmentationExpName)) {
-            console.log(`[Auto-show] Also adding segmentation layer to visible list: ${segmentationExpName}`);
-            updated.push(segmentationExpName);
-          }
-          
-          return updated;
+          return [...prev, activeExperiment];
         }
         return prev;
       });
     }
-  }, [activeExperiment, experiments]); // Added experiments dependency to check for segmentation layers
+  }, [activeExperiment, experiments]);
 
   // Clean up visibleExperiments when experiments are deleted
   useEffect(() => {
@@ -2593,14 +2614,31 @@ const MicroscopeMapDisplay = forwardRef(({
         getTileKey(tile.bounds, tile.scale, tile.channel, tile.experimentName) === tileKey
       );
       
+      // 🧹 CLEANUP LOWER SCALES: When adding a tile at a new scale, remove tiles from lower scales
+      // This prevents blackouts during zoom by ensuring only current scale tiles are visible
+      const tilesWithoutLowerScales = prevTiles.filter(tile => tile.scale >= newTile.scale);
+      
+      if (tilesWithoutLowerScales.length < prevTiles.length) {
+        const removedCount = prevTiles.length - tilesWithoutLowerScales.length;
+        console.log(`🧹 Removed ${removedCount} tiles from lower scales (< ${newTile.scale})`);
+      }
+      
       if (existingIndex >= 0) {
-        // Update existing tile
-        const updatedTiles = [...prevTiles];
-        updatedTiles[existingIndex] = newTile;
-        return updatedTiles;
+        // Update existing tile (find new index after filtering)
+        const newIndex = tilesWithoutLowerScales.findIndex(tile => 
+          getTileKey(tile.bounds, tile.scale, tile.channel, tile.experimentName) === tileKey
+        );
+        if (newIndex >= 0) {
+          const updatedTiles = [...tilesWithoutLowerScales];
+          updatedTiles[newIndex] = newTile;
+          return updatedTiles;
+        } else {
+          // Tile was from lower scale and got filtered out, add as new
+          return [...tilesWithoutLowerScales, newTile];
+        }
       } else {
         // Add new tile
-        return [...prevTiles, newTile];
+        return [...tilesWithoutLowerScales, newTile];
       }
     });
   }, [getTileKey]);
@@ -4141,8 +4179,9 @@ const MicroscopeMapDisplay = forwardRef(({
 
   // Text search handler (moved from SimilaritySearchPanel)
   // Note: This must be defined AFTER all dependencies are declared (experiments, selectedHistoricalDataset, etc.)
-  const handleTextSearch = useCallback(async () => {
-    if (!textSearchQuery.trim()) {
+  // Reusable text search function that accepts a query parameter
+  const performTextSearch = useCallback(async (query) => {
+    if (!query || !query.trim()) {
       showNotification('Please enter a search query.', 'warning');
       return;
     }
@@ -4175,7 +4214,7 @@ const MicroscopeMapDisplay = forwardRef(({
       const queryParams = new URLSearchParams({
         collection_name: convertToValidCollectionName('agent-lens'),
         application_id: applicationId,
-        query_text: textSearchQuery.trim(),
+        query_text: query.trim(),
         limit: '10'
       });
       
@@ -4222,7 +4261,11 @@ const MicroscopeMapDisplay = forwardRef(({
     } finally {
       setIsSearching(false);
     }
-  }, [textSearchQuery, selectedHistoricalDataset, activeLayer, experiments, convertToValidCollectionName, showNotification]);
+  }, [selectedHistoricalDataset, activeLayer, experiments, convertToValidCollectionName, showNotification]);
+
+  const handleTextSearch = useCallback(async () => {
+    await performTextSearch(textSearchQuery);
+  }, [textSearchQuery, performTextSearch]);
 
   // Image similarity search handler (for Find Similar button in SimilaritySearchPanel)
   const handleFindSimilar = useCallback(async (annotation) => {
@@ -5874,6 +5917,9 @@ const MicroscopeMapDisplay = forwardRef(({
                       // Incubator service for fetching sample info
                       incubatorControlService={incubatorControlService}
                       
+                      // Selected microscope ID for determining which microscope's sample to use
+                      selectedMicroscopeId={selectedMicroscopeId}
+                      
                       // Layout props
                       isFovFittedMode={mapViewMode === 'FOV_FITTED'}
                       
@@ -6210,6 +6256,8 @@ const MicroscopeMapDisplay = forwardRef(({
           isVisible={showSimilarityResultInfoWindow}
           onClose={() => setShowSimilarityResultInfoWindow(false)}
           containerBounds={mapContainerRef.current?.getBoundingClientRect()}
+          onSearch={performTextSearch}
+          isSearching={isSearching}
         />
         
         {/* Rectangle selection active indicator */}
