@@ -597,8 +597,8 @@
 /* Styles for the main sidebar toggle button */
 .main-sidebar-toggle-container {
   padding: 0.5rem 1rem; /* Match horizontal padding of .sidebar-tabs */
-  margin-top: auto; /* Push to the bottom */
-  border-top: 1px solid #e0e0e0; /* Separator line */
+  margin-top: -1rem; /* Remove space above by counteracting parent padding */
+  border-bottom: 1px solid #e0e0e0; /* Separator line below the button */
 }
 
 .main-sidebar-collapsed .main-sidebar-toggle-container {

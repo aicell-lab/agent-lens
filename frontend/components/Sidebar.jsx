@@ -31,6 +31,14 @@ const Sidebar = React.forwardRef(({
 
 
   const handleMicroscopeTabClick = () => {
+    // If sidebar is collapsed, expand it and open the dropdown
+    if (isMainSidebarCollapsed) {
+      setIsMainSidebarCollapsed(false);
+      setIsMicroscopeDropdownOpen(true);
+      onTabChange('microscope');
+      return;
+    }
+    
     if (activeTab === 'microscope') {
       // Toggle dropdown instead of panel
       setIsMicroscopeDropdownOpen(!isMicroscopeDropdownOpen);
@@ -79,6 +87,17 @@ const Sidebar = React.forwardRef(({
   return (
     <div className="sidebar-container">
       <div className={`main-sidebar ${isMainSidebarCollapsed ? 'main-sidebar-collapsed' : ''} ${currentOperation ? 'operation-in-progress' : ''}`} style={{ cursor: currentOperation ? 'not-allowed' : 'default' }}>
+        {/* Collapse/Expand button for the main sidebar */}
+        <div className="main-sidebar-toggle-container">
+          <button 
+            onClick={toggleMainSidebarCollapse} 
+            className="main-sidebar-toggle-button"
+            disabled={!!currentOperation}
+            title={currentOperation ? "Sample operation in progress" : (isMainSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar")}
+          >
+            <i className={`fas ${isMainSidebarCollapsed ? 'fa-chevron-right' : 'fa-chevron-left'}`}></i>
+          </button>
+        </div>
         <div className="sidebar-tabs">
           <button 
             className={`sidebar-tab ${activeTab === 'microscope' ? 'active' : ''}`}
@@ -145,17 +164,6 @@ const Sidebar = React.forwardRef(({
           >
             <i className="fas fa-tachometer-alt"></i>
             {!isMainSidebarCollapsed && <span>Dashboard</span>}
-          </button>
-        </div>
-        {/* Collapse/Expand button for the main sidebar */}
-        <div className="main-sidebar-toggle-container">
-          <button 
-            onClick={toggleMainSidebarCollapse} 
-            className="main-sidebar-toggle-button"
-            disabled={!!currentOperation}
-            title={currentOperation ? "Sample operation in progress" : (isMainSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar")}
-          >
-            <i className={`fas ${isMainSidebarCollapsed ? 'fa-chevron-right' : 'fa-chevron-left'}`}></i>
           </button>
         </div>
       </div>
