@@ -7,11 +7,11 @@ import { useState, useEffect, useCallback } from 'react';
 // eliminating hardcoded color values scattered across multiple components.
 export const CHANNEL_COLORS = {
   'BF LED matrix full': '#FFFFFF',        // White for brightfield (channel_id 0)
-  'Fluorescence 405 nm Ex': '#8000FF',   // Blue-violet (channel_id 11)
-  'Fluorescence 488 nm Ex': '#00FF00',    // Green (channel_id 12)
-  'Fluorescence 561 nm Ex': '#FFFF00',    // Yellow (channel_id 14)
-  'Fluorescence 638 nm Ex': '#FF0000',   // Red (channel_id 13)
-  'Fluorescence 730 nm Ex': '#FF00FF',   // Magenta (channel_id 15)
+  'Fluorescence 405 nm Ex': '#0000FF',   // Blue (channel_id 11) - matches DAPI emission, standard blue
+  'Fluorescence 488 nm Ex': '#00FF00',    // Green (channel_id 12) - matches FITC/GFP emission, standard green
+  'Fluorescence 561 nm Ex': '#FF0000',   // Red (channel_id 14) - matches TRITC/mCherry emission, standard red
+  'Fluorescence 638 nm Ex': '#FF00FF',   // Magenta (channel_id 13) - matches Cy5 emission, standard far-red/magenta
+  'Fluorescence 730 nm Ex': '#00FFFF',   // Cyan (channel_id 15) - far-red/NIR, distinct from 638nm magenta, color-blind friendly
 };
 
 /**
