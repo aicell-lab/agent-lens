@@ -8,7 +8,7 @@ import micropip
 await micropip.install(["hypha-rpc"])
 from hypha_rpc import connect_to_server, login
 
-# Connect to Hypha server
+# Connect to Hypha server (This is your token acquired when you login)
 token = await login({"server_url": "https://hypha.aicell.io"})
 server = await connect_to_server({
   "server_url": "https://hypha.aicell.io", 
