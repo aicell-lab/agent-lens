@@ -4167,8 +4167,9 @@ const MicroscopeMapDisplay = forwardRef(({
 
   // Text search handler (moved from SimilaritySearchPanel)
   // Note: This must be defined AFTER all dependencies are declared (experiments, selectedHistoricalDataset, etc.)
-  const handleTextSearch = useCallback(async () => {
-    if (!textSearchQuery.trim()) {
+  // Reusable text search function that accepts a query parameter
+  const performTextSearch = useCallback(async (query) => {
+    if (!query || !query.trim()) {
       showNotification('Please enter a search query.', 'warning');
       return;
     }
@@ -4201,7 +4202,7 @@ const MicroscopeMapDisplay = forwardRef(({
       const queryParams = new URLSearchParams({
         collection_name: convertToValidCollectionName('agent-lens'),
         application_id: applicationId,
-        query_text: textSearchQuery.trim(),
+        query_text: query.trim(),
         limit: '10'
       });
       
@@ -4248,7 +4249,11 @@ const MicroscopeMapDisplay = forwardRef(({
     } finally {
       setIsSearching(false);
     }
-  }, [textSearchQuery, selectedHistoricalDataset, activeLayer, experiments, convertToValidCollectionName, showNotification]);
+  }, [selectedHistoricalDataset, activeLayer, experiments, convertToValidCollectionName, showNotification]);
+
+  const handleTextSearch = useCallback(async () => {
+    await performTextSearch(textSearchQuery);
+  }, [textSearchQuery, performTextSearch]);
 
   // Image similarity search handler (for Find Similar button in SimilaritySearchPanel)
   const handleFindSimilar = useCallback(async (annotation) => {
@@ -6239,6 +6244,8 @@ const MicroscopeMapDisplay = forwardRef(({
           isVisible={showSimilarityResultInfoWindow}
           onClose={() => setShowSimilarityResultInfoWindow(false)}
           containerBounds={mapContainerRef.current?.getBoundingClientRect()}
+          onSearch={performTextSearch}
+          isSearching={isSearching}
         />
         
         {/* Rectangle selection active indicator */}

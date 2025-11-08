@@ -18,7 +18,9 @@ const SimilarityResultInfoWindow = ({
   position,
   isVisible,
   onClose,
-  containerBounds = null
+  containerBounds = null,
+  onSearch = null,
+  isSearching = false
 }) => {
   const [adjustedPosition, setAdjustedPosition] = useState(position);
 
@@ -222,30 +224,62 @@ const SimilarityResultInfoWindow = ({
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                 <strong style={{ color: '#f3f4f6', fontSize: '12px' }}>UUID:</strong>
-                <button
-                  onClick={() => {
-                    const uuid = objectUUID || '';
-                    // Add header prefix for UUID based search
-                    const uuidWithHeader = uuid ? `uuid: ${uuid}` : '';
-                    navigator.clipboard.writeText(uuidWithHeader).catch(console.error);
-                  }}
-                  style={{
-                    fontSize: '10px',
-                    padding: '2px 6px',
-                    backgroundColor: '#374151',
-                    color: '#f3f4f6',
-                    border: '1px solid #6b7280',
-                    borderRadius: '3px',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px'
-                  }}
-                  title="Copy UUID (with header for search)"
-                >
-                  <i className="fas fa-copy" style={{ fontSize: '9px' }}></i>
-                  Copy
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  {/* Search button */}
+                  {onSearch && objectUUID && (
+                    <button
+                      onClick={() => {
+                        const uuid = objectUUID || '';
+                        // Add header prefix for UUID based search
+                        const uuidWithHeader = uuid ? `uuid: ${uuid}` : '';
+                        onSearch(uuidWithHeader);
+                      }}
+                      disabled={isSearching}
+                      style={{
+                        fontSize: '10px',
+                        padding: '2px 6px',
+                        backgroundColor: isSearching ? '#4b5563' : '#2563eb',
+                        color: '#f3f4f6',
+                        border: '1px solid #6b7280',
+                        borderRadius: '3px',
+                        cursor: isSearching ? 'not-allowed' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        opacity: isSearching ? 0.5 : 1
+                      }}
+                      title="Search for similar cells using this UUID"
+                    >
+                      <i className={`fas ${isSearching ? 'fa-spinner fa-spin' : 'fa-search'}`} style={{ fontSize: '9px' }}></i>
+                      Search
+                    </button>
+                  )}
+                  {/* Copy button */}
+                  <button
+                    onClick={() => {
+                      const uuid = objectUUID || '';
+                      // Add header prefix for UUID based search
+                      const uuidWithHeader = uuid ? `uuid: ${uuid}` : '';
+                      navigator.clipboard.writeText(uuidWithHeader).catch(console.error);
+                    }}
+                    style={{
+                      fontSize: '10px',
+                      padding: '2px 6px',
+                      backgroundColor: '#374151',
+                      color: '#f3f4f6',
+                      border: '1px solid #6b7280',
+                      borderRadius: '3px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}
+                    title="Copy UUID (with header for search)"
+                  >
+                    <i className="fas fa-copy" style={{ fontSize: '9px' }}></i>
+                    Copy
+                  </button>
+                </div>
               </div>
               <div 
                 style={{ 
@@ -333,7 +367,9 @@ SimilarityResultInfoWindow.propTypes = {
   containerBounds: PropTypes.shape({
     width: PropTypes.number,
     height: PropTypes.number
-  })
+  }),
+  onSearch: PropTypes.func,
+  isSearching: PropTypes.bool
 };
 
 export default SimilarityResultInfoWindow;
