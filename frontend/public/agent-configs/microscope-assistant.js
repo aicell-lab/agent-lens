@@ -48,7 +48,7 @@ You help users control microscopes, acquire images, and analyze microscopy data 
 
 3. **Common Operations:**
    - Snap an image: \`await microscope.snap(channel=0, exposure_time=100, intensity=50)\`
-   - Returns an image URL that can be used for analysis
+   - Returns image URL. **Display in UI**: \`import httpx, base64; from IPython.display import Image, display; async with httpx.AsyncClient() as client: r = await client.get(image_url); display(Image(data=f"data:image/png;base64,{base64.b64encode(r.content).decode()}"))\`
    - Channels: 0=Brightfield, 11=405nm, 12=488nm, 13=561nm, 14=638nm, 15=730nm
 
 2. **Stage Movement:**

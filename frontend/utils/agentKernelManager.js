@@ -120,7 +120,7 @@ export class AgentKernelManager {
             if (event.data && event.data.data) {
               if (event.data.data['image/png']) {
                 const outputItem = {
-                  type: 'stdout',
+                  type: 'img',
                   content: `data:image/png;base64,${event.data.data['image/png']}`,
                   short_content: '[Image]'
                 };

@@ -64,7 +64,7 @@ The Python kernel has already been initialized with the following variables avai
 2. **Image Acquisition:**
    - Snap image: \`await microscope.snap(channel=0, exposure_time=10, intensity=50)\`
    - Channels: 0=Brightfield, 11=405nm, 12=488nm, 13=561nm, 14=638nm, 15=730nm
-   - Returns image URL for viewing/analysis
+   - Returns image URL. **Display in UI**: \`import httpx, base64; from IPython.display import Image, display; async with httpx.AsyncClient() as client: r = await client.get(image_url); display(Image(data=f"data:image/png;base64,{base64.b64encode(r.content).decode()}"))\`
 
 3. **Normal Scan (Grid Acquisition):**
    - Start scan: \`await microscope.scan_start({"saved_data_type": "full_zarr", "Nx": 5, "Ny": 5, "dx_mm": 0.8, "dy_mm": 0.8, "illumination_settings": [{"channel": 0, "exposure_time": 100, "intensity": 50}], "wells_to_scan": ["A1", "B2"], "well_plate_type": "96","experiment_name": "my_experiment", "do_reflection_af": True})\`

@@ -201,7 +201,20 @@ export class CellManager {
       await executeCodeFn(currentCode, {
         onOutput: (output) => {
           outputs.push(output);
-          outputText += output.content + '\n';
+          // Exclude image outputs from text result to prevent token overflow
+          // Images are displayed in UI but shouldn't be in the text sent to agent
+          if (output.type !== 'img') {
+            // Also filter out base64 image data URLs from stdout/stderr (edge case: if agent prints them)
+            let content = output.content;
+            if (typeof content === 'string' && content.includes('data:image/') && content.includes('base64,')) {
+              // Replace base64 image data URLs with placeholder
+              content = content.replace(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]{100,}/g, '[Image data URL truncated]');
+            }
+            outputText += content + '\n';
+          } else {
+            // For images, just add a placeholder so agent knows image was displayed
+            outputText += '[Image displayed in UI]\n';
+          }
           this.updateCellExecutionState(id, 'running', outputs);
         },
         onStatus: (status) => {

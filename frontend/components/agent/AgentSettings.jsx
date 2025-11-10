@@ -13,6 +13,7 @@ const STORAGE_MODEL_KEY = 'agent_lens_openai_model';
 // Available OpenAI models
 const AVAILABLE_MODELS = [
   { value: 'gpt-5', label: 'GPT-5 (Latest)' },
+  { value: 'gpt-5-mini', label: 'GPT-5 Mini' },
   { value: 'gpt-4o', label: 'GPT-4o' },
   { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
   { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
