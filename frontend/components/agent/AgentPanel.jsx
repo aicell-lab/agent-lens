@@ -9,7 +9,7 @@ import { AgentKernelManager } from '../../utils/agentKernelManager';
 import { CellManager } from '../../utils/cellManager';
 import { chatCompletion } from '../../utils/chatCompletion';
 import { loadAgentConfig } from '../../utils/agentConfigLoader';
-import { getOpenAIApiKey, getOpenAIBaseURL, getOpenAIModel } from '../../utils/openaiConfig';
+import { getOpenAIApiKey, getOpenAIBaseURL, getOpenAIModel, getOpenAITemperature } from '../../utils/openaiConfig';
 import NotebookContent from './NotebookContent';
 import ChatInput from './ChatInput';
 import AgentSettings from './AgentSettings';
@@ -242,7 +242,7 @@ const AgentPanel = ({
         messages: history,
         systemPrompt: systemPrompt, // System prompt extracted from system cell
         model: getOpenAIModel(),
-        temperature: 1,
+        temperature: getOpenAITemperature() ?? 1, // Get from settings, fallback to 1
         baseURL: getOpenAIBaseURL(),
         apiKey: getOpenAIApiKey(),
         maxSteps: 10,

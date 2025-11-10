@@ -8,7 +8,7 @@ const ChatbotButton = ({ microscopeControlService, appendLog }) => {
     useEffect(() => {
         const initializeHyphaCore = async () => {
             if (!window.hyphaCore || !window.hyphaApi) {
-                const module = await import('https://cdn.jsdelivr.net/npm/hypha-core@0.20.38/dist/hypha-core.mjs');
+                const module = await import('https://cdn.jsdelivr.net/npm/hypha-core@0.20.60/dist/hypha-core.mjs');
                 const { HyphaCore } = module;
                 window.hyphaCore = new HyphaCore();
                 await window.hyphaCore.start();
