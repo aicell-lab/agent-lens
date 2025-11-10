@@ -4,6 +4,7 @@
  */
 
 import OpenAI from 'openai';
+import { modelSupportsTemperature } from './openaiConfig';
 
 /**
  * Generate a unique ID
@@ -269,7 +270,7 @@ function extractScript(script) {
 export async function* chatCompletion({
   messages,
   systemPrompt = '',
-  model = 'gpt-5',
+  model = 'gpt-5-mini', // Default to fastest GPT-5 model
   temperature = 1,
   onExecuteCode,
   onMessage,
@@ -318,13 +319,18 @@ export async function* chatCompletion({
       let accumulatedResponse = '';
 
       try {
+        const requestParams = {
+          model,
+          messages: fullMessages,
+          stream: stream
+        };
+        
+        if (modelSupportsTemperature(model)) {
+          requestParams.temperature = temperature;
+        }
+        
         const completionStream = await openai.chat.completions.create(
-          {
-            model,
-            messages: fullMessages,
-            temperature,
-            stream: stream
-          },
+          requestParams,
           { signal }
         );
 

@@ -9,36 +9,85 @@ import PropTypes from 'prop-types';
 const STORAGE_KEY = 'agent_lens_openai_api_key';
 const STORAGE_BASE_URL_KEY = 'agent_lens_openai_base_url';
 const STORAGE_MODEL_KEY = 'agent_lens_openai_model';
+const STORAGE_TEMPERATURE_KEY = 'agent_lens_openai_temperature';
 
-// Available OpenAI models
+// Available OpenAI models with configuration (ordered by speed, fastest first)
 const AVAILABLE_MODELS = [
-  { value: 'gpt-5', label: 'GPT-5 (Latest)' },
-  { value: 'gpt-4o', label: 'GPT-4o' },
-  { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
-  { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
-  { value: 'gpt-4', label: 'GPT-4' },
+  { 
+    value: 'gpt-5-mini', 
+    label: 'GPT-5 Mini (Fastest)',
+    supportsTemperature: true,
+    defaultTemperature: 1.0,
+    temperatureFixed: true
+  },
+  { 
+    value: 'gpt-5', 
+    label: 'GPT-5 (Standard)',
+    supportsTemperature: true,
+    defaultTemperature: 1.0,
+    temperatureFixed: true
+  },
+  { 
+    value: 'o3-mini', 
+    label: 'O3 Mini',
+    supportsTemperature: false,
+    defaultTemperature: null,
+    temperatureFixed: false
+  },
+  { 
+    value: 'gpt-4o', 
+    label: 'GPT-4o',
+    supportsTemperature: true,
+    defaultTemperature: 0.5,
+    temperatureFixed: false
+  },
 ];
+
+// Helper: Get model config
+const getModelConfig = (modelValue) => {
+  return AVAILABLE_MODELS.find(m => m.value === modelValue) || null;
+};
 
 const AgentSettings = ({ isOpen, onClose }) => {
   const [apiKey, setApiKey] = useState('');
   const [baseURL, setBaseURL] = useState('https://api.openai.com/v1/');
-  const [model, setModel] = useState('gpt-5');
+  const [model, setModel] = useState('gpt-5-mini');
+  const [temperature, setTemperature] = useState(1.0);
   const [showKey, setShowKey] = useState(false);
 
   // Load settings from localStorage on mount
   useEffect(() => {
     const savedKey = localStorage.getItem(STORAGE_KEY) || '';
     const savedBaseURL = localStorage.getItem(STORAGE_BASE_URL_KEY) || 'https://api.openai.com/v1/';
-    const savedModel = localStorage.getItem(STORAGE_MODEL_KEY) || 'gpt-5';
+    const savedModel = localStorage.getItem(STORAGE_MODEL_KEY) || 'gpt-5-mini';
+    const modelConfig = getModelConfig(savedModel);
+    const savedTemp = localStorage.getItem(STORAGE_TEMPERATURE_KEY);
+    const defaultTemp = modelConfig?.defaultTemperature ?? 0.5;
     setApiKey(savedKey);
     setBaseURL(savedBaseURL);
     setModel(savedModel);
+    setTemperature(savedTemp !== null ? parseFloat(savedTemp) : defaultTemp);
   }, []);
+
+  // Update temperature when model changes
+  useEffect(() => {
+    const modelConfig = getModelConfig(model);
+    if (modelConfig?.temperatureFixed) {
+      setTemperature(modelConfig.defaultTemperature);
+    } else if (modelConfig && !localStorage.getItem(STORAGE_TEMPERATURE_KEY)) {
+      setTemperature(modelConfig.defaultTemperature);
+    }
+  }, [model]);
 
   const handleSave = () => {
     localStorage.setItem(STORAGE_KEY, apiKey);
     localStorage.setItem(STORAGE_BASE_URL_KEY, baseURL);
     localStorage.setItem(STORAGE_MODEL_KEY, model);
+    const modelConfig = getModelConfig(model);
+    if (modelConfig?.supportsTemperature) {
+      const tempToSave = modelConfig.temperatureFixed ? modelConfig.defaultTemperature : temperature;
+      localStorage.setItem(STORAGE_TEMPERATURE_KEY, tempToSave.toString());
+    }
     if (onClose) {
       onClose();
     }
@@ -47,10 +96,12 @@ const AgentSettings = ({ isOpen, onClose }) => {
   const handleClear = () => {
     setApiKey('');
     setBaseURL('https://api.openai.com/v1/');
-    setModel('gpt-5');
+    setModel('gpt-5-mini');
+    setTemperature(1.0);
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(STORAGE_BASE_URL_KEY);
     localStorage.removeItem(STORAGE_MODEL_KEY);
+    localStorage.removeItem(STORAGE_TEMPERATURE_KEY);
   };
 
   if (!isOpen) return null;
@@ -141,9 +192,47 @@ const AgentSettings = ({ isOpen, onClose }) => {
               ))}
             </select>
             <p className="agent-settings-help">
-              Choose the OpenAI model to use for agent interactions. GPT-5 is recommended for best performance.
+              Choose the model to use. GPT-5 Mini is fastest, GPT-5 Standard provides deeper reasoning but may be slower, and GPT-4o offers a good balance.
             </p>
           </div>
+
+          {(() => {
+            const modelConfig = getModelConfig(model);
+            if (!modelConfig?.supportsTemperature) return null;
+            
+            return (
+              <div className="agent-settings-section">
+                <label htmlFor="temperature">
+                  <i className="fas fa-thermometer-half"></i> Temperature
+                  {modelConfig.temperatureFixed && (
+                    <span className="agent-settings-locked-badge" title="Fixed temperature for this model">
+                      <i className="fas fa-lock"></i> Fixed at {modelConfig.defaultTemperature}
+                    </span>
+                  )}
+                </label>
+                <input
+                  id="temperature"
+                  type="number"
+                  min="0"
+                  max="2"
+                  step="0.1"
+                  value={temperature}
+                  onChange={(e) => setTemperature(Math.max(0, Math.min(2, parseFloat(e.target.value) || 0)))}
+                  disabled={modelConfig.temperatureFixed}
+                  className={`agent-settings-input ${modelConfig.temperatureFixed ? 'agent-settings-input-disabled' : ''}`}
+                  style={{
+                    opacity: modelConfig.temperatureFixed ? 0.6 : 1,
+                    cursor: modelConfig.temperatureFixed ? 'not-allowed' : 'text'
+                  }}
+                />
+                <p className="agent-settings-help">
+                  {modelConfig.temperatureFixed
+                    ? `${modelConfig.label} requires temperature = ${modelConfig.defaultTemperature} and cannot be adjusted.`
+                    : 'Controls randomness in responses (0 = deterministic, 2 = very creative).'}
+                </p>
+              </div>
+            );
+          })()}
         </div>
 
         <div className="agent-settings-footer">
