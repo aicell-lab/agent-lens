@@ -86,7 +86,13 @@ const MicroscopeControlPanel = ({
   const [xMove, setXMove] = useState(0.1);
   const [yMove, setYMove] = useState(0.1);
   const [zMove, setZMove] = useState(0.01);
-  const [microscopeBusy, setMicroscopeBusy] = useState(false);
+  const [microscopeBusy, setMicroscopeBusyRaw] = useState(false);
+  
+  // Wrap setMicroscopeBusy - all updates should go through updateMicroscopeBusy
+  // but we keep this for backward compatibility with other code
+  const setMicroscopeBusy = useCallback((value) => {
+    setMicroscopeBusyRaw(value);
+  }, []);
   
   // Ref for accessing MicroscopeMapDisplay methods
   const microscopeMapDisplayRef = useRef(null);
@@ -124,6 +130,12 @@ const MicroscopeControlPanel = ({
 
   // Ref to track if the illumination channel change was initiated by the UI
   const channelSetByUIFlagRef = useRef(false);
+  
+  // Ref to track when microscopeBusy was last set to true (to prevent premature clearing)
+  const lastBusySetTimeRef = useRef(0);
+  
+  // Ref to track current microscopeBusy state (to avoid redundant setState calls)
+  const microscopeBusyRef = useRef(microscopeBusy);
 
   // WebRTC State
   const [isWebRtcActive, setIsWebRtcActive] = useState(false);
@@ -334,6 +346,27 @@ const MicroscopeControlPanel = ({
   useEffect(() => {
     autoContrastMaxAdjustRef.current = autoContrastMaxAdjust;
   }, [autoContrastMaxAdjust]);
+  
+  // Helper function to update microscopeBusy only when value actually changes
+  // IMPORTANT: This function updates the ref synchronously to prevent race conditions
+  // Do NOT use a useEffect to sync the ref, as it will cause timing issues
+  const updateMicroscopeBusy = useCallback((newValue) => {
+    if (microscopeBusyRef.current !== newValue) {
+      console.log(`[MicroscopeBusy] Changing from ${microscopeBusyRef.current} to ${newValue}`);
+      // Update ref immediately (synchronously) to prevent race conditions
+      microscopeBusyRef.current = newValue;
+      setMicroscopeBusy(newValue);
+      if (newValue) {
+        lastBusySetTimeRef.current = Date.now();
+      }
+    }
+  }, []);
+  
+  // CRITICAL: Initialize ref on mount to match initial state
+  // This ensures the ref starts in sync with the state
+  useEffect(() => {
+    microscopeBusyRef.current = microscopeBusy;
+  }, []); // Empty deps - only run once on mount
 
   // Memoized function to stop the WebRTC stream
   const memoizedStopWebRtcStream = useCallback(() => {
@@ -1144,12 +1177,50 @@ const MicroscopeControlPanel = ({
     setIsRightPanelCollapsed(!isRightPanelCollapsed);
   };
 
+  // Poll transport queue status to determine if microscope is busy with sample operations
+  const pollTransportQueueStatus = useCallback(async () => {
+    if (!orchestratorManagerService || !isRealMicroscope(selectedMicroscopeId)) {
+      return;
+    }
+
+    try {
+      const status = await orchestratorManagerService.get_transport_queue_status();
+      
+      // Check if there's a current operation for this microscope
+      if (status && status.current_operation) {
+        const microscopeIdentifier = getOrchestratorMicroscopeId(selectedMicroscopeId);
+        // Check if the current operation is for this microscope
+        if (status.current_operation.microscope_id === microscopeIdentifier) {
+          console.log(`[TransportQueue] Microscope busy with operation: ${status.current_operation.action} for slot ${status.current_operation.incubator_slot}`);
+          updateMicroscopeBusy(true); // Only updates if value changes
+        } else {
+          // Operation is for a different microscope, we're not busy
+          updateMicroscopeBusy(false);
+        }
+      } else {
+        // No current operation in queue
+        // Add grace period: don't clear busy state if we set it recently (within 3 seconds)
+        // This prevents blinking when the orchestrator takes a moment to update the queue status
+        const timeSinceLastBusySet = Date.now() - lastBusySetTimeRef.current;
+        const gracePeriodMs = 3000; // 3 seconds grace period
+        
+        if (timeSinceLastBusySet > gracePeriodMs) {
+          updateMicroscopeBusy(false);
+        } else {
+          console.log(`[TransportQueue] No operation in queue, but within grace period (${timeSinceLastBusySet}ms < ${gracePeriodMs}ms) - keeping busy state`);
+        }
+      }
+    } catch (error) {
+      console.error("[MicroscopeControlPanel] Error polling transport queue status:", error);
+      // Don't change busy state on error - keep current state
+    }
+  }, [orchestratorManagerService, selectedMicroscopeId, updateMicroscopeBusy]);
+
   const fetchImagingTasks = useCallback(async () => {
     if (!orchestratorManagerService || !selectedMicroscopeId) {
       setImagingTasks([]);
-      // For simulated or unmanaged scopes, ensure task-related busy state is cleared if no service/id.
       if (isSimulatedMicroscope(selectedMicroscopeId) || !orchestratorManagerService) {
-        setMicroscopeBusy(false);
+        updateMicroscopeBusy(false);
       }
       return;
     }
@@ -1157,12 +1228,11 @@ const MicroscopeControlPanel = ({
     if (isSimulatedMicroscope(selectedMicroscopeId)) {
       appendLog("Time-lapse imaging not supported for simulated microscope.");
       setImagingTasks([]);
-      setMicroscopeBusy(false); // Simulated microscope is not busy due to tasks
+      updateMicroscopeBusy(false);
       return;
     }
 
     // For real microscopes with orchestrator service
-    let activeTaskFoundForThisScope = false;
     try {
       appendLog("Fetching imaging tasks...");
       const tasks = await orchestratorManagerService.get_all_imaging_tasks();
@@ -1180,38 +1250,65 @@ const MicroscopeControlPanel = ({
       const activeTask = relevantTasks.find(task => 
         task.operational_state && 
         task.operational_state.status !== "completed" && 
-        task.operational_state.status !== "failed" // Add other non-busy terminal states if any
+        task.operational_state.status !== "failed"
       );
 
       if (activeTask) {
-        activeTaskFoundForThisScope = true;
         appendLog(`Microscope ${selectedMicroscopeId} has an active imaging task: ${activeTask.name}. Status: ${activeTask.operational_state.status}`);
         if (showNotification) {
           showNotification(`Microscope has an unfinished imaging task: ${activeTask.name}. Controls may be limited.`, 'info');
         }
-        setMicroscopeBusy(true); // CRITICAL: Set busy if an active task for this scope is found
-      } else {
-        // If no active task is found for this REAL microscope, it's not busy due to tasks.
-        // (Simulated scope and no orchestrator handled at the start of the function)
-        if (isRealMicroscope(selectedMicroscopeId) && orchestratorManagerService) {
-            appendLog(`No active imaging tasks found for ${selectedMicroscopeId}. Setting microscope to not busy.`);
-            setMicroscopeBusy(false);
-        }
+        updateMicroscopeBusy(true);
       }
+      // Note: If no active imaging task, the transport queue polling (every 1 second)
+      // will handle setting busy state for sample operations
 
     } catch (error) {
       appendLog(`Error fetching imaging tasks: ${error.message}`);
       console.error("[MicroscopeControlPanel] Error fetching imaging tasks:", error);
       setImagingTasks([]);
-      // Do not change microscopeBusy state on error, as the actual state is unknown or might be busy from other ops.
     }
 
-  }, [orchestratorManagerService, selectedMicroscopeId, appendLog, showNotification, setMicroscopeBusy]);
+  }, [orchestratorManagerService, selectedMicroscopeId, appendLog, showNotification, updateMicroscopeBusy]);
 
-  // Effect to fetch imaging tasks
+  // Effect to fetch imaging tasks - initial fetch and periodic refresh
   useEffect(() => {
+    // Fetch immediately
     fetchImagingTasks();
-  }, [fetchImagingTasks]); // Depend on the memoized fetchImagingTasks
+    
+    // Set up periodic refresh every 5 seconds for real microscopes with orchestrator
+    if (isRealMicroscope(selectedMicroscopeId) && orchestratorManagerService) {
+      const interval = setInterval(fetchImagingTasks, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [fetchImagingTasks, selectedMicroscopeId, orchestratorManagerService]);
+
+  // Effect to poll transport queue status for sample operations
+  useEffect(() => {
+    if (!orchestratorManagerService || !isRealMicroscope(selectedMicroscopeId)) {
+      return;
+    }
+
+    // Poll immediately
+    pollTransportQueueStatus();
+    
+    // Set up periodic polling every 1 second for real-time updates
+    const interval = setInterval(pollTransportQueueStatus, 1000);
+    return () => clearInterval(interval);
+  }, [pollTransportQueueStatus, orchestratorManagerService, selectedMicroscopeId]);
+
+  // Effect to provide immediate UI feedback when sample operations start
+  // Note: We set busy=true immediately for instant feedback, then let the 1-second
+  // transport queue polling be the source of truth for the actual operation status
+  useEffect(() => {
+    if (currentOperation === 'loading' || currentOperation === 'unloading') {
+      console.log(`[MicroscopeControlPanel] Setting microscopeBusy to TRUE due to currentOperation: ${currentOperation}`);
+      updateMicroscopeBusy(true); // Only updates if value changes
+    }
+    // Note: When currentOperation becomes null, we don't manually poll - the 1-second
+    // interval polling will handle updating the busy state based on actual queue status
+    // The grace period prevents premature clearing while the orchestrator updates its queue
+  }, [currentOperation, updateMicroscopeBusy]);
 
   const openImagingTaskModal = (task) => {
     if (isSimulatedMicroscope(selectedMicroscopeId)) {

@@ -432,8 +432,19 @@ const MicroscopeMapDisplay = forwardRef(({
       setIsQuickScanInProgress(false);
       
       // Unlock hardware when scan completes or fails
-      if (setMicroscopeBusy) setMicroscopeBusy(false);
-      if (setCurrentOperation) setCurrentOperation(null);
+      // IMPORTANT: Don't clear busy state if a sample operation (loading/unloading) is in progress
+      if (setMicroscopeBusy) {
+        // Only clear busy state if there's no active sample operation
+        if (currentOperation !== 'loading' && currentOperation !== 'unloading') {
+          setMicroscopeBusy(false);
+        } else {
+          console.log(`[MicroscopeMapDisplay] Scan completed but sample operation (${currentOperation}) in progress - keeping busy state`);
+        }
+      }
+      // Only clear currentOperation if it's related to scanning, not sample operations
+      if (setCurrentOperation && currentOperation !== 'loading' && currentOperation !== 'unloading') {
+        setCurrentOperation(null);
+      }
       
       // If scan just completed successfully, refresh results and show notification
       if (scanJustCompleted) {
@@ -458,7 +469,7 @@ const MicroscopeMapDisplay = forwardRef(({
         }
       }
     }
-  }, [refreshScanResults, showNotification, appendLog, setMicroscopeBusy, setCurrentOperation]);
+  }, [refreshScanResults, showNotification, appendLog, setMicroscopeBusy, setCurrentOperation, currentOperation]);
 
   // Expose handleScanStatusUpdate to parent component via ref
   useImperativeHandle(ref, () => ({
