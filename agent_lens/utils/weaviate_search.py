@@ -98,8 +98,9 @@ async def generate_image_embeddings_batch(image_bytes_list: List[bytes]) -> List
     Generate unit-normalized CLIP embeddings for multiple images in a single batch.
     This is much faster than processing images individually, especially on GPU.
     
-    The main optimization is batching the CLIP model inference, which allows the GPU
-    to process multiple images simultaneously and significantly improves throughput.
+    The main optimizations are:
+    1. Parallel image preprocessing using ThreadPoolExecutor (PIL operations release GIL)
+    2. Batching the CLIP model inference, which allows the GPU to process multiple images simultaneously
     
     Args:
         image_bytes_list: List of image byte data to process
@@ -109,27 +110,50 @@ async def generate_image_embeddings_batch(image_bytes_list: List[bytes]) -> List
     """
     from PIL import Image
     import io
+    from concurrent.futures import ThreadPoolExecutor
+    import asyncio
     
     if not image_bytes_list:
         return []
     
     model, preprocess = _load_clip_model()
-    batch_tensors = []
-    index_mapping = {}  # Maps batch position to original index
+    
+    # Preprocess images in parallel using ThreadPoolExecutor
+    # PIL operations release the GIL, so threading provides speedup
+    def preprocess_single_image(idx: int, img_bytes: bytes):
+        """Preprocess a single image (runs in thread pool)."""
+        try:
+            with Image.open(io.BytesIO(img_bytes)) as image:
+                image = image.convert("RGB")
+                image.thumbnail((224, 224), Image.Resampling.LANCZOS)
+                preprocessed = preprocess(image)
+                return preprocessed, idx, None
+        except Exception as e:
+            logger.warning(f"Failed to preprocess image at index {idx}: {e}")
+            return None, idx, e
     
     try:
-        # Preprocess all images sequentially (CPU-bound, but fast)
-        for idx, img_bytes in enumerate(image_bytes_list):
-            try:
-                with Image.open(io.BytesIO(img_bytes)) as image:
-                    image = image.convert("RGB")
-                    image.thumbnail((224, 224), Image.Resampling.LANCZOS)
-                    preprocessed = preprocess(image)
-                    index_mapping[len(batch_tensors)] = idx
-                    batch_tensors.append(preprocessed)
-            except Exception as e:
-                logger.warning(f"Failed to preprocess image at index {idx}: {e}")
-                # Will be None in results
+        # Use ThreadPoolExecutor for parallel preprocessing
+        # Default max_workers=None uses min(32, os.cpu_count() + 4) workers
+        # PIL operations release the GIL, so threading provides significant speedup
+        loop = asyncio.get_running_loop()
+        with ThreadPoolExecutor() as executor:
+            # Submit all preprocessing tasks
+            preprocessing_tasks = [
+                loop.run_in_executor(executor, preprocess_single_image, idx, img_bytes)
+                for idx, img_bytes in enumerate(image_bytes_list)
+            ]
+            # Wait for all preprocessing to complete
+            preprocessing_results = await asyncio.gather(*preprocessing_tasks)
+        
+        # Collect successfully preprocessed images and track indices
+        batch_tensors = []
+        index_mapping = {}  # Maps batch position to original index
+        
+        for preprocessed, original_idx, error in preprocessing_results:
+            if preprocessed is not None:
+                index_mapping[len(batch_tensors)] = original_idx
+                batch_tensors.append(preprocessed)
         
         if not batch_tensors:
             # All images failed preprocessing

@@ -436,13 +436,10 @@ export const processSegmentationPolygon = async (
       reader.readAsDataURL(imageBlob);
     });
 
-    // Generate embeddings
-    const { generateImageEmbedding, generateTextEmbedding } = await import('./annotationEmbeddingService');
+    // Generate image embedding (text embedding not needed for segmentation)
+    const { generateImageEmbedding } = await import('./annotationEmbeddingService');
     
-    const [imageEmbedding, textEmbedding] = await Promise.all([
-      generateImageEmbedding(imageBlob),
-      generateTextEmbedding(annotation.description)
-    ]);
+    const imageEmbedding = await generateImageEmbedding(imageBlob);
 
     // Generate 50x50 preview
     const { generatePreviewFromDataUrl } = await import('./previewImageUtils');
@@ -464,7 +461,7 @@ export const processSegmentationPolygon = async (
       metadata: metadata,
       embeddings: {
         imageEmbedding,
-        textEmbedding,
+        textEmbedding: null, // Not needed for segmentation annotations
         extractedImageDataUrl
       },
       previewImage: previewImage
@@ -661,22 +658,39 @@ export const batchProcessSegmentationPolygons = async (
       console.log(`[SegmentationUtils] Extracting ${batchData.length} regions for ${enabledChannels.length} channels`);
       
       const channelExtractionResults = {};
+      const channelExtractionFailures = [];
       for (const [channelName, regions] of Object.entries(regionsPerChannel)) {
         if (regions.length > 0) {
           console.log(`[SegmentationUtils] Batch extracting channel: ${channelName} (${regions.length} regions)`);
-          const extractionResult = await batchExtractRegions(regions, services.microscopeControlService);
-          
-          if (!extractionResult.success || !extractionResult.results) {
-            console.warn(`[SegmentationUtils] Channel ${channelName} extraction failed`);
-            continue;
+          try {
+            const extractionResult = await batchExtractRegions(regions, services.microscopeControlService);
+            
+            if (!extractionResult.success || !extractionResult.results) {
+              const errorMsg = extractionResult?.message || 'Unknown extraction error';
+              console.warn(`[SegmentationUtils] Channel ${channelName} extraction failed: ${errorMsg}`);
+              channelExtractionFailures.push({ channel: channelName, error: errorMsg });
+              continue;
+            }
+            
+            // Validate that we got the expected number of results
+            if (extractionResult.results.length !== regions.length) {
+              console.warn(`[SegmentationUtils] Channel ${channelName} extraction returned ${extractionResult.results.length} results, expected ${regions.length}`);
+            }
+            
+            channelExtractionResults[channelName] = extractionResult.results;
+          } catch (error) {
+            console.error(`[SegmentationUtils] Channel ${channelName} extraction threw error:`, error);
+            channelExtractionFailures.push({ channel: channelName, error: error.message });
           }
-          
-          channelExtractionResults[channelName] = extractionResult.results;
         }
+      }
+      
+      if (channelExtractionFailures.length > 0) {
+        console.warn(`[SegmentationUtils] ${channelExtractionFailures.length} channel(s) failed extraction:`, channelExtractionFailures);
       }
 
       // Step 2: Process each polygon in parallel - apply contrast, merge channels, generate embeddings
-      const { generateImageEmbeddingBatch, generateTextEmbedding } = await import('./annotationEmbeddingService');
+      const { generateImageEmbeddingBatch } = await import('./annotationEmbeddingService');
       const { generatePreviewFromDataUrl } = await import('./previewImageUtils');
       const { applyShapeMaskToImageBlob } = await import('./annotationEmbeddingService');
 
@@ -692,8 +706,19 @@ export const batchProcessSegmentationPolygons = async (
             const channelName = channel.label || channel.channelName || channel.name;
             const channelResults = channelExtractionResults[channelName];
             
-            if (!channelResults || !channelResults[i] || !channelResults[i].success) {
-              console.warn(`[SegmentationUtils] Missing data for channel ${channelName}, polygon ${i}`);
+            if (!channelResults) {
+              console.warn(`[SegmentationUtils] No extraction results available for channel ${channelName}, polygon ${i} (global ${data.globalIndex})`);
+              continue;
+            }
+            
+            if (!channelResults[i]) {
+              console.warn(`[SegmentationUtils] Missing result at index ${i} for channel ${channelName}, polygon ${i} (global ${data.globalIndex}) - results length: ${channelResults.length}`);
+              continue;
+            }
+            
+            if (!channelResults[i].success) {
+              const errorMsg = channelResults[i].error || channelResults[i].message || 'Unknown error';
+              console.warn(`[SegmentationUtils] Channel ${channelName} extraction failed for polygon ${i} (global ${data.globalIndex}): ${errorMsg}`);
               continue;
             }
             
@@ -790,6 +815,7 @@ export const batchProcessSegmentationPolygons = async (
       // Separate successful and failed results
       const mergedImageBlobs = [];
       const validBatchData = [];
+      const errorSummary = {}; // Track error types for debugging
       
       for (const result of polygonResults) {
         if (result.success) {
@@ -797,11 +823,33 @@ export const batchProcessSegmentationPolygons = async (
           validBatchData.push(result.data);
         } else {
           failedCount++;
+          const errorMsg = result.error || 'Unknown error';
+          
+          // Track error types
+          if (!errorSummary[errorMsg]) {
+            errorSummary[errorMsg] = [];
+          }
+          errorSummary[errorMsg].push({
+            index: result.globalIndex,
+            wellId: result.wellId
+          });
+          
           failedPolygons.push({ 
             index: result.globalIndex, 
             wellId: result.wellId, 
-            error: result.error 
+            error: errorMsg
           });
+          
+          // Log individual failure with details
+          console.error(`[SegmentationUtils] Polygon ${result.globalIndex} (well ${result.wellId}) failed: ${errorMsg}`);
+        }
+      }
+      
+      // Log error summary
+      if (failedCount > 0) {
+        console.error(`[SegmentationUtils] Parallel processing failures summary:`);
+        for (const [errorType, polygons] of Object.entries(errorSummary)) {
+          console.error(`  - ${errorType}: ${polygons.length} polygons (indices: ${polygons.map(p => p.index).slice(0, 10).join(', ')}${polygons.length > 10 ? '...' : ''})`);
         }
       }
       
@@ -812,12 +860,9 @@ export const batchProcessSegmentationPolygons = async (
         continue;
       }
 
-      // Step 4: Generate embeddings from merged images
-      console.log(`[SegmentationUtils] Generating embeddings for ${mergedImageBlobs.length} merged images`);
+      // Step 4: Generate image embeddings from merged images
+      console.log(`[SegmentationUtils] Generating image embeddings for ${mergedImageBlobs.length} merged images`);
       const imageEmbeddings = await generateImageEmbeddingBatch(mergedImageBlobs);
-      const textEmbeddings = await Promise.all(
-        validBatchData.map(d => generateTextEmbedding(d.annotation.description))
-      );
 
       // Step 5: Process results - create final annotation objects
       for (let i = 0; i < validBatchData.length; i++) {
@@ -863,7 +908,7 @@ export const batchProcessSegmentationPolygons = async (
           metadata: metadata,
           embeddings: {
             imageEmbedding,
-            textEmbedding: textEmbeddings[i],
+            textEmbedding: null, // Not needed for segmentation annotations
             extractedImageDataUrl: null
           },
           previewImage: previewImage

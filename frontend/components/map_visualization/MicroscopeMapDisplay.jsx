@@ -1533,7 +1533,7 @@ const MicroscopeMapDisplay = forwardRef(({
         enabledChannels,
         onProgress,
         getWellInfoById,
-        60, // batchSize
+        100, // batchSize
         shouldCancel // Pass cancellation check function
       );
 

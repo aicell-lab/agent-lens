@@ -19,6 +19,7 @@ import sys
 from fastapi.middleware.gzip import GZipMiddleware
 import uuid
 import traceback
+import asyncio
 # Import similarity search utilities
 from agent_lens.utils.weaviate_search import similarity_service, WEAVIATE_COLLECTION_NAME
 
@@ -161,7 +162,7 @@ def get_frontend_api():
     async def generate_image_embedding_batch(images: List[UploadFile] = File(...)):
         """Generate CLIP image embeddings from multiple uploaded images in batch.
         
-        This endpoint uses optimized batch processing for significantly faster
+        This endpoint uses optimized batch processing with parallel I/O for significantly faster
         embedding generation, especially when using GPU acceleration.
 
         Args:
@@ -185,24 +186,34 @@ def get_frontend_api():
             
             from agent_lens.utils.weaviate_search import generate_image_embeddings_batch
             
-            # Read all images first and filter valid ones
-            image_bytes_list = []
-            valid_indices = []  # Track which original indices are valid
-            
-            for idx, image in enumerate(images):
+            # Parallel image reading for faster I/O
+            async def read_image(idx: int, image: UploadFile):
+                """Read a single image file asynchronously."""
                 try:
                     if not image.content_type or not image.content_type.startswith("image/"):
-                        continue
+                        return None, idx
                     
                     image_bytes = await image.read()
                     if not image_bytes:
-                        continue
+                        return None, idx
                     
-                    image_bytes_list.append(image_bytes)
-                    valid_indices.append(idx)
+                    return image_bytes, idx
                 except Exception as e:
                     logger.warning(f"Error reading image {image.filename}: {e}")
-                    continue
+                    return None, idx
+            
+            # Read all images in parallel (much faster than sequential!)
+            read_tasks = [read_image(idx, image) for idx, image in enumerate(images)]
+            read_results = await asyncio.gather(*read_tasks)
+            
+            # Filter valid images and track indices
+            image_bytes_list = []
+            valid_indices = []
+            
+            for image_bytes, idx in read_results:
+                if image_bytes is not None:
+                    image_bytes_list.append(image_bytes)
+                    valid_indices.append(idx)
             
             if not image_bytes_list:
                 raise HTTPException(status_code=400, detail="No valid images found in upload")
