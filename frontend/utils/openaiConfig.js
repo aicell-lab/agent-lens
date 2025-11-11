@@ -13,7 +13,10 @@ const MODEL_CONFIG = {
   'gpt-5-mini': { supportsTemperature: true, defaultTemperature: 1.0, temperatureFixed: true },
   'gpt-5': { supportsTemperature: true, defaultTemperature: 1.0, temperatureFixed: true },
   'o3-mini': { supportsTemperature: false, defaultTemperature: null, temperatureFixed: false },
-  'gpt-4o': { supportsTemperature: true, defaultTemperature: 0.5, temperatureFixed: false },
+  'gpt-4o': { supportsTemperature: true, defaultTemperature: 0.7, temperatureFixed: false },
+  'gpt-4o-mini': { supportsTemperature: true, defaultTemperature: 0.7, temperatureFixed: false },
+  'gpt-4-turbo': { supportsTemperature: true, defaultTemperature: 0.7, temperatureFixed: false },
+  'gpt-4': { supportsTemperature: true, defaultTemperature: 0.7, temperatureFixed: false },
 };
 
 /**

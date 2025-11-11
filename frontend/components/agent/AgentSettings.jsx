@@ -38,28 +38,28 @@ const AVAILABLE_MODELS = [
     value: 'gpt-4o', 
     label: 'GPT-4o',
     supportsTemperature: true,
-    defaultTemperature: 0.5,
+    defaultTemperature: 0.7,
     temperatureFixed: false
   },
   { 
     value: 'gpt-4o-mini', 
     label: 'GPT-4o Mini',
     supportsTemperature: true,
-    defaultTemperature: 0.5,
+    defaultTemperature: 0.7,
     temperatureFixed: false
   },
   { 
     value: 'gpt-4-turbo', 
     label: 'GPT-4 Turbo',
     supportsTemperature: true,
-    defaultTemperature: 0.5,
+    defaultTemperature: 0.7,
     temperatureFixed: false
   },
   { 
     value: 'gpt-4', 
     label: 'GPT-4',
     supportsTemperature: true,
-    defaultTemperature: 0.5,
+    defaultTemperature: 0.7,
     temperatureFixed: false
   },
 ];
@@ -83,7 +83,7 @@ const AgentSettings = ({ isOpen, onClose }) => {
     const savedModel = localStorage.getItem(STORAGE_MODEL_KEY) || 'gpt-5-mini';
     const modelConfig = getModelConfig(savedModel);
     const savedTemp = localStorage.getItem(STORAGE_TEMPERATURE_KEY);
-    const defaultTemp = modelConfig?.defaultTemperature ?? 0.5;
+    const defaultTemp = modelConfig?.defaultTemperature ?? 0.7;
     setApiKey(savedKey);
     setBaseURL(savedBaseURL);
     setModel(savedModel);
@@ -94,8 +94,11 @@ const AgentSettings = ({ isOpen, onClose }) => {
   useEffect(() => {
     const modelConfig = getModelConfig(model);
     if (modelConfig?.temperatureFixed) {
+      // Fixed temperature models: always use their default
       setTemperature(modelConfig.defaultTemperature);
-    } else if (modelConfig && !localStorage.getItem(STORAGE_TEMPERATURE_KEY)) {
+    } else if (modelConfig?.supportsTemperature && modelConfig.defaultTemperature !== undefined) {
+      // For models with adjustable temperature, update to model's default when switching
+      // This ensures GPT-4 models get 0.5, GPT-5 models get 1.0, etc.
       setTemperature(modelConfig.defaultTemperature);
     }
   }, [model]);

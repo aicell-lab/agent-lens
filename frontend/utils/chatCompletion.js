@@ -31,12 +31,6 @@ const RESPONSE_INSTRUCTIONS = `You are a powerful coding assistant capable of so
 - When the task is complete, respond with <returnToUser commit="...">...</returnToUser> containing a concise summary (<=3 sentences) of actions and outcomes.
 - Do not emit plain text outside of these tags.
 
-**MINIMAL ACTION GUARDRAIL**
-- "move to well B2" -> only call await microscope.navigate_to_well('B', 2, well_plate_type='96').
-- "snap an image" -> only call await microscope.snap(...).
-- "move to B2 and focus" -> navigate first, then run the requested focus routine.
-- Ask the user before performing extra movements, imaging, scans, or analysis.
-
 **EXECUTION LOOP**
 1. Plan with <thoughts>.
 2. Run a <=25 line script inside <py-script>.
@@ -52,6 +46,7 @@ const RESPONSE_INSTRUCTIONS = `You are a powerful coding assistant capable of so
 - Using Markdown code fences (three backticks).
 - Bundling multiple independent tasks into one script.
 - Continuing after the user aborts or after the maximum step reminder.
+- **NEVER create fake/placeholder analysis functions** - Always use real microscopy tools available through the microscope service.
 
 **RUNTIME NOTES**
 - Imports and variables persist between scripts.
@@ -444,3 +439,4 @@ Please provide a new response using the required <thoughts> and <py-script> or <
     };
   }
 }
+

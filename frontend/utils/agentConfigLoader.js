@@ -151,7 +151,8 @@ async function loadDefaultConfig(token = null) {
   try {
     // Use the current page URL as base, which should be the frontend service URL
     const baseUrl = window.location.origin + window.location.pathname.replace(/\/$/, '');
-    const configPath = `${baseUrl}/agent-configs/microscope-assistant.js`;
+    // Use squid-control-simulation as default (safer for fallback - it's a simulation)
+    const configPath = `${baseUrl}/agent-configs/squid-control-simulation.js`;
     console.log(`[AgentConfigLoader] Loading default config from:`, configPath);
     
     const response = await fetch(configPath);
