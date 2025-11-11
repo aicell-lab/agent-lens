@@ -21,9 +21,6 @@ import {
   isSegmentationRunning,
   isSegmentationCompleted,
   isSegmentationFailed,
-  getSegmentationExperimentName,
-  isSegmentationExperiment,
-  getSourceExperimentName,
   fetchSegmentationPolygons,
   batchProcessSegmentationPolygons
 } from '../../utils/segmentationUtils.js';
@@ -236,6 +233,8 @@ const MicroscopeMapDisplay = forwardRef(({
   const [showSegmentationConfirmModal, setShowSegmentationConfirmModal] = useState(false);
   const [completedSegmentationExperiment, setCompletedSegmentationExperiment] = useState(null);
   const segmentationUploadCancelRef = useRef(false);
+  const segmentationAutoUploadRef = useRef({}); // Store autoUpload flag per experiment
+  const handleSegmentationToSimilaritySearchRef = useRef(null); // Ref to store the function
 
   // Layer dropdown state
   const [isLayerDropdownOpen, setIsLayerDropdownOpen] = useState(false);
@@ -1114,20 +1113,12 @@ const MicroscopeMapDisplay = forwardRef(({
     if (!microscopeControlService || !activeExperiment) return;
     
     try {
-      // Reload experiments to get updated list including segmentation results
+      // Reload experiments to get updated list
       const result = await microscopeControlService.list_experiments();
       if (result.success !== false) {
-        // Check if segmentation experiment was created
-        const segmentationExpName = getSegmentationExperimentName(activeExperiment);
-        const segmentationExp = result.experiments.find(exp => exp.name === segmentationExpName);
-        
-        if (segmentationExp) {
-          console.log(`🔬 Segmentation experiment found: ${segmentationExpName}`);
-          // The experiment manager will handle updating the experiments list
-          // We just need to trigger a refresh of the current experiment's channels
-          if (appendLog) {
-            appendLog(`Segmentation results available in experiment: ${segmentationExpName}`);
-          }
+        // The experiment manager will handle updating the experiments list
+        if (appendLog) {
+          appendLog(`Experiment data refreshed`);
         }
       }
     } catch (error) {
@@ -1144,21 +1135,6 @@ const MicroscopeMapDisplay = forwardRef(({
     const newConfigs = {};
     const activeChannels = [...channelMetadata.activeChannels];
     
-    // Check if this is a segmentation experiment and add Segmentation channel
-    const isSegmentationExp = isSegmentationExperiment(activeExperiment);
-    if (isSegmentationExp) {
-      // Add Segmentation channel for segmentation experiments
-      const segmentationChannel = {
-        label: 'Segmentation',
-        window: { start: 0, end: 255 },
-        color: '#8b5cf6', // Purple color for segmentation
-        index: activeChannels.length,
-        coefficient: 1.0,
-        family: 'segmentation'
-      };
-      activeChannels.push(segmentationChannel);
-    }
-    
     activeChannels.forEach(channel => {
       newConfigs[channel.label] = {
         enabled: true, // Auto-enable all active channels as requested
@@ -1172,9 +1148,6 @@ const MicroscopeMapDisplay = forwardRef(({
     });
     
     console.log(`🎨 Initialized ${Object.keys(newConfigs).length} zarr channels:`, Object.keys(newConfigs));
-    if (isSegmentationExp) {
-      console.log(`🔬 Segmentation experiment detected - added Segmentation channel`);
-    }
     setZarrChannelConfigs(newConfigs);
     setAvailableZarrChannels(activeChannels);
     setIsMultiChannelMode(Object.keys(newConfigs).length > 1);
@@ -1228,35 +1201,6 @@ const MicroscopeMapDisplay = forwardRef(({
               appendLog(`Segmentation progress: ${progressMessage}`);
             }
             
-            // Ensure segmentation layer exists in UI (but not visible) when segmentation is running
-            // Also refresh it if user manually set it visible
-            if (experimentName) {
-              const segmentationExpName = getSegmentationExperimentName(experimentName);
-              
-              // Check if segmentation experiment already exists in the experiments list
-              const segExpExists = experiments.find(exp => exp.name === segmentationExpName);
-              
-              if (!segExpExists) {
-                // Not in experiments list yet, reload experiments to make it available in UI
-                loadExperiments().then(() => {
-                  setTimeout(() => {
-                    const segExp = experiments.find(exp => exp.name === segmentationExpName);
-                    if (segExp) {
-                      console.log(`[Segmentation] Segmentation layer now available in UI: ${segmentationExpName} (not visible until user enables it)`);
-                    }
-                  }, 500);
-                });
-              }
-              
-              // Refresh segmentation layer every 5 seconds if user manually set it visible
-              const currentVisible = visibleExperimentsRef.current;
-              const isSegmentationVisible = currentVisible.includes(segmentationExpName);
-              if (isSegmentationVisible) {
-                // Trigger tile reload to refresh segmentation layer
-                setNeedsTileReload(true);
-                console.log(`[Segmentation Refresh] Refreshing visible segmentation layer: ${segmentationExpName}`);
-              }
-            }
           }
 
           // Check if segmentation is complete
@@ -1281,11 +1225,24 @@ const MicroscopeMapDisplay = forwardRef(({
               await refreshExperimentData();
             }
 
-            // Show modal to ask if user wants to upload to similarity search
+            // Check if auto-upload is enabled for this experiment
             const sourceExperiment = status.progress?.source_experiment;
             if (sourceExperiment) {
-              setCompletedSegmentationExperiment(sourceExperiment);
-              setShowSegmentationConfirmModal(true);
+              const shouldAutoUpload = segmentationAutoUploadRef.current[sourceExperiment];
+              
+              if (shouldAutoUpload) {
+                // Auto-upload: skip modal and directly upload
+                delete segmentationAutoUploadRef.current[sourceExperiment];
+                setCompletedSegmentationExperiment(sourceExperiment);
+                // Automatically trigger upload using ref
+                if (handleSegmentationToSimilaritySearchRef.current) {
+                  handleSegmentationToSimilaritySearchRef.current(sourceExperiment);
+                }
+              } else {
+                // Show modal to ask if user wants to upload to similarity search
+                setCompletedSegmentationExperiment(sourceExperiment);
+                setShowSegmentationConfirmModal(true);
+              }
             }
           } else if (isSegmentationFailed(status.state)) {
             stopSegmentationPolling();
@@ -1312,7 +1269,7 @@ const MicroscopeMapDisplay = forwardRef(({
         }
       }
     }, 5000); // Poll every 5 seconds
-  }, [microscopeControlService, showNotification, appendLog, refreshExperimentData, stopSegmentationPolling, getSegmentationExperimentName, experiments, loadExperiments]);
+  }, [microscopeControlService, showNotification, appendLog, refreshExperimentData, stopSegmentationPolling, experiments, loadExperiments]);
 
   const cancelRunningSegmentation = useCallback(async () => {
     if (!microscopeControlService || !segmentationState.isRunning) {
@@ -1715,6 +1672,11 @@ const MicroscopeMapDisplay = forwardRef(({
     getLayerContrastSettings,
     activeExperiment
   ]);
+
+  // Update ref whenever handleSegmentationToSimilaritySearch changes
+  useEffect(() => {
+    handleSegmentationToSimilaritySearchRef.current = handleSegmentationToSimilaritySearch;
+  }, [handleSegmentationToSimilaritySearch]);
 
   // Cleanup polling on unmount
   useEffect(() => {
@@ -3825,7 +3787,7 @@ const MicroscopeMapDisplay = forwardRef(({
   // Segmentation event handler
   useEffect(() => {
     const handleSegmentExperiment = async (event) => {
-      const { experimentName } = event.detail;
+      const { experimentName, autoUpload = false } = event.detail;
       
       if (!microscopeControlService) {
         showNotification('Microscope service not available', 'error');
@@ -3838,6 +3800,11 @@ const MicroscopeMapDisplay = forwardRef(({
       }
 
       try {
+        // Store autoUpload flag for this experiment
+        if (autoUpload) {
+          segmentationAutoUploadRef.current[experimentName] = true;
+        }
+
         // Build channel configurations from current UI state
         const channelConfigs = buildChannelConfigs(
           visibleLayers.channels,
@@ -3890,6 +3857,8 @@ const MicroscopeMapDisplay = forwardRef(({
         if (appendLog) {
           appendLog(`Segmentation failed: ${error.message}`);
         }
+        // Clear autoUpload flag on error
+        delete segmentationAutoUploadRef.current[experimentName];
       }
     };
 
@@ -5998,6 +5967,7 @@ const MicroscopeMapDisplay = forwardRef(({
                       segmentationUploadState={segmentationUploadState}
                       handleSegmentationToSimilaritySearch={handleSegmentationToSimilaritySearch}
                       cancelSegmentationUpload={cancelSegmentationUpload}
+                      completedSegmentationExperiment={completedSegmentationExperiment}
                     />
                   </div>
                 )}
@@ -6166,20 +6136,6 @@ const MicroscopeMapDisplay = forwardRef(({
           const baseZIndex = 1;
           let experimentZIndex = experimentIndex >= 0 ? experimentIndex + baseZIndex : baseZIndex;
           
-          // 🎨 SEGMENTATION LAYER Z-INDEX: Ensure segmentation layers always appear above their parent experiment
-          if (tile.experimentName && isSegmentationExperiment(tile.experimentName)) {
-            const parentExperimentName = getSourceExperimentName(tile.experimentName);
-            const parentIndex = experimentsToShow.indexOf(parentExperimentName);
-            // If parent experiment is visible, ensure segmentation has higher z-index
-            // Add a large offset (100) to segmentation layers to ensure they're always on top
-            if (parentIndex >= 0) {
-              experimentZIndex = parentIndex + baseZIndex + 100; // Segmentation always 100 units above parent
-            } else {
-              // Parent not visible, but still give segmentation a high z-index
-              experimentZIndex = baseZIndex + 100;
-            }
-          }
-          
           // 🎨 SCALE-BASED Z-INDEX: Higher resolution (scale 0) > Lower resolution (scale 4)
           // Each scale level gets 10 z-index units to allow for experiment layering
           const maxScale = 5; // Assuming scale levels 0-5
@@ -6206,7 +6162,7 @@ const MicroscopeMapDisplay = forwardRef(({
                   objectFit: 'fill', // Fill the container exactly, matching the calculated dimensions
                   objectPosition: 'top left', // Ensure alignment with top-left corner
                   display: 'block', // Remove any inline spacing
-                  opacity: tile.experimentName && isSegmentationExperiment(tile.experimentName) ? 0.5 : 1.0 // Fixed transparency for segmentation masks
+                  opacity: 1.0
                 }}
               />
               

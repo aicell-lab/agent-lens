@@ -1155,14 +1155,6 @@ const MicroscopeControlPanel = ({
   };
 
   const resetEmbedding = (map, vectorLayer) => {
-    map.getLayers()
-      .getArray()
-      .slice()
-      .filter((layer) => layer.get('isSegmentationLayer'))
-      .forEach((layer) => {
-      map.removeLayer(layer);
-    });
-
     if (vectorLayer && vectorLayer.getSource()) {
         vectorLayer.getSource().clear();
     }

@@ -3,7 +3,6 @@ import PropTypes from 'prop-types';
 import './LayerPanel.css';
 import DualRangeSlider from '../DualRangeSlider';
 import { getChannelColor, getMicroscopeNumber } from '../../utils';
-import { isSegmentationExperiment, getSourceExperimentName } from '../../utils/segmentationUtils';
 
 const LayerPanel = ({
   // Map Layers props
@@ -94,7 +93,8 @@ const LayerPanel = ({
   // Segmentation upload props
   segmentationUploadState,
   handleSegmentationToSimilaritySearch,
-  cancelSegmentationUpload
+  cancelSegmentationUpload,
+  completedSegmentationExperiment
 }) => {
   const [showLayerTypeDropdown, setShowLayerTypeDropdown] = useState(false);
   const [newLayerType, setNewLayerType] = useState('quick-scan');
@@ -302,8 +302,7 @@ const LayerPanel = ({
     
     // For real microscope experiments ONLY, also call setActiveExperimentHandler
     // Browse Data layers are remote data and don't need microscope experiment activation
-    // Segmentation layers should not trigger experiment activation
-    if (layerType === 'experiment' && !isSegmentationExperiment(layerId) && setActiveExperimentHandler) {
+    if (layerType === 'experiment' && setActiveExperimentHandler) {
       try {
         await setActiveExperimentHandler(layerId);
         console.log(`[LayerPanel] Set active experiment: ${layerId}`);
@@ -654,19 +653,8 @@ const LayerPanel = ({
           <>
             {isLoadingExperiments ? (
               <div className="loading-text">Loading experiments...</div>
-            ) : (() => {
-              // Filter out segmentation experiments and create mapping
-              const regularExperiments = experiments.filter(exp => !isSegmentationExperiment(exp.name));
-              const segmentationExperiments = experiments.filter(exp => isSegmentationExperiment(exp.name));
-              
-              // Create mapping: parent experiment name -> segmentation experiment
-              const segmentationMap = {};
-              segmentationExperiments.forEach(segExp => {
-                const parentName = getSourceExperimentName(segExp.name);
-                segmentationMap[parentName] = segExp;
-              });
-              
-              return regularExperiments.map((exp) => {
+            ) : (
+              experiments.map((exp) => {
                 const isVisible = visibleExperiments.includes(exp.name);
                 const isActive = exp.name === activeExperiment;
                 return (
@@ -676,27 +664,9 @@ const LayerPanel = ({
                       className="layer-visibility-btn"
                       onClick={() => {
                         if (isVisible) {
-                          // Hide experiment and its segmentation layer (if exists)
-                          setVisibleExperiments(prev => {
-                            const filtered = prev.filter(name => name !== exp.name);
-                            // Also hide segmentation layer if it exists
-                            const segExp = segmentationMap[exp.name];
-                            if (segExp) {
-                              return filtered.filter(name => name !== segExp.name);
-                            }
-                            return filtered;
-                          });
+                          setVisibleExperiments(prev => prev.filter(name => name !== exp.name));
                         } else {
-                          // Show experiment and automatically show its segmentation layer (if exists)
-                          setVisibleExperiments(prev => {
-                            const updated = [...prev, exp.name];
-                            // Also automatically show segmentation layer if it exists
-                            const segExp = segmentationMap[exp.name];
-                            if (segExp && !prev.includes(segExp.name)) {
-                              updated.push(segExp.name);
-                            }
-                            return updated;
-                          });
+                          setVisibleExperiments(prev => [...prev, exp.name]);
                         }
                       }}
                       title={isVisible ? "Hide experiment" : "Show experiment"}
@@ -826,138 +796,8 @@ const LayerPanel = ({
                             <i className="fas fa-cloud-upload-alt mr-1"></i>
                             Upload Dataset
                           </button>
-                          {/* Segment Experiment / Cancel Segmentation button */}
-                          <button 
-                            className="segment-btn"
-                            onClick={async () => {
-                              if (isSimulatedMicroscope || !microscopeControlService) return;
-                              
-                              // Check if segmentation is running for this experiment
-                              const isRunning = segmentationState?.isRunning && 
-                                                segmentationState?.experimentName === exp.name;
-                              
-                              if (isRunning) {
-                                // Cancel running segmentation
-                                if (cancelRunningSegmentation) {
-                                  await cancelRunningSegmentation();
-                                }
-                              } else {
-                                // Trigger segment experiment event
-                                const event = new CustomEvent('segmentExperiment', {
-                                  detail: { experimentName: exp.name }
-                                });
-                                window.dispatchEvent(event);
-                              }
-                            }}
-                            disabled={isSimulatedMicroscope || !microscopeControlService}
-                            title={
-                              segmentationState?.isRunning && segmentationState?.experimentName === exp.name
-                                ? "Cancel running segmentation"
-                                : "Run automated cell segmentation on this experiment"
-                            }
-                          >
-                            <i className={`fas mr-1 ${segmentationState?.isRunning && segmentationState?.experimentName === exp.name ? 'fa-times' : 'fa-cut'}`}></i>
-                            {segmentationState?.isRunning && segmentationState?.experimentName === exp.name
-                              ? 'Cancel Segmentation'
-                              : 'Segment Experiment'}
-                          </button>
                         </div>
                       </div>
-                      
-                      {/* Segmentation Layer (if exists) */}
-                      {segmentationMap[exp.name] && (
-                        <div className="channel-item channel-item--segmentation">
-                          <div className="channel-header">
-                            <button
-                              className="channel-visibility-btn"
-                              onClick={() => {
-                                // Toggle segmentation visibility
-                                const segExp = segmentationMap[exp.name];
-                                const isVisible = visibleExperiments.includes(segExp.name);
-                                if (isVisible) {
-                                  setVisibleExperiments(prev => prev.filter(name => name !== segExp.name));
-                                } else {
-                                  setVisibleExperiments(prev => [...prev, segExp.name]);
-                                }
-                              }}
-                              title={visibleExperiments.includes(segmentationMap[exp.name].name) ? "Hide segmentation" : "Show segmentation"}
-                            >
-                              <i className={`fas fa-eye${visibleExperiments.includes(segmentationMap[exp.name].name) ? '' : '-slash'}`}></i>
-                            </button>
-                            <span className="channel-name">
-                              <i className="fas fa-cut"></i>
-                              Segmentation
-                            </span>
-                            <div className="segmentation-actions">
-                              {/* Upload to Similarity Search Button */}
-                              {segmentationUploadState?.isProcessing && 
-                               segmentationUploadState?.sourceExperimentName === exp.name ? (
-                                <div className="flex items-center gap-2">
-                                  <button
-                                    className="segmentation-action-btn"
-                                    disabled
-                                    title="Processing segmentation results"
-                                  >
-                                    <i className="fas fa-spinner fa-spin" style={{ fontSize: '0.8em' }}></i>
-                                    <span className="ml-1" style={{ fontSize: '0.75em' }}>
-                                      Processing {segmentationUploadState.currentPolygon}/{segmentationUploadState.totalPolygons}
-                                    </span>
-                                  </button>
-                                  <button
-                                    className="segmentation-action-btn segmentation-action-btn--delete"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      if (cancelSegmentationUpload) {
-                                        cancelSegmentationUpload();
-                                      }
-                                    }}
-                                    title="Stop processing"
-                                  >
-                                    <i className="fas fa-stop"></i>
-                                  </button>
-                                </div>
-                              ) : (
-                                <button
-                                  className="segmentation-action-btn"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    const sourceExp = exp.name;
-                                    if (handleSegmentationToSimilaritySearch) {
-                                      handleSegmentationToSimilaritySearch(sourceExp);
-                                    }
-                                  }}
-                                  disabled={segmentationUploadState?.isProcessing}
-                                  title="Upload segmentation results to similarity search"
-                                >
-                                  <i className="fas fa-upload"></i>
-                                </button>
-                              )}
-                              <button
-                                className="segmentation-action-btn"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setExperimentToReset(segmentationMap[exp.name].name);
-                                  setShowClearCanvasConfirmation(true);
-                                }}
-                                title="Reset segmentation data"
-                              >
-                                <i className="fas fa-undo"></i>
-                              </button>
-                              <button
-                                className="segmentation-action-btn segmentation-action-btn--delete"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setExperimentToDelete(segmentationMap[exp.name].name);
-                                  setShowDeleteConfirmation(true);
-                                }}
-                                title="Delete segmentation layer"
-                              >
-                                <i className="fas fa-trash"></i>
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      )}
                       
                       {/* Similarity Search Sublayer for Experiments */}
                       <div className="channel-item channel-item--annotation">
@@ -999,6 +839,109 @@ const LayerPanel = ({
                             Similarity Search
                           </span>
                           <span className="channel-color-indicator" style={{ backgroundColor: '#3B82F6' }}></span>
+                        </div>
+                        
+                        {/* Combined Segmentation & Upload Button */}
+                        <div className="segmentation-upload-controls" style={{ padding: '0.5rem', marginTop: '0.5rem' }}>
+                          {(() => {
+                            const isSegmentationRunning = segmentationState?.isRunning && 
+                                                          segmentationState?.experimentName === exp.name;
+                            const isUploadProcessing = segmentationUploadState?.isProcessing && 
+                                                      segmentationUploadState?.sourceExperimentName === exp.name;
+                            const isReadyToUpload = completedSegmentationExperiment === exp.name;
+                            
+                            if (isSegmentationRunning) {
+                              // Segmentation is running - show cancel button
+                              return (
+                                <button
+                                  className="segment-btn"
+                                  onClick={async () => {
+                                    if (cancelRunningSegmentation) {
+                                      await cancelRunningSegmentation();
+                                    }
+                                  }}
+                                  disabled={!microscopeControlService || isSimulatedMicroscope}
+                                  title="Cancel running segmentation"
+                                  style={{ width: '100%' }}
+                                >
+                                  <i className="fas fa-times mr-1"></i>
+                                  Cancel Segmentation
+                                </button>
+                              );
+                            } else if (isUploadProcessing) {
+                              // Upload is processing - show progress and cancel
+                              return (
+                                <div className="flex items-center gap-2" style={{ width: '100%' }}>
+                                  <button
+                                    className="segment-btn"
+                                    disabled
+                                    title="Processing segmentation results"
+                                    style={{ flex: 1 }}
+                                  >
+                                    <i className="fas fa-spinner fa-spin mr-1"></i>
+                                    Processing {segmentationUploadState.currentPolygon}/{segmentationUploadState.totalPolygons}
+                                  </button>
+                                  <button
+                                    className="segment-btn"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (cancelSegmentationUpload) {
+                                        cancelSegmentationUpload();
+                                      }
+                                    }}
+                                    title="Stop processing"
+                                    style={{ padding: '0.25rem 0.5rem' }}
+                                  >
+                                    <i className="fas fa-stop"></i>
+                                  </button>
+                                </div>
+                              );
+                            } else if (isReadyToUpload) {
+                              // Segmentation complete, ready to upload
+                              return (
+                                <button
+                                  className="segment-btn"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (handleSegmentationToSimilaritySearch) {
+                                      handleSegmentationToSimilaritySearch(exp.name);
+                                    }
+                                  }}
+                                  disabled={!microscopeControlService || isSimulatedMicroscope || segmentationUploadState?.isProcessing}
+                                  title="Upload segmentation results to similarity search"
+                                  style={{ width: '100%' }}
+                                >
+                                  <i className="fas fa-upload mr-1"></i>
+                                  Upload to Similarity Search
+                                </button>
+                              );
+                            } else {
+                              // Not started - show segment & upload button
+                              return (
+                                <button
+                                  className="segment-btn"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (isSimulatedMicroscope || !microscopeControlService) return;
+                                    // Trigger segment experiment event with auto-upload flag
+                                    const event = new CustomEvent('segmentExperiment', {
+                                      detail: { 
+                                        experimentName: exp.name,
+                                        autoUpload: true // Flag to auto-upload when complete
+                                      }
+                                    });
+                                    window.dispatchEvent(event);
+                                  }}
+                                  disabled={isSimulatedMicroscope || !microscopeControlService || segmentationUploadState?.isProcessing}
+                                  title="Run automated cell segmentation and upload results to similarity search"
+                                  style={{ width: '100%' }}
+                                >
+                                  <i className="fas fa-cut mr-1"></i>
+                                  Segment & Upload
+                                </button>
+                              );
+                            }
+                          })()}
                         </div>
                       </div>
                       
@@ -1084,8 +1027,8 @@ const LayerPanel = ({
                   )}
                 </div>
                 );
-              });
-            })()}
+              })
+            )}
           </>
         )}
 
@@ -1200,7 +1143,8 @@ LayerPanel.propTypes = {
     sourceExperimentName: PropTypes.string
   }),
   handleSegmentationToSimilaritySearch: PropTypes.func,
-  cancelSegmentationUpload: PropTypes.func
+  cancelSegmentationUpload: PropTypes.func,
+  completedSegmentationExperiment: PropTypes.string
 };
 
 export default LayerPanel;
