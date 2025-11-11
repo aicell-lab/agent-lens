@@ -1525,17 +1525,75 @@ const MicroscopeMapDisplay = forwardRef(({
         return;
       }
 
-      const processResult = await batchProcessSegmentationPolygons(
-        polygonsResult.polygons,
-        sourceExperimentName,
-        services,
-        channelConfigs,
-        enabledChannels,
-        onProgress,
-        getWellInfoById,
-        100, // batchSize
-        shouldCancel // Pass cancellation check function
-      );
+      // Choose between frontend or backend processing
+      // Backend processing is recommended for GPU acceleration and better performance
+      const USE_BACKEND_PROCESSING = true; // Set to false to use frontend processing
+      
+      let processResult;
+      
+      if (USE_BACKEND_PROCESSING) {
+        // Backend processing (GPU accelerated, recommended)
+        const { processSegmentationBackend } = await import('../../utils/segmentationUtils');
+        
+        if (appendLog) {
+          appendLog('Using backend processing (GPU accelerated)...');
+        }
+        
+        processResult = await processSegmentationBackend(
+          sourceExperimentName,
+          applicationId,
+          selectedMicroscopeId,  // Use selectedMicroscopeId prop
+          visibleLayers.channels,
+          getLayerContrastSettings,
+          null, // wellId (null = all wells)
+          100, // batchSize
+          onProgress
+        );
+        
+        // Check for backend processing success
+        if (!processResult.success) {
+          throw new Error(processResult.error || 'Backend processing failed');
+        }
+        
+        // Backend already uploaded to Weaviate, so skip frontend upload
+        if (appendLog) {
+          appendLog(`Backend processing complete: ${processResult.uploadedCount} cells uploaded, ${processResult.failedCount} failed`);
+        }
+        
+        // Show completion notification
+        if (processResult.failedCount > 0) {
+          showNotification(
+            `Processed ${processResult.uploadedCount}/${processResult.totalPolygons} cells (${processResult.failedCount} failed)`,
+            'warning'
+          );
+        } else {
+          showNotification(
+            `Successfully uploaded ${processResult.uploadedCount} cells to similarity search`,
+            'success'
+          );
+        }
+        
+        // Return early since backend handled everything
+        return;
+        
+      } else {
+        // Frontend processing (original implementation)
+        if (appendLog) {
+          appendLog('Using frontend processing...');
+        }
+        
+        processResult = await batchProcessSegmentationPolygons(
+          polygonsResult.polygons,
+          sourceExperimentName,
+          services,
+          channelConfigs,
+          enabledChannels,
+          onProgress,
+          getWellInfoById,
+          100, // batchSize
+          shouldCancel // Pass cancellation check function
+        );
+      }
 
       // Check for cancellation after processing
       if (segmentationUploadCancelRef.current) {

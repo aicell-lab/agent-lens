@@ -977,3 +977,118 @@ function dataUrlToBlob(dataUrl) {
   });
 }
 
+/**
+ * Process segmentation polygons on backend (GPU accelerated)
+ * This function calls the backend endpoint instead of processing on frontend.
+ * 
+ * @param {string} sourceExperimentName - Name of the source experiment
+ * @param {string} applicationId - Application ID for Weaviate
+ * @param {string} microscopeServiceId - Microscope service ID
+ * @param {Object} visibleChannels - Object with channel names as keys and visibility as values
+ * @param {Function} getLayerContrastSettings - Function to get contrast settings for a layer
+ * @param {string} wellId - Optional well ID to process (null = all wells)
+ * @param {number} batchSize - Batch size for processing (default: 60)
+ * @param {Function} onProgress - Optional callback for progress updates (current, total, successful, failed)
+ * @returns {Promise<Object>} Result with counts and status
+ */
+export const processSegmentationBackend = async (
+  sourceExperimentName,
+  applicationId,
+  microscopeServiceId,
+  visibleChannels,
+  getLayerContrastSettings,
+  wellId = null,
+  batchSize = 60,
+  onProgress = null
+) => {
+  try {
+    console.log(`[SegmentationUtils Backend] Starting backend processing for: ${sourceExperimentName}`);
+    
+    // Build channel configurations
+    const channelConfigs = buildChannelConfigs(visibleChannels, getLayerContrastSettings, sourceExperimentName);
+    
+    if (channelConfigs.length === 0) {
+      throw new Error('No visible channels configured');
+    }
+    
+    // Get enabled channels info
+    const enabledChannels = Object.keys(visibleChannels)
+      .filter(channel => visibleChannels[channel] === true)
+      .map(channelName => ({
+        name: channelName,
+        label: channelName,
+        channelName: channelName
+      }));
+    
+    console.log(`[SegmentationUtils Backend] Calling backend with ${enabledChannels.length} channels`);
+    
+    // Prepare form data
+    const formData = new FormData();
+    formData.append('source_experiment_name', sourceExperimentName);
+    formData.append('application_id', applicationId);
+    formData.append('microscope_service_id', microscopeServiceId);
+    if (wellId) {
+      formData.append('well_id', wellId);
+    }
+    formData.append('batch_size', batchSize.toString());
+    
+    // Convert channel configs to the format expected by backend
+    const backendChannelConfigs = {};
+    channelConfigs.forEach(config => {
+      // Convert percentiles back to 0-255 range for backend
+      const min = Math.round((config.min_percentile / 100) * 255);
+      const max = Math.round((config.max_percentile / 100) * 255);
+      backendChannelConfigs[config.channel] = { min, max };
+    });
+    
+    formData.append('enabled_channels_json', JSON.stringify(enabledChannels));
+    formData.append('channel_configs_json', JSON.stringify(backendChannelConfigs));
+    
+    // Determine service ID based on URL (same pattern as other API calls)
+    const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
+    
+    // Call backend endpoint through the agent-lens service path
+    const response = await fetch(`/agent-lens/apps/${serviceId}/segmentation/process-and-upload`, {
+      method: 'POST',
+      body: formData
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
+      throw new Error(errorData.detail || `HTTP ${response.status}`);
+    }
+    
+    const result = await response.json();
+    
+    console.log(`[SegmentationUtils Backend] Backend processing complete:`, result);
+    
+    // Call progress callback with final status
+    if (onProgress && result.success) {
+      onProgress(
+        result.total_polygons,
+        result.total_polygons,
+        result.uploaded_count,
+        result.failed_count
+      );
+    }
+    
+    return {
+      success: true,
+      processedCount: result.processed_count,
+      uploadedCount: result.uploaded_count,
+      failedCount: result.failed_count,
+      totalPolygons: result.total_polygons,
+      message: result.message,
+      failedDetails: result.failed_details
+    };
+    
+  } catch (error) {
+    console.error(`[SegmentationUtils Backend] Error:`, error);
+    return {
+      success: false,
+      error: error.message,
+      message: `Backend processing failed: ${error.message}`
+    };
+  }
+};
+

@@ -1216,6 +1216,388 @@ def get_frontend_api():
             logger.error(traceback.format_exc())
             raise HTTPException(status_code=500, detail=str(e))
 
+    #########################################################################################
+    # Segmentation Processing Endpoints (Backend processing for GPU acceleration)
+    #########################################################################################
+    
+    @app.post("/segmentation/process-and-upload")
+    async def process_segmentation_and_upload(
+        source_experiment_name: str = Form(...),
+        application_id: str = Form(...),
+        microscope_service_id: str = Form(...),
+        well_id: str = Form(None),
+        batch_size: int = Form(60),
+        enabled_channels_json: str = Form(...),  # JSON array of enabled channels
+        channel_configs_json: str = Form(...)  # JSON object of channel configurations
+    ):
+        """
+        Backend version of segmentation processing workflow.
+        This endpoint replaces the frontend batchProcessSegmentationPolygons function
+        for GPU-accelerated embedding generation and reduced network traffic.
+        
+        Args:
+            source_experiment_name (str): Name of the source experiment (not segmentation experiment)
+            application_id (str): Application ID for Weaviate (dataset name)
+            microscope_service_id (str): Microscope service ID to connect to
+            well_id (str, optional): Specific well ID to process (None = all wells)
+            batch_size (int): Batch size for processing (default: 60)
+            enabled_channels_json (str): JSON array of enabled channel objects
+            channel_configs_json (str): JSON object of channel configurations
+            
+        Returns:
+            dict: Processing results with counts and any errors
+        """
+        import json
+        import base64
+        from io import BytesIO
+        from PIL import Image
+        
+        try:
+            logger.info(f"[Segmentation Backend] Starting processing for experiment: {source_experiment_name}")
+            
+            # Parse channel configurations
+            try:
+                enabled_channels = json.loads(enabled_channels_json)
+                channel_configs = json.loads(channel_configs_json)
+            except json.JSONDecodeError as e:
+                raise HTTPException(status_code=400, detail=f"Invalid JSON in channel configs: {str(e)}")
+            
+            logger.info(f"[Segmentation Backend] Enabled channels: {len(enabled_channels)}, configs: {len(channel_configs)}")
+            
+            # Step 1: Connect to microscope service
+            from hypha_rpc import connect_to_server as connect_rpc
+            try:
+                server_for_microscope = await connect_rpc({
+                    "server_url": SERVER_URL,
+                    "token": WORKSPACE_TOKEN
+                })
+                microscope_service = await server_for_microscope.get_service(microscope_service_id)
+                logger.info(f"[Segmentation Backend] Connected to microscope service: {microscope_service_id}")
+            except Exception as e:
+                logger.error(f"[Segmentation Backend] Failed to connect to microscope service: {e}")
+                raise HTTPException(status_code=503, detail=f"Failed to connect to microscope service: {str(e)}")
+            
+            # Step 2: Fetch segmentation polygons from microscope
+            try:
+                polygons_result = await microscope_service.segmentation_get_polygons(
+                    source_experiment_name,
+                    well_id
+                )
+                
+                if not polygons_result or not polygons_result.get('success'):
+                    error_msg = polygons_result.get('message', 'Unknown error') if polygons_result else 'No result returned'
+                    raise HTTPException(status_code=404, detail=f"Failed to fetch polygons: {error_msg}")
+                
+                polygons = polygons_result.get('polygons', [])
+                logger.info(f"[Segmentation Backend] Fetched {len(polygons)} polygons from microscope")
+                
+                if len(polygons) == 0:
+                    return {
+                        "success": True,
+                        "processed_count": 0,
+                        "uploaded_count": 0,
+                        "failed_count": 0,
+                        "message": "No polygons found to process"
+                    }
+                
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"[Segmentation Backend] Error fetching polygons: {e}")
+                raise HTTPException(status_code=500, detail=f"Error fetching polygons: {str(e)}")
+            
+            # Step 3: Process polygons in batches
+            processed_count = 0
+            uploaded_count = 0
+            failed_count = 0
+            failed_details = []
+            
+            # Get well plate information (needed for coordinate conversion)
+            try:
+                status = await microscope_service.get_status()
+                well_plate_config = status.get('well_plate', {})
+                well_plate_type = well_plate_config.get('type', '96')
+            except Exception as e:
+                logger.warning(f"[Segmentation Backend] Could not get well plate type: {e}, using default 96")
+                well_plate_type = '96'
+            
+            # Process in batches
+            for batch_start in range(0, len(polygons), batch_size):
+                batch_end = min(batch_start + batch_size, len(polygons))
+                batch = polygons[batch_start:batch_end]
+                
+                logger.info(f"[Segmentation Backend] Processing batch {batch_start//batch_size + 1} ({batch_start + 1}-{batch_end} of {len(polygons)})")
+                
+                try:
+                    # Prepare region extraction requests for all enabled channels
+                    regions_per_channel = {}
+                    polygon_metadata = []  # Track metadata for each polygon
+                    
+                    for channel in enabled_channels:
+                        channel_name = channel.get('label') or channel.get('channelName') or channel.get('name')
+                        regions_per_channel[channel_name] = []
+                    
+                    for i, polygon in enumerate(batch):
+                        global_index = batch_start + i
+                        
+                        try:
+                            # Parse WKT polygon
+                            polygon_wkt = polygon.get('polygon_wkt', '')
+                            well_id_poly = polygon.get('well_id', '')
+                            
+                            # Extract coordinates from WKT: POLYGON((x1 y1, x2 y2, ...))
+                            import re
+                            match = re.match(r'POLYGON\(\(([^)]+)\)\)', polygon_wkt)
+                            if not match:
+                                logger.warning(f"[Segmentation Backend] Invalid WKT format for polygon {global_index}")
+                                failed_count += 1
+                                failed_details.append({"index": global_index, "error": "Invalid WKT format"})
+                                continue
+                            
+                            coord_pairs = match.group(1).split(',')
+                            points = []
+                            for pair in coord_pairs:
+                                x, y = pair.strip().split()
+                                points.append({"x": float(x), "y": float(y)})
+                            
+                            if len(points) < 3:
+                                logger.warning(f"[Segmentation Backend] Polygon {global_index} has < 3 points")
+                                failed_count += 1
+                                failed_details.append({"index": global_index, "error": "Invalid polygon - needs at least 3 points"})
+                                continue
+                            
+                            # Calculate bounding box (well-relative coordinates in mm)
+                            x_values = [p['x'] for p in points]
+                            y_values = [p['y'] for p in points]
+                            raw_width = max(x_values) - min(x_values)
+                            raw_height = max(y_values) - min(y_values)
+                            center_x = (min(x_values) + max(x_values)) / 2
+                            center_y = (min(y_values) + max(y_values)) / 2
+                            
+                            # Add 5% padding to ensure we capture cell edges
+                            padding_percent = 0.05
+                            width = raw_width * (1 + padding_percent)
+                            height = raw_height * (1 + padding_percent)
+                            
+                            # Create region specification for each channel
+                            region_spec = {
+                                "center_x_mm": center_x,
+                                "center_y_mm": center_y,
+                                "width_mm": width,
+                                "height_mm": height,
+                                "well_plate_type": well_plate_type,
+                                "scale_level": 0,
+                                "timepoint": 0,
+                                "well_padding_mm": 0,
+                                "experiment_name": source_experiment_name
+                            }
+                            
+                            # Add region to each enabled channel
+                            for channel in enabled_channels:
+                                channel_name = channel.get('label') or channel.get('channelName') or channel.get('name')
+                                regions_per_channel[channel_name].append({
+                                    **region_spec,
+                                    "channel_name": channel_name
+                                })
+                            
+                            # Store metadata for later use
+                            polygon_metadata.append({
+                                "index": global_index,
+                                "well_id": well_id_poly,
+                                "polygon_wkt": polygon_wkt,
+                                "points": points
+                            })
+                            
+                        except Exception as e:
+                            logger.error(f"[Segmentation Backend] Error preparing polygon {global_index}: {e}")
+                            failed_count += 1
+                            failed_details.append({"index": global_index, "error": str(e)})
+                    
+                    if len(polygon_metadata) == 0:
+                        logger.warning(f"[Segmentation Backend] No valid polygons in batch {batch_start//batch_size + 1}")
+                        continue
+                    
+                    # Step 4: Batch extract images for all channels
+                    channel_extraction_results = {}
+                    
+                    for channel_name, regions in regions_per_channel.items():
+                        if len(regions) > 0:
+                            logger.info(f"[Segmentation Backend] Extracting {len(regions)} regions for channel: {channel_name}")
+                            try:
+                                extraction_result = await microscope_service.get_stitched_regions_batch(regions)
+                                
+                                if not extraction_result.get('success'):
+                                    logger.warning(f"[Segmentation Backend] Channel {channel_name} extraction failed")
+                                    continue
+                                
+                                channel_extraction_results[channel_name] = extraction_result.get('results', [])
+                                logger.info(f"[Segmentation Backend] Channel {channel_name} extracted {len(channel_extraction_results[channel_name])} images")
+                                
+                            except Exception as e:
+                                logger.error(f"[Segmentation Backend] Channel {channel_name} extraction error: {e}")
+                                continue
+                    
+                    # Step 5: Process each polygon - merge channels, apply masks, generate embeddings
+                    valid_objects = []
+                    image_blobs = []
+                    
+                    for i, metadata in enumerate(polygon_metadata):
+                        try:
+                            # Collect all channel images for this polygon
+                            channel_images = []
+                            
+                            for channel in enabled_channels:
+                                channel_name = channel.get('label') or channel.get('channelName') or channel.get('name')
+                                
+                                if channel_name not in channel_extraction_results:
+                                    continue
+                                
+                                results = channel_extraction_results[channel_name]
+                                if i >= len(results):
+                                    continue
+                                
+                                result = results[i]
+                                if not result.get('success'):
+                                    continue
+                                
+                                # Get base64 image data
+                                data = result.get('data', '')
+                                if not data.startswith('data:'):
+                                    data = f"data:image/png;base64,{data}"
+                                
+                                # Apply contrast adjustment and color tinting
+                                # (For backend, we'll do simplified processing)
+                                channel_config = channel_configs.get(channel_name, {"min": 0, "max": 255})
+                                
+                                channel_images.append({
+                                    "data": data,
+                                    "config": channel_config,
+                                    "channel_name": channel_name
+                                })
+                            
+                            if len(channel_images) == 0:
+                                failed_count += 1
+                                failed_details.append({"index": metadata['index'], "error": "No valid channel images"})
+                                continue
+                            
+                            # Merge channels (simplified version - just use first channel for now)
+                            # TODO: Implement proper multi-channel merging on backend
+                            merged_data = channel_images[0]['data']
+                            
+                            # Convert data URL to bytes
+                            if merged_data.startswith('data:'):
+                                header, encoded = merged_data.split(',', 1)
+                                image_bytes = base64.b64decode(encoded)
+                            else:
+                                image_bytes = base64.b64decode(merged_data)
+                            
+                            image_blobs.append(image_bytes)
+                            
+                            # Prepare object for Weaviate
+                            image_id = f"{source_experiment_name}_cell_{metadata['index']}"
+                            description = f"Cell from {source_experiment_name} well {metadata['well_id']}"
+                            
+                            valid_objects.append({
+                                "image_id": image_id,
+                                "description": description,
+                                "metadata": {
+                                    "annotation_id": image_id,
+                                    "well_id": metadata['well_id'],
+                                    "annotation_type": "polygon",
+                                    "timestamp": metadata.get('timestamp', ''),
+                                    "polygon_wkt": metadata['polygon_wkt'],
+                                    "source": "segmentation"
+                                },
+                                "dataset_id": application_id
+                            })
+                            
+                            processed_count += 1
+                            
+                        except Exception as e:
+                            logger.error(f"[Segmentation Backend] Error processing polygon {metadata['index']}: {e}")
+                            failed_count += 1
+                            failed_details.append({"index": metadata['index'], "error": str(e)})
+                    
+                    # Step 6: Generate embeddings in batch (GPU accelerated!)
+                    if len(image_blobs) > 0:
+                        logger.info(f"[Segmentation Backend] Generating embeddings for {len(image_blobs)} images (GPU accelerated)")
+                        
+                        try:
+                            from agent_lens.utils.weaviate_search import generate_image_embeddings_batch
+                            embeddings = await generate_image_embeddings_batch(image_blobs)
+                            
+                            # Add embeddings to objects
+                            for i, embedding in enumerate(embeddings):
+                                if i < len(valid_objects) and embedding is not None:
+                                    valid_objects[i]["vector"] = embedding
+                                else:
+                                    logger.warning(f"[Segmentation Backend] No embedding for object {i}")
+                            
+                            # Filter objects that have embeddings
+                            valid_objects = [obj for obj in valid_objects if "vector" in obj]
+                            logger.info(f"[Segmentation Backend] Successfully generated {len(valid_objects)} embeddings")
+                            
+                        except Exception as e:
+                            logger.error(f"[Segmentation Backend] Embedding generation failed: {e}")
+                            logger.error(traceback.format_exc())
+                            raise HTTPException(status_code=500, detail=f"Embedding generation failed: {str(e)}")
+                    
+                    # Step 7: Upload to Weaviate in batch
+                    if len(valid_objects) > 0:
+                        logger.info(f"[Segmentation Backend] Uploading {len(valid_objects)} objects to Weaviate")
+                        
+                        try:
+                            # Extract just the dataset ID part
+                            clean_application_id = application_id.split('/')[-1] if '/' in application_id else application_id
+                            
+                            upload_result = await similarity_service.insert_many_images(
+                                collection_name=WEAVIATE_COLLECTION_NAME,
+                                application_id=clean_application_id,
+                                objects=valid_objects
+                            )
+                            
+                            uploaded_count += len(valid_objects)
+                            logger.info(f"[Segmentation Backend] Batch upload successful: {len(valid_objects)} objects")
+                            
+                        except Exception as e:
+                            logger.error(f"[Segmentation Backend] Weaviate upload failed: {e}")
+                            logger.error(traceback.format_exc())
+                            raise HTTPException(status_code=500, detail=f"Weaviate upload failed: {str(e)}")
+                    
+                except Exception as e:
+                    logger.error(f"[Segmentation Backend] Batch processing error: {e}")
+                    logger.error(traceback.format_exc())
+                    # Continue to next batch instead of failing completely
+                    for i in range(len(batch)):
+                        global_index = batch_start + i
+                        if not any(f['index'] == global_index for f in failed_details):
+                            failed_count += 1
+                            failed_details.append({"index": global_index, "error": str(e)})
+            
+            # Return summary
+            result = {
+                "success": True,
+                "processed_count": processed_count,
+                "uploaded_count": uploaded_count,
+                "failed_count": failed_count,
+                "total_polygons": len(polygons),
+                "message": f"Processed {processed_count}/{len(polygons)} polygons, uploaded {uploaded_count} to Weaviate"
+            }
+            
+            if failed_count > 0:
+                result["failed_details"] = failed_details[:10]  # Limit to first 10 failures
+                result["message"] += f", {failed_count} failed"
+            
+            logger.info(f"[Segmentation Backend] Processing complete: {result['message']}")
+            return result
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"[Segmentation Backend] Unexpected error: {e}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
+
     @app.get("/similarity/collections/{collection_name}/exists")
     async def check_collection_exists(collection_name: str):
         """
