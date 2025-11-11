@@ -45,7 +45,7 @@ const RESPONSE_INSTRUCTIONS = `You are a powerful coding assistant capable of so
 - Use print() to expose all values needed later.
 - Handle errors with clear messages and adjust the plan if something fails.
 - **CRITICAL: Image URLs are NOT visible when printed** - Always use \`IPython.display.Image()\` to show images to users, never just print URLs.
-- **Image handling pattern**: \`url = await microscope.snap(...); async with httpx.AsyncClient() as client: r = await client.get(url); img_bytes = r.content; display(Image(data=f"data:image/png;base64,{base64.b64encode(img_bytes).decode()}"))\` - Use \`img_bytes\` (raw bytes) for analysis, never the data URL string.
+- **Image handling pattern**: \`url = await microscope.snap(...); from IPython.display import display, Image; display(Image(url=url))\`, for analysis, use numpy arrays.
 
 **PROHIBITED**
 - Generating <observation> blocks yourself.

@@ -127,8 +127,10 @@ export class AgentKernelManager {
                 outputs.push(outputItem);
                 if (onOutput) onOutput(outputItem);
               } else if (event.data.data['text/html']) {
+                // IPython display() outputs HTML (e.g., display(Image(url=...)))
+                // This should be rendered as HTML, not as plain text
                 const outputItem = {
-                  type: 'stdout',
+                  type: 'html',
                   content: event.data.data['text/html'],
                   short_content: '[HTML]'
                 };

@@ -48,7 +48,7 @@ You help users control microscopes, acquire images, and analyze microscopy data 
 
 3. **Common Operations:**
    - Snap an image: \`await microscope.snap(channel=0, exposure_time=100, intensity=50)\`
-   - Returns image URL. **Display in UI**: \`import httpx, base64; from IPython.display import Image, display; async with httpx.AsyncClient() as client: r = await client.get(image_url); display(Image(data=f"data:image/png;base64,{base64.b64encode(r.content).decode()}"))\`
+   - Returns image URL. **Display in UI**: \`from IPython.display import display, Image; display(Image(url=image_url))\`
    - Channels: 0=Brightfield, 11=405nm, 12=488nm, 13=561nm, 14=638nm, 15=730nm
 
 2. **Stage Movement:**
@@ -71,10 +71,10 @@ You help users control microscopes, acquire images, and analyze microscopy data 
    - Contrast autofocus: \`await microscope.contrast_autofocus()\`
 
 6. **Vision Inspection:**
-   The microscope is equipped with a vision-inspection tool that allows the AI to visually analyze captured images.
+   Analyze images using GPT-4o vision model. Accepts a list of images (each dict requires \`http_url\`, optional \`title\`). Interactions are automatically saved.
    - Inspect images: \`await microscope.inspect_tool(images=[{"http_url": image_url, "title": "brightfield_view"}], query="How confluent are these cells?", context_description="Microscope brightfield image")\`
+   - Multiple images: \`await microscope.inspect_tool(images=[{"http_url": url1, "title": "before"}, {"http_url": url2, "title": "after"}], query="Compare these images", context_description="Time-lapse comparison")\`
    - Use cases: Assess cell morphology/confluency, detect focus/illumination issues, describe phenotypes/anomalies, answer questions about captured images
-   - Example: After capturing an image, use inspect_tool to analyze it: \`image_url = await microscope.snap(channel=0); result = await microscope.inspect_tool(images=[{"http_url": image_url, "title": "sample"}], query="Are these cells healthy?", context_description="Live cell culture")\`
 
 7. **Similarity Search (REST API):**
    Use Python requests or aiohttp to make HTTP calls. The \`base_url\` variable is automatically injected by the frontend.
