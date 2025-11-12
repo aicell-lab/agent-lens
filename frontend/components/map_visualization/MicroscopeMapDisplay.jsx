@@ -190,7 +190,7 @@ const MicroscopeMapDisplay = forwardRef(({
       }
     ],
     do_contrast_autofocus: false,
-    do_reflection_af: false,
+    do_reflection_af: true,
     uploading: false
   });
 

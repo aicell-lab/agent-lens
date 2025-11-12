@@ -114,6 +114,85 @@ const NormalScanConfig = ({
     }
   }, [isGridDragging, gridDragStart, gridDragEnd]);
 
+  // Helper function to get current microscope settings for a specific channel
+  const getCurrentSettingsForChannel = React.useCallback(async (channelName) => {
+    if (!microscopeControlService) {
+      return { intensity: 50, exposure_time: 100 };
+    }
+
+    try {
+      const status = await microscopeControlService.get_status();
+      
+      // Map channel names to channel numbers
+      const channelNameToNumber = {
+        "BF LED matrix full": "0",
+        "Fluorescence 405 nm Ex": "11",
+        "Fluorescence 488 nm Ex": "12",
+        "Fluorescence 561 nm Ex": "14",
+        "Fluorescence 638 nm Ex": "13",
+        "Fluorescence 730 nm Ex": "15"
+      };
+      
+      const channelNumber = channelNameToNumber[channelName];
+      if (!channelNumber) {
+        return { intensity: 50, exposure_time: 100 };
+      }
+      
+      // Get intensity and exposure for this channel from status
+      let intensity = 50;
+      let exposure_time = 100;
+      
+      switch (channelNumber) {
+        case "0":
+          if (status.BF_intensity_exposure) {
+            intensity = status.BF_intensity_exposure[0];
+            exposure_time = status.BF_intensity_exposure[1];
+          }
+          break;
+        case "11":
+          if (status.F405_intensity_exposure) {
+            intensity = status.F405_intensity_exposure[0];
+            exposure_time = status.F405_intensity_exposure[1];
+          }
+          break;
+        case "12":
+          if (status.F488_intensity_exposure) {
+            intensity = status.F488_intensity_exposure[0];
+            exposure_time = status.F488_intensity_exposure[1];
+          }
+          break;
+        case "14":
+          if (status.F561_intensity_exposure) {
+            intensity = status.F561_intensity_exposure[0];
+            exposure_time = status.F561_intensity_exposure[1];
+          }
+          break;
+        case "13":
+          if (status.F638_intensity_exposure) {
+            intensity = status.F638_intensity_exposure[0];
+            exposure_time = status.F638_intensity_exposure[1];
+          }
+          break;
+        case "15":
+          if (status.F730_intensity_exposure) {
+            intensity = status.F730_intensity_exposure[0];
+            exposure_time = status.F730_intensity_exposure[1];
+          }
+          break;
+        default:
+          break;
+      }
+      
+      return { intensity, exposure_time };
+    } catch (error) {
+      if (appendLog) {
+        appendLog(`Failed to get settings for channel ${channelName}: ${error.message}`);
+      }
+      console.error('[NormalScanConfig] Failed to get settings for channel:', error);
+      return { intensity: 50, exposure_time: 100 };
+    }
+  }, [microscopeControlService, appendLog]);
+
   return (
     <div className="normal-scan-config-panel">
       <div className="normal-scan-config-header">
@@ -137,6 +216,166 @@ const NormalScanConfig = ({
           title="Close"
         >
           <i className="fas fa-times"></i>
+        </button>
+      </div>
+      
+      {/* Action Buttons - Moved to top */}
+      <div className="normal-scan-config-actions">
+        <button
+          onClick={() => {
+            if (isScanInProgress) return;
+            if (isRectangleSelection) {
+              // Stop rectangle selection
+              setIsRectangleSelection(false);
+              setRectangleStart(null);
+              setRectangleEnd(null);
+              setDragSelectedWell(null);
+            } else {
+              // Start rectangle selection - clear any existing selection first
+              setRectangleStart(null);
+              setRectangleEnd(null);
+              setDragSelectedWell(null);
+              setIsRectangleSelection(true);
+            }
+          }}
+          className={`normal-scan-config-button ${
+            isRectangleSelection ? 'normal-scan-config-button--active' : 'normal-scan-config-button--secondary'
+          }`}
+          disabled={isScanInProgress}
+        >
+          <i className="fas fa-vector-square mr-1"></i>
+          {isRectangleSelection ? 'Stop Selection' : 'Select Area'}
+        </button>
+        <button
+          onClick={async () => {
+            if (!microscopeControlService) return;
+            
+            if (isScanInProgress) {
+              // Stop scan logic using new unified API
+              try {
+                if (appendLog) appendLog('Cancelling scan...');
+                
+                const result = await microscopeControlService.scan_cancel();
+                
+                if (result.success) {
+                  if (showNotification) showNotification('Scan cancelled successfully', 'success');
+                  if (appendLog) appendLog('Scan cancelled - operation interrupted');
+                  // Note: scan state will be updated by status polling, no need to manually reset
+                  if (setMicroscopeBusy) setMicroscopeBusy(false);
+                  if (setCurrentOperation) setCurrentOperation(null); // Re-enable sidebar
+                } else {
+                  if (showNotification) showNotification(`Failed to cancel scan: ${result.message}`, 'error');
+                  if (appendLog) appendLog(`Failed to cancel scan: ${result.message}`);
+                }
+              } catch (error) {
+                if (showNotification) showNotification(`Error cancelling scan: ${error.message}`, 'error');
+                if (appendLog) appendLog(`Error cancelling scan: ${error.message}`);
+              }
+              return;
+            }
+            
+            // Check if WebRTC is active and stop it to prevent camera resource conflict
+            const wasWebRtcActive = isWebRtcActive;
+            if (wasWebRtcActive) {
+              if (appendLog) appendLog('Stopping WebRTC stream to prevent camera resource conflict during scanning...');
+              try {
+                if (toggleWebRtcStream) {
+                  toggleWebRtcStream(); // This will stop the WebRTC stream
+                  // Wait a moment for the stream to fully stop
+                  await new Promise(resolve => setTimeout(resolve, 500));
+                } else {
+                  if (appendLog) appendLog('Warning: toggleWebRtcStream function not available, proceeding with scan...');
+                }
+              } catch (webRtcError) {
+                if (appendLog) appendLog(`Warning: Failed to stop WebRTC stream: ${webRtcError.message}. Proceeding with scan...`);
+              }
+            }
+            
+            // Note: scan state will be managed by status polling, but we set busy states immediately
+            if (setMicroscopeBusy) setMicroscopeBusy(true); // Set global busy state
+            if (setCurrentOperation) setCurrentOperation('scanning'); // Disable sidebar during scanning
+            
+            // Disable rectangle selection during scanning to allow map browsing
+            setIsRectangleSelection(false);
+            setRectangleStart(null);
+            setRectangleEnd(null);
+            
+            try {
+              if (appendLog) {
+                const channelNames = scanParameters.illumination_settings.map(s => s.channel).join(', ');
+                appendLog(`Starting scan: ${scanParameters.Nx}×${scanParameters.Ny} positions from (${scanParameters.start_x_mm.toFixed(1)}, ${scanParameters.start_y_mm.toFixed(1)}) mm`);
+                appendLog(`Channels: ${channelNames}`);
+              }
+              
+              // Use new unified scan API
+              const result = await microscopeControlService.scan_start({
+                saved_data_type: "full_zarr",
+                action_ID: 'scan_' + Date.now(),
+                start_x_mm: scanParameters.start_x_mm,
+                start_y_mm: scanParameters.start_y_mm,
+                Nx: scanParameters.Nx,
+                Ny: scanParameters.Ny,
+                dx_mm: scanParameters.dx_mm,
+                dy_mm: scanParameters.dy_mm,
+                illumination_settings: scanParameters.illumination_settings,
+                wells_to_scan: selectedWells,
+                well_plate_type: wellPlateType,
+                well_padding_mm: wellPaddingMm,
+                experiment_name: activeExperiment,
+                uploading: scanParameters.uploading,
+                do_contrast_autofocus: scanParameters.do_contrast_autofocus,
+                do_reflection_af: scanParameters.do_reflection_af,
+                timepoint: 0
+              });
+              
+              if (result.success) {
+                if (showNotification) showNotification('Scan started successfully', 'success');
+                if (appendLog) {
+                  appendLog('Scan started - monitoring progress via status polling');
+                  if (wasWebRtcActive) {
+                    appendLog('Note: WebRTC stream was stopped for scanning. Click "Start Live" to resume video stream if needed.');
+                  }
+                }
+                // Close scan config panel
+                setShowScanConfig(false);
+                setIsRectangleSelection(false);
+                setRectangleStart(null);
+                setRectangleEnd(null);
+                // Enable scan results layer if not already
+                setVisibleLayers(prev => ({ ...prev, scanResults: true }));
+                
+                // Note: scan completion and results refresh will be handled by status polling
+              } else {
+                if (showNotification) showNotification(`Failed to start scan: ${result.error_message || result.message}`, 'error');
+                if (appendLog) appendLog(`Failed to start scan: ${result.error_message || result.message}`);
+                // Reset busy states since scan didn't start
+                if (setMicroscopeBusy) setMicroscopeBusy(false);
+                if (setCurrentOperation) setCurrentOperation(null);
+              }
+            } catch (error) {
+              if (showNotification) showNotification(`Error starting scan: ${error.message}`, 'error');
+              if (appendLog) appendLog(`Error starting scan: ${error.message}`);
+              // Reset busy states on error
+              if (setMicroscopeBusy) setMicroscopeBusy(false);
+              if (setCurrentOperation) setCurrentOperation(null);
+            }
+          }}
+          className={`normal-scan-config-button ${
+            isScanInProgress ? 'normal-scan-config-button--stop' : 'normal-scan-config-button--start'
+          }`}
+          disabled={!microscopeControlService}
+        >
+          {isScanInProgress ? (
+            <>
+              <i className="fas fa-stop mr-1"></i>
+              Stop Scan
+            </>
+          ) : (
+            <>
+              <i className="fas fa-play mr-1"></i>
+              Start Scan
+            </>
+          )}
         </button>
       </div>
       
@@ -340,7 +579,7 @@ const NormalScanConfig = ({
                 Load Current
               </button>
               <button
-                onClick={() => {
+                onClick={async () => {
                   if (isScanInProgress) return;
                   // Find a channel that's not already in use
                   const availableChannels = [
@@ -354,17 +593,24 @@ const NormalScanConfig = ({
                   const usedChannels = scanParameters.illumination_settings.map(s => s.channel);
                   const nextChannel = availableChannels.find(c => !usedChannels.includes(c)) || 'BF LED matrix full';
                   
+                  // Get current microscope settings for this channel
+                  const settings = await getCurrentSettingsForChannel(nextChannel);
+                  
                   setScanParameters(prev => ({
                     ...prev,
                     illumination_settings: [
                       ...prev.illumination_settings,
                       {
                         channel: nextChannel,
-                        intensity: 50,
-                        exposure_time: 100
+                        intensity: settings.intensity,
+                        exposure_time: settings.exposure_time
                       }
                     ]
                   }));
+                  
+                  if (appendLog) {
+                    appendLog(`Added channel ${nextChannel} with current settings: ${settings.intensity}% intensity, ${settings.exposure_time}ms exposure`);
+                  }
                 }}
                 className="normal-scan-config-button normal-scan-config-button--secondary"
                 disabled={isScanInProgress || scanParameters.illumination_settings.length >= 6}
@@ -400,14 +646,28 @@ const NormalScanConfig = ({
                     <div className="normal-scan-config-channel-select-container">
                       <select
                         value={setting.channel}
-                        onChange={(e) => {
+                        onChange={async (e) => {
                           if (isScanInProgress) return;
+                          const newChannel = e.target.value;
+                          
+                          // Get current microscope settings for the newly selected channel
+                          const settings = await getCurrentSettingsForChannel(newChannel);
+                          
                           setScanParameters(prev => ({
                             ...prev,
                             illumination_settings: prev.illumination_settings.map((s, i) => 
-                              i === index ? { ...s, channel: e.target.value } : s
+                              i === index ? { 
+                                ...s, 
+                                channel: newChannel,
+                                intensity: settings.intensity,
+                                exposure_time: settings.exposure_time
+                              } : s
                             )
                           }));
+                          
+                          if (appendLog) {
+                            appendLog(`Updated channel ${index + 1} to ${newChannel} with current settings: ${settings.intensity}% intensity, ${settings.exposure_time}ms exposure`);
+                          }
                         }}
                         className={`normal-scan-config-select ${
                           scanParameters.illumination_settings.filter(s => s.channel === setting.channel).length > 1 
@@ -574,166 +834,6 @@ const NormalScanConfig = ({
               Drag on the map to select scan area. Current settings will be used as defaults.
             </div>
           )}
-        </div>
-        
-        {/* Action Buttons */}
-        <div className="normal-scan-config-actions">
-          <button
-            onClick={() => {
-              if (isScanInProgress) return;
-              if (isRectangleSelection) {
-                // Stop rectangle selection
-                setIsRectangleSelection(false);
-                setRectangleStart(null);
-                setRectangleEnd(null);
-                setDragSelectedWell(null);
-              } else {
-                // Start rectangle selection - clear any existing selection first
-                setRectangleStart(null);
-                setRectangleEnd(null);
-                setDragSelectedWell(null);
-                setIsRectangleSelection(true);
-              }
-            }}
-            className={`normal-scan-config-button ${
-              isRectangleSelection ? 'normal-scan-config-button--active' : 'normal-scan-config-button--secondary'
-            }`}
-            disabled={isScanInProgress}
-          >
-            <i className="fas fa-vector-square mr-1"></i>
-            {isRectangleSelection ? 'Stop Selection' : 'Select Area'}
-          </button>
-          <button
-            onClick={async () => {
-              if (!microscopeControlService) return;
-              
-              if (isScanInProgress) {
-                // Stop scan logic using new unified API
-                try {
-                  if (appendLog) appendLog('Cancelling scan...');
-                  
-                  const result = await microscopeControlService.scan_cancel();
-                  
-                  if (result.success) {
-                    if (showNotification) showNotification('Scan cancelled successfully', 'success');
-                    if (appendLog) appendLog('Scan cancelled - operation interrupted');
-                    // Note: scan state will be updated by status polling, no need to manually reset
-                    if (setMicroscopeBusy) setMicroscopeBusy(false);
-                    if (setCurrentOperation) setCurrentOperation(null); // Re-enable sidebar
-                  } else {
-                    if (showNotification) showNotification(`Failed to cancel scan: ${result.message}`, 'error');
-                    if (appendLog) appendLog(`Failed to cancel scan: ${result.message}`);
-                  }
-                } catch (error) {
-                  if (showNotification) showNotification(`Error cancelling scan: ${error.message}`, 'error');
-                  if (appendLog) appendLog(`Error cancelling scan: ${error.message}`);
-                }
-                return;
-              }
-              
-              // Check if WebRTC is active and stop it to prevent camera resource conflict
-              const wasWebRtcActive = isWebRtcActive;
-              if (wasWebRtcActive) {
-                if (appendLog) appendLog('Stopping WebRTC stream to prevent camera resource conflict during scanning...');
-                try {
-                  if (toggleWebRtcStream) {
-                    toggleWebRtcStream(); // This will stop the WebRTC stream
-                    // Wait a moment for the stream to fully stop
-                    await new Promise(resolve => setTimeout(resolve, 500));
-                  } else {
-                    if (appendLog) appendLog('Warning: toggleWebRtcStream function not available, proceeding with scan...');
-                  }
-                } catch (webRtcError) {
-                  if (appendLog) appendLog(`Warning: Failed to stop WebRTC stream: ${webRtcError.message}. Proceeding with scan...`);
-                }
-              }
-              
-              // Note: scan state will be managed by status polling, but we set busy states immediately
-              if (setMicroscopeBusy) setMicroscopeBusy(true); // Set global busy state
-              if (setCurrentOperation) setCurrentOperation('scanning'); // Disable sidebar during scanning
-              
-              // Disable rectangle selection during scanning to allow map browsing
-              setIsRectangleSelection(false);
-              setRectangleStart(null);
-              setRectangleEnd(null);
-              
-              try {
-                if (appendLog) {
-                  const channelNames = scanParameters.illumination_settings.map(s => s.channel).join(', ');
-                  appendLog(`Starting scan: ${scanParameters.Nx}×${scanParameters.Ny} positions from (${scanParameters.start_x_mm.toFixed(1)}, ${scanParameters.start_y_mm.toFixed(1)}) mm`);
-                  appendLog(`Channels: ${channelNames}`);
-                }
-                
-                // Use new unified scan API
-                const result = await microscopeControlService.scan_start({
-                  saved_data_type: "full_zarr",
-                  action_ID: 'scan_' + Date.now(),
-                  start_x_mm: scanParameters.start_x_mm,
-                  start_y_mm: scanParameters.start_y_mm,
-                  Nx: scanParameters.Nx,
-                  Ny: scanParameters.Ny,
-                  dx_mm: scanParameters.dx_mm,
-                  dy_mm: scanParameters.dy_mm,
-                  illumination_settings: scanParameters.illumination_settings,
-                  wells_to_scan: selectedWells,
-                  well_plate_type: wellPlateType,
-                  well_padding_mm: wellPaddingMm,
-                  experiment_name: activeExperiment,
-                  uploading: scanParameters.uploading,
-                  do_contrast_autofocus: scanParameters.do_contrast_autofocus,
-                  do_reflection_af: scanParameters.do_reflection_af,
-                  timepoint: 0
-                });
-                
-                if (result.success) {
-                  if (showNotification) showNotification('Scan started successfully', 'success');
-                  if (appendLog) {
-                    appendLog('Scan started - monitoring progress via status polling');
-                    if (wasWebRtcActive) {
-                      appendLog('Note: WebRTC stream was stopped for scanning. Click "Start Live" to resume video stream if needed.');
-                    }
-                  }
-                  // Close scan config panel
-                  setShowScanConfig(false);
-                  setIsRectangleSelection(false);
-                  setRectangleStart(null);
-                  setRectangleEnd(null);
-                  // Enable scan results layer if not already
-                  setVisibleLayers(prev => ({ ...prev, scanResults: true }));
-                  
-                  // Note: scan completion and results refresh will be handled by status polling
-                } else {
-                  if (showNotification) showNotification(`Failed to start scan: ${result.error_message || result.message}`, 'error');
-                  if (appendLog) appendLog(`Failed to start scan: ${result.error_message || result.message}`);
-                  // Reset busy states since scan didn't start
-                  if (setMicroscopeBusy) setMicroscopeBusy(false);
-                  if (setCurrentOperation) setCurrentOperation(null);
-                }
-              } catch (error) {
-                if (showNotification) showNotification(`Error starting scan: ${error.message}`, 'error');
-                if (appendLog) appendLog(`Error starting scan: ${error.message}`);
-                // Reset busy states on error
-                if (setMicroscopeBusy) setMicroscopeBusy(false);
-                if (setCurrentOperation) setCurrentOperation(null);
-              }
-            }}
-            className={`normal-scan-config-button ${
-              isScanInProgress ? 'normal-scan-config-button--stop' : 'normal-scan-config-button--start'
-            }`}
-            disabled={!microscopeControlService}
-          >
-            {isScanInProgress ? (
-              <>
-                <i className="fas fa-stop mr-1"></i>
-                Stop Scan
-              </>
-            ) : (
-              <>
-                <i className="fas fa-play mr-1"></i>
-                Start Scan
-              </>
-            )}
-          </button>
         </div>
       </div>
     </div>
