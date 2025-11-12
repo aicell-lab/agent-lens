@@ -86,11 +86,34 @@ The Python kernel has already been initialized with the following variables avai
    - Parameters: Nx/Ny (grid size), dx_mm/dy_mm (step size, default 0.8mm), illumination_settings (list of channel configs), wells_to_scan (optional well list), well_plate_type (well plate type), experiment_name (for data organization), do_reflection_af (autofocus options). Note: Grid is automatically centered around well center if start_x_mm/start_y_mm are not provided.
    - Returns: {"success": True, ...} - Check scan_status in get_status() for progress (state: "idle"/"running"/"completed"/"failed")
 
-7. **Advanced Features:**
+7. **Search Cells in Well (Complete Workflow):**
+   - Scan, segment, upload to Weaviate, and search for similar cells: \`await microscope.search_cells_in_well(well="A1", target_uuid="abc-123-def", limit_expected=10, Nx=1, Ny=1, selected_channel_name="Fluorescence_488_nm_Ex")\`
+   - ⚠️ **IMPORTANT - Channel Availability:** The specified channel MUST be available in the well canvas. 'BF LED matrix full' (brightfield) may not always be available. Use fluorescence channels ('Fluorescence_405_nm_Ex', 'Fluorescence_488_nm_Ex', 'Fluorescence_561_nm_Ex', 'Fluorescence_638_nm_Ex', 'Fluorescence_730_nm_Ex') if brightfield is not available. If you get "Channel 'X' not available in well canvas" error, try a different channel or check which channels are available for the well.
+   - This method performs a complete workflow:
+     1. Scans the specified well region with a grid (Nx × Ny positions)
+     2. Segments the scanned images to extract cells
+     3. Generates embeddings and uploads cells to Weaviate (appending to existing data, no reset)
+     4. Searches for cells similar to the target UUID
+     5. Checks if the number of similar results matches the expected limit
+   - Parameters:
+     - \`well\`: Well identifier (e.g., 'A1', 'B2')
+     - \`target_uuid\`: UUID of the target cell to search for similar cells
+     - \`limit_expected\`: Expected number of similar cells to find
+     - \`Nx\`: Number of scan positions in X direction (default: 1)
+     - \`Ny\`: Number of scan positions in Y direction (default: 1)
+     - \`selected_channel_name\`: Channel name for imaging (default: 'BF LED matrix full'). **MUST use a channel available in the well canvas**. Common channels: 'BF LED matrix full' (brightfield), 'Fluorescence_405_nm_Ex', 'Fluorescence_488_nm_Ex', 'Fluorescence_561_nm_Ex', 'Fluorescence_638_nm_Ex', 'Fluorescence_730_nm_Ex'. If 'BF LED matrix full' fails, try fluorescence channels.
+   - Returns: \`{"success": bool, "match": bool, "found_count": int, "limit_expected": int, "similar_results": list, "scan_result": dict, "segmentation_result": dict, "error": str (if failed)}\`
+     - \`match\`: True if found_count matches limit_expected
+     - \`found_count\`: Number of similar cells found
+     - \`similar_results\`: List of similar cell results from Weaviate
+     - \`scan_result\`: Results from the scan operation
+     - \`segmentation_result\`: Results from the segmentation operation
+
+8. **Advanced Features:**
    - Switch objective: \`await microscope.switch_objective('4x', move_z=True)\`
    - Set filter wheel: \`await microscope.set_filter_wheel_position(1)\`
 
-8. **Similarity Search (REST API):**
+9. **Similarity Search (REST API):**
    Use Python requests or aiohttp to make HTTP calls. The \`base_url\` variable is automatically injected by the frontend.
    Example:
    \`\`\`python
