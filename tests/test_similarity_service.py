@@ -695,15 +695,24 @@ class TestWeaviateSimilarityService:
                 description="Test UUID search application"
             )
             
-            # Insert test objects with different descriptions
+            # Insert test objects with similar descriptions to ensure vectors are similar enough
+            # All descriptions should be about similar microscopy topics to meet 0.98 certainty threshold
             test_images = []
             target_uuid = None
             
+            # Use similar microscopy-related descriptions so vectors will be similar
+            base_description = "microscopy image of cells in culture"
+            descriptions = [
+                f"{base_description} sample A",
+                f"{base_description} sample B", 
+                f"{base_description} sample C",  # This will be the target
+                f"{base_description} sample D",
+                f"{base_description} sample E"
+            ]
+            
             for i in range(5):
                 image_id = f"test_img_id_{i}"
-                description = f"Test microscopy image {i}"
-                if i == 2:
-                    description = "Special cell with unique characteristics"
+                description = descriptions[i]
                 
                 # Generate CLIP vector
                 clip_vector = self._generate_clip_vector(description)
