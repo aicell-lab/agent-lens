@@ -184,7 +184,7 @@ User: "Find 200 cells similar to UUID 78f07999208b4397ba622ccb3615d3fb, start fr
 <thoughts>
 Start from E2.
 Search for similar cells.
-Check found count.
+Check cumulative found count.
 If less than 200, move to next well.
 Continue until 200 found.
 </thoughts>
@@ -198,15 +198,16 @@ result = await microscope.search_cells_in_well(
     Ny=2,
     selected_channels=0
 )
-print(f"Found {result['found_count']} similar cells in E2")
-print(f"Total needed: 200, Current: {result['found_count']}")
+# found_count is cumulative across all wells, not just this well
+print(f"Total similar cells found (cumulative): {result['found_count']}")
+print(f"Target: 200, Current: {result['found_count']}")
 if result['found_count'] >= 200:
     print("✓ Reached 200 cells! Stopping.")
 else:
     print(f"Need {200 - result['found_count']} more. Continue to next well.")
 </py-script>
 
-→ After observation, if found_count < 200: move to next well (E3, E4, etc.) and repeat search_cells_in_well. Keep track of cumulative count across wells. Stop when total reaches 200.
+→ After observation, if found_count < 200: move to next well and repeat. found_count is cumulative across all wells searched.
 
 **Well Plate Support:**
 - Standard 96-well plates are most common
