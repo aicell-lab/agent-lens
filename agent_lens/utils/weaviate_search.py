@@ -4,7 +4,7 @@ Provides functions for connecting to Weaviate, managing collections, and perform
 """
 
 import os
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from hypha_rpc import connect_to_server
 import numpy as np
 import clip
@@ -425,8 +425,18 @@ class WeaviateSimilarityService:
     
     async def search_similar_images(self, collection_name: str, application_id: str,
                                   query_vector: List[float], limit: int = 10,
-                                  include_vector: bool = False) -> List[Dict[str, Any]]:
-        """Search for similar images using vector similarity."""
+                                  include_vector: bool = False, certainty: Optional[float] = 0.9) -> List[Dict[str, Any]]:
+        """Search for similar images using vector similarity.
+        
+        Args:
+            collection_name: Name of the collection
+            application_id: Application ID
+            query_vector: Vector for similarity search
+            limit: Maximum number of results to return
+            include_vector: Whether to include vectors in results
+            certainty: Certainty threshold (0.0-1.0). If None, no certainty filter is applied.
+                      Default is 0.9 for UUID and image-image searches.
+        """
         if not await self.ensure_connected():
             raise RuntimeError("Not connected to Weaviate service")
         
@@ -440,15 +450,21 @@ class WeaviateSimilarityService:
             "preview_image"  # This is the key - explicitly include the blob property
         ]
         
-        results = await self.weaviate_service.query.near_vector(
-            collection_name=collection_name,
-            application_id=application_id,
-            near_vector=query_vector,
-            include_vector=include_vector,
-            limit=limit,
-            certainty=0.98,
-            return_properties=return_properties  # Add this parameter
-        )
+        # Build query parameters - only include certainty if it's not None
+        query_params = {
+            "collection_name": collection_name,
+            "application_id": application_id,
+            "near_vector": query_vector,
+            "include_vector": include_vector,
+            "limit": limit,
+            "return_properties": return_properties
+        }
+        
+        # Only add certainty if it's not None
+        if certainty is not None:
+            query_params["certainty"] = certainty
+        
+        results = await self.weaviate_service.query.near_vector(**query_params)
         
         # Handle different result formats
         if hasattr(results, 'objects') and results.objects:
@@ -605,9 +621,12 @@ class WeaviateSimilarityService:
     
     async def search_by_text(self, collection_name: str, application_id: str,
                            query_text: str, limit: int = 10) -> List[Dict[str, Any]]:
-        """Search for similar images using text query."""
+        """Search for similar images using text query.
+        
+        Note: Text-image search does not apply a certainty threshold to allow more flexible results.
+        """
         query_vector = await generate_text_embedding(query_text)
-        return await self.search_similar_images(collection_name, application_id, query_vector, limit)
+        return await self.search_similar_images(collection_name, application_id, query_vector, limit, certainty=None)
     
     async def search_by_image(self, collection_name: str, application_id: str,
                             image_bytes: bytes, limit: int = 10) -> List[Dict[str, Any]]:
