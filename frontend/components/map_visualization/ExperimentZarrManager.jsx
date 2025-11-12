@@ -161,12 +161,76 @@ const useExperimentZarrManager = ({
     }
   }, [microscopeControlService, showNotification, appendLog]);
 
+  // Helper function to delete Weaviate application for an experiment
+  const deleteWeaviateApplication = useCallback(async (experimentName) => {
+    if (!experimentName) return;
+    
+    try {
+      // Determine service ID based on URL
+      const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
+      
+      // Convert collection name (same pattern as used in SimilaritySearchPanel)
+      const convertToValidCollectionName = (name) => {
+        let valid = name.split('-').map(word => 
+          word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+        ).join('');
+        if (!valid[0] || !valid[0].match(/[A-Z]/)) {
+          valid = 'A' + valid.slice(1);
+        }
+        return valid;
+      };
+      
+      const collectionName = convertToValidCollectionName('agent-lens');
+      
+      // Prepare query parameters
+      const queryParams = new URLSearchParams({
+        collection_name: collectionName,
+        application_id: experimentName
+      });
+      
+      const response = await fetch(`/agent-lens/apps/${serviceId}/similarity/applications/delete?${queryParams}`, {
+        method: 'DELETE'
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success) {
+          if (appendLog) appendLog(`Deleted Weaviate application for experiment "${experimentName}"`);
+          console.log(`Deleted Weaviate application "${experimentName}":`, result);
+          return true;
+        } else {
+          console.warn(`Weaviate application deletion returned success=false for "${experimentName}"`);
+          return false;
+        }
+      } else {
+        const errorText = await response.text();
+        // If application doesn't exist, that's okay - just log it
+        if (response.status === 404 || errorText.includes('does not exist')) {
+          if (appendLog) appendLog(`Weaviate application for experiment "${experimentName}" does not exist (skipping)`);
+          console.log(`Weaviate application "${experimentName}" does not exist - skipping deletion`);
+          return true; // Not an error if it doesn't exist
+        } else {
+          console.warn(`Failed to delete Weaviate application "${experimentName}": ${errorText}`);
+          if (appendLog) appendLog(`Warning: Failed to delete Weaviate application for "${experimentName}": ${errorText}`);
+          return false;
+        }
+      }
+    } catch (error) {
+      // Don't fail the experiment deletion/reset if Weaviate deletion fails
+      console.warn(`Error deleting Weaviate application for "${experimentName}":`, error);
+      if (appendLog) appendLog(`Warning: Error deleting Weaviate application for "${experimentName}": ${error.message}`);
+      return false;
+    }
+  }, [appendLog]);
 
   // Reset experiment after confirmation
   const handleResetExperiment = useCallback(async () => {
     if (!microscopeControlService || !experimentToReset) return;
     
     try {
+      // Delete Weaviate application first (non-blocking)
+      await deleteWeaviateApplication(experimentToReset);
+      
       const result = await microscopeControlService.reset_experiment(experimentToReset);
       if (result.success !== false) {
         if (showNotification) showNotification(`Experiment '${experimentToReset}' reset successfully`, 'success');
@@ -186,13 +250,16 @@ const useExperimentZarrManager = ({
       setShowClearCanvasConfirmation(false);
       setExperimentToReset(null);
     }
-  }, [microscopeControlService, experimentToReset, showNotification, appendLog, loadExperiments, onExperimentReset]);
+  }, [microscopeControlService, experimentToReset, showNotification, appendLog, loadExperiments, onExperimentReset, deleteWeaviateApplication]);
 
   // Handle delete experiment confirmation
   const handleDeleteExperiment = useCallback(async () => {
     if (!experimentToDelete || !microscopeControlService) return;
     
     try {
+      // Delete Weaviate application first (non-blocking)
+      await deleteWeaviateApplication(experimentToDelete);
+      
       const result = await microscopeControlService.remove_experiment(experimentToDelete);
       if (result.success !== false) {
         if (appendLog) appendLog(`Experiment "${experimentToDelete}" deleted successfully`);
@@ -223,7 +290,7 @@ const useExperimentZarrManager = ({
       setShowDeleteConfirmation(false);
       setExperimentToDelete(null);
     }
-  }, [experimentToDelete, microscopeControlService, appendLog, showNotification, loadExperiments, activeExperiment, experiments, onExperimentChange]);
+  }, [experimentToDelete, microscopeControlService, appendLog, showNotification, loadExperiments, activeExperiment, experiments, onExperimentChange, deleteWeaviateApplication]);
 
   // Render UI dialogs
   const renderDialogs = () => (
@@ -260,6 +327,7 @@ const useExperimentZarrManager = ({
                     <ul className="list-disc list-inside space-y-1">
                       <li>Remove all scan result images from all wells</li>
                       <li>Clear all experiment data from storage</li>
+                      <li>Delete all similarity search annotations (Weaviate application)</li>
                       <li>Reset the experiment to empty state</li>
                       <li>Keep the experiment structure for future use</li>
                     </ul>
@@ -411,6 +479,7 @@ const useExperimentZarrManager = ({
                     <ul className="list-disc list-inside space-y-1">
                       <li>Permanently delete the experiment</li>
                       <li>Remove all associated data and files</li>
+                      <li>Delete all similarity search annotations (Weaviate application)</li>
                       <li>Clear the experiment from the list</li>
                       <li>Cannot be undone</li>
                     </ul>
