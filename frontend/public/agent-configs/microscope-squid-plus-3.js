@@ -87,8 +87,7 @@ The Python kernel has already been initialized with the following variables avai
    - Returns: {"success": True, ...} - Check scan_status in get_status() for progress (state: "idle"/"running"/"completed"/"failed")
 
 7. **Search Cells in Well (Complete Workflow):**
-   - Scan, segment, upload to Weaviate, and search for similar cells: \`await microscope.search_cells_in_well(well="A1", target_uuid="abc-123-def", limit_expected=10, Nx=1, Ny=1, selected_channel_name="Fluorescence_488_nm_Ex")\`
-   - ⚠️ **IMPORTANT - Channel Availability:** The specified channel MUST be available in the well canvas. 'BF LED matrix full' (brightfield) may not always be available. Use fluorescence channels ('Fluorescence_405_nm_Ex', 'Fluorescence_488_nm_Ex', 'Fluorescence_561_nm_Ex', 'Fluorescence_638_nm_Ex', 'Fluorescence_730_nm_Ex') if brightfield is not available. If you get "Channel 'X' not available in well canvas" error, try a different channel or check which channels are available for the well.
+   - Scan, segment, upload to Weaviate, and search for similar cells: \`await microscope.search_cells_in_well(well="A1", target_uuid="abc-123-def", limit_expected=10, Nx=1, Ny=1, selected_channels=12)\`
    - This method performs a complete workflow:
      1. Scans the specified well region with a grid (Nx × Ny positions)
      2. Segments the scanned images to extract cells
@@ -101,7 +100,7 @@ The Python kernel has already been initialized with the following variables avai
      - \`limit_expected\`: Expected number of similar cells to find
      - \`Nx\`: Number of scan positions in X direction (default: 1)
      - \`Ny\`: Number of scan positions in Y direction (default: 1)
-     - \`selected_channel_name\`: Channel name for imaging (default: 'BF LED matrix full'). **MUST use a channel available in the well canvas**. Common channels: 'BF LED matrix full' (brightfield), 'Fluorescence_405_nm_Ex', 'Fluorescence_488_nm_Ex', 'Fluorescence_561_nm_Ex', 'Fluorescence_638_nm_Ex', 'Fluorescence_730_nm_Ex'. If 'BF LED matrix full' fails, try fluorescence channels.
+     - \`selected_channels\`: Channel ID for imaging (optional). If None, uses channel 0 (Brightfield). Channel IDs: 0=Brightfield, 11=405nm, 12=488nm, 13=638nm, 14=561nm, 15=730nm. Same as \`snap()\` channel parameter.
    - Returns: \`{"success": bool, "match": bool, "found_count": int, "limit_expected": int, "similar_results": list, "scan_result": dict, "segmentation_result": dict, "error": str (if failed)}\`
      - \`match\`: True if found_count matches limit_expected
      - \`found_count\`: Number of similar cells found
@@ -112,40 +111,6 @@ The Python kernel has already been initialized with the following variables avai
 8. **Advanced Features:**
    - Switch objective: \`await microscope.switch_objective('4x', move_z=True)\`
    - Set filter wheel: \`await microscope.set_filter_wheel_position(1)\`
-
-9. **Similarity Search (REST API):**
-   Use Python requests or aiohttp to make HTTP calls. The \`base_url\` variable is automatically injected by the frontend.
-   Example:
-   \`\`\`python
-   import requests
-   # base_url is already set (injected by frontend)
-   
-   **Search Endpoints (application_id optional - uses current active app):**
-   - Get current application: GET {base_url}/current-application
-     Example: \`response = requests.get(f"{base_url}/current-application")\`
-     Returns: {"success": True, "application_id": "...", "collection_name": "Agentlens"}
-   
-   - Search by text: POST {base_url}/search/text?query_text=dark%20cells&limit=10
-     Example: \`response = requests.post(f"{base_url}/search/text", params={"query_text": "dark cells", "limit": 10})\`
-     Returns: {"success": True, "results": [...], "query": "...", "query_type": "text", "count": N}
-     Each result contains: image_id, description, metadata, preview_image, similarity_score, etc.
-   
-   - Search by UUID: POST {base_url}/search/text?query_text=uuid:%20abc-123-def&limit=10
-     Example: \`response = requests.post(f"{base_url}/search/text", params={"query_text": "uuid: abc-123-def", "limit": 10})\`
-     Returns: {"success": True, "results": [...], "query": "...", "query_type": "uuid", "uuid": "...", "count": N}
-     Finds similar annotations to the one with the given UUID
-   
-   - Search by image: POST {base_url}/search/image (multipart/form-data with image file)
-     Example: \`with open("image.png", "rb") as f: response = requests.post(f"{base_url}/search/image", files={"image": f})\`
-     Returns: {"success": True, "results": [...], "count": N}
-   
-   **Fetch & List Endpoints (require application_id parameter):**
-   - Fetch all annotations: GET {base_url}/fetch-all?application_id=experiment-123&limit=1000
-     Example: \`response = requests.get(f"{base_url}/fetch-all", params={"application_id": "experiment-123", "limit": 1000})\`
-     Returns: {"success": True, "annotations": [...], "total": N}
-     Gets all annotations for a specific application/experiment
-   
-   **Note:** The \`base_url\` variable is automatically set by the frontend based on the current environment. Application ID is set automatically when embeddings are reset in the UI. For search endpoints, you can omit application_id to use the current active application.
 
 **Code Execution Rules:**
 - 🚨 **CRITICAL: Write SHORT scripts (MAX 25 lines)** - Break complex tasks into steps!
