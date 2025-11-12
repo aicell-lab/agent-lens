@@ -3827,8 +3827,84 @@ const MicroscopeMapDisplay = forwardRef(({
             results = results ? [results] : [];
           }
           
+          // Check if this is a UUID-based search and handle original annotation
+          const isUuidSearch = query.trim().toLowerCase().startsWith('uuid: ');
+          if (isUuidSearch) {
+            const searchedUuid = query.trim().substring(6).trim(); // Remove "uuid: " prefix
+            
+            // Helper function to extract UUID from result object
+            const extractUUID = (resultObj) => {
+              if (resultObj.uuid) return resultObj.uuid;
+              if (resultObj.id) return resultObj.id;
+              if (resultObj._uuid) return resultObj._uuid;
+              if (resultObj.properties) {
+                const props = resultObj.properties;
+                if (props.uuid) return props.uuid;
+                if (props.id) return props.id;
+              }
+              return null;
+            };
+            
+            // Find the original annotation in the results
+            const originalIndex = results.findIndex(r => {
+              const uuid = extractUUID(r);
+              return uuid && uuid.toLowerCase() === searchedUuid.toLowerCase();
+            });
+            
+            if (originalIndex !== -1) {
+              // Found the original annotation in results - move it to the top
+              const originalAnnotation = results[originalIndex];
+              // Remove it from its current position
+              results = results.filter((_, idx) => idx !== originalIndex);
+              // Mark it as original and add to the top
+              originalAnnotation.isOriginal = true;
+              results = [originalAnnotation, ...results];
+              console.log('✅ Found original annotation in results, moved to top');
+            } else {
+              // Original annotation not in results - try to fetch it
+              console.log('⚠️ Original annotation not found in results, attempting to fetch...');
+              try {
+                // Try to fetch all annotations and find the one with matching UUID
+                const fetchParams = new URLSearchParams({
+                  collection_name: convertToValidCollectionName('agent-lens'),
+                  application_id: applicationId,
+                  limit: '10000',
+                  include_vector: 'false',
+                  use_prefix_match: 'true'
+                });
+                
+                const fetchResponse = await fetch(`/agent-lens/apps/${serviceId}/similarity/fetch-all?${fetchParams}`, {
+                  method: 'GET'
+                });
+                
+                if (fetchResponse.ok) {
+                  const fetchResult = await fetchResponse.json();
+                  if (fetchResult.success && fetchResult.annotations) {
+                    const originalAnnotation = fetchResult.annotations.find(ann => {
+                      const uuid = extractUUID(ann);
+                      return uuid && uuid.toLowerCase() === searchedUuid.toLowerCase();
+                    });
+                    
+                    if (originalAnnotation) {
+                      originalAnnotation.isOriginal = true;
+                      results = [originalAnnotation, ...results];
+                      console.log('✅ Fetched original annotation and added to top');
+                    } else {
+                      console.warn('⚠️ Original annotation not found in database');
+                    }
+                  }
+                }
+              } catch (fetchError) {
+                console.error('Error fetching original annotation:', fetchError);
+              }
+            }
+          }
+          
           setSimilaritySearchResults(results);
-          showNotification(`Found ${results.length} similar annotation(s)`, 'success');
+          const resultCount = isUuidSearch && results.length > 0 && results[0].isOriginal 
+            ? results.length - 1 
+            : results.length;
+          showNotification(`Found ${resultCount} similar annotation(s)${isUuidSearch && results.length > 0 && results[0].isOriginal ? ' (original shown at top)' : ''}`, 'success');
         } else {
           console.error('No results found:', result);
           setSimilaritySearchResults([]);

@@ -425,7 +425,7 @@ class WeaviateSimilarityService:
     
     async def search_similar_images(self, collection_name: str, application_id: str,
                                   query_vector: List[float], limit: int = 10,
-                                  include_vector: bool = False, certainty: Optional[float] = 0.9) -> List[Dict[str, Any]]:
+                                  include_vector: bool = False, certainty: Optional[float] = 0.95) -> List[Dict[str, Any]]:
         """Search for similar images using vector similarity.
         
         Args:
@@ -435,7 +435,7 @@ class WeaviateSimilarityService:
             limit: Maximum number of results to return
             include_vector: Whether to include vectors in results
             certainty: Certainty threshold (0.0-1.0). If None, no certainty filter is applied.
-                      Default is 0.9 for UUID and image-image searches.
+                      Default is 0.95 for UUID and image-image searches.
         """
         if not await self.ensure_connected():
             raise RuntimeError("Not connected to Weaviate service")

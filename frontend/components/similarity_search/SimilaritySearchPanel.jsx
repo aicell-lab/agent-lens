@@ -453,8 +453,6 @@ const SimilaritySearchPanel = ({
     return getActiveLayerType() === 'load-server';
   };
 
-
-
   const tools = [
     { id: 'rectangle', name: 'Rectangle', icon: 'fa-square', tooltip: 'Draw rectangles' },
     { id: 'polygon', name: 'Polygon', icon: 'fa-draw-polygon', tooltip: 'Draw polygons (click to add points, double-click to finish)' },
@@ -854,6 +852,27 @@ const SimilaritySearchPanel = ({
     setSelectedAnnotation(null);
   };
 
+  // Effect to automatically load annotations when similarity search layer is activated
+  useEffect(() => {
+    const handleSimilaritySearchLayerActivated = (event) => {
+      const { layerId, layerType } = event.detail;
+      console.log(`[SimilaritySearchPanel] Similarity search layer activated: ${layerId} (${layerType}), triggering annotation load...`);
+      
+      // Trigger loading of annotations when layer is activated
+      // Use a small delay to ensure the activeLayer state is updated
+      setTimeout(() => {
+        handleLoadAllAnnotations();
+      }, 100);
+    };
+
+    window.addEventListener('similaritySearchLayerActivated', handleSimilaritySearchLayerActivated);
+    
+    return () => {
+      window.removeEventListener('similaritySearchLayerActivated', handleSimilaritySearchLayerActivated);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeLayer, experiments, selectedHistoricalDataset, selectedApplicationId]); // handleLoadAllAnnotations is defined in component scope
+
   return (
     <div className="similarity-search-panel">
       {/* Header */}
@@ -911,18 +930,18 @@ const SimilaritySearchPanel = ({
             {isLoadingApplications ? 'Loading...' : 'List Apps'}
           </span>
           
-          {/* Load All Button / Loaded Annotations Indicator */}
+          {/* Refresh Button / Loaded Annotations Indicator */}
           <span 
             className="text-xs text-green-400 ml-2 px-2 py-1 bg-green-900 rounded cursor-pointer hover:bg-green-800 transition-colors" 
-            title={loadedAnnotationsCount > 0 ? "Loaded annotations from database" : "Click to load all annotations from database"}
+            title={loadedAnnotationsCount > 0 ? "Refresh annotations from database" : "Click to refresh annotations from database"}
             onClick={() => handleLoadAllAnnotations()}
             style={{ 
               pointerEvents: isLoadingAllAnnotations ? 'none' : 'auto',
               opacity: isLoadingAllAnnotations ? 0.6 : 1 
             }}
           >
-            <i className={`fas ${isLoadingAllAnnotations ? 'fa-spinner fa-spin' : 'fa-database'} mr-1`}></i>
-            {isLoadingAllAnnotations ? 'Loading...' : (loadedAnnotationsCount > 0 ? `Load All (${loadedAnnotationsCount} loaded)` : 'Load All')}
+            <i className={`fas ${isLoadingAllAnnotations ? 'fa-spinner fa-spin' : 'fa-sync-alt'} mr-1`}></i>
+            {isLoadingAllAnnotations ? 'Loading...' : (loadedAnnotationsCount > 0 ? `Refresh (${loadedAnnotationsCount} loaded)` : 'Refresh')}
           </span>
         </div>
       </div>
@@ -1188,9 +1207,23 @@ const SimilaritySearchPanel = ({
                       };
                       
                       const objectUUID = extractUUID(result);
+                      const isOriginal = result.isOriginal === true;
                       
                       return (
-                        <div key={index} className="similarity-result-item-embedded">
+                        <div 
+                          key={index} 
+                          className="similarity-result-item-embedded"
+                          style={{
+                            // Different styling for original annotation
+                            backgroundColor: isOriginal ? '#1e3a8a' : undefined,
+                            border: isOriginal ? '2px solid #3b82f6' : undefined,
+                            borderLeft: isOriginal ? '4px solid #60a5fa' : undefined,
+                            borderRadius: isOriginal ? '6px' : undefined,
+                            padding: isOriginal ? '10px' : undefined,
+                            marginBottom: isOriginal ? '12px' : undefined,
+                            boxShadow: isOriginal ? '0 2px 8px rgba(59, 130, 246, 0.3)' : undefined
+                          }}
+                        >
                           {/* Preview Image */}
                           {props.preview_image && (
                             <img 
@@ -1202,14 +1235,44 @@ const SimilaritySearchPanel = ({
                           
                           {/* Content */}
                           <div className="similarity-result-content-embedded">
-                            <div className="similarity-result-title-embedded">
+                            {/* Original annotation header */}
+                            {isOriginal && (
+                              <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                marginBottom: '8px',
+                                paddingBottom: '6px',
+                                borderBottom: '1px solid rgba(96, 165, 250, 0.3)'
+                              }}>
+                                <i className="fas fa-star" style={{ color: '#fbbf24', fontSize: '12px' }}></i>
+                                <span style={{
+                                  fontSize: '11px',
+                                  fontWeight: '600',
+                                  color: '#93c5fd',
+                                  textTransform: 'uppercase',
+                                  letterSpacing: '0.5px'
+                                }}>
+                                  Original Annotation
+                                </span>
+                              </div>
+                            )}
+                            <div className="similarity-result-title-embedded" style={{
+                              color: isOriginal ? '#e0e7ff' : undefined,
+                              fontWeight: isOriginal ? '600' : undefined
+                            }}>
                               {props.description || 'No description'}
                             </div>
-                            <div className="similarity-result-id-embedded">
+                            <div className="similarity-result-id-embedded" style={{
+                              color: isOriginal ? '#c7d2fe' : undefined,
+                              fontFamily: isOriginal ? 'monospace' : undefined
+                            }}>
                               {objectUUID || 'Unknown'}
                             </div>
                             {parsedMetadata && Object.keys(parsedMetadata).length > 0 && (
-                              <div className="similarity-result-metadata-embedded">
+                              <div className="similarity-result-metadata-embedded" style={{
+                                color: isOriginal ? '#c7d2fe' : undefined
+                              }}>
                                 <strong>Well:</strong> {parsedMetadata.well_id || 'Unknown'}
                                 {(parsedMetadata.polygon_wkt || parsedMetadata.bbox) && (
                                   <> - {extractCoordinate(parsedMetadata)}</>
@@ -1223,7 +1286,8 @@ const SimilaritySearchPanel = ({
                                 )}
                               </div>
                             )}
-                            {result.metadata?.score && (
+                            {/* Only show similarity score for non-original results */}
+                            {!isOriginal && result.metadata?.score && (
                               <div className="similarity-result-score-embedded">
                                 Similarity: {(result.metadata.score * 100).toFixed(1)}%
                               </div>

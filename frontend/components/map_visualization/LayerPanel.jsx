@@ -851,49 +851,61 @@ const LayerPanel = ({
                             const isReadyToUpload = completedSegmentationExperiment === exp.name;
                             
                             if (isSegmentationRunning) {
-                              // Segmentation is running - show cancel button
+                              // Segmentation is running - show progress and cancel button
                               return (
-                                <button
-                                  className="segment-btn"
-                                  onClick={async () => {
-                                    if (cancelRunningSegmentation) {
-                                      await cancelRunningSegmentation();
-                                    }
-                                  }}
-                                  disabled={!microscopeControlService || isSimulatedMicroscope}
-                                  title="Cancel running segmentation"
-                                  style={{ width: '100%' }}
-                                >
-                                  <i className="fas fa-times mr-1"></i>
-                                  Cancel Segmentation
-                                </button>
+                                <div className="segmentation-progress-container">
+                                  <div className="segmentation-progress-header">
+                                    <i className="fas fa-cog fa-spin segmentation-spinner" style={{ color: '#8b5cf6' }}></i>
+                                    <span className="segmentation-status-text">Segmentation in Progress</span>
+                                  </div>
+                                  <button
+                                    className="segment-btn segment-btn--cancel"
+                                    onClick={async () => {
+                                      if (cancelRunningSegmentation) {
+                                        await cancelRunningSegmentation();
+                                      }
+                                    }}
+                                    disabled={!microscopeControlService || isSimulatedMicroscope}
+                                    title="Cancel running segmentation"
+                                    style={{ width: '100%', marginTop: '0.5rem' }}
+                                  >
+                                    <i className="fas fa-times mr-1"></i>
+                                    Cancel Segmentation
+                                  </button>
+                                </div>
                               );
                             } else if (isUploadProcessing) {
                               // Upload is processing - show progress and cancel
                               return (
-                                <div className="flex items-center gap-2" style={{ width: '100%' }}>
-                                  <button
-                                    className="segment-btn"
-                                    disabled
-                                    title="Processing segmentation results"
-                                    style={{ flex: 1 }}
-                                  >
-                                    <i className="fas fa-spinner fa-spin mr-1"></i>
-                                    Processing {segmentationUploadState.currentPolygon}/{segmentationUploadState.totalPolygons}
-                                  </button>
-                                  <button
-                                    className="segment-btn"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      if (cancelSegmentationUpload) {
-                                        cancelSegmentationUpload();
-                                      }
-                                    }}
-                                    title="Stop processing"
-                                    style={{ padding: '0.25rem 0.5rem' }}
-                                  >
-                                    <i className="fas fa-stop"></i>
-                                  </button>
+                                <div className="segmentation-upload-progress-container">
+                                  <div className="segmentation-progress-header">
+                                    <i className="fas fa-upload fa-spin segmentation-spinner" style={{ color: '#10b981' }}></i>
+                                    <span className="segmentation-status-text">Uploading to Similarity Search</span>
+                                  </div>
+                                  <div className="flex items-center gap-2" style={{ width: '100%', marginTop: '0.5rem' }}>
+                                    <button
+                                      className="segment-btn segment-btn--processing"
+                                      disabled
+                                      title="Processing segmentation results"
+                                      style={{ flex: 1 }}
+                                    >
+                                      <i className="fas fa-spinner fa-spin mr-1"></i>
+                                      Processing...
+                                    </button>
+                                    <button
+                                      className="segment-btn segment-btn--cancel"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (cancelSegmentationUpload) {
+                                          cancelSegmentationUpload();
+                                        }
+                                      }}
+                                      title="Stop processing"
+                                      style={{ padding: '0.25rem 0.5rem' }}
+                                    >
+                                      <i className="fas fa-stop"></i>
+                                    </button>
+                                  </div>
                                 </div>
                               );
                             } else if (isReadyToUpload) {
