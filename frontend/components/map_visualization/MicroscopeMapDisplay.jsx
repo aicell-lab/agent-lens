@@ -20,9 +20,7 @@ import {
   formatErrorMessage,
   isSegmentationRunning,
   isSegmentationCompleted,
-  isSegmentationFailed,
-  fetchSegmentationPolygons,
-  batchProcessSegmentationPolygons
+  isSegmentationFailed
 } from '../../utils/segmentationUtils.js';
 import './MicroscopeMapDisplay.css';
 
@@ -221,20 +219,6 @@ const MicroscopeMapDisplay = forwardRef(({
     error: null
   });
   const segmentationPollingRef = useRef(null);
-
-  // Segmentation to similarity search state
-  const [segmentationUploadState, setSegmentationUploadState] = useState({
-    isProcessing: false,
-    currentPolygon: 0,
-    totalPolygons: 0,
-    error: null,
-    sourceExperimentName: null
-  });
-  const [showSegmentationConfirmModal, setShowSegmentationConfirmModal] = useState(false);
-  const [completedSegmentationExperiment, setCompletedSegmentationExperiment] = useState(null);
-  const segmentationUploadCancelRef = useRef(false);
-  const segmentationAutoUploadRef = useRef({}); // Store autoUpload flag per experiment
-  const handleSegmentationToSimilaritySearchRef = useRef(null); // Ref to store the function
 
   // Layer dropdown state
   const [isLayerDropdownOpen, setIsLayerDropdownOpen] = useState(false);
@@ -1224,26 +1208,6 @@ const MicroscopeMapDisplay = forwardRef(({
             if (refreshExperimentData) {
               await refreshExperimentData();
             }
-
-            // Check if auto-upload is enabled for this experiment
-            const sourceExperiment = status.progress?.source_experiment;
-            if (sourceExperiment) {
-              const shouldAutoUpload = segmentationAutoUploadRef.current[sourceExperiment];
-              
-              if (shouldAutoUpload) {
-                // Auto-upload: skip modal and directly upload
-                delete segmentationAutoUploadRef.current[sourceExperiment];
-                setCompletedSegmentationExperiment(sourceExperiment);
-                // Automatically trigger upload using ref
-                if (handleSegmentationToSimilaritySearchRef.current) {
-                  handleSegmentationToSimilaritySearchRef.current(sourceExperiment);
-                }
-              } else {
-                // Show modal to ask if user wants to upload to similarity search
-                setCompletedSegmentationExperiment(sourceExperiment);
-                setShowSegmentationConfirmModal(true);
-              }
-            }
           } else if (isSegmentationFailed(status.state)) {
             stopSegmentationPolling();
             setSegmentationState(prev => ({
@@ -1306,377 +1270,6 @@ const MicroscopeMapDisplay = forwardRef(({
       }
     }
   }, [microscopeControlService, segmentationState.isRunning, stopSegmentationPolling, showNotification, appendLog]);
-
-  // Cancel segmentation upload processing
-  const cancelSegmentationUpload = useCallback(() => {
-    segmentationUploadCancelRef.current = true;
-    setSegmentationUploadState(prev => ({
-      ...prev,
-      isProcessing: false,
-      error: 'Cancelled by user'
-    }));
-    showNotification('Processing cancelled', 'info');
-    if (appendLog) {
-      appendLog('Segmentation upload cancelled by user');
-    }
-  }, [showNotification, appendLog]);
-
-  // Handler for processing segmentation results to similarity search
-  const handleSegmentationToSimilaritySearch = useCallback(async (sourceExperimentName) => {
-    if (!microscopeControlService || !sourceExperimentName) {
-      showNotification('Missing required services or experiment name', 'error');
-      return;
-    }
-
-    // Reset cancellation flag
-    segmentationUploadCancelRef.current = false;
-
-    try {
-      setSegmentationUploadState({
-        isProcessing: true,
-        currentPolygon: 0,
-        totalPolygons: 0,
-        error: null,
-        sourceExperimentName
-      });
-
-      if (appendLog) {
-        appendLog(`Starting segmentation to similarity search for: ${sourceExperimentName}`);
-      }
-
-      // Step 1: Fetch polygons
-      const polygonsResult = await fetchSegmentationPolygons(microscopeControlService, sourceExperimentName);
-      
-      if (!polygonsResult.success) {
-        throw new Error(polygonsResult.error || 'Failed to fetch polygons');
-      }
-
-      if (polygonsResult.polygons.length === 0) {
-        showNotification('No polygons found in segmentation results', 'warning');
-        setSegmentationUploadState(prev => ({ ...prev, isProcessing: false }));
-        return;
-      }
-
-      setSegmentationUploadState(prev => ({
-        ...prev,
-        totalPolygons: polygonsResult.totalCount
-      }));
-
-      if (appendLog) {
-        appendLog(`Found ${polygonsResult.totalCount} polygons to process`);
-      }
-
-      // Step 2: Delete existing Weaviate application if it exists, then create a new one
-      const collectionName = 'Agentlens';  // Use correct collection name (capital A)
-      const applicationId = sourceExperimentName;
-      
-      const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
-      
-      // Try to delete existing application (if it exists)
-      if (appendLog) {
-        appendLog(`Deleting existing Weaviate application: ${applicationId}`);
-      }
-      
-      const deleteParams = new URLSearchParams({
-        collection_name: collectionName,
-        application_id: applicationId
-      });
-      
-      const deleteResponse = await fetch(
-        `/agent-lens/apps/${serviceId}/similarity/applications/delete?${deleteParams}`,
-        { method: 'DELETE' }
-      );
-      
-      if (deleteResponse.ok) {
-        const deleteResult = await deleteResponse.json();
-        if (appendLog) {
-          appendLog(`Deleted existing application: ${applicationId} (removed ${deleteResult.result?.successful || 0} objects)`);
-        }
-      } else {
-        const errorText = await deleteResponse.text().catch(() => 'Unknown error');
-        let errorMessage = errorText.toLowerCase();
-        
-        // Parse JSON error if present
-        try {
-          const errorJson = JSON.parse(errorText);
-          if (errorJson.detail) {
-            errorMessage = errorJson.detail.toLowerCase();
-          }
-        } catch (e) {
-          // Not JSON, use text as-is
-        }
-        
-        if (deleteResponse.status === 404 || errorMessage.includes('does not exist')) {
-          if (appendLog) {
-            appendLog(`Application ${applicationId} does not exist, will create new one`);
-          }
-        } else {
-          throw new Error(`Failed to delete existing application ${applicationId}: ${errorText}`);
-        }
-      }
-      
-      // Create the application (whether it existed before or not)
-      if (appendLog) {
-        appendLog(`Creating Weaviate application: ${applicationId}`);
-      }
-      
-      const createParams = new URLSearchParams({
-        collection_name: collectionName,
-        description: `Application for experiment ${applicationId}`,
-        application_id: applicationId
-      });
-      
-      const createResponse = await fetch(
-        `/agent-lens/apps/${serviceId}/similarity/collections?${createParams}`,
-        { method: 'POST' }
-      );
-      
-      if (!createResponse.ok) {
-        const errorText = await createResponse.text().catch(() => 'Unknown error');
-        throw new Error(`Failed to create application ${applicationId}: ${errorText}`);
-      }
-      
-      if (appendLog) {
-        appendLog(`Created application: ${applicationId}`);
-      }
-
-      // Set this as the current active application
-      const setCurrentAppParams = new URLSearchParams({
-        application_id: applicationId
-      });
-      
-      const setCurrentAppResponse = await fetch(
-        `/agent-lens/apps/${serviceId}/similarity/current-application?${setCurrentAppParams}`,
-        { method: 'POST' }
-      );
-      
-      if (setCurrentAppResponse.ok) {
-        if (appendLog) {
-          appendLog(`Set ${applicationId} as current active application`);
-        }
-      } else {
-        // Non-critical error, just log it
-        const errorText = await setCurrentAppResponse.text().catch(() => 'Unknown error');
-        if (appendLog) {
-          appendLog(`Warning: Could not set current application: ${errorText}`);
-        }
-      }
-
-      // Step 3: Get channel configurations for image extraction (use UI contrast settings, not defaults)
-      const channelConfigs = {};
-      const enabledChannels = Object.entries(visibleLayers.channels)
-        .filter(([channelName, isVisible]) => isVisible)
-        .map(([channelName]) => ({ 
-          channelName, 
-          label: channelName 
-        }));
-      
-      // Build channelConfigs from actual UI contrast settings (layerContrastSettings)
-      // IMPORTANT: Always use sourceExperimentName for contrast settings and data extraction
-      // The segmentation experiment doesn't have its own channel data - it only has polygon overlays
-      const experimentForContrast = sourceExperimentName;
-      console.log(`[SegmentationUpload] Using source experiment for contrast lookup: ${experimentForContrast} (active: ${activeExperiment})`);
-      
-      enabledChannels.forEach(channel => {
-        const channelName = channel.label || channel.channelName || channel.name;
-        const layerId = `${experimentForContrast}-${channelName}`;
-        const layerContrast = getLayerContrastSettings(layerId);
-        
-        // Get color from zarrChannelConfigs or defaults
-        const zarrConfig = zarrChannelConfigs[channelName] || {};
-        
-        channelConfigs[channelName] = {
-          min: layerContrast.min !== undefined ? layerContrast.min : (zarrConfig.min || 0),
-          max: layerContrast.max !== undefined ? layerContrast.max : (zarrConfig.max || 255),
-          color: zarrConfig.color,
-          enabled: true
-        };
-        
-        console.log(`[SegmentationUpload] Channel ${channelName} layerId: ${layerId}, contrast settings:`, channelConfigs[channelName]);
-      });
-
-      if (enabledChannels.length === 0) {
-        throw new Error('No visible channels found for image extraction');
-      }
-
-      // Step 4: Process polygons
-      const services = {
-        microscopeControlService,
-        artifactZarrLoader: artifactZarrLoaderRef.current
-      };
-
-      const onProgress = (current, total, successful, failed) => {
-        // Check for cancellation
-        if (segmentationUploadCancelRef.current) {
-          return;
-        }
-        setSegmentationUploadState(prev => ({
-          ...prev,
-          currentPolygon: current,
-          totalPolygons: total
-        }));
-      };
-
-      // Create cancellation check function
-      const shouldCancel = () => segmentationUploadCancelRef.current;
-
-      // Check for cancellation before processing
-      if (segmentationUploadCancelRef.current) {
-        return;
-      }
-
-      const processResult = await batchProcessSegmentationPolygons(
-        polygonsResult.polygons,
-        sourceExperimentName,
-        services,
-        channelConfigs,
-        enabledChannels,
-        onProgress,
-        getWellInfoById,
-        100, // batchSize
-        shouldCancel // Pass cancellation check function
-      );
-
-      // Check for cancellation after processing
-      if (segmentationUploadCancelRef.current) {
-        if (appendLog) {
-          appendLog('Processing cancelled by user');
-        }
-        return;
-      }
-
-      if (appendLog) {
-        appendLog(`Processed ${processResult.successfulCount}/${processResult.totalCount} polygons`);
-      }
-
-      // Step 5: Upload to Weaviate using batch inserts
-      let uploadedCount = 0;
-      let failedCount = 0;
-      const insertBatchSize = 50; // Match extraction batch size
-
-      // Process annotations in batches
-      for (let batchStart = 0; batchStart < processResult.processedAnnotations.length; batchStart += insertBatchSize) {
-        // Check for cancellation before each batch
-        if (segmentationUploadCancelRef.current) {
-          break;
-        }
-
-        const batchEnd = Math.min(batchStart + insertBatchSize, processResult.processedAnnotations.length);
-        const batch = processResult.processedAnnotations.slice(batchStart, batchEnd);
-
-        try {
-          // Prepare objects for batch insertion
-          const objects = batch.map(processed => ({
-            image_id: processed.annotation.id,
-            description: processed.annotation.description,
-            metadata: processed.metadata,
-            dataset_id: applicationId,
-            vector: processed.embeddings.imageEmbedding,
-            preview_image: processed.previewImage || null
-          }));
-
-          const queryParams = new URLSearchParams({
-            collection_name: collectionName,
-            application_id: applicationId
-          });
-
-          const requestBody = new FormData();
-          requestBody.append('objects_json', JSON.stringify(objects));
-
-          const insertResponse = await fetch(
-            `/agent-lens/apps/${serviceId}/similarity/insert-many?${queryParams}`,
-            {
-              method: 'POST',
-              body: requestBody
-            }
-          );
-
-          if (insertResponse.ok) {
-            const result = await insertResponse.json();
-            uploadedCount += batch.length;
-            if (appendLog) {
-              appendLog(`Uploaded batch ${Math.floor(batchStart / insertBatchSize) + 1} (${batchEnd}/${processResult.processedAnnotations.length} cells)`);
-            }
-          } else {
-            const errorText = await insertResponse.text();
-            console.error(`Failed to upload batch ${Math.floor(batchStart / insertBatchSize) + 1}:`, errorText);
-            failedCount += batch.length;
-          }
-        } catch (error) {
-          console.error(`Error uploading batch ${Math.floor(batchStart / insertBatchSize) + 1}:`, error);
-          failedCount += batch.length;
-        }
-      }
-
-      // Step 6: Show completion notification
-      const totalFailed = processResult.failedCount + failedCount;
-      const totalProcessed = processResult.totalCount;
-      
-      if (totalFailed > 0) {
-        showNotification(
-          `Processed ${uploadedCount}/${totalProcessed} cells (${totalFailed} failed)`,
-          'warning'
-        );
-      } else {
-        showNotification(
-          `Successfully uploaded ${uploadedCount} cells to similarity search`,
-          'success'
-        );
-      }
-
-      if (appendLog) {
-        appendLog(`Segmentation to similarity search complete: ${uploadedCount} uploaded, ${totalFailed} failed`);
-      }
-
-    } catch (error) {
-      // Check if this was a cancellation
-      if (error.message === 'Processing cancelled by user' || segmentationUploadCancelRef.current) {
-        console.log('Segmentation processing cancelled by user');
-        showNotification('Processing cancelled', 'info');
-        if (appendLog) {
-          appendLog('Segmentation upload cancelled by user');
-        }
-        setSegmentationUploadState(prev => ({
-          ...prev,
-          error: 'Cancelled by user',
-          isProcessing: false
-        }));
-      } else {
-        console.error('Error in segmentation to similarity search:', error);
-        showNotification(`Failed to process segmentation: ${error.message}`, 'error');
-        if (appendLog) {
-          appendLog(`Error processing segmentation: ${error.message}`);
-        }
-        
-        setSegmentationUploadState(prev => ({
-          ...prev,
-          error: error.message
-        }));
-      }
-    } finally {
-      // Reset cancellation flag
-      segmentationUploadCancelRef.current = false;
-      setSegmentationUploadState(prev => ({
-        ...prev,
-        isProcessing: false
-      }));
-    }
-  }, [
-    microscopeControlService,
-    zarrChannelConfigs,
-    visibleLayers.channels,
-    artifactZarrLoaderRef,
-    getWellInfoById,
-    showNotification,
-    appendLog,
-    getLayerContrastSettings,
-    activeExperiment
-  ]);
-
-  // Update ref whenever handleSegmentationToSimilaritySearch changes
-  useEffect(() => {
-    handleSegmentationToSimilaritySearchRef.current = handleSegmentationToSimilaritySearch;
-  }, [handleSegmentationToSimilaritySearch]);
 
   // Cleanup polling on unmount
   useEffect(() => {
@@ -3787,7 +3380,7 @@ const MicroscopeMapDisplay = forwardRef(({
   // Segmentation event handler
   useEffect(() => {
     const handleSegmentExperiment = async (event) => {
-      const { experimentName, autoUpload = false } = event.detail;
+      const { experimentName } = event.detail;
       
       if (!microscopeControlService) {
         showNotification('Microscope service not available', 'error');
@@ -3800,11 +3393,6 @@ const MicroscopeMapDisplay = forwardRef(({
       }
 
       try {
-        // Store autoUpload flag for this experiment
-        if (autoUpload) {
-          segmentationAutoUploadRef.current[experimentName] = true;
-        }
-
         // Build channel configurations from current UI state
         const channelConfigs = buildChannelConfigs(
           visibleLayers.channels,
@@ -3857,8 +3445,6 @@ const MicroscopeMapDisplay = forwardRef(({
         if (appendLog) {
           appendLog(`Segmentation failed: ${error.message}`);
         }
-        // Clear autoUpload flag on error
-        delete segmentationAutoUploadRef.current[experimentName];
       }
     };
 
@@ -5962,12 +5548,6 @@ const MicroscopeMapDisplay = forwardRef(({
                       // Segmentation props
                       segmentationState={segmentationState}
                       cancelRunningSegmentation={cancelRunningSegmentation}
-                      
-                      // Segmentation upload props
-                      segmentationUploadState={segmentationUploadState}
-                      handleSegmentationToSimilaritySearch={handleSegmentationToSimilaritySearch}
-                      cancelSegmentationUpload={cancelSegmentationUpload}
-                      completedSegmentationExperiment={completedSegmentationExperiment}
                     />
                   </div>
                 )}
@@ -6961,61 +6541,6 @@ const MicroscopeMapDisplay = forwardRef(({
       {/* Real-time chunk loading progress overlay */}
       {renderRealTimeProgress()}
 
-      {/* Segmentation to Similarity Search Confirmation Modal */}
-      {showSegmentationConfirmModal && completedSegmentationExperiment && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-gray-800 border border-gray-600 rounded-lg shadow-xl max-w-md w-full text-white">
-            {/* Modal Header */}
-            <div className="flex items-center p-4 border-b border-gray-600">
-              <i className="fas fa-question-circle text-blue-400 mr-3 text-xl"></i>
-              <h3 className="text-lg font-semibold text-gray-200">
-                Use Segmentation for Similarity Search?
-              </h3>
-            </div>
-
-            {/* Modal Body */}
-            <div className="p-4">
-              <p className="text-gray-300 mb-4">
-                Segmentation is complete for experiment: <strong>{completedSegmentationExperiment}</strong>
-              </p>
-              <p className="text-gray-400 mb-4 text-sm">
-                Would you like to process the segmented cells and upload them to the similarity search system?
-                This will extract cell images and create embeddings for searching.
-              </p>
-              {segmentationUploadState.totalPolygons > 0 && (
-                <p className="text-gray-400 text-sm">
-                  This may take a few minutes for large datasets.
-                </p>
-              )}
-            </div>
-
-            {/* Modal Footer */}
-            <div className="flex justify-end space-x-3 p-4 border-t border-gray-600">
-              <button
-                onClick={() => {
-                  setShowSegmentationConfirmModal(false);
-                  setCompletedSegmentationExperiment(null);
-                }}
-                className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded transition"
-                disabled={segmentationUploadState.isProcessing}
-              >
-                Later
-              </button>
-              <button
-                onClick={() => {
-                  setShowSegmentationConfirmModal(false);
-                  handleSegmentationToSimilaritySearch(completedSegmentationExperiment);
-                }}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded transition flex items-center"
-                disabled={segmentationUploadState.isProcessing}
-              >
-                <i className="fas fa-check mr-2"></i>
-                Yes, Process
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
       
     </div>
   );
