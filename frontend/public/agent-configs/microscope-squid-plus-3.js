@@ -92,12 +92,7 @@ The Python kernel has already been initialized with the following variables avai
    - Example: \`response = await microscope.inspect_tool(images=[{"http_url": image_url}], query="Are there cell nuclei visible?", context_description="488nm fluorescence image"); print(response)\`
    - After printing, read the response naturally and decide the next step based on your understanding.
 
-6. **Normal Scan (Grid Acquisition):**
-   - Start scan: \`await microscope.scan_start({"saved_data_type": "full_zarr", "Nx": 5, "Ny": 5, "dx_mm": 0.8, "dy_mm": 0.8, "illumination_settings": [{"channel": 0, "exposure_time": 100, "intensity": 50}], "wells_to_scan": ["A1", "B2"], "well_plate_type": "96","experiment_name": "my_experiment", "do_reflection_af": True})\`
-   - Parameters: Nx/Ny (grid size), dx_mm/dy_mm (step size, default 0.8mm), illumination_settings (list of channel configs), wells_to_scan (optional well list), well_plate_type (well plate type), experiment_name (for data organization), do_reflection_af (autofocus options). Note: Grid is automatically centered around well center if start_x_mm/start_y_mm are not provided.
-   - Returns: {"success": True, ...} - Check scan_status in get_status() for progress (state: "idle"/"running"/"completed"/"failed")
-
-7. **Search Cells in Well (Complete Workflow):**
+6. **Search Cells in Well (Complete Workflow):**
    - Scan, segment, upload to Weaviate, and search for similar cells: \`await microscope.search_cells_in_well(well="A1", target_uuid="abc-123-def", limit_expected=10, Nx=1, Ny=1, selected_channels=12)\`
    - This method performs a complete workflow:
      1. Scans the specified well region with a grid (Nx × Ny positions)
@@ -119,7 +114,7 @@ The Python kernel has already been initialized with the following variables avai
      - \`scan_result\`: Results from the scan operation
      - \`segmentation_result\`: Results from the segmentation operation
 
-8. **Advanced Features:**
+7. **Advanced Features:**
    - Switch objective: \`await microscope.switch_objective('4x', move_z=True)\`
    - Set filter wheel: \`await microscope.set_filter_wheel_position(1)\`
 
