@@ -251,7 +251,7 @@ const SimilarityResultInfoWindow = ({
                       title="Search for similar cells using this UUID"
                     >
                       <i className={`fas ${isSearching ? 'fa-spinner fa-spin' : 'fa-search'}`} style={{ fontSize: '9px' }}></i>
-                      Search
+                      Find Similar
                     </button>
                   )}
                   {/* Copy button */}

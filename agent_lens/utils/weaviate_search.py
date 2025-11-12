@@ -446,6 +446,7 @@ class WeaviateSimilarityService:
             near_vector=query_vector,
             include_vector=include_vector,
             limit=limit,
+            certainty=0.98,
             return_properties=return_properties  # Add this parameter
         )
         
