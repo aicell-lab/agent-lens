@@ -110,7 +110,7 @@ The Python kernel has already been initialized with the following variables avai
      - \`selected_channels\`: Channel ID for imaging (optional). If None, uses channel 0 (Brightfield). Channel IDs: 0=Brightfield, 11=405nm, 12=488nm, 13=638nm, 14=561nm, 15=730nm. Same as \`snap()\` channel parameter.
    - Returns: \`{"success": bool, "match": bool, "found_count": int, "limit_expected": int, "similar_results": list, "scan_result": dict, "segmentation_result": dict, "error": str (if failed)}\`
      - \`match\`: True if found_count matches limit_expected
-     - \`found_count\`: Number of similar cells found
+     - \`found_count\`: Number of similar cells found (total number of similar cells found across all wells)
      - \`similar_results\`: List of similar cell results from Weaviate
      - \`scan_result\`: Results from the scan operation
      - \`segmentation_result\`: Results from the segmentation operation
@@ -152,6 +152,61 @@ print(f"Current position: {status['current_x']}, {status['current_y']}")
 </py-script>
 
 → Wait for observation, then step 2...
+
+**Workflow Example 1 - Finding Wells with Fluorescence Signals:**
+User: "Find wells with nuclei fluorescence on 561nm, start from E2, stop when you find signals"
+<thoughts>
+Navigate to E2.
+Focus and take 561nm image.
+Check for signals.
+If found, stop.
+If not, move to next well.
+</thoughts>
+
+<py-script id="check_e2">
+await microscope.navigate_to_well('E', 2, well_plate_type='96')
+await microscope.reflection_autofocus()
+image_url = await microscope.snap(channel=14)
+from IPython.display import display, Image
+display(Image(url=image_url))
+response = await microscope.inspect_tool(
+    images=[{"http_url": image_url}],
+    query="Are there cell nuclei with fluorescence signals visible?",
+    context_description="561nm fluorescence image"
+)
+print(response)
+</py-script>
+
+→ After observation, if signals found: STOP. If not: move to next well (E3, E4, etc.) and repeat.
+
+**Workflow Example 2 - Finding Similar Cells Across Wells:**
+User: "Find 200 cells similar to UUID 78f07999208b4397ba622ccb3615d3fb, start from E2"
+<thoughts>
+Start from E2.
+Search for similar cells.
+Check found count.
+If less than 200, move to next well.
+Continue until 200 found.
+</thoughts>
+
+<py-script id="search_e2">
+result = await microscope.search_cells_in_well(
+    well="E2",
+    target_uuid="xxxxxx",
+    limit_expected=200,
+    Nx=2,
+    Ny=2,
+    selected_channels=0
+)
+print(f"Found {result['found_count']} similar cells in E2")
+print(f"Total needed: 200, Current: {result['found_count']}")
+if result['found_count'] >= 200:
+    print("✓ Reached 200 cells! Stopping.")
+else:
+    print(f"Need {200 - result['found_count']} more. Continue to next well.")
+</py-script>
+
+→ After observation, if found_count < 200: move to next well (E3, E4, etc.) and repeat search_cells_in_well. Keep track of cumulative count across wells. Stop when total reaches 200.
 
 **Well Plate Support:**
 - Standard 96-well plates are most common
