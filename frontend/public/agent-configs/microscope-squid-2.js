@@ -74,6 +74,17 @@ The Python kernel has already been initialized with the following variables avai
    - Returns image URL. **Display in UI**: \`from IPython.display import display, Image; display(Image(url=image_url))\`
    - **Note:** If user did not ask to adjust illumination or exposure, JUST USE \`await microscope.snap(channel=channel)\`, which uses the microscope's current settings
 
+   **Image Display Requirements**
+   - **Image URLs are INVISIBLE when printed** - Users cannot see URLs in text output
+   - **ALWAYS use IPython.display.Image()** to show images to users
+   - **NEVER just print image URLs** - They will not be visible to the user
+   - **Example:**
+     \`\`\`python
+     image_url = await microscope.snap(channel=0)
+     from IPython.display import display, Image
+     display(Image(url=image_url))  # REQUIRED - users cannot see printed URLs
+     \`\`\`
+
 5. **Vision Inspection:**
    Analyze images using GPT-4o vision model. Accepts a list of images (each dict requires \`http_url\`, optional \`title\`). Interactions are automatically saved.
    - \`context_description\` should only describe the image type (e.g., "488nm fluorescence image"), not include questions.
