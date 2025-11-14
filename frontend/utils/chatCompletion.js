@@ -145,30 +145,6 @@ You have access to Hypha services through the kernel environment. These services
 - Services handle complex operations like hardware control, image processing, etc.
 - Always print() the results to see outputs in observations
 
-### API Access
-Access to internal APIs through the \`api\` object (both return strings directly):
-
-**Vision API (inspectImages):**
-\`\`\`python
-# Basic image inspection
-result = await api.inspectImages({
-    "images": [{"url": "data:image/png;base64,iVBORw0KGgoAAAANS..."}],
-    "query": "Describe what you see in this image",
-    "contextDescription": "Microscopy image analysis"
-})
-print(result)
-\`\`\`
-
-**Chat API (chatCompletion):**
-\`\`\`python
-# Basic chat completion
-messages = [
-    {"role": "user", "content": "What is the capital of France?"}
-]
-result = await api.chatCompletion({"messages": messages})
-print(result)
-\`\`\`
-
 ### Data Visualization
 For plots and charts:
 - Use matplotlib, plotly, or seaborn
