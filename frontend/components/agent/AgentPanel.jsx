@@ -10,6 +10,7 @@ import { CellManager } from '../../utils/cellManager';
 import { chatCompletion } from '../../utils/chatCompletion';
 import { loadAgentConfig } from '../../utils/agentConfigLoader';
 import { getOpenAIApiKey, getOpenAIBaseURL, getOpenAIModel, getOpenAITemperature } from '../../utils/openaiConfig';
+import { setupNotebookService } from '../../utils/hyphaCoreServices';
 import NotebookContent from './NotebookContent';
 import ChatInput from './ChatInput';
 import AgentSettings from './AgentSettings';
@@ -68,8 +69,15 @@ const AgentPanel = ({
         appendLog('[AgentPanel] Initializing agent...');
         setKernelStatus('starting');
 
-        // Get token from hyphaManager to reuse existing login (do this early)
+        // Get token and server from hyphaManager
         const token = hyphaManager.getCurrentToken();
+        // IMPORTANT: getServer() returns a Promise, must await it!
+        const server = await hyphaManager.getServer('agent-lens');
+        
+        if (!server) {
+          throw new Error('Hypha server not connected. Please ensure you are logged in.');
+        }
+        
         if (token) {
           appendLog('[AgentPanel] Using existing login token');
         } else {
@@ -77,7 +85,7 @@ const AgentPanel = ({
         }
 
         // Load agent configuration with token injection
-        const systemCellCode = await loadAgentConfig(selectedMicroscopeId, token || null);
+        let systemCellCode = await loadAgentConfig(selectedMicroscopeId, token || null);
         if (!mounted) return;
         
         appendLog(`[AgentPanel] Loaded agent config for ${selectedMicroscopeId}`);
@@ -88,6 +96,24 @@ const AgentPanel = ({
         
         appendLog('[AgentPanel] Kernel initialized');
         setKernelStatus('ready');
+
+        // Setup notebook service (registers API service and connects it in Python kernel)
+        appendLog('[AgentPanel] Setting up notebook service...');
+        const agentSettings = {
+          apiKey: getOpenAIApiKey(),
+          baseURL: getOpenAIBaseURL(),
+          model: getOpenAIModel(),
+        };
+        
+        await setupNotebookService({
+          server: server,
+          executeCode: async (code, options) => {
+            return await kernelManager.executePython(code, options);
+          },
+          agentSettings: agentSettings,
+        });
+        
+        appendLog('[AgentPanel] Notebook service registered (api object available in Python)');
 
         // Create system cell
         const systemCellId = cellManager.addCell(

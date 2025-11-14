@@ -150,13 +150,50 @@ Access to internal APIs through the \`api\` object (both return strings directly
 
 **Vision API (inspectImages):**
 \`\`\`python
-# Basic image inspection
+# Basic image inspection with microscopy image
+# Use http URL from microscope snap() - recommended for microscopy images
+image_url = await microscope.snap(channel=0, exposure_time=100, intensity=50)
 result = await api.inspectImages({
-    "images": [{"url": "data:image/png;base64,iVBORw0KGgoAAAANS..."}],
+    "images": [{"url": image_url}],
     "query": "Describe what you see in this image",
-    "contextDescription": "Microscopy image analysis"
+    "contextDescription": "Brightfield microscopy image"
 })
 print(result)
+
+# With structured output using Pydantic models
+import micropip
+await micropip.install("pydantic")
+from pydantic import BaseModel, Field
+from typing import List
+import json
+
+class CellAnalysis(BaseModel):
+    cell_count: int = Field(description="Number of cells visible")
+    cell_health: str = Field(description="Overall cell health assessment")
+    notable_features: List[str] = Field(description="List of notable features observed")
+
+# Generate JSON schema from Pydantic model
+schema = CellAnalysis.model_json_schema()
+
+# Capture fluorescence image
+fluorescence_url = await microscope.snap(channel=14, exposure_time=200, intensity=60)
+result = await api.inspectImages({
+    "images": [{"url": fluorescence_url}],
+    "query": "Analyze the cells in this fluorescence image",
+    "contextDescription": "561nm fluorescence microscopy image",
+    "outputSchema": schema
+})
+
+# API returns parsed object directly when outputSchema is provided
+print(f"Cell count: {result['cell_count']}")
+print(f"Cell health: {result['cell_health']}")
+print(f"Notable features: {result['notable_features']}")
+
+# Or validate with Pydantic for type safety
+analysis = CellAnalysis.model_validate(result)
+print(f"Cell count: {analysis.cell_count}")
+print(f"Cell health: {analysis.cell_health}")
+print(f"Notable features: {analysis.notable_features}")
 \`\`\`
 
 **Chat API (chatCompletion):**
@@ -167,6 +204,78 @@ messages = [
 ]
 result = await api.chatCompletion({"messages": messages})
 print(result)
+
+# With custom parameters
+result = await api.chatCompletion({
+    "messages": messages,
+    "max_tokens": 500
+})
+print(result)
+
+# With JSON object response format
+result = await api.chatCompletion({
+    "messages": [{"role": "user", "content": "Give me weather data for Paris in JSON format"}],
+    "response_format": {"type": "json_object"}
+})
+print(result)
+
+# With structured JSON schema response using Pydantic
+import micropip
+await micropip.install("pydantic")
+from pydantic import BaseModel, Field
+import json
+
+class WeatherResponse(BaseModel):
+    city: str = Field(description="Name of the city")
+    temperature: float = Field(description="Temperature in Celsius")
+    condition: str = Field(description="Weather condition description")
+
+# Create schema details for OpenAI API
+schema_details = {
+    "name": "weather_response",
+    "description": "Weather information response",
+    "schema": WeatherResponse.model_json_schema()
+}
+
+result = await api.chatCompletion({
+    "messages": [{"role": "user", "content": "Get weather for Paris"}],
+    "response_format": {
+        "type": "json_schema",
+        "json_schema": schema_details
+    }
+})
+
+# API returns parsed object directly when response_format is json_object or json_schema
+print(f"City: {result['city']}")
+print(f"Temperature: {result['temperature']}°C")
+print(f"Condition: {result['condition']}")
+
+# Or validate with Pydantic for type safety
+weather = WeatherResponse.model_validate(result)
+print(f"City: {weather.city}")
+print(f"Temperature: {weather.temperature}°C")
+print(f"Condition: {weather.condition}")
+\`\`\`
+
+**API Options:**
+
+**inspectImages Options:**
+- \`images\`: Array of image objects with \`url\` field (data URLs or regular URLs)
+- \`query\`: String describing what you want to analyze about the images
+- \`contextDescription\`: String providing context for the analysis
+- \`outputSchema\` (optional): JSONSchema object to structure the response
+  - **Tip**: Use Pydantic models with \`MyModel.model_json_schema()\` to generate schemas
+  - **Return Type**: Returns parsed object when \`outputSchema\` provided, otherwise string
+
+**chatCompletion Options:**
+- \`messages\`: Array of chat messages with \`role\` and \`content\` fields
+- \`max_tokens\` (optional): Maximum number of tokens in the response (default: 1024)
+- \`response_format\` (optional): Response format specification:
+  - \`{"type": "text"}\` - Plain text response (returns string)
+  - \`{"type": "json_object"}\` - Valid JSON object (returns parsed object)
+  - \`{"type": "json_schema", "json_schema": {...}}\` - Structured response (returns parsed object)
+    - **Tip**: Use Pydantic models with \`MyModel.model_json_schema()\` for the schema field
+  - **Return Type**: Returns parsed object when JSON format specified, otherwise string
 \`\`\`
 
 ### Data Visualization
