@@ -20,6 +20,13 @@ const AVAILABLE_MODELS = [
     defaultTemperature: 1.0,
     temperatureFixed: true
   },
+  {
+    value: 'gpt-5.1',
+    label: 'GPT-5.1 (Best for long context)',
+    supportsTemperature: true,
+    defaultTemperature: 1.0,
+    temperatureFixed: true
+  },
   { 
     value: 'gpt-5', 
     label: 'GPT-5 (Standard)',
