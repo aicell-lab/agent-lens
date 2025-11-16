@@ -155,7 +155,7 @@ class TestWeaviateSimilarityService:
         await service.disconnect()
 
     @pytest.mark.integration
-    @pytest.mark.timeout(120)  # 2 minutes timeout to match GitHub Actions
+    @pytest.mark.timeout(300)  # 5 minutes timeout for CLIP model loading and Weaviate operations
     async def test_weaviate_collection_lifecycle(self, weaviate_service):
         """Test creating, using, and deleting a Weaviate collection."""
         collection_name = self._generate_test_collection_name()
@@ -361,6 +361,7 @@ class TestWeaviateSimilarityService:
             pass
 
     @pytest.mark.integration
+    @pytest.mark.timeout(300)  # 5 minutes timeout for CLIP model loading and text search operations
     async def test_weaviate_text_search(self, weaviate_service):
         """Test text-based search functionality."""
         collection_name = self._generate_test_collection_name()
