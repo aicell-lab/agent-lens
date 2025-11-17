@@ -155,7 +155,8 @@ class TestWeaviateSimilarityService:
         await service.disconnect()
 
     @pytest.mark.integration
-    @pytest.mark.timeout(300)  # 5 minutes timeout for CLIP model loading and Weaviate operations
+    @pytest.mark.slow  # Mark as slow test - requires CLIP model loading
+    @pytest.mark.timeout(600)  # 10 minutes timeout for CLIP model loading and Weaviate operations
     async def test_weaviate_collection_lifecycle(self, weaviate_service):
         """Test creating, using, and deleting a Weaviate collection."""
         collection_name = self._generate_test_collection_name()
@@ -361,7 +362,8 @@ class TestWeaviateSimilarityService:
             pass
 
     @pytest.mark.integration
-    @pytest.mark.timeout(300)  # 5 minutes timeout for CLIP model loading and text search operations
+    @pytest.mark.slow  # Mark as slow test - requires CLIP model loading
+    @pytest.mark.timeout(600)  # 10 minutes timeout for CLIP model loading and text search operations
     async def test_weaviate_text_search(self, weaviate_service):
         """Test text-based search functionality."""
         collection_name = self._generate_test_collection_name()
@@ -382,11 +384,13 @@ class TestWeaviateSimilarityService:
                 else:
                     raise
             
+            print(f"Creating application: {application_id}")
             await weaviate_service.create_application(
                 collection_name=collection_name,
                 application_id=application_id,
                 description="Test text search application"
             )
+            print(f"✅ Application {application_id} created successfully")
             
             # Insert text data
             text_objects = [
@@ -403,14 +407,18 @@ class TestWeaviateSimilarityService:
             ]
             
             # Insert objects with CLIP vectors and preview images
-            for text_obj in text_objects:
+            for i, text_obj in enumerate(text_objects):
+                print(f"Processing text object {i+1}/{len(text_objects)}: {text_obj['title']}")
                 # Generate CLIP vector for the title + content
                 text_description = f"{text_obj['title']}: {text_obj['content']}"
+                print(f"Generating CLIP vector for: {text_description[:50]}...")
                 clip_vector = self._generate_clip_vector(text_description)
+                print(f"✅ CLIP vector generated (length: {len(clip_vector)})")
                 
                 # Generate test preview image
                 preview_image = self._generate_test_preview_image()
                 
+                print(f"Inserting image: {text_obj['title'].lower().replace(' ', '_')}")
                 await weaviate_service.insert_image(
                     collection_name=collection_name,
                     application_id=application_id,
@@ -420,14 +428,17 @@ class TestWeaviateSimilarityService:
                     vector=clip_vector,
                     preview_image=preview_image
                 )
+                print(f"✅ Image inserted: {text_obj['title']}")
             
             # Test text-based search
+            print("Performing text-based search...")
             search_results = await weaviate_service.search_by_text(
                 collection_name=collection_name,
                 application_id=application_id,
                 query_text="microscopy techniques",
                 limit=5
             )
+            print(f"✅ Search completed, found {len(search_results) if hasattr(search_results, '__len__') else 'unknown'} results")
             
             assert len(search_results) > 0, "Text search should return results"
             
