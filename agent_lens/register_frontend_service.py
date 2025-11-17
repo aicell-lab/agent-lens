@@ -1249,67 +1249,6 @@ def get_frontend_api():
     return serve_fastapi
 
 
-async def register_service_probes(server, server_id="agent-lens"):
-    """
-    Register readiness and liveness probes for Kubernetes health checks.
-    
-    Args:
-        server (Server): The server instance.
-        server_id (str): The ID of the service.
-    """
-    # Register probes on the server
-    await _register_probes(server, server_id)
-
-async def _register_probes(server, probe_service_id):
-    """
-    Internal function to register probes on a given server.
-    
-    Args:
-        server (Server): The server to register probes on.
-        probe_service_id (str): The ID to use for probe registrations.
-    """
-    async def is_service_healthy():
-        logger.info("Checking service health")
-        # Minimal check: ensure artifact_manager can attempt a connection
-        # and that it's properly initialized after connection attempt.
-        try:
-            # Try to list the default gallery to ensure it's accessible
-            default_gallery_id = "agent-lens/20250506-scan-time-lapse-gallery"
-            logger.info(f"Health check: Attempting to list default gallery: {default_gallery_id}")
-            
-            try:
-                # Use the artifact_manager to list the gallery contents
-                if not artifact_manager_instance.server:
-                    logger.info("Artifact manager not connected, connecting for health check...")
-                    server_for_am, svc_for_am = await get_artifact_manager()
-                    await artifact_manager_instance.connect_server(server_for_am)
-                
-                gallery_contents = await artifact_manager_instance._svc.list(parent_id=default_gallery_id)
-                
-                if not gallery_contents:
-                    logger.warning(f"Health check: Default gallery '{default_gallery_id}' exists but is empty.")
-                    # This is not a critical error if the gallery exists but is empty
-                else:
-                    logger.info(f"Health check: Successfully listed default gallery with {len(gallery_contents)} items.")
-            except Exception as gallery_error:
-                logger.error(f"Health check: Failed to list gallery '{default_gallery_id}': {gallery_error}")
-                raise RuntimeError(f"Failed to list default gallery: {gallery_error}")
-
-            logger.info("Service appears healthy (TileManager connection established and gallery accessible).")
-            return {"status": "ok", "message": "Service healthy"}
-
-        except Exception as e:
-            logger.error(f"Health check failed: {str(e)}")
-            logger.error(traceback.format_exc())
-            raise RuntimeError(f"Service health check failed: {str(e)}")
-    
-    logger.info(f"Registering health probes for Kubernetes with ID: {probe_service_id}")
-    await server.register_probes({
-        f"readiness-{probe_service_id}": is_service_healthy,
-        f"liveness-{probe_service_id}": is_service_healthy
-    })
-    logger.info("Health probes registered successfully")
-
 async def preload_clip_model():
     """
     Preload CLIP model during service startup to avoid delays during first use.
@@ -1388,24 +1327,6 @@ async def setup_service(server, server_id="agent-lens"):
     )
 
     logger.info(f"Frontend service registered successfully with ID: {server_id}")
-
-    # Check if we're running locally
-    is_local = "--port" in cmd_args or "start-server" in cmd_args
-    
-    # Check if we're running in test mode
-    is_test_mode = (
-        "pytest" in cmd_args or 
-        "test" in cmd_args or 
-        server_id.startswith("test-") or 
-        any("test" in arg.lower() for arg in sys.argv)
-    )
-    
-    # Only register service health probes when not running locally, not in test mode, and not in VSCode connect-server mode
-    # Docker mode should register probes
-    if not is_local and not is_test_mode and (is_docker or not is_connect_server):
-        await register_service_probes(server, server_id)
-    elif is_test_mode:
-        logger.info(f"Skipping health probe registration for test service: {server_id}")
 
     # Store the cleanup function in the server's config
     # Note: No specific cleanup needed since artifact_manager_instance is global
