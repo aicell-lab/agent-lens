@@ -5898,6 +5898,8 @@ const MicroscopeMapDisplay = forwardRef(({
           containerBounds={mapContainerRef.current?.getBoundingClientRect()}
           onSearch={performTextSearch}
           isSearching={isSearching}
+          collectionName="Agentlens"
+          applicationId={selectedHistoricalDataset?.id || (activeLayer && experiments.find(exp => exp.name === activeLayer)?.name) || null}
         />
         
         {/* Rectangle selection active indicator */}

@@ -20,9 +20,15 @@ const SimilarityResultInfoWindow = ({
   onClose,
   containerBounds = null,
   onSearch = null,
-  isSearching = false
+  isSearching = false,
+  collectionName = "Agentlens",
+  applicationId = null
 }) => {
+  // All useState hooks must be at the top, before any early returns
   const [adjustedPosition, setAdjustedPosition] = useState(position);
+  const [editingTags, setEditingTags] = useState([]);
+  const [newTagInput, setNewTagInput] = useState('');
+  const [isUpdatingTags, setIsUpdatingTags] = useState(false);
 
   // Adjust window position to keep it fully visible within container bounds
   useEffect(() => {
@@ -72,7 +78,31 @@ const SimilarityResultInfoWindow = ({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isVisible, onClose]);
 
+  // Update tags when result changes
+  useEffect(() => {
+    if (!result) {
+      setEditingTags([]);
+      setNewTagInput('');
+      return;
+    }
+    
+    const props = result.properties || result;
+    const tagString = props.tag || '';
+    let tags = [];
+    try {
+      if (tagString) {
+        tags = JSON.parse(tagString);
+        if (!Array.isArray(tags)) tags = [];
+      }
+    } catch (e) {
+      console.warn('Failed to parse tags:', e);
+      tags = [];
+    }
+    setEditingTags(tags);
+    setNewTagInput('');
+  }, [result]);
 
+  // Early return after all hooks
   if (!isVisible || !result) return null;
 
   // Extract result data from properties
@@ -94,6 +124,65 @@ const SimilarityResultInfoWindow = ({
   };
   
   const objectUUID = extractUUID(result);
+  
+  // Function to update tags
+  const updateTags = async (updatedTags) => {
+    if (!objectUUID || !applicationId || !result) {
+      console.warn('Cannot update tags: missing objectUUID, applicationId, or result');
+      return;
+    }
+    
+    setIsUpdatingTags(true);
+    try {
+      // Determine service ID from URL (same pattern as SimilaritySearchPanel)
+      const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
+      
+      // Serialize tags as JSON array string
+      const tagString = JSON.stringify(updatedTags);
+      
+      // Call the backend update endpoint
+      const queryParams = new URLSearchParams({
+        collection_name: collectionName,
+        application_id: applicationId,
+        uuid: objectUUID
+      });
+      
+      const response = await fetch(`/agent-lens/apps/${serviceId}/similarity/update?${queryParams}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ tag: tagString })
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
+        throw new Error(errorData.detail || `Failed to update tags: ${response.statusText}`);
+      }
+      
+      setEditingTags(updatedTags);
+      console.log('Tags updated successfully');
+    } catch (error) {
+      console.error('Failed to update tags:', error);
+      // Re-parse tags from result on error to revert
+      if (result) {
+        const props = result.properties || result;
+        const tagString = props.tag || '';
+        let tags = [];
+        try {
+          if (tagString) {
+            tags = JSON.parse(tagString);
+            if (!Array.isArray(tags)) tags = [];
+          }
+        } catch (e) {
+          tags = [];
+        }
+        setEditingTags(tags);
+      }
+    } finally {
+      setIsUpdatingTags(false);
+    }
+  };
   
   // Parse metadata
   let parsedMetadata = {};
@@ -200,23 +289,117 @@ const SimilarityResultInfoWindow = ({
           }}
           className="similarity-result-content"
         >
-          {/* Preview Image */}
-          {props.preview_image && (
-            <div style={{ marginBottom: '10px', textAlign: 'center' }}>
-              <img
-                src={`data:image/png;base64,${props.preview_image}`}
-                alt="Result preview"
-                style={{
-                  maxWidth: '100px',
-                  maxHeight: '100px',
-                  width: 'auto',
-                  height: 'auto',
-                  borderRadius: '4px',
-                  border: '1px solid #374151'
-                }}
-              />
+          {/* Preview Image and Tags Section */}
+          <div style={{ display: 'flex', gap: '12px', marginBottom: '12px' }}>
+            {/* Preview Image - Left side */}
+            {props.preview_image && (
+              <div style={{ flexShrink: 0 }}>
+                <img
+                  src={`data:image/png;base64,${props.preview_image}`}
+                  alt="Result preview"
+                  style={{
+                    width: '100px',
+                    height: '100px',
+                    borderRadius: '4px',
+                    border: '1px solid #374151',
+                    objectFit: 'cover'
+                  }}
+                />
+              </div>
+            )}
+            
+            {/* Tags Section - Right side of preview */}
+            <div style={{ 
+              flex: '1',
+              display: 'flex', 
+              flexDirection: 'column',
+              gap: '8px',
+              minWidth: '0'
+            }}>
+              <div>
+                <strong style={{ color: '#f3f4f6', fontSize: '12px', marginBottom: '4px', display: 'block' }}>
+                  Tags
+                </strong>
+                
+                {/* Tag Badges Container */}
+                <div style={{ 
+                  display: 'flex', 
+                  flexWrap: 'wrap', 
+                  gap: '4px',
+                  marginBottom: '6px'
+                }}>
+                  {editingTags.map((tag, index) => (
+                    <div
+                      key={index}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        backgroundColor: '#2563eb',
+                        color: '#ffffff',
+                        padding: '3px 8px',
+                        borderRadius: '12px',
+                        fontSize: '11px',
+                        fontWeight: '500'
+                      }}
+                    >
+                      <span>{tag}</span>
+                      <button
+                        onClick={() => {
+                          const newTags = editingTags.filter((_, i) => i !== index);
+                          updateTags(newTags);
+                        }}
+                        disabled={isUpdatingTags}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#ffffff',
+                          cursor: isUpdatingTags ? 'not-allowed' : 'pointer',
+                          padding: '0',
+                          fontSize: '14px',
+                          lineHeight: '1',
+                          opacity: isUpdatingTags ? 0.5 : 1
+                        }}
+                        title="Remove tag"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                
+                {/* Add Tag Input */}
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  <input
+                    type="text"
+                    value={newTagInput}
+                    onChange={(e) => setNewTagInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && newTagInput.trim()) {
+                        const trimmedTag = newTagInput.trim();
+                        if (!editingTags.includes(trimmedTag)) {
+                          updateTags([...editingTags, trimmedTag]);
+                        }
+                        setNewTagInput('');
+                      }
+                    }}
+                    placeholder="Add a tag..."
+                    disabled={isUpdatingTags}
+                    style={{
+                      flex: '1',
+                      padding: '4px 8px',
+                      fontSize: '11px',
+                      backgroundColor: '#374151',
+                      color: '#f3f4f6',
+                      border: '1px solid #6b7280',
+                      borderRadius: '4px',
+                      outline: 'none'
+                    }}
+                  />
+                </div>
+              </div>
             </div>
-          )}
+          </div>
 
           {/* Information Fields */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '12px' }}>
@@ -369,7 +552,9 @@ SimilarityResultInfoWindow.propTypes = {
     height: PropTypes.number
   }),
   onSearch: PropTypes.func,
-  isSearching: PropTypes.bool
+  isSearching: PropTypes.bool,
+  collectionName: PropTypes.string,
+  applicationId: PropTypes.string
 };
 
 export default SimilarityResultInfoWindow;

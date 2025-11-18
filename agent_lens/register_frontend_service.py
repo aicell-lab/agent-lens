@@ -1172,6 +1172,56 @@ def get_frontend_api():
             logger.error(traceback.format_exc())
             raise HTTPException(status_code=500, detail=str(e))
 
+    @app.post("/similarity/update")
+    async def update_similarity_object(
+        collection_name: str,
+        application_id: str,
+        uuid: str,
+        properties: dict
+    ):
+        """
+        Update a similarity search object's properties.
+        
+        Args:
+            collection_name (str): Name of the collection
+            application_id (str): Application ID
+            uuid (str): UUID of the object to update
+            properties (dict): Dictionary of properties to update
+            
+        Returns:
+            dict: Update result
+        """
+        try:
+            try:
+                if not await similarity_service.ensure_connected():
+                    raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            except Exception as e:
+                logger.warning(f"Similarity service not available: {e}")
+                raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            
+            # Always use the existing 'Agentlens' collection
+            valid_collection_name = WEAVIATE_COLLECTION_NAME
+            
+            # Extract just the dataset ID part
+            clean_application_id = application_id.split('/')[-1] if '/' in application_id else application_id
+            
+            result = await similarity_service.update_object(
+                collection_name=valid_collection_name,
+                application_id=clean_application_id,
+                object_uuid=uuid,
+                properties=properties
+            )
+            
+            logger.info(f"Updated similarity search object {uuid} in collection {valid_collection_name}")
+            return {"success": True, "result": result}
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error updating similarity search object: {e}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
+
     @app.get("/similarity/list-applications")
     async def list_annotation_applications(
         collection_name: str,
