@@ -254,7 +254,19 @@ class WeaviateSimilarityService:
                 {"name": "metadata", "dataType": ["text"]},
                 {"name": "dataset_id", "dataType": ["text"]},
                 {"name": "file_path", "dataType": ["text"]},
-                {"name": "preview_image", "dataType": ["blob"]}  # Base64 encoded 50x50 preview
+                {"name": "preview_image", "dataType": ["blob"]},  # Base64 encoded 50x50 preview
+                {"name": "tag", "dataType": ["text"]},  # Tag field for categorization
+                # Cell morphology measurements for downstream analysis
+                {"name": "area", "dataType": ["number"]},  # Cell area in pixels or µm²
+                {"name": "perimeter", "dataType": ["number"]},  # Cell perimeter
+                {"name": "equivalent_diameter", "dataType": ["number"]},  # Diameter of circle with same area
+                {"name": "bbox_width", "dataType": ["number"]},  # Bounding box width
+                {"name": "bbox_height", "dataType": ["number"]},  # Bounding box height
+                {"name": "aspect_ratio", "dataType": ["number"]},  # Major axis / minor axis (elongation)
+                {"name": "circularity", "dataType": ["number"]},  # 4πA / P² (roundness)
+                {"name": "eccentricity", "dataType": ["number"]},  # 0 = circle, → 1 elongated
+                {"name": "solidity", "dataType": ["number"]},  # Area / convex hull area
+                {"name": "convexity", "dataType": ["number"]}  # Smoothness of boundary
             ],
             "vectorizer": "none"  # We'll provide vectors manually
         }
@@ -279,7 +291,14 @@ class WeaviateSimilarityService:
     async def insert_image(self, collection_name: str, application_id: str, 
                           image_id: str, description: str, metadata: Dict[str, Any],
                           dataset_id: str = None, file_path: str = None,
-                          vector: List[float] = None, preview_image: str = None) -> Dict[str, Any]:
+                          vector: List[float] = None, preview_image: str = None,
+                          tag: str = None,
+                          # Cell morphology measurements
+                          area: float = None, perimeter: float = None,
+                          equivalent_diameter: float = None, bbox_width: float = None,
+                          bbox_height: float = None, aspect_ratio: float = None,
+                          circularity: float = None, eccentricity: float = None,
+                          solidity: float = None, convexity: float = None) -> Dict[str, Any]:
         """Insert an image with its embedding into Weaviate."""
         if not await self.ensure_connected():
             raise RuntimeError("Not connected to Weaviate service")
@@ -291,7 +310,19 @@ class WeaviateSimilarityService:
             "metadata": json.dumps(metadata) if metadata else "",
             "dataset_id": dataset_id or "",
             "file_path": file_path or "",
-            "preview_image": preview_image or ""
+            "preview_image": preview_image or "",
+            "tag": tag or "",
+            # Cell morphology measurements
+            "area": area,
+            "perimeter": perimeter,
+            "equivalent_diameter": equivalent_diameter,
+            "bbox_width": bbox_width,
+            "bbox_height": bbox_height,
+            "aspect_ratio": aspect_ratio,
+            "circularity": circularity,
+            "eccentricity": eccentricity,
+            "solidity": solidity,
+            "convexity": convexity
         }
         
         # Generate vector if not provided
@@ -447,7 +478,19 @@ class WeaviateSimilarityService:
             "metadata",
             "dataset_id",
             "file_path",
-            "preview_image"  # This is the key - explicitly include the blob property
+            "preview_image",  # This is the key - explicitly include the blob property
+            "tag",
+            # Cell morphology measurements
+            "area",
+            "perimeter",
+            "equivalent_diameter",
+            "bbox_width",
+            "bbox_height",
+            "aspect_ratio",
+            "circularity",
+            "eccentricity",
+            "solidity",
+            "convexity"
         ]
         
         # Build query parameters - only include certainty if it's not None
@@ -510,7 +553,19 @@ class WeaviateSimilarityService:
             "metadata",
             "dataset_id",
             "file_path",
-            "preview_image"
+            "preview_image",
+            "tag",
+            # Cell morphology measurements
+            "area",
+            "perimeter",
+            "equivalent_diameter",
+            "bbox_width",
+            "bbox_height",
+            "aspect_ratio",
+            "circularity",
+            "eccentricity",
+            "solidity",
+            "convexity"
         ]
         
         # Handle prefix matching vs exact matching
@@ -679,7 +734,12 @@ class WeaviateSimilarityService:
                     collection_name=collection_name,
                     application_id=application_id,
                     limit=10000,
-                    return_properties=["image_id", "description", "metadata", "dataset_id", "file_path", "preview_image"],
+                    return_properties=[
+                        "image_id", "description", "metadata", "dataset_id", "file_path", "preview_image", "tag",
+                        # Cell morphology measurements
+                        "area", "perimeter", "equivalent_diameter", "bbox_width", "bbox_height",
+                        "aspect_ratio", "circularity", "eccentricity", "solidity", "convexity"
+                    ],
                     include_vector=include_vector
                 )
                 
@@ -830,6 +890,38 @@ class WeaviateSimilarityService:
         
         logger.info(f"Found {len(filtered_results)} similar objects for UUID '{object_uuid}' (excluding query object)")
         return filtered_results
+    
+    async def update_object(self, collection_name: str, application_id: str,
+                           object_uuid: str, properties: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Update a similarity search object's properties.
+        
+        Args:
+            collection_name: Name of the collection
+            application_id: Application ID
+            object_uuid: UUID of the object to update
+            properties: Dictionary of properties to update (e.g., {"tag": "..."})
+            
+        Returns:
+            Dictionary with update result
+        """
+        if not await self.ensure_connected():
+            raise RuntimeError("Not connected to Weaviate service")
+        
+        try:
+            result = await self.weaviate_service.data.update(
+                collection_name,
+                application_id,
+                uuid=object_uuid,
+                properties=properties
+            )
+            
+            logger.info(f"Updated object {object_uuid} in collection {collection_name}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error updating object {object_uuid}: {e}")
+            raise
     
     async def list_collections(self) -> Dict[str, Any]:
         """List all available collections."""

@@ -86,7 +86,7 @@ The Python kernel has already been initialized with the following variables avai
      \`\`\`
 
 5. **Vision Inspection:**
-   Analyze images using GPT-4o vision model. Accepts a list of images (each dict requires \`http_url\`, optional \`title\`). Interactions are automatically saved.
+   Analyze images using GPT-5.1 vision model. Accepts a list of images (each dict requires \`http_url\`, optional \`title\`). Interactions are automatically saved.
    - \`context_description\` should only describe the image type (e.g., "488nm fluorescence image"), not include questions.
    - **NO LOOPS:** Process ONE image at a time. After \`inspect_tool\`, print the response, stop, and wait for observation. Do not use loops or programmatic decision-making.
    - Example: \`response = await microscope.inspect_tool(images=[{"http_url": image_url}], query="Are there cell nuclei visible?", context_description="488nm fluorescence image"); print(response)\`
