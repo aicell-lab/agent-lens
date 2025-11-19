@@ -3,6 +3,8 @@
  * Loads agent configuration files (system cell code) from public/agent-configs/
  */
 
+import { getOpenAIApiKey } from './openaiConfig.js';
+
 /**
  * Inject authentication token into Python code, replacing the login() call
  * @param {string} code - Python code string
@@ -32,6 +34,40 @@ function injectToken(code, token) {
     console.warn('[AgentConfigLoader] Token provided but login pattern not found in code');
   } else {
     console.log('[AgentConfigLoader] Token injected into system cell code');
+  }
+  
+  return modifiedCode;
+}
+
+/**
+ * Inject OpenAI API key into Python code
+ * @param {string} code - Python code string
+ * @returns {string} - Code with OpenAI API key injected
+ */
+function injectOpenAIApiKey(code) {
+  const apiKey = getOpenAIApiKey();
+  
+  if (!apiKey) {
+    // No API key configured, keep placeholder
+    console.warn('[AgentConfigLoader] No OpenAI API key found in localStorage');
+    return code;
+  }
+
+  // Escape API key for Python string
+  const escapedApiKey = apiKey.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+
+  // Pattern to match: openai_api_key = "YOUR_API_KEY_HERE"
+  const apiKeyPattern = /openai_api_key\s*=\s*["'][^"']*["']/g;
+  
+  const replacement = `openai_api_key = "${escapedApiKey}"`;
+  
+  const modifiedCode = code.replace(apiKeyPattern, replacement);
+  
+  if (modifiedCode === code) {
+    // No replacement occurred, log warning but don't fail
+    console.warn('[AgentConfigLoader] OpenAI API key pattern not found in code');
+  } else {
+    console.log('[AgentConfigLoader] OpenAI API key injected into system cell code');
   }
   
   return modifiedCode;
@@ -130,6 +166,9 @@ export async function loadAgentConfig(microscopeId, token = null) {
     // Inject token if provided
     systemCellCode = injectToken(systemCellCode, token);
     
+    // Inject OpenAI API key from localStorage
+    systemCellCode = injectOpenAIApiKey(systemCellCode);
+    
     // Inject base_url for similarity search API
     systemCellCode = injectBaseUrl(systemCellCode);
     
@@ -175,6 +214,9 @@ async function loadDefaultConfig(token = null) {
     
     // Inject token if provided
     systemCellCode = injectToken(systemCellCode, token);
+    
+    // Inject OpenAI API key from localStorage
+    systemCellCode = injectOpenAIApiKey(systemCellCode);
     
     // Inject base_url for similarity search API
     systemCellCode = injectBaseUrl(systemCellCode);
@@ -226,6 +268,9 @@ print(SYSTEM_PROMPT)
   
   // Inject token if provided
   let modifiedCode = injectToken(code, token);
+  
+  // Inject OpenAI API key from localStorage
+  modifiedCode = injectOpenAIApiKey(modifiedCode);
   
   // Inject base_url for similarity search API
   modifiedCode = injectBaseUrl(modifiedCode);
