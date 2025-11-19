@@ -255,7 +255,18 @@ class WeaviateSimilarityService:
                 {"name": "dataset_id", "dataType": ["text"]},
                 {"name": "file_path", "dataType": ["text"]},
                 {"name": "preview_image", "dataType": ["blob"]},  # Base64 encoded 50x50 preview
-                {"name": "tag", "dataType": ["text"]}  # Tag field for categorization
+                {"name": "tag", "dataType": ["text"]},  # Tag field for categorization
+                # Cell morphology measurements for downstream analysis
+                {"name": "area", "dataType": ["number"]},  # Cell area in pixels or µm²
+                {"name": "perimeter", "dataType": ["number"]},  # Cell perimeter
+                {"name": "equivalent_diameter", "dataType": ["number"]},  # Diameter of circle with same area
+                {"name": "bbox_width", "dataType": ["number"]},  # Bounding box width
+                {"name": "bbox_height", "dataType": ["number"]},  # Bounding box height
+                {"name": "aspect_ratio", "dataType": ["number"]},  # Major axis / minor axis (elongation)
+                {"name": "circularity", "dataType": ["number"]},  # 4πA / P² (roundness)
+                {"name": "eccentricity", "dataType": ["number"]},  # 0 = circle, → 1 elongated
+                {"name": "solidity", "dataType": ["number"]},  # Area / convex hull area
+                {"name": "convexity", "dataType": ["number"]}  # Smoothness of boundary
             ],
             "vectorizer": "none"  # We'll provide vectors manually
         }
@@ -281,7 +292,13 @@ class WeaviateSimilarityService:
                           image_id: str, description: str, metadata: Dict[str, Any],
                           dataset_id: str = None, file_path: str = None,
                           vector: List[float] = None, preview_image: str = None,
-                          tag: str = None) -> Dict[str, Any]:
+                          tag: str = None,
+                          # Cell morphology measurements
+                          area: float = None, perimeter: float = None,
+                          equivalent_diameter: float = None, bbox_width: float = None,
+                          bbox_height: float = None, aspect_ratio: float = None,
+                          circularity: float = None, eccentricity: float = None,
+                          solidity: float = None, convexity: float = None) -> Dict[str, Any]:
         """Insert an image with its embedding into Weaviate."""
         if not await self.ensure_connected():
             raise RuntimeError("Not connected to Weaviate service")
@@ -294,7 +311,18 @@ class WeaviateSimilarityService:
             "dataset_id": dataset_id or "",
             "file_path": file_path or "",
             "preview_image": preview_image or "",
-            "tag": tag or ""
+            "tag": tag or "",
+            # Cell morphology measurements
+            "area": area,
+            "perimeter": perimeter,
+            "equivalent_diameter": equivalent_diameter,
+            "bbox_width": bbox_width,
+            "bbox_height": bbox_height,
+            "aspect_ratio": aspect_ratio,
+            "circularity": circularity,
+            "eccentricity": eccentricity,
+            "solidity": solidity,
+            "convexity": convexity
         }
         
         # Generate vector if not provided
@@ -451,7 +479,18 @@ class WeaviateSimilarityService:
             "dataset_id",
             "file_path",
             "preview_image",  # This is the key - explicitly include the blob property
-            "tag"
+            "tag",
+            # Cell morphology measurements
+            "area",
+            "perimeter",
+            "equivalent_diameter",
+            "bbox_width",
+            "bbox_height",
+            "aspect_ratio",
+            "circularity",
+            "eccentricity",
+            "solidity",
+            "convexity"
         ]
         
         # Build query parameters - only include certainty if it's not None
@@ -515,7 +554,18 @@ class WeaviateSimilarityService:
             "dataset_id",
             "file_path",
             "preview_image",
-            "tag"
+            "tag",
+            # Cell morphology measurements
+            "area",
+            "perimeter",
+            "equivalent_diameter",
+            "bbox_width",
+            "bbox_height",
+            "aspect_ratio",
+            "circularity",
+            "eccentricity",
+            "solidity",
+            "convexity"
         ]
         
         # Handle prefix matching vs exact matching

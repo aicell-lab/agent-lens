@@ -199,7 +199,18 @@ class TestWeaviateSimilarityService:
                 image_data = {
                     "image_id": f"test_img_{i}",
                     "description": f"Test microscopy image {i}",
-                    "metadata": f"{{'channel': 'BF_LED_matrix_full', 'exposure': {100 + i * 50}}}"
+                    "metadata": f"{{'channel': 'BF_LED_matrix_full', 'exposure': {100 + i * 50}}}",
+                    # Cell morphology measurements
+                    "area": 500 + i * 100,
+                    "perimeter": 80 + i * 10,
+                    "equivalent_diameter": 25.0 + i * 3.0,
+                    "bbox_width": 30 + i * 5,
+                    "bbox_height": 28 + i * 4,
+                    "aspect_ratio": 1.2 + i * 0.1,
+                    "circularity": 0.85 - i * 0.05,
+                    "eccentricity": 0.3 + i * 0.1,
+                    "solidity": 0.95 - i * 0.02,
+                    "convexity": 0.98 - i * 0.01
                 }
                 test_images.append(image_data)
             
@@ -220,7 +231,18 @@ class TestWeaviateSimilarityService:
                     description=img_data["description"],
                     metadata=img_data["metadata"],
                     vector=clip_vector,
-                    preview_image=preview_image
+                    preview_image=preview_image,
+                    # Cell morphology measurements
+                    area=img_data["area"],
+                    perimeter=img_data["perimeter"],
+                    equivalent_diameter=img_data["equivalent_diameter"],
+                    bbox_width=img_data["bbox_width"],
+                    bbox_height=img_data["bbox_height"],
+                    aspect_ratio=img_data["aspect_ratio"],
+                    circularity=img_data["circularity"],
+                    eccentricity=img_data["eccentricity"],
+                    solidity=img_data["solidity"],
+                    convexity=img_data["convexity"]
                 )
                 insert_results.append(result)
             
