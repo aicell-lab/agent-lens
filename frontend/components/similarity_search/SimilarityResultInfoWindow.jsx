@@ -109,6 +109,21 @@ const SimilarityResultInfoWindow = ({
   const props = result.properties || result;
   const metadata = props.metadata || '';
   
+  // Debug: Log available properties to see what morphology data exists
+  console.log('SimilarityResultInfoWindow - Available properties:', {
+    area: props.area,
+    perimeter: props.perimeter,
+    equivalent_diameter: props.equivalent_diameter,
+    bbox_width: props.bbox_width,
+    bbox_height: props.bbox_height,
+    aspect_ratio: props.aspect_ratio,
+    circularity: props.circularity,
+    eccentricity: props.eccentricity,
+    solidity: props.solidity,
+    convexity: props.convexity,
+    allProps: Object.keys(props)
+  });
+  
   // Extract UUID from result object
   const extractUUID = (resultObj) => {
     if (resultObj.uuid) return resultObj.uuid;
@@ -283,9 +298,10 @@ const SimilarityResultInfoWindow = ({
           style={{ 
             padding: '12px', 
             overflowY: 'auto', 
+            overflowX: 'hidden',
             flex: 1,
-            scrollbarWidth: 'thick', // For Firefox
-            scrollbarColor: '#6b7280 #374151' // For Firefox
+            scrollbarWidth: 'thin', // For Firefox
+            scrollbarColor: '#6b7280 #374151' // For Firefox (thumb, track)
           }}
           className="similarity-result-content"
         >
@@ -531,6 +547,129 @@ const SimilarityResultInfoWindow = ({
                 </div>
               </div>
             )}
+
+            {/* Cell Morphology Measurements */}
+            {(props.area !== null && props.area !== undefined) ||
+             (props.perimeter !== null && props.perimeter !== undefined) ||
+             (props.equivalent_diameter !== null && props.equivalent_diameter !== undefined) ||
+             (props.bbox_width !== null && props.bbox_width !== undefined) ||
+             (props.bbox_height !== null && props.bbox_height !== undefined) ||
+             (props.aspect_ratio !== null && props.aspect_ratio !== undefined) ||
+             (props.circularity !== null && props.circularity !== undefined) ||
+             (props.eccentricity !== null && props.eccentricity !== undefined) ||
+             (props.solidity !== null && props.solidity !== undefined) ||
+             (props.convexity !== null && props.convexity !== undefined) ? (
+              <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #374151' }}>
+                <strong style={{ color: '#f3f4f6', fontSize: '12px', marginBottom: '8px', display: 'block' }}>
+                  Cell Morphology:
+                </strong>
+                
+                {/* Helper function to format numbers */}
+                {(() => {
+                  const formatNumber = (value, decimals = 2) => {
+                    if (value === null || value === undefined) return 'N/A';
+                    return typeof value === 'number' ? value.toFixed(decimals) : value;
+                  };
+                  
+                  return (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '11px' }}>
+                      {/* Size measurements */}
+                      {props.area !== null && props.area !== undefined && (
+                        <div title="Cell area in µm²">
+                          <strong style={{ color: '#9ca3af' }}>Area:</strong>
+                          <div style={{ marginTop: '2px', color: '#f3f4f6' }}>
+                            {formatNumber(props.area, 1)} µm²
+                          </div>
+                        </div>
+                      )}
+                      
+                      {props.perimeter !== null && props.perimeter !== undefined && (
+                        <div title="Cell perimeter in µm">
+                          <strong style={{ color: '#9ca3af' }}>Perimeter:</strong>
+                          <div style={{ marginTop: '2px', color: '#f3f4f6' }}>
+                            {formatNumber(props.perimeter, 1)} µm
+                          </div>
+                        </div>
+                      )}
+                      
+                      {props.equivalent_diameter !== null && props.equivalent_diameter !== undefined && (
+                        <div title="Diameter of circle with same area in µm">
+                          <strong style={{ color: '#9ca3af' }}>Eq. Diameter:</strong>
+                          <div style={{ marginTop: '2px', color: '#f3f4f6' }}>
+                            {formatNumber(props.equivalent_diameter, 2)} µm
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Bounding box */}
+                      {props.bbox_width !== null && props.bbox_width !== undefined && (
+                        <div title="Bounding box width in µm">
+                          <strong style={{ color: '#9ca3af' }}>BBox Width:</strong>
+                          <div style={{ marginTop: '2px', color: '#f3f4f6' }}>
+                            {formatNumber(props.bbox_width, 1)} µm
+                          </div>
+                        </div>
+                      )}
+                      
+                      {props.bbox_height !== null && props.bbox_height !== undefined && (
+                        <div title="Bounding box height in µm">
+                          <strong style={{ color: '#9ca3af' }}>BBox Height:</strong>
+                          <div style={{ marginTop: '2px', color: '#f3f4f6' }}>
+                            {formatNumber(props.bbox_height, 1)} µm
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Shape descriptors */}
+                      {props.aspect_ratio !== null && props.aspect_ratio !== undefined && (
+                        <div title="Major axis / minor axis (elongation, unitless)">
+                          <strong style={{ color: '#9ca3af' }}>Aspect Ratio:</strong>
+                          <div style={{ marginTop: '2px', color: '#f3f4f6' }}>
+                            {formatNumber(props.aspect_ratio, 3)}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {props.circularity !== null && props.circularity !== undefined && (
+                        <div title="4π×area/perimeter² (roundness, 1.0 = perfect circle)">
+                          <strong style={{ color: '#9ca3af' }}>Circularity:</strong>
+                          <div style={{ marginTop: '2px', color: '#f3f4f6' }}>
+                            {formatNumber(props.circularity, 3)}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {props.eccentricity !== null && props.eccentricity !== undefined && (
+                        <div title="0 = circle, → 1 elongated (unitless)">
+                          <strong style={{ color: '#9ca3af' }}>Eccentricity:</strong>
+                          <div style={{ marginTop: '2px', color: '#f3f4f6' }}>
+                            {formatNumber(props.eccentricity, 3)}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {props.solidity !== null && props.solidity !== undefined && (
+                        <div title="Area / convex hull area (unitless)">
+                          <strong style={{ color: '#9ca3af' }}>Solidity:</strong>
+                          <div style={{ marginTop: '2px', color: '#f3f4f6' }}>
+                            {formatNumber(props.solidity, 3)}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {props.convexity !== null && props.convexity !== undefined && (
+                        <div title="Perimeter of convex hull / perimeter (smoothness)">
+                          <strong style={{ color: '#9ca3af' }}>Convexity:</strong>
+                          <div style={{ marginTop: '2px', color: '#f3f4f6' }}>
+                            {formatNumber(props.convexity, 3)}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            ) : null}
 
           </div>
         </div>

@@ -734,7 +734,12 @@ class WeaviateSimilarityService:
                     collection_name=collection_name,
                     application_id=application_id,
                     limit=10000,
-                    return_properties=["image_id", "description", "metadata", "dataset_id", "file_path", "preview_image", "tag"],
+                    return_properties=[
+                        "image_id", "description", "metadata", "dataset_id", "file_path", "preview_image", "tag",
+                        # Cell morphology measurements
+                        "area", "perimeter", "equivalent_diameter", "bbox_width", "bbox_height",
+                        "aspect_ratio", "circularity", "eccentricity", "solidity", "convexity"
+                    ],
                     include_vector=include_vector
                 )
                 
