@@ -36,8 +36,8 @@ services:
       test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/agent-lens/services/probes/readiness-agent-lens | jq -e '.status == \"ok\"'"]
       interval: 120s
       timeout: 60s
-      retries: 1
-      start_period: 120s
+      retries: 3
+      start_period: 300s
     restart: on-failure
     stop_grace_period: 30s
     security_opt:
@@ -92,8 +92,8 @@ services:
     restart: always
     environment:
       - AUTOHEAL_CONTAINER_LABEL=autoheal.enable
-      - AUTOHEAL_INTERVAL=10
-      - AUTOHEAL_START_PERIOD=30
+      - AUTOHEAL_INTERVAL=60
+      - AUTOHEAL_START_PERIOD=300
       - AUTOHEAL_DEFAULT_STOP_TIMEOUT=30
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
