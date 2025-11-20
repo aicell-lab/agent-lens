@@ -1,6 +1,6 @@
 services:
   agent-lens:
-    image: ghcr.io/aicell-lab/agent-lens:sha-d7141bb
+    image: ghcr.io/aicell-lab/agent-lens:sha-59f00a0
     container_name: agent-lens
     # Optimize image pulling
     pull_policy: if_not_present
@@ -46,7 +46,7 @@ services:
       - ALL
 
   squid-control:
-    image: ghcr.io/aicell-lab/squid-control:sha-a49b865
+    image: ghcr.io/aicell-lab/squid-control:sha-137975b
     container_name: squid-control
     # Optimize image pulling
     pull_policy: if_not_present

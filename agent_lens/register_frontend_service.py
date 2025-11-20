@@ -20,6 +20,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 import uuid
 import traceback
 import asyncio
+import base64
 # Import similarity search utilities
 from agent_lens.utils.weaviate_search import similarity_service, WEAVIATE_COLLECTION_NAME
 
@@ -1365,7 +1366,65 @@ async def setup_service(server, server_id="agent-lens"):
             logger.warning(f"Warning: Failed to connect AgentLensArtifactManager: {e}")
             logger.warning("Some endpoints may not function correctly.")
     
-    # Register the service
+    # Define simple hypha-rpc service method for batch image embedding generation
+    async def generate_image_embeddings_batch_rpc(images_base64: List[str]) -> dict:
+        """
+        Generate CLIP image embeddings for multiple images in batch via hypha-rpc.
+        
+        This endpoint uses optimized batch processing with parallel I/O for significantly faster
+        embedding generation, especially when using GPU acceleration.
+        
+        Args:
+            images_base64: List of base64-encoded image data strings
+            
+        Returns:
+            dict: JSON object with success flag, results array, and count
+        """
+        try:
+            if not images_base64 or len(images_base64) == 0:
+                raise ValueError("At least one image is required")
+            
+            # Decode all base64 image data
+            image_bytes_list = []
+            valid_indices = []
+            
+            for idx, image_base64 in enumerate(images_base64):
+                try:
+                    image_bytes = base64.b64decode(image_base64)
+                    if image_bytes:
+                        image_bytes_list.append(image_bytes)
+                        valid_indices.append(idx)
+                except Exception as e:
+                    logger.warning(f"Failed to decode image at index {idx}: {e}")
+            
+            if not image_bytes_list:
+                raise ValueError("No valid images found in request")
+            
+            from agent_lens.utils.weaviate_search import generate_image_embeddings_batch
+            embeddings = await generate_image_embeddings_batch(image_bytes_list)
+            
+            # Map results back to original order
+            results = [None] * len(images_base64)
+            for valid_idx, embedding in zip(valid_indices, embeddings):
+                if embedding is not None:
+                    results[valid_idx] = {
+                        "success": True,
+                        "embedding": embedding,
+                        "dimension": len(embedding),
+                        "model": "ViT-B/32"
+                    }
+            
+            return {
+                "success": True,
+                "results": results,
+                "count": len(results)
+            }
+        except Exception as e:
+            logger.error(f"Error generating batch image embeddings via RPC: {e}")
+            logger.error(traceback.format_exc())
+            raise
+    
+    # Register the service with both ASGI and RPC methods
     await server.register_service(
         {
             "id": server_id,
@@ -1373,10 +1432,14 @@ async def setup_service(server, server_id="agent-lens"):
             "type": "asgi",
             "serve": get_frontend_api(),
             "config": {"visibility": "public"},
+            # Register RPC method for batch image embedding generation
+            "generate_image_embeddings_batch": generate_image_embeddings_batch_rpc,
         }
     )
 
     logger.info(f"Frontend service registered successfully with ID: {server_id}")
+    logger.info("Embedding generation method available via hypha-rpc:")
+    logger.info("  - generate_image_embeddings_batch")
 
     # Store the cleanup function in the server's config
     # Note: No specific cleanup needed since artifact_manager_instance is global
