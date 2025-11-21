@@ -1366,6 +1366,34 @@ async def setup_service(server, server_id="agent-lens"):
             logger.warning(f"Warning: Failed to connect AgentLensArtifactManager: {e}")
             logger.warning("Some endpoints may not function correctly.")
     
+    # Define simple hypha-rpc service method for text embedding generation
+    async def generate_text_embedding_rpc(text: str) -> dict:
+        """
+        Generate a CLIP text embedding via hypha-rpc.
+        
+        Args:
+            text: Text input to generate embedding for
+            
+        Returns:
+            dict: JSON object with embedding vector and metadata
+        """
+        try:
+            if not text or not text.strip():
+                raise ValueError("Text input cannot be empty")
+            
+            from agent_lens.utils.weaviate_search import generate_text_embedding
+            embedding = await generate_text_embedding(text.strip())
+            return {
+                "model": "ViT-B/32",
+                "embedding": embedding,
+                "dimension": len(embedding),
+                "text": text.strip()
+            }
+        except Exception as e:
+            logger.error(f"Error generating text embedding via RPC: {e}")
+            logger.error(traceback.format_exc())
+            raise
+    
     # Define simple hypha-rpc service method for batch image embedding generation
     async def generate_image_embeddings_batch_rpc(images_base64: List[str]) -> dict:
         """
@@ -1432,14 +1460,13 @@ async def setup_service(server, server_id="agent-lens"):
             "type": "asgi",
             "serve": get_frontend_api(),
             "config": {"visibility": "public"},
-            # Register RPC method for batch image embedding generation
+            # Register RPC methods for embedding generation
+            "generate_text_embedding": generate_text_embedding_rpc,
             "generate_image_embeddings_batch": generate_image_embeddings_batch_rpc,
         }
     )
 
     logger.info(f"Frontend service registered successfully with ID: {server_id}")
-    logger.info("Embedding generation method available via hypha-rpc:")
-    logger.info("  - generate_image_embeddings_batch")
 
     # Store the cleanup function in the server's config
     # Note: No specific cleanup needed since artifact_manager_instance is global
