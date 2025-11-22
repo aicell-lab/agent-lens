@@ -575,47 +575,47 @@ const SimilarityResultInfoWindow = ({
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '11px' }}>
                       {/* Size measurements */}
                       {props.area !== null && props.area !== undefined && (
-                        <div title="Cell area in µm²">
+                        <div title="Cell area in pixels">
                           <strong style={{ color: '#9ca3af' }}>Area:</strong>
                           <div style={{ marginTop: '2px', color: '#f3f4f6' }}>
-                            {formatNumber(props.area, 1)} µm²
+                            {formatNumber(props.area, 1)} px²
                           </div>
                         </div>
                       )}
                       
                       {props.perimeter !== null && props.perimeter !== undefined && (
-                        <div title="Cell perimeter in µm">
+                        <div title="Cell perimeter in pixels">
                           <strong style={{ color: '#9ca3af' }}>Perimeter:</strong>
                           <div style={{ marginTop: '2px', color: '#f3f4f6' }}>
-                            {formatNumber(props.perimeter, 1)} µm
+                            {formatNumber(props.perimeter, 1)} px
                           </div>
                         </div>
                       )}
                       
                       {props.equivalent_diameter !== null && props.equivalent_diameter !== undefined && (
-                        <div title="Diameter of circle with same area in µm">
+                        <div title="Diameter of circle with same area in pixels">
                           <strong style={{ color: '#9ca3af' }}>Eq. Diameter:</strong>
                           <div style={{ marginTop: '2px', color: '#f3f4f6' }}>
-                            {formatNumber(props.equivalent_diameter, 2)} µm
+                            {formatNumber(props.equivalent_diameter, 2)} px
                           </div>
                         </div>
                       )}
                       
                       {/* Bounding box */}
                       {props.bbox_width !== null && props.bbox_width !== undefined && (
-                        <div title="Bounding box width in µm">
+                        <div title="Bounding box width in pixels">
                           <strong style={{ color: '#9ca3af' }}>BBox Width:</strong>
                           <div style={{ marginTop: '2px', color: '#f3f4f6' }}>
-                            {formatNumber(props.bbox_width, 1)} µm
+                            {formatNumber(props.bbox_width, 1)} px
                           </div>
                         </div>
                       )}
                       
                       {props.bbox_height !== null && props.bbox_height !== undefined && (
-                        <div title="Bounding box height in µm">
+                        <div title="Bounding box height in pixels">
                           <strong style={{ color: '#9ca3af' }}>BBox Height:</strong>
                           <div style={{ marginTop: '2px', color: '#f3f4f6' }}>
-                            {formatNumber(props.bbox_height, 1)} µm
+                            {formatNumber(props.bbox_height, 1)} px
                           </div>
                         </div>
                       )}

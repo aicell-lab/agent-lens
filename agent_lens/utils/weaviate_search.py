@@ -257,11 +257,11 @@ class WeaviateSimilarityService:
                 {"name": "preview_image", "dataType": ["blob"]},  # Base64 encoded 50x50 preview
                 {"name": "tag", "dataType": ["text"]},  # Tag field for categorization
                 # Cell morphology measurements for downstream analysis
-                {"name": "area", "dataType": ["number"]},  # Cell area in pixels or µm²
-                {"name": "perimeter", "dataType": ["number"]},  # Cell perimeter
-                {"name": "equivalent_diameter", "dataType": ["number"]},  # Diameter of circle with same area
-                {"name": "bbox_width", "dataType": ["number"]},  # Bounding box width
-                {"name": "bbox_height", "dataType": ["number"]},  # Bounding box height
+                {"name": "area", "dataType": ["number"]},  # Cell area in pixels
+                {"name": "perimeter", "dataType": ["number"]},  # Cell perimeter in pixels
+                {"name": "equivalent_diameter", "dataType": ["number"]},  # Diameter of circle with same area in pixels
+                {"name": "bbox_width", "dataType": ["number"]},  # Bounding box width in pixels
+                {"name": "bbox_height", "dataType": ["number"]},  # Bounding box height in pixels
                 {"name": "aspect_ratio", "dataType": ["number"]},  # Major axis / minor axis (elongation)
                 {"name": "circularity", "dataType": ["number"]},  # 4πA / P² (roundness)
                 {"name": "eccentricity", "dataType": ["number"]},  # 0 = circle, → 1 elongated
