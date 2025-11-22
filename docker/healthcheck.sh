@@ -19,7 +19,7 @@ check_health() {
 
 # Check agent-lens health
 if [ "$SERVICE" = "agent-lens" ]; then
-    check_health "https://hypha.aicell.io/agent-lens/services/probes/liveness-agent-lens" "agent-lens"
+    check_health "https://hypha.aicell.io/agent-lens/services/probes/liveness" "agent-lens"
 # Check squid-control health
 elif [ "$SERVICE" = "squid-control" ]; then
     check_health "https://hypha.aicell.io/agent-lens/services/${MICROSCOPE_SERVICE_ID}/is_service_healthy" "squid-control"

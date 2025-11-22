@@ -1225,7 +1225,7 @@ def get_frontend_api():
 
     @app.get("/similarity/list-applications")
     async def list_annotation_applications(
-        collection_name: str,
+        collection_name: str = WEAVIATE_COLLECTION_NAME,
         prefix: str = None,
         limit: int = 1000
     ):
@@ -1268,7 +1268,7 @@ def get_frontend_api():
             raise HTTPException(status_code=500, detail=str(e))
 
     @app.get("/similarity/collections/{collection_name}/exists")
-    async def check_collection_exists(collection_name: str):
+    async def check_collection_exists(collection_name: str = WEAVIATE_COLLECTION_NAME):
         """
         Check if a collection exists.
         
@@ -1467,6 +1467,67 @@ async def setup_service(server, server_id="agent-lens"):
     )
 
     logger.info(f"Frontend service registered successfully with ID: {server_id}")
+
+    # Register health probes if running in Docker mode
+    if is_docker:
+        logger.info("Docker mode detected - registering health probes...")
+        
+        def check_readiness():
+            """Check if the service is ready to accept requests."""
+            return {"status": "ok", "service": server_id}
+        
+        async def check_liveness():
+            """
+            Check if the service is alive and all critical connections are working.
+            This checks:
+            1. Artifact manager connection (for microscope galleries)
+            2. Weaviate connection (for similarity search)
+            """
+            health_status = {
+                "status": "ok",
+                "service": server_id,
+                "checks": {}
+            }
+            
+            # Check 1: Artifact manager connection
+            try:
+                # Try to list microscope galleries to verify artifact manager is working
+                result = await artifact_manager_instance.list_microscope_galleries(microscope_service_id="microscope-squid-1")
+                if result and not result.get("error"):
+                    health_status["checks"]["artifact_manager"] = "ok"
+                else:
+                    health_status["checks"]["artifact_manager"] = "degraded"
+                    health_status["status"] = "degraded"
+            except Exception as e:
+                logger.warning(f"Artifact manager health check failed: {e}")
+                health_status["checks"]["artifact_manager"] = f"error: {str(e)}"
+                health_status["status"] = "degraded"
+            
+            # Check 2: Weaviate connection (similarity search)
+            try:
+                # Check if the default collection exists to verify Weaviate connection
+                exists = await similarity_service.collection_exists(WEAVIATE_COLLECTION_NAME)
+                health_status["checks"]["weaviate"] = "ok" if exists is not None else "error"
+                if exists is None:
+                    health_status["status"] = "degraded"
+            except Exception as e:
+                logger.warning(f"Weaviate health check failed: {e}")
+                health_status["checks"]["weaviate"] = f"error: {str(e)}"
+                health_status["status"] = "degraded"
+            
+            return health_status
+        
+        # Register probes for the service
+        await server.register_probes({
+            "readiness": check_readiness,
+            "liveness": check_liveness,
+        })
+        
+        logger.info(f"Health probes registered at workspace: {server.config.workspace}")
+        logger.info(f"Liveness probe URL: {SERVER_URL}/{server.config.workspace}/services/probes/liveness")
+        logger.info(f"Readiness probe URL: {SERVER_URL}/{server.config.workspace}/services/probes/readiness")
+    else:
+        logger.info("Not in Docker mode - skipping health probe registration")
 
     # Store the cleanup function in the server's config
     # Note: No specific cleanup needed since artifact_manager_instance is global
