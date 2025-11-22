@@ -2053,17 +2053,32 @@ const MicroscopeControlPanel = ({
                 <p className="text-xs text-gray-500">No imaging tasks found for this microscope.</p>
               ) : (
                 <ul className="list-disc pl-5 space-y-1 text-xs">
-                  {imagingTasks.map(task => (
-                    <li 
-                      key={task.name} 
-                      className={`cursor-pointer hover:text-blue-600 ${task.operational_state?.status !== 'completed' && task.operational_state?.status !== 'failed' ? 'font-semibold text-blue-700' : 'text-gray-600'}`}
-                      onClick={() => openImagingTaskModal(task)}
-                      title={`Status: ${task.operational_state?.status || 'Unknown'}. Click to manage.`}
-                    >
-                      {task.name} ({task.operational_state?.status || 'Unknown'})
-                      {task.operational_state?.status !== 'completed' && task.operational_state?.status !== 'failed' && <i className="fas fa-spinner fa-spin ml-2 text-blue-500"></i>}
-                    </li>
-                  ))}
+                  {imagingTasks.map(task => {
+                    const status = task.operational_state?.status || 'Unknown';
+                    const isPaused = status === 'paused';
+                    const isActive = status !== 'completed' && status !== 'failed' && status !== 'paused';
+                    const isCompleted = status === 'completed';
+                    const isFailed = status === 'failed';
+                    
+                    return (
+                      <li 
+                        key={task.name} 
+                        className={`cursor-pointer hover:text-blue-600 ${
+                          isActive ? 'font-semibold text-blue-700' : 
+                          isPaused ? 'font-semibold text-yellow-600' :
+                          isFailed ? 'text-red-600' :
+                          'text-gray-600'
+                        }`}
+                        onClick={() => openImagingTaskModal(task)}
+                        title={`Status: ${status}. Click to manage.`}
+                      >
+                        {task.name} ({status})
+                        {isActive && <i className="fas fa-spinner fa-spin ml-2 text-blue-500"></i>}
+                        {isPaused && <i className="fas fa-pause ml-2 text-yellow-500"></i>}
+                        {isFailed && <i className="fas fa-exclamation-triangle ml-2 text-red-500"></i>}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </div>

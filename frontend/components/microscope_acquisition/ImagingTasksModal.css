@@ -199,6 +199,14 @@ input[type="checkbox"]:disabled ~ span {
   background-color: #5a6268; /* Tailwind: hover:bg-gray-600 */
 }
 
+.imaging-tasks-modal-footer .action-button.warning {
+  background-color: #ffc107; /* Tailwind: bg-yellow-500 */
+  color: #212529; /* Dark text for better contrast on yellow */
+}
+.imaging-tasks-modal-footer .action-button.warning:hover:not(:disabled) {
+  background-color: #e0a800; /* Tailwind: hover:bg-yellow-600 */
+}
+
 .imaging-tasks-modal-footer .action-button.danger {
   background-color: #dc3545; /* Tailwind: bg-red-500 */
   color: white;

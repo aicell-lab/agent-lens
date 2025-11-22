@@ -709,6 +709,52 @@ const ImagingTasksModal = ({
     }
   };
 
+  const handlePauseTask = async () => {
+    if (task && task.name) {
+      appendLog(`Attempting to pause task '${task.name}'...`);
+      try {
+        const result = await orchestratorManagerService.pause_imaging_task(task.name);
+        if (result && result.success) {
+          showNotification(`Task '${task.name}' paused successfully.`, 'success');
+          appendLog(`Task '${task.name}' paused: ${result.message}`);
+          if(onTaskChange) onTaskChange(); // Refresh tasks in parent
+        } else {
+          showNotification(`Failed to pause task '${task.name}': ${result ? result.message : 'Unknown error'}`, 'error');
+          appendLog(`Failed to pause task '${task.name}': ${result ? result.message : 'Unknown error'}`);
+        }
+      } catch (error) {
+        showNotification(`Error pausing task '${task.name}': ${error.message}`, 'error');
+        appendLog(`Error pausing task '${task.name}': ${error.message}`);
+        console.error("Error pausing task:", error);
+      }
+    } else {
+      showNotification('No task selected for pausing or task name is missing.', 'warning');
+    }
+  };
+
+  const handleResumeTask = async () => {
+    if (task && task.name) {
+      appendLog(`Attempting to resume task '${task.name}'...`);
+      try {
+        const result = await orchestratorManagerService.resume_imaging_task(task.name);
+        if (result && result.success) {
+          showNotification(`Task '${task.name}' resumed successfully.`, 'success');
+          appendLog(`Task '${task.name}' resumed: ${result.message}`);
+          if(onTaskChange) onTaskChange(); // Refresh tasks in parent
+        } else {
+          showNotification(`Failed to resume task '${task.name}': ${result ? result.message : 'Unknown error'}`, 'error');
+          appendLog(`Failed to resume task '${task.name}': ${result ? result.message : 'Unknown error'}`);
+        }
+      } catch (error) {
+        showNotification(`Error resuming task '${task.name}': ${error.message}`, 'error');
+        appendLog(`Error resuming task '${task.name}': ${error.message}`);
+        console.error("Error resuming task:", error);
+      }
+    } else {
+      showNotification('No task selected for resuming or task name is missing.', 'warning');
+    }
+  };
+
   const handleDeleteTask = async () => {
     if (task && task.name) {
       appendLog(`Attempting to delete task '${task.name}'...`);
@@ -1262,6 +1308,32 @@ const ImagingTasksModal = ({
             )}
             {task && (
                 <>
+                    {/* Pause/Resume buttons - shown for active tasks */}
+                    {task.operational_state?.status !== 'completed' && task.operational_state?.status !== 'failed' && (
+                      <>
+                        {task.operational_state?.status === 'paused' ? (
+                          <button 
+                            onClick={handleResumeTask} 
+                            className="action-button primary mr-2"
+                            title="Resume the paused imaging task"
+                          >
+                            <i className="fas fa-play mr-1"></i> Resume Task
+                            <TutorialTooltip text="Resume this paused task. The task will continue processing from where it was paused." />
+                          </button>
+                        ) : (
+                          <button 
+                            onClick={handlePauseTask} 
+                            className="action-button warning mr-2"
+                            title="Pause the imaging task"
+                          >
+                            <i className="fas fa-pause mr-1"></i> Pause Task
+                            <TutorialTooltip text="Pause this task to temporarily stop it from being processed. You can resume it later." />
+                          </button>
+                        )}
+                      </>
+                    )}
+                    
+                    {/* Upload button - only for completed tasks */}
                     {task.operational_state?.status === 'completed' && (
                         <button 
                             onClick={handleUploadTask} 
@@ -1273,6 +1345,8 @@ const ImagingTasksModal = ({
                             <TutorialTooltip text="Upload and stitch completed time-lapse images to the artifact manager for viewing and analysis. This process will combine all time points into a single dataset." />
                         </button>
                     )}
+                    
+                    {/* Delete button - always available for existing tasks */}
                     <button 
                         onClick={handleDeleteTask} 
                         className="action-button danger"
