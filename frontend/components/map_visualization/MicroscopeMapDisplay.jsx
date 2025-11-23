@@ -7,6 +7,7 @@ import useExperimentZarrManager from './ExperimentZarrManager';
 import TileProcessingManager from './TileProcessingManager';
 import QuickScanConfig from '../microscope_acquisition/QuickScanConfig';
 import NormalScanConfig from '../microscope_acquisition/NormalScanConfig';
+import WellPlateOffsetPanel from './WellPlateOffsetPanel';
 import SimilaritySearchPanel from '../similarity_search/SimilaritySearchPanel';
 import AnnotationCanvas from '../similarity_search/AnnotationCanvas';
 import SimilarityResultsRenderer from '../similarity_search/SimilarityResultsRenderer';
@@ -106,6 +107,25 @@ const MicroscopeMapDisplay = forwardRef(({
       setMicroscopeBusy(false);
     }
   }, [microscopeControlService, microscopeBusy, currentOperation, setMicroscopeBusy, appendLog]);
+
+  // Handler to reload microscope configuration after offset changes
+  const handleConfigurationUpdated = useCallback(async () => {
+    if (!microscopeControlService) return;
+    
+    try {
+      if (appendLog) appendLog('Reloading microscope configuration...');
+      const response = await microscopeControlService.get_microscope_configuration();
+      
+      if (response.success) {
+        if (appendLog) appendLog('Configuration reloaded successfully');
+        // Note: The configuration state is managed by the parent component (MicroscopeControlPanel)
+        // The parent will receive the updated configuration through its normal mechanisms
+      }
+    } catch (error) {
+      if (appendLog) appendLog(`Error reloading configuration: ${error.message}`);
+      console.error('[MicroscopeMapDisplay] Configuration reload error:', error);
+    }
+  }, [microscopeControlService, appendLog]);
   
   // Close scan configurations when switching to simulated microscope (basic cleanup only)
   useEffect(() => {
@@ -155,6 +175,16 @@ const MicroscopeMapDisplay = forwardRef(({
       }));
     }
   }, [selectedMicroscopeId]);
+
+  // Sync well plate offset values from microscope configuration
+  useEffect(() => {
+    if (microscopeConfiguration?.wellplate) {
+      const offsetX = microscopeConfiguration.wellplate.offset_x_mm ?? 0;
+      const offsetY = microscopeConfiguration.wellplate.offset_y_mm ?? 0;
+      setWellPlateOffsetX(offsetX);
+      setWellPlateOffsetY(offsetY);
+    }
+  }, [microscopeConfiguration]);
 
   
   // Map view mode: 'FOV_FITTED' for fitted video view, 'FREE_PAN' for stage map view
@@ -209,6 +239,11 @@ const MicroscopeMapDisplay = forwardRef(({
     velocity_scan_mm_per_s: 7.0,
     uploading: false
   });
+
+  // Well plate offset adjustment states
+  const [showWellPlateOffsetPanel, setShowWellPlateOffsetPanel] = useState(false);
+  const [wellPlateOffsetX, setWellPlateOffsetX] = useState(0);
+  const [wellPlateOffsetY, setWellPlateOffsetY] = useState(0);
 
   // Segmentation state management
   const [segmentationState, setSegmentationState] = useState({
@@ -1538,6 +1573,21 @@ const MicroscopeMapDisplay = forwardRef(({
     quickScanParameters.velocity_scan_mm_per_s,
     (value) => setQuickScanParameters(prev => ({ ...prev, velocity_scan_mm_per_s: value })),
     { min: 1, max: 30, allowFloat: true },
+    showNotification
+  );
+
+  // Validation hooks for well plate offset parameters with "Enter to confirm" behavior
+  const offsetXInput = useValidatedNumberInput(
+    wellPlateOffsetX,
+    (value) => setWellPlateOffsetX(value),
+    { min: -10, max: 10, allowFloat: true, allowEmpty: false },
+    showNotification
+  );
+
+  const offsetYInput = useValidatedNumberInput(
+    wellPlateOffsetY,
+    (value) => setWellPlateOffsetY(value),
+    { min: -10, max: 10, allowFloat: true, allowEmpty: false },
     showNotification
   );
   
@@ -5601,6 +5651,9 @@ const MicroscopeMapDisplay = forwardRef(({
                       showQuickScanConfig={showQuickScanConfig}
                       setShowQuickScanConfig={setShowQuickScanConfig}
                       
+                      // Well plate offset adjustment props
+                      setShowWellPlateOffsetPanel={setShowWellPlateOffsetPanel}
+                      
                       // Browse data modal props
                       setShowBrowseDataModal={setShowBrowseDataModal}
                       
@@ -6475,6 +6528,26 @@ const MicroscopeMapDisplay = forwardRef(({
         getWellPlateGridLabels={getWellPlateGridLabels}
         getWellIdFromIndex={getWellIdFromIndex}
         loadCurrentMicroscopeSettings={loadCurrentMicroscopeSettings}
+      />
+
+      {/* Well Plate Offset Adjustment Side Panel */}
+      <WellPlateOffsetPanel
+        // State props
+        showWellPlateOffsetPanel={showWellPlateOffsetPanel}
+        setShowWellPlateOffsetPanel={setShowWellPlateOffsetPanel}
+        microscopeConfiguration={microscopeConfiguration}
+        
+        // Service props
+        microscopeControlService={microscopeControlService}
+        appendLog={appendLog}
+        showNotification={showNotification}
+        
+        // Callback to reload configuration after save
+        onConfigurationUpdated={handleConfigurationUpdated}
+        
+        // Input validation hooks
+        offsetXInput={offsetXInput}
+        offsetYInput={offsetYInput}
       />
 
       {/* Browse Data Modal */}

@@ -55,6 +55,9 @@ const LayerPanel = ({
   setShowScanConfig,
   setShowQuickScanConfig,
   
+  // Well plate offset adjustment props
+  setShowWellPlateOffsetPanel,
+  
   // Browse data modal props
   setShowBrowseDataModal,
   
@@ -477,6 +480,16 @@ const LayerPanel = ({
                   {layer.type === 'plate-view' && (
                     <div className="channel-item channel-item--overlay">
                       <span className="channel-name">Plate Overlay</span>
+                      <div className="plate-controls">
+                        <button 
+                          className="control-btn"
+                          onClick={() => setShowWellPlateOffsetPanel(true)}
+                          title="Adjust well plate offset values"
+                        >
+                          <i className="fas fa-wrench mr-1"></i>
+                          Adjust Offset
+                        </button>
+                      </div>
                     </div>
                   )}
                   {layer.type === 'microscope-control' && (
@@ -1103,6 +1116,9 @@ LayerPanel.propTypes = {
   setShowScanConfig: PropTypes.func,
   showQuickScanConfig: PropTypes.bool,
   setShowQuickScanConfig: PropTypes.func,
+  
+  // Well plate offset adjustment props
+  setShowWellPlateOffsetPanel: PropTypes.func,
   
   // Browse data modal props
   setShowBrowseDataModal: PropTypes.func,
