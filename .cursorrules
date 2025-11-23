@@ -239,8 +239,7 @@ frontend/                  # React application
 
 docker/                   # Containerization
 ├── docker-compose-agent-lens-app.yml  # Main application compose
-├── dockerfile           # Main application container
-└── healthcheck.sh       # Health monitoring
+└── dockerfile           # Main application container
 
 scripts/                  # Development and deployment scripts
 ├── run_tests.py         # Comprehensive test runner

@@ -1,6 +1,6 @@
 services:
   agent-lens:
-    image: ghcr.io/aicell-lab/agent-lens:sha-9124c93
+    image: ghcr.io/aicell-lab/agent-lens:sha-c9b1ffe
     container_name: agent-lens
     # Optimize image pulling
     pull_policy: if_not_present
@@ -33,9 +33,9 @@ services:
         max_attempts: 3
         window: 120s
     healthcheck:
-      test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/agent-lens/services/probes/readiness-agent-lens | jq -e '.status == \"ok\"'"]
-      interval: 120s
-      timeout: 60s
+      test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/agent-lens/services/probes/liveness | jq -e '.status == \"ok\"'"]
+      interval: 600s
+      timeout: 120s
       retries: 3
       start_period: 300s
     restart: on-failure
@@ -67,7 +67,7 @@ services:
       - squid-control-cache:/app/.cache
     healthcheck:
       test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/agent-lens/services/squid-control-simulation/is_service_healthy | jq -e '.status == \"ok\"'"]
-      interval: 120s
+      interval: 600s
       timeout: 30s
       retries: 1
       start_period: 120s

@@ -198,16 +198,15 @@ const MicroscopeMapDisplay = forwardRef(({
   const [showQuickScanConfig, setShowQuickScanConfig] = useState(false);
   const [isQuickScanInProgress, setIsQuickScanInProgress] = useState(false);
   const [quickScanParameters, setQuickScanParameters] = useState({
-    well_plate_type: '96',
-    exposure_time: 4,
-    intensity: 100,
-    fps_target: 5,
-    n_stripes: 3,
-    stripe_width_mm: 4,
+    start_x_mm: 10,
+    start_y_mm: 6.5,
+    scan_width_mm: 119.0,
+    scan_height_mm: 70.0,
+    exposure_time: 5,
+    intensity: 70,
+    fps_target: 10,
     dy_mm: 0.85,
-    velocity_scan_mm_per_s: 3.0,
-    do_contrast_autofocus: false,
-    do_reflection_af: false,
+    velocity_scan_mm_per_s: 7.0,
     uploading: false
   });
 
@@ -1500,17 +1499,31 @@ const MicroscopeMapDisplay = forwardRef(({
     showNotification
   );
 
-  const quickStripesInput = useValidatedNumberInput(
-    quickScanParameters.n_stripes,
-    (value) => setQuickScanParameters(prev => ({ ...prev, n_stripes: value })),
-    { min: 1, max: 10, allowFloat: false },
+  const quickStartXInput = useValidatedNumberInput(
+    quickScanParameters.start_x_mm,
+    (value) => setQuickScanParameters(prev => ({ ...prev, start_x_mm: value })),
+    { min: -100, max: 100, allowFloat: true },
     showNotification
   );
 
-  const quickStripeWidthInput = useValidatedNumberInput(
-    quickScanParameters.stripe_width_mm,
-    (value) => setQuickScanParameters(prev => ({ ...prev, stripe_width_mm: value })),
-    { min: 0.5, max: 10.0, allowFloat: true },
+  const quickStartYInput = useValidatedNumberInput(
+    quickScanParameters.start_y_mm,
+    (value) => setQuickScanParameters(prev => ({ ...prev, start_y_mm: value })),
+    { min: -100, max: 100, allowFloat: true },
+    showNotification
+  );
+
+  const quickScanWidthInput = useValidatedNumberInput(
+    quickScanParameters.scan_width_mm,
+    (value) => setQuickScanParameters(prev => ({ ...prev, scan_width_mm: value })),
+    { min: 1, max: 200, allowFloat: true },
+    showNotification
+  );
+
+  const quickScanHeightInput = useValidatedNumberInput(
+    quickScanParameters.scan_height_mm,
+    (value) => setQuickScanParameters(prev => ({ ...prev, scan_height_mm: value })),
+    { min: 1, max: 200, allowFloat: true },
     showNotification
   );
 
@@ -6396,8 +6409,10 @@ const MicroscopeMapDisplay = forwardRef(({
         setCurrentOperation={setCurrentOperation}
         
         // Input validation hooks
-        quickStripesInput={quickStripesInput}
-        quickStripeWidthInput={quickStripeWidthInput}
+        quickStartXInput={quickStartXInput}
+        quickStartYInput={quickStartYInput}
+        quickScanWidthInput={quickScanWidthInput}
+        quickScanHeightInput={quickScanHeightInput}
         quickDyInput={quickDyInput}
         quickExposureInput={quickExposureInput}
         quickIntensityInput={quickIntensityInput}

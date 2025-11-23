@@ -11,7 +11,6 @@ const QuickScanConfig = ({
   isQuickScanInProgress,
   setIsQuickScanInProgress,
   activeExperiment,
-  wellPaddingMm,
   
   // Service props
   microscopeControlService,
@@ -23,8 +22,10 @@ const QuickScanConfig = ({
   setCurrentOperation,
   
   // Input validation hooks
-  quickStripesInput,
-  quickStripeWidthInput,
+  quickStartXInput,
+  quickStartYInput,
+  quickScanWidthInput,
+  quickScanHeightInput,
   quickDyInput,
   quickExposureInput,
   quickIntensityInput,
@@ -51,63 +52,93 @@ const QuickScanConfig = ({
       
       <div className="quick-scan-config-content">
         <div className="quick-scan-config-sections">
-          {/* Well Plate Type */}
-          <div className="quick-scan-config-section">
-            <label className="quick-scan-config-label">Well Plate Type</label>
-            <select
-              value={quickScanParameters.well_plate_type}
-              onChange={(e) => setQuickScanParameters(prev => ({ ...prev, well_plate_type: e.target.value }))}
-              className="quick-scan-config-select"
-              disabled={isQuickScanInProgress}
-            >
-              <option value="96">96-well plate</option>
-            </select>
-          </div>
-
-          {/* Stripe Pattern Configuration */}
+          {/* Scan Region Configuration */}
           <div className="quick-scan-config-section quick-scan-config-section--highlighted">
             <div className="quick-scan-config-section-header">
-              <i className="fas fa-grip-lines mr-1"></i>
-              Stripe Pattern
+              <i className="fas fa-vector-square mr-1"></i>
+              Scan Region
             </div>
             <div className="quick-scan-config-row">
               <div className="quick-scan-config-input-group">
-                <label className="quick-scan-config-label">Stripes per Well</label>
+                <label className="quick-scan-config-label">Start X (mm)</label>
                 <input
                   type="number"
-                  value={quickStripesInput.inputValue}
-                  onChange={quickStripesInput.handleInputChange}
-                  onKeyDown={quickStripesInput.handleKeyDown}
-                  onBlur={quickStripesInput.handleBlur}
+                  value={quickStartXInput.inputValue}
+                  onChange={quickStartXInput.handleInputChange}
+                  onKeyDown={quickStartXInput.handleKeyDown}
+                  onBlur={quickStartXInput.handleBlur}
                   className={getInputValidationClasses(
-                    quickStripesInput.isValid,
-                    quickStripesInput.hasUnsavedChanges,
+                    quickStartXInput.isValid,
+                    quickStartXInput.hasUnsavedChanges,
                     "quick-scan-config-input"
                   )}
-                  min="1"
-                  max="10"
+                  min="-100"
+                  max="100"
+                  step="0.1"
                   disabled={isQuickScanInProgress}
-                  placeholder="1-10"
+                  placeholder="X position"
                 />
               </div>
               <div className="quick-scan-config-input-group">
-                <label className="quick-scan-config-label">Stripe Width (mm)</label>
+                <label className="quick-scan-config-label">Start Y (mm)</label>
                 <input
                   type="number"
-                  value={quickStripeWidthInput.inputValue}
-                  onChange={quickStripeWidthInput.handleInputChange}
-                  onKeyDown={quickStripeWidthInput.handleKeyDown}
-                  onBlur={quickStripeWidthInput.handleBlur}
+                  value={quickStartYInput.inputValue}
+                  onChange={quickStartYInput.handleInputChange}
+                  onKeyDown={quickStartYInput.handleKeyDown}
+                  onBlur={quickStartYInput.handleBlur}
                   className={getInputValidationClasses(
-                    quickStripeWidthInput.isValid,
-                    quickStripeWidthInput.hasUnsavedChanges,
+                    quickStartYInput.isValid,
+                    quickStartYInput.hasUnsavedChanges,
                     "quick-scan-config-input"
                   )}
-                  min="0.5"
-                  max="10.0"
+                  min="-100"
+                  max="100"
                   step="0.1"
                   disabled={isQuickScanInProgress}
-                  placeholder="0.5-10.0"
+                  placeholder="Y position"
+                />
+              </div>
+            </div>
+            <div className="quick-scan-config-row">
+              <div className="quick-scan-config-input-group">
+                <label className="quick-scan-config-label">Width (mm)</label>
+                <input
+                  type="number"
+                  value={quickScanWidthInput.inputValue}
+                  onChange={quickScanWidthInput.handleInputChange}
+                  onKeyDown={quickScanWidthInput.handleKeyDown}
+                  onBlur={quickScanWidthInput.handleBlur}
+                  className={getInputValidationClasses(
+                    quickScanWidthInput.isValid,
+                    quickScanWidthInput.hasUnsavedChanges,
+                    "quick-scan-config-input"
+                  )}
+                  min="1"
+                  max="200"
+                  step="0.1"
+                  disabled={isQuickScanInProgress}
+                  placeholder="Scan width"
+                />
+              </div>
+              <div className="quick-scan-config-input-group">
+                <label className="quick-scan-config-label">Height (mm)</label>
+                <input
+                  type="number"
+                  value={quickScanHeightInput.inputValue}
+                  onChange={quickScanHeightInput.handleInputChange}
+                  onKeyDown={quickScanHeightInput.handleKeyDown}
+                  onBlur={quickScanHeightInput.handleBlur}
+                  className={getInputValidationClasses(
+                    quickScanHeightInput.isValid,
+                    quickScanHeightInput.hasUnsavedChanges,
+                    "quick-scan-config-input"
+                  )}
+                  min="1"
+                  max="200"
+                  step="0.1"
+                  disabled={isQuickScanInProgress}
+                  placeholder="Scan height"
                 />
               </div>
             </div>
@@ -181,48 +212,6 @@ const QuickScanConfig = ({
               </div>
             </div>
             
-            {/* Autofocus selection */}
-            <div className="quick-scan-config-autofocus">
-              <div className="quick-scan-config-section-header">
-                <i className="fas fa-bullseye mr-1"></i>
-                Autofocus
-              </div>
-              <div className="quick-scan-config-radio-group">
-                <label className="quick-scan-config-radio">
-                  <input
-                    type="radio"
-                    name="quickscan-autofocus"
-                    checked={!quickScanParameters.do_contrast_autofocus && !quickScanParameters.do_reflection_af}
-                    onChange={() => setQuickScanParameters(prev => ({ ...prev, do_contrast_autofocus: false, do_reflection_af: false }))}
-                    disabled={isQuickScanInProgress}
-                  />
-                  <span>None</span>
-                </label>
-                <label className="quick-scan-config-radio">
-                  <input
-                    type="radio"
-                    name="quickscan-autofocus"
-                    checked={quickScanParameters.do_contrast_autofocus}
-                    onChange={() => setQuickScanParameters(prev => ({ ...prev, do_contrast_autofocus: true, do_reflection_af: false }))}
-                    disabled={isQuickScanInProgress}
-                  />
-                  <span>Contrast Autofocus</span>
-                </label>
-                <label className="quick-scan-config-radio">
-                  <input
-                    type="radio"
-                    name="quickscan-autofocus"
-                    checked={quickScanParameters.do_reflection_af}
-                    onChange={() => setQuickScanParameters(prev => ({ ...prev, do_contrast_autofocus: false, do_reflection_af: true }))}
-                    disabled={isQuickScanInProgress}
-                  />
-                  <span>Reflection Autofocus</span>
-                </label>
-              </div>
-              <div className="quick-scan-config-hint">
-                Only one autofocus mode can be enabled for quick scan.
-              </div>
-            </div>
           </div>
 
           {/* Motion & Acquisition Settings */}
@@ -300,15 +289,14 @@ const QuickScanConfig = ({
             </div>
             <div className="quick-scan-config-info-list">
               <div>• Brightfield channel only</div>
-              <div>• {quickScanParameters.n_stripes}-stripe × {quickScanParameters.stripe_width_mm}mm serpentine pattern per well</div>
-              <div>• Maximum exposure: 30ms</div>
-              <div>• Scans entire {quickScanParameters.well_plate_type}-well plate</div>
+              <div>• Horizontal stripe serpentine pattern</div>
+              <div>• Scans rectangular region: {quickScanParameters.scan_width_mm}mm × {quickScanParameters.scan_height_mm}mm</div>
+              <div>• Starting position: ({quickScanParameters.start_x_mm}, {quickScanParameters.start_y_mm}) mm</div>
+              <div>• No autofocus - simple, fast scanning</div>
               <div>• Estimated scan time: {(() => {
-                const wellplateSizes = {'96': 96};
-                const wells = wellplateSizes[quickScanParameters.well_plate_type] || 96;
-                const stripesPerWell = quickScanParameters.n_stripes;
-                const timePerStripe = quickScanParameters.stripe_width_mm / quickScanParameters.velocity_scan_mm_per_s;
-                const estimatedTimeSeconds = wells * stripesPerWell * timePerStripe * 1.5; // 1.5x factor for movement overhead
+                const stripes = Math.ceil(quickScanParameters.scan_height_mm / quickScanParameters.dy_mm);
+                const timePerStripe = quickScanParameters.scan_width_mm / quickScanParameters.velocity_scan_mm_per_s;
+                const estimatedTimeSeconds = stripes * timePerStripe * 1.5; // 1.5x factor for movement overhead
                 return estimatedTimeSeconds < 60 ? `${Math.round(estimatedTimeSeconds)}s` : `${Math.round(estimatedTimeSeconds/60)}min`;
               })()}</div>
             </div>
@@ -351,20 +339,17 @@ const QuickScanConfig = ({
                   
                   const result = await microscopeControlService.scan_start({
                     saved_data_type: "quick_zarr",
-                    action_ID: 'quick_scan_' + Date.now(),
-                    well_plate_type: quickScanParameters.well_plate_type,
-                    well_padding_mm: wellPaddingMm,
+                    start_x_mm: quickScanParameters.start_x_mm,
+                    start_y_mm: quickScanParameters.start_y_mm,
+                    scan_width_mm: quickScanParameters.scan_width_mm,
+                    scan_height_mm: quickScanParameters.scan_height_mm,
                     dy_mm: quickScanParameters.dy_mm,
                     exposure_time: quickScanParameters.exposure_time,
                     intensity: quickScanParameters.intensity,
                     fps_target: quickScanParameters.fps_target,
-                    n_stripes: quickScanParameters.n_stripes,
-                    stripe_width_mm: quickScanParameters.stripe_width_mm,
                     velocity_scan_mm_per_s: quickScanParameters.velocity_scan_mm_per_s,
                     experiment_name: activeExperiment,
-                    uploading: quickScanParameters.uploading,
-                    do_contrast_autofocus: quickScanParameters.do_contrast_autofocus,
-                    do_reflection_af: quickScanParameters.do_reflection_af
+                    uploading: quickScanParameters.uploading
                   });
                   
                   if (appendLog) appendLog(`Quick scan start result: ${JSON.stringify(result)}`);
