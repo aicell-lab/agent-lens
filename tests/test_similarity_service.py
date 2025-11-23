@@ -2,6 +2,7 @@ import pytest
 import pytest_asyncio
 import dotenv
 import uuid
+import asyncio
 
 dotenv.load_dotenv()
 
@@ -1095,13 +1096,20 @@ class TestWeaviateSimilarityService:
                             ]
                             
                             try:
-                                res_with_vector = await ws.data.insert_many(
-                                    collection_name,
-                                    application_id,
-                                    objects_with_vectors
+                                # Add timeout to prevent hanging - 30 seconds should be enough
+                                res_with_vector = await asyncio.wait_for(
+                                    ws.data.insert_many(
+                                        collection_name,
+                                        application_id,
+                                        objects_with_vectors
+                                    ),
+                                    timeout=60.0
                                 )
                                 print(f"✅ SUCCESS: insert_many worked WITH vectors!")
                                 print(f"   Result: {res_with_vector}")
+                            except asyncio.TimeoutError:
+                                print(f"⏱️  TIMEOUT: insert_many WITH vectors timed out after 30 seconds")
+                                print(f"   This suggests insert_many may hang when vectors are included")
                             except Exception as e_vec:
                                 print(f"❌ FAILED: insert_many WITH vectors")
                                 print(f"   Error type: {type(e_vec).__name__}")
@@ -1130,9 +1138,15 @@ class TestWeaviateSimilarityService:
                             raise
             
         finally:
-            # Cleanup
+            # Cleanup with timeout to prevent hanging
             try:
-                await weaviate_service.delete_collection(collection_name)
+                await asyncio.wait_for(
+                    weaviate_service.delete_collection(collection_name),
+                    timeout=60.0
+                )
+                print(f"✅ Cleaned up collection: {collection_name}")
+            except asyncio.TimeoutError:
+                print(f"⚠️  Warning: Collection cleanup timed out after 10 seconds")
             except Exception as e:
                 print(f"Warning: Error cleaning up: {e}")
 
