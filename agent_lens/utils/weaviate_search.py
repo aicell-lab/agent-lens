@@ -266,7 +266,13 @@ class WeaviateSimilarityService:
                 {"name": "circularity", "dataType": ["number"]},  # 4πA / P² (roundness)
                 {"name": "eccentricity", "dataType": ["number"]},  # 0 = circle, → 1 elongated
                 {"name": "solidity", "dataType": ["number"]},  # Area / convex hull area
-                {"name": "convexity", "dataType": ["number"]}  # Smoothness of boundary
+                {"name": "convexity", "dataType": ["number"]},  # Smoothness of boundary
+                # Texture-based features from GLCM analysis
+                {"name": "brightness", "dataType": ["number"]},  # Mean pixel intensity (0-255)
+                {"name": "contrast", "dataType": ["number"]},  # GLCM contrast (texture variation)
+                {"name": "homogeneity", "dataType": ["number"]},  # GLCM homogeneity (texture smoothness, 0-1)
+                {"name": "energy", "dataType": ["number"]},  # GLCM energy/uniformity (0-1)
+                {"name": "correlation", "dataType": ["number"]}  # GLCM correlation (texture linearity, -1 to 1)
             ],
             "vectorizer": "none"  # We'll provide vectors manually
         }
@@ -298,7 +304,11 @@ class WeaviateSimilarityService:
                           equivalent_diameter: float = None, bbox_width: float = None,
                           bbox_height: float = None, aspect_ratio: float = None,
                           circularity: float = None, eccentricity: float = None,
-                          solidity: float = None, convexity: float = None) -> Dict[str, Any]:
+                          solidity: float = None, convexity: float = None,
+                          # Texture-based features from GLCM analysis
+                          brightness: float = None, contrast: float = None,
+                          homogeneity: float = None, energy: float = None,
+                          correlation: float = None) -> Dict[str, Any]:
         """Insert an image with its embedding into Weaviate."""
         if not await self.ensure_connected():
             raise RuntimeError("Not connected to Weaviate service")
@@ -322,7 +332,13 @@ class WeaviateSimilarityService:
             "circularity": circularity,
             "eccentricity": eccentricity,
             "solidity": solidity,
-            "convexity": convexity
+            "convexity": convexity,
+            # Texture-based features from GLCM analysis
+            "brightness": brightness,
+            "contrast": contrast,
+            "homogeneity": homogeneity,
+            "energy": energy,
+            "correlation": correlation
         }
         
         # Generate vector if not provided
@@ -490,7 +506,13 @@ class WeaviateSimilarityService:
             "circularity",
             "eccentricity",
             "solidity",
-            "convexity"
+            "convexity",
+            # Texture-based features from GLCM analysis
+            "brightness",
+            "contrast",
+            "homogeneity",
+            "energy",
+            "correlation"
         ]
         
         # Build query parameters - only include certainty if it's not None
@@ -565,7 +587,13 @@ class WeaviateSimilarityService:
             "circularity",
             "eccentricity",
             "solidity",
-            "convexity"
+            "convexity",
+            # Texture-based features from GLCM analysis
+            "brightness",
+            "contrast",
+            "homogeneity",
+            "energy",
+            "correlation"
         ]
         
         # Handle prefix matching vs exact matching
@@ -738,7 +766,9 @@ class WeaviateSimilarityService:
                         "image_id", "description", "metadata", "dataset_id", "file_path", "preview_image", "tag",
                         # Cell morphology measurements
                         "area", "perimeter", "equivalent_diameter", "bbox_width", "bbox_height",
-                        "aspect_ratio", "circularity", "eccentricity", "solidity", "convexity"
+                        "aspect_ratio", "circularity", "eccentricity", "solidity", "convexity",
+                        # Texture-based features from GLCM analysis
+                        "brightness", "contrast", "homogeneity", "energy", "correlation"
                     ],
                     include_vector=include_vector
                 )

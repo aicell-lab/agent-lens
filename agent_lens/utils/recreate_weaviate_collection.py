@@ -77,7 +77,13 @@ async def recreate_collection():
                 {"name": "circularity", "dataType": ["number"]},  # 4πA / P² (roundness)
                 {"name": "eccentricity", "dataType": ["number"]},  # 0 = circle, → 1 elongated
                 {"name": "solidity", "dataType": ["number"]},  # Area / convex hull area
-                {"name": "convexity", "dataType": ["number"]}  # Smoothness of boundary
+                {"name": "convexity", "dataType": ["number"]},  # Smoothness of boundary
+                # Texture-based features from GLCM analysis
+                {"name": "brightness", "dataType": ["number"]},  # Mean pixel intensity (0-255)
+                {"name": "contrast", "dataType": ["number"]},  # GLCM contrast (texture variation)
+                {"name": "homogeneity", "dataType": ["number"]},  # GLCM homogeneity (texture smoothness, 0-1)
+                {"name": "energy", "dataType": ["number"]},  # GLCM energy/uniformity (0-1)
+                {"name": "correlation", "dataType": ["number"]}  # GLCM correlation (texture linearity, -1 to 1)
             ],
             "vectorizer": "none"  # We'll provide vectors manually
         }
@@ -91,7 +97,6 @@ async def recreate_collection():
         print("✅ Done! Collection recreated successfully")
         print("\n⚠️  Note: All previous data in this collection has been deleted.")
         print("   You will need to re-insert your annotations.")
-        print("\n💡 You can now delete this script file: recreate_collection.py")
         
     except Exception as e:
         print(f"❌ Error: {e}")

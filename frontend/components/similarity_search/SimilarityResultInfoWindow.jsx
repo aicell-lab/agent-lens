@@ -121,6 +121,11 @@ const SimilarityResultInfoWindow = ({
     eccentricity: props.eccentricity,
     solidity: props.solidity,
     convexity: props.convexity,
+    brightness: props.brightness,
+    contrast: props.contrast,
+    homogeneity: props.homogeneity,
+    energy: props.energy,
+    correlation: props.correlation,
     allProps: Object.keys(props)
   });
   
@@ -558,7 +563,12 @@ const SimilarityResultInfoWindow = ({
              (props.circularity !== null && props.circularity !== undefined) ||
              (props.eccentricity !== null && props.eccentricity !== undefined) ||
              (props.solidity !== null && props.solidity !== undefined) ||
-             (props.convexity !== null && props.convexity !== undefined) ? (
+             (props.convexity !== null && props.convexity !== undefined) ||
+             (props.brightness !== null && props.brightness !== undefined) ||
+             (props.contrast !== null && props.contrast !== undefined) ||
+             (props.homogeneity !== null && props.homogeneity !== undefined) ||
+             (props.energy !== null && props.energy !== undefined) ||
+             (props.correlation !== null && props.correlation !== undefined) ? (
               <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #374151' }}>
                 <strong style={{ color: '#f3f4f6', fontSize: '12px', marginBottom: '8px', display: 'block' }}>
                   Cell Morphology:
@@ -662,6 +672,52 @@ const SimilarityResultInfoWindow = ({
                           <strong style={{ color: '#9ca3af' }}>Convexity:</strong>
                           <div style={{ marginTop: '2px', color: '#f3f4f6' }}>
                             {formatNumber(props.convexity, 3)}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Texture-based features from GLCM analysis */}
+                      {props.brightness !== null && props.brightness !== undefined && (
+                        <div title="Mean pixel intensity (0-255)">
+                          <strong style={{ color: '#9ca3af' }}>Brightness:</strong>
+                          <div style={{ marginTop: '2px', color: '#f3f4f6' }}>
+                            {formatNumber(props.brightness, 1)}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {props.contrast !== null && props.contrast !== undefined && (
+                        <div title="GLCM contrast (texture variation)">
+                          <strong style={{ color: '#9ca3af' }}>Contrast:</strong>
+                          <div style={{ marginTop: '2px', color: '#f3f4f6' }}>
+                            {formatNumber(props.contrast, 3)}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {props.homogeneity !== null && props.homogeneity !== undefined && (
+                        <div title="GLCM homogeneity (texture smoothness, 0-1)">
+                          <strong style={{ color: '#9ca3af' }}>Homogeneity:</strong>
+                          <div style={{ marginTop: '2px', color: '#f3f4f6' }}>
+                            {formatNumber(props.homogeneity, 3)}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {props.energy !== null && props.energy !== undefined && (
+                        <div title="GLCM energy/uniformity (0-1)">
+                          <strong style={{ color: '#9ca3af' }}>Energy:</strong>
+                          <div style={{ marginTop: '2px', color: '#f3f4f6' }}>
+                            {formatNumber(props.energy, 3)}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {props.correlation !== null && props.correlation !== undefined && (
+                        <div title="GLCM correlation (texture linearity, -1 to 1)">
+                          <strong style={{ color: '#9ca3af' }}>Correlation:</strong>
+                          <div style={{ marginTop: '2px', color: '#f3f4f6' }}>
+                            {formatNumber(props.correlation, 3)}
                           </div>
                         </div>
                       )}

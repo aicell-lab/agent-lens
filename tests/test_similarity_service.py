@@ -211,7 +211,13 @@ class TestWeaviateSimilarityService:
                     "circularity": 0.85 - i * 0.05,
                     "eccentricity": 0.3 + i * 0.1,
                     "solidity": 0.95 - i * 0.02,
-                    "convexity": 0.98 - i * 0.01
+                    "convexity": 0.98 - i * 0.01,
+                    # Texture-based features from GLCM analysis
+                    "brightness": 120 + i * 5,
+                    "contrast": 0.5 + i * 0.1,
+                    "homogeneity": 0.8 - i * 0.02,
+                    "energy": 0.6 + i * 0.05,
+                    "correlation": 0.3 + i * 0.1
                 }
                 test_images.append(image_data)
             
@@ -243,7 +249,13 @@ class TestWeaviateSimilarityService:
                     circularity=img_data["circularity"],
                     eccentricity=img_data["eccentricity"],
                     solidity=img_data["solidity"],
-                    convexity=img_data["convexity"]
+                    convexity=img_data["convexity"],
+                    # Texture-based features from GLCM analysis
+                    brightness=img_data["brightness"],
+                    contrast=img_data["contrast"],
+                    homogeneity=img_data["homogeneity"],
+                    energy=img_data["energy"],
+                    correlation=img_data["correlation"]
                 )
                 insert_results.append(result)
             
