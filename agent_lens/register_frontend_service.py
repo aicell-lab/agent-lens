@@ -4,7 +4,7 @@ that serves the frontend application.
 """
 
 import os
-from typing import List
+from typing import List, Optional
 from fastapi import FastAPI
 from fastapi import UploadFile, File, HTTPException, Form
 from fastapi.responses import FileResponse, HTMLResponse
@@ -1452,6 +1452,117 @@ async def setup_service(server, server_id="agent-lens"):
             logger.error(traceback.format_exc())
             raise
     
+    # Define hypha-rpc service method for UMAP clustering
+    async def make_umap_cluster_figure_base64_rpc(
+        all_cells: List[dict],
+        n_neighbors: int = 15,
+        min_dist: float = 0.1,
+        random_state: Optional[int] = None,
+        n_jobs: Optional[int] = 16,
+    ) -> dict:
+        """
+        Generate UMAP clustering visualization for cell embeddings via hypha-rpc.
+        
+        This method runs UMAP computation in a thread pool to avoid blocking the asyncio event loop.
+        For parallelism, set random_state=None and n_jobs=-1 (uses all CPU cores).
+        
+        Args:
+            all_cells: List of cell dictionaries, each should have 'embedding' key
+            n_neighbors: Number of neighbors for UMAP (default: 15)
+            min_dist: Minimum distance for UMAP (default: 0.1)
+            random_state: Random state for reproducibility. If None, allows parallelism (default: None)
+            n_jobs: Number of parallel jobs. -1 uses all CPU cores, None auto-selects based on random_state
+            
+        Returns:
+            dict: JSON object with success flag and base64 PNG string, or None if failed
+        """
+        try:
+            if not all_cells or len(all_cells) == 0:
+                return {
+                    "success": False,
+                    "error": "No cells provided",
+                    "image_base64": None
+                }
+            
+            from agent_lens.utils.umap_analysis_utils import make_umap_cluster_figure_base64
+            
+            # Run CPU-intensive UMAP computation in a thread pool to avoid blocking asyncio loop
+            image_base64 = await asyncio.to_thread(
+                make_umap_cluster_figure_base64,
+                all_cells=all_cells,
+                n_neighbors=n_neighbors,
+                min_dist=min_dist,
+                random_state=random_state,
+                n_jobs=n_jobs,
+            )
+            
+            if image_base64 is None:
+                return {
+                    "success": False,
+                    "error": "Failed to generate UMAP cluster figure (too few cells or other error)",
+                    "image_base64": None
+                }
+            
+            return {
+                "success": True,
+                "image_base64": image_base64,
+                "n_cells": len(all_cells)
+            }
+        except Exception as e:
+            logger.error(f"Error generating UMAP cluster figure via RPC: {e}")
+            logger.error(traceback.format_exc())
+            raise
+    
+    # Define hypha-rpc service method for interactive UMAP (HTML)
+    async def make_umap_cluster_figure_interactive_rpc(
+        all_cells: List[dict],
+        n_neighbors: int = 15,
+        min_dist: float = 0.1,
+        random_state: Optional[int] = None,
+        n_jobs: Optional[int] = None,
+    ) -> dict:
+        """
+        Generate interactive UMAP clustering visualization (Plotly HTML) via hypha-rpc.
+        
+        Returns HTML string that can be embedded in an iframe or div.
+        """
+        try:
+            if not all_cells or len(all_cells) == 0:
+                return {
+                    "success": False,
+                    "error": "No cells provided",
+                    "html": None
+                }
+            
+            from agent_lens.utils.umap_analysis_utils import make_umap_cluster_figure_interactive
+            
+            # Run in thread pool to avoid blocking
+            html = await asyncio.to_thread(
+                make_umap_cluster_figure_interactive,
+                all_cells=all_cells,
+                n_neighbors=n_neighbors,
+                min_dist=min_dist,
+                random_state=random_state,
+                n_jobs=n_jobs,
+            )
+            
+            if html is None:
+                return {
+                    "success": False,
+                    "error": "Failed to generate interactive UMAP figure (Plotly not available or too few cells)",
+                    "html": None
+                }
+            
+            return {
+                "success": True,
+                "html": html,
+                "n_cells": len(all_cells)
+            }
+        except Exception as e:
+            logger.error(f"Error generating interactive UMAP figure via RPC: {e}")
+            logger.error(traceback.format_exc())
+            raise
+    
     # Register the service with both ASGI and RPC methods
     await server.register_service(
         {
@@ -1463,6 +1574,9 @@ async def setup_service(server, server_id="agent-lens"):
             # Register RPC methods for embedding generation
             "generate_text_embedding": generate_text_embedding_rpc,
             "generate_image_embeddings_batch": generate_image_embeddings_batch_rpc,
+            # Register RPC methods for UMAP clustering
+            "make_umap_cluster_figure_base64": make_umap_cluster_figure_base64_rpc,
+            "make_umap_cluster_figure_interactive": make_umap_cluster_figure_interactive_rpc,
         }
     )
 
