@@ -111,6 +111,10 @@ const ImagingTasksModal = ({
   };
   // State for new task form fields
   const [taskName, setTaskName] = useState('');
+  const [scanMode, setScanMode] = useState('full_automation'); // 'full_automation' or 'microscope_only'
+  const [savedDataType, setSavedDataType] = useState('raw_images_well_plate'); // 'raw_images_well_plate' or 'raw_image_flexible'
+  const [positions, setPositions] = useState([]); // Array of position objects for flexible positioning
+  const [isCapturingPosition, setIsCapturingPosition] = useState(false);
   const [incubatorSlot, setIncubatorSlot] = useState(''); // Default to empty, will be populated
   const [availableSlots, setAvailableSlots] = useState([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
@@ -364,6 +368,9 @@ const ImagingTasksModal = ({
       setStartTime(localISOTime);
       setEndTime('');
       setTaskName('');
+      setScanMode('full_automation'); // Reset to default scan mode
+      setSavedDataType('raw_images_well_plate'); // Reset to default data type
+      setPositions([]); // Clear positions array
       setDoContrastAutofocus(false);
       setDoReflectionAf(true);
       setIntervalMinutes('30');
@@ -574,6 +581,245 @@ const ImagingTasksModal = ({
     }
   };
 
+  const handleCapturePosition = async () => {
+    if (!microscopeControlService) {
+      showNotification('Microscope service not available.', 'error');
+      return;
+    }
+
+    setIsCapturingPosition(true);
+    try {
+      appendLog('Capturing current microscope position...');
+      const status = await microscopeControlService.get_status();
+      
+      if (!status || status.current_x === undefined || status.current_y === undefined) {
+        showNotification('Failed to get microscope position.', 'error');
+        appendLog('Error: Could not retrieve microscope position from status.');
+        return;
+      }
+
+      // Prompt for position name
+      const positionName = window.prompt(
+        'Enter a name for this position (optional):',
+        `Position_${positions.length + 1}`
+      );
+      
+      // User cancelled
+      if (positionName === null) {
+        appendLog('Position capture cancelled by user.');
+        return;
+      }
+
+      // Prompt for Nx
+      const nxStr = window.prompt('Enter Nx (number of FOVs in X direction):', '3');
+      if (nxStr === null) return;
+      const nxVal = parseInt(nxStr, 10);
+      if (isNaN(nxVal) || nxVal < 1 || nxVal > 20) {
+        showNotification('Invalid Nx value. Must be between 1 and 20.', 'error');
+        return;
+      }
+
+      // Prompt for Ny
+      const nyStr = window.prompt('Enter Ny (number of FOVs in Y direction):', '3');
+      if (nyStr === null) return;
+      const nyVal = parseInt(nyStr, 10);
+      if (isNaN(nyVal) || nyVal < 1 || nyVal > 20) {
+        showNotification('Invalid Ny value. Must be between 1 and 20.', 'error');
+        return;
+      }
+
+      // Prompt for dx
+      const defaultSpacingVal = getDefaultSpacing();
+      const dxStr = window.prompt(`Enter dx (X spacing in mm):`, defaultSpacingVal.dx);
+      if (dxStr === null) return;
+      const dxVal = parseFloat(dxStr);
+      if (isNaN(dxVal) || dxVal < 0.1 || dxVal > 5.0) {
+        showNotification('Invalid dx value. Must be between 0.1 and 5.0 mm.', 'error');
+        return;
+      }
+
+      // Prompt for dy
+      const dyStr = window.prompt(`Enter dy (Y spacing in mm):`, defaultSpacingVal.dy);
+      if (dyStr === null) return;
+      const dyVal = parseFloat(dyStr);
+      if (isNaN(dyVal) || dyVal < 0.1 || dyVal > 5.0) {
+        showNotification('Invalid dy value. Must be between 0.1 and 5.0 mm.', 'error');
+        return;
+      }
+
+      const newPosition = {
+        x: status.current_x,
+        y: status.current_y,
+        z: status.current_z || 0,
+        Nx: nxVal,
+        Ny: nyVal,
+        dx: dxVal,
+        dy: dyVal,
+        name: positionName.trim() || `Position_${positions.length + 1}`
+      };
+
+      setPositions(prev => [...prev, newPosition]);
+      showNotification(`Position "${newPosition.name}" captured successfully.`, 'success');
+      appendLog(`Captured position: ${JSON.stringify(newPosition)}`);
+    } catch (error) {
+      showNotification(`Error capturing position: ${error.message}`, 'error');
+      appendLog(`Error capturing position: ${error.message}`);
+      console.error('Error capturing position:', error);
+    } finally {
+      setIsCapturingPosition(false);
+    }
+  };
+
+  const handleAddManualPosition = () => {
+    // Prompt for position name
+    const positionName = window.prompt(
+      'Enter a name for this position (optional):',
+      `Position_${positions.length + 1}`
+    );
+    
+    // User cancelled
+    if (positionName === null) {
+      return;
+    }
+
+    // Prompt for X coordinate
+    const xStr = window.prompt('Enter X coordinate (mm):', '0');
+    if (xStr === null) return;
+    const xVal = parseFloat(xStr);
+    if (isNaN(xVal)) {
+      showNotification('Invalid X coordinate. Must be a number.', 'error');
+      return;
+    }
+
+    // Prompt for Y coordinate
+    const yStr = window.prompt('Enter Y coordinate (mm):', '0');
+    if (yStr === null) return;
+    const yVal = parseFloat(yStr);
+    if (isNaN(yVal)) {
+      showNotification('Invalid Y coordinate. Must be a number.', 'error');
+      return;
+    }
+
+    // Prompt for Z coordinate
+    const zStr = window.prompt('Enter Z coordinate (mm, optional):', '0');
+    if (zStr === null) return;
+    const zVal = parseFloat(zStr);
+    if (isNaN(zVal)) {
+      showNotification('Invalid Z coordinate. Must be a number.', 'error');
+      return;
+    }
+
+    // Prompt for Nx
+    const nxStr = window.prompt('Enter Nx (number of FOVs in X direction):', '3');
+    if (nxStr === null) return;
+    const nxVal = parseInt(nxStr, 10);
+    if (isNaN(nxVal) || nxVal < 1 || nxVal > 20) {
+      showNotification('Invalid Nx value. Must be between 1 and 20.', 'error');
+      return;
+    }
+
+    // Prompt for Ny
+    const nyStr = window.prompt('Enter Ny (number of FOVs in Y direction):', '3');
+    if (nyStr === null) return;
+    const nyVal = parseInt(nyStr, 10);
+    if (isNaN(nyVal) || nyVal < 1 || nyVal > 20) {
+      showNotification('Invalid Ny value. Must be between 1 and 20.', 'error');
+      return;
+    }
+
+    // Prompt for dx
+    const defaultSpacingVal = getDefaultSpacing();
+    const dxStr = window.prompt(`Enter dx (X spacing in mm):`, defaultSpacingVal.dx);
+    if (dxStr === null) return;
+    const dxVal = parseFloat(dxStr);
+    if (isNaN(dxVal) || dxVal < 0.1 || dxVal > 5.0) {
+      showNotification('Invalid dx value. Must be between 0.1 and 5.0 mm.', 'error');
+      return;
+    }
+
+    // Prompt for dy
+    const dyStr = window.prompt(`Enter dy (Y spacing in mm):`, defaultSpacingVal.dy);
+    if (dyStr === null) return;
+    const dyVal = parseFloat(dyStr);
+    if (isNaN(dyVal) || dyVal < 0.1 || dyVal > 5.0) {
+      showNotification('Invalid dy value. Must be between 0.1 and 5.0 mm.', 'error');
+      return;
+    }
+
+    const newPosition = {
+      x: xVal,
+      y: yVal,
+      z: zVal,
+      Nx: nxVal,
+      Ny: nyVal,
+      dx: dxVal,
+      dy: dyVal,
+      name: positionName.trim() || `Position_${positions.length + 1}`
+    };
+
+    setPositions(prev => [...prev, newPosition]);
+    showNotification(`Position "${newPosition.name}" added successfully.`, 'success');
+    appendLog(`Added manual position: ${JSON.stringify(newPosition)}`);
+  };
+
+  const handleDeletePosition = (index) => {
+    const positionName = positions[index].name;
+    if (window.confirm(`Delete position "${positionName}"?`)) {
+      setPositions(prev => prev.filter((_, i) => i !== index));
+      showNotification(`Position "${positionName}" deleted.`, 'success');
+      appendLog(`Deleted position: ${positionName}`);
+    }
+  };
+
+  const handleEditPosition = (index) => {
+    const position = positions[index];
+    
+    // Prompt for new values with current values as defaults
+    const nxStr = window.prompt('Enter Nx (number of FOVs in X direction):', position.Nx.toString());
+    if (nxStr === null) return;
+    const nxVal = parseInt(nxStr, 10);
+    if (isNaN(nxVal) || nxVal < 1 || nxVal > 20) {
+      showNotification('Invalid Nx value. Must be between 1 and 20.', 'error');
+      return;
+    }
+
+    const nyStr = window.prompt('Enter Ny (number of FOVs in Y direction):', position.Ny.toString());
+    if (nyStr === null) return;
+    const nyVal = parseInt(nyStr, 10);
+    if (isNaN(nyVal) || nyVal < 1 || nyVal > 20) {
+      showNotification('Invalid Ny value. Must be between 1 and 20.', 'error');
+      return;
+    }
+
+    const dxStr = window.prompt('Enter dx (X spacing in mm):', position.dx.toString());
+    if (dxStr === null) return;
+    const dxVal = parseFloat(dxStr);
+    if (isNaN(dxVal) || dxVal < 0.1 || dxVal > 5.0) {
+      showNotification('Invalid dx value. Must be between 0.1 and 5.0 mm.', 'error');
+      return;
+    }
+
+    const dyStr = window.prompt('Enter dy (Y spacing in mm):', position.dy.toString());
+    if (dyStr === null) return;
+    const dyVal = parseFloat(dyStr);
+    if (isNaN(dyVal) || dyVal < 0.1 || dyVal > 5.0) {
+      showNotification('Invalid dy value. Must be between 0.1 and 5.0 mm.', 'error');
+      return;
+    }
+
+    const updatedPosition = {
+      ...position,
+      Nx: nxVal,
+      Ny: nyVal,
+      dx: dxVal,
+      dy: dyVal
+    };
+
+    setPositions(prev => prev.map((p, i) => i === index ? updatedPosition : p));
+    showNotification(`Position "${position.name}" updated.`, 'success');
+    appendLog(`Updated position: ${JSON.stringify(updatedPosition)}`);
+  };
+
   const handleCreateTask = async () => {
     console.log('[ImagingTasksModal] handleCreateTask started.'); // DIAGNOSTIC LOG
     
@@ -587,31 +833,51 @@ const ImagingTasksModal = ({
       showNotification('Task Name is required.', 'warning');
       return;
     }
-    if (!incubatorSlot) { // Check if incubatorSlot is selected
-        showNotification('A Sample/Slot selection is required.', 'warning');
+
+    // Validation based on scan mode
+    if (scanMode === 'full_automation') {
+      // Full automation mode requires incubator slot
+      if (!incubatorSlot) {
+        showNotification('A Sample/Slot selection is required for Full Automation mode.', 'warning');
         return;
-    }
-    // NEW CHECK: ensure the selected incubatorSlot is actually available.
-    const selectedSlotData = availableSlots.find(s => s.value === incubatorSlot);
-    if (!selectedSlotData || !selectedSlotData.isAvailableForTask) {
+      }
+      // Ensure the selected incubatorSlot is actually available
+      const selectedSlotData = availableSlots.find(s => s.value === incubatorSlot);
+      if (!selectedSlotData || !selectedSlotData.isAvailableForTask) {
         showNotification('The selected sample is not available in the incubator. Please choose an available sample from an incubator slot.', 'warning');
         return;
+      }
     }
-    if (!nx.trim()){
+    
+    // Validation based on scan type (applies to both modes)
+    if (savedDataType === 'raw_images_well_plate') {
+      // Well plate scan validation
+      if (selectedWells.length === 0) {
+        showNotification('At least one well must be selected for Well Plate Scan.', 'warning');
+        return;
+      }
+      if (!nx.trim()) {
         showNotification('Nx is required.', 'warning');
         return;
-    }
-    if (!ny.trim()){
+      }
+      if (!ny.trim()) {
         showNotification('Ny is required.', 'warning');
         return;
-    }
-    if (!dx.trim()){
+      }
+      if (!dx.trim()) {
         showNotification('dx is required.', 'warning');
         return;
-    }
-    if (!dy.trim()){
+      }
+      if (!dy.trim()) {
         showNotification('dy is required.', 'warning');
         return;
+      }
+    } else if (savedDataType === 'raw_image_flexible') {
+      // Flexible positions validation
+      if (positions.length === 0) {
+        showNotification('At least one position must be captured for Flexible Positions scan.', 'warning');
+        return;
+      }
     }
     
     const enabledIlluminationSettings = illuminationSettings.filter(setting => setting.enabled);
@@ -620,14 +886,8 @@ const ImagingTasksModal = ({
       return; 
     }
     
-    if (selectedWells.length === 0) { showNotification('At least one well must be selected.', 'warning'); return; }
-    
     const timePointsArray = pendingTimePoints.split('\n').map(tp => tp.trim()).filter(tp => tp);
     if (timePointsArray.length === 0) { showNotification('At least one Pending Time Point is required.', 'warning'); return; }
-
-    // Get well plate type from selected slot
-    const selectedSlotInfo = availableSlots.find(s => s.value === incubatorSlot);
-    const wellPlateType = selectedSlotInfo?.wellPlateType || '96';
 
     // Format illumination settings for the new API
     const formattedIlluminationSettings = enabledIlluminationSettings.map(setting => ({
@@ -636,25 +896,54 @@ const ImagingTasksModal = ({
       exposure_time: parseFloat(setting.exposure_time)
     }));
 
+    // Build task definition based on scan mode and scan type
     const taskDefinition = {
       name: taskName.trim(),
       settings: {
-        incubator_slot: parseInt(incubatorSlot, 10),
+        scan_mode: scanMode,
         allocated_microscope: getOrchestratorMicroscopeId(selectedMicroscopeId),
         pending_time_points: timePointsArray,
         imaged_time_points: [],
-        well_plate_type: wellPlateType,
         illumination_settings: formattedIlluminationSettings,
         do_contrast_autofocus: doContrastAutofocus,
         do_reflection_af: doReflectionAf,
-        wells_to_scan: selectedWells,
-        Nx: parseInt(nx, 10),
-        Ny: parseInt(ny, 10),
-        dx: parseFloat(dx),
-        dy: parseFloat(dy),
         action_ID: taskName.trim(),
       },
     };
+
+    // Add incubator slot for full automation mode
+    if (scanMode === 'full_automation') {
+      const selectedSlotInfo = availableSlots.find(s => s.value === incubatorSlot);
+      const wellPlateType = selectedSlotInfo?.wellPlateType || '96';
+      
+      taskDefinition.settings.incubator_slot = parseInt(incubatorSlot, 10);
+      taskDefinition.settings.well_plate_type = wellPlateType;
+      
+      // Always add saved_data_type for full automation (backend requires it)
+      taskDefinition.settings.saved_data_type = savedDataType;
+    }
+    
+    // Add saved_data_type for microscope_only mode (always needed)
+    if (scanMode === 'microscope_only') {
+      taskDefinition.settings.saved_data_type = savedDataType;
+    }
+    
+    // Add scan type specific fields (applies to both modes)
+    if (savedDataType === 'raw_images_well_plate') {
+      // Well plate scan fields
+      if (scanMode === 'microscope_only') {
+        // For microscope_only, add well_plate_type if not already set
+        taskDefinition.settings.well_plate_type = '96'; // Default, could be made configurable
+      }
+      taskDefinition.settings.wells_to_scan = selectedWells;
+      taskDefinition.settings.Nx = parseInt(nx, 10);
+      taskDefinition.settings.Ny = parseInt(ny, 10);
+      taskDefinition.settings.dx = parseFloat(dx);
+      taskDefinition.settings.dy = parseFloat(dy);
+    } else if (savedDataType === 'raw_image_flexible') {
+      // Flexible positions fields
+      taskDefinition.settings.positions = positions;
+    }
 
     appendLog(`Creating new task: ${JSON.stringify(taskDefinition, null, 2)}`);
     try {
@@ -795,16 +1084,49 @@ const ImagingTasksModal = ({
             // Display existing task details (read-only view)
             <div className="task-details mb-4 text-xs">
               <p><strong>Status:</strong> {task.operational_state?.status || 'N/A'}</p>
+              <p><strong>Scan Mode:</strong> {task.settings?.scan_mode === 'microscope_only' ? 'Microscope Only' : 'Full Automation'}</p>
+              {task.settings?.saved_data_type && (
+                <p><strong>Scan Type:</strong> {task.settings.saved_data_type === 'raw_images_well_plate' ? 'Well Plate Scan' : task.settings.saved_data_type === 'raw_image_flexible' ? 'Flexible Positions' : task.settings.saved_data_type}</p>
+              )}
               <p><strong>Allocated Microscope:</strong> {task.settings?.allocated_microscope || 'N/A'}</p>
-              <p><strong>Incubator Slot:</strong> {task.settings?.incubator_slot || 'N/A'}</p>
-              <p><strong>Well Plate Type:</strong> {task.settings?.well_plate_type || 'N/A'}</p>
+              {task.settings?.incubator_slot && (
+                <p><strong>Incubator Slot:</strong> {task.settings.incubator_slot}</p>
+              )}
+              {task.settings?.well_plate_type && (
+                <p><strong>Well Plate Type:</strong> {task.settings.well_plate_type}</p>
+              )}
               <p><strong>Action ID:</strong> {task.settings?.action_ID || 'N/A'}</p>
               <p><strong>Imaging Started:</strong> {task.settings?.imaging_started ? 'Yes' : 'No'}</p>
               <p><strong>Imaging Completed:</strong> {task.settings?.imaging_completed ? 'Yes' : 'No'}</p>
               <p><strong>Illumination Settings:</strong> {task.settings?.illumination_settings ? JSON.stringify(task.settings.illumination_settings) : 'N/A'}</p>
-              <p><strong>Nx, Ny:</strong> {task.settings?.Nx}, {task.settings?.Ny}</p>
-              <p><strong>dx, dy:</strong> {task.settings?.dx || 'N/A'}, {task.settings?.dy || 'N/A'} mm</p>
-              <p><strong>Wells to Scan:</strong> {task.settings?.wells_to_scan?.join(', ') || 'N/A'}</p>
+              
+              {/* Display positions for flexible positioning tasks */}
+              {task.settings?.positions && task.settings.positions.length > 0 && (
+                <>
+                  <p><strong>Positions:</strong> {task.settings.positions.length} position(s)</p>
+                  <ul className="list-disc pl-5 max-h-32 overflow-y-auto">
+                    {task.settings.positions.map((pos, idx) => (
+                      <li key={idx}>
+                        {pos.name || `Position ${idx + 1}`}: 
+                        X={pos.x?.toFixed(2)}mm, Y={pos.y?.toFixed(2)}mm, Z={pos.z?.toFixed(2)}mm, 
+                        Grid={pos.Nx}×{pos.Ny}, Spacing={pos.dx}×{pos.dy}mm
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+              
+              {/* Display well plate scan parameters */}
+              {task.settings?.Nx && task.settings?.Ny && (
+                <>
+                  <p><strong>Nx, Ny:</strong> {task.settings.Nx}, {task.settings.Ny}</p>
+                  <p><strong>dx, dy:</strong> {task.settings?.dx || 'N/A'}, {task.settings?.dy || 'N/A'} mm</p>
+                </>
+              )}
+              {task.settings?.wells_to_scan && task.settings.wells_to_scan.length > 0 && (
+                <p><strong>Wells to Scan:</strong> {task.settings.wells_to_scan.join(', ')}</p>
+              )}
+              
               <p><strong>Contrast AF:</strong> {task.settings?.do_contrast_autofocus ? 'Yes' : 'No'}</p>
               <p><strong>Reflection AF:</strong> {task.settings?.do_reflection_af ? 'Yes' : 'No'}</p>
               <p><strong>Pending Time Points:</strong> {task.settings?.pending_time_points?.length || 0}</p>
@@ -829,6 +1151,41 @@ const ImagingTasksModal = ({
             >
               <fieldset className="modal-fieldset">
                 <legend className="modal-legend">Task Setup</legend>
+                
+                {/* Scan Mode Selection */}
+                <div className="form-group">
+                  <label className="form-label">
+                    Scan Mode
+                    <TutorialTooltip text="Choose between Full Automation (uses robotic arm and incubator) or Microscope Only (direct scanning without automation hardware)." />
+                  </label>
+                  <div className="scan-mode-radio-group">
+                    <label className="radio-label">
+                      <input
+                        type="radio"
+                        name="scanMode"
+                        value="full_automation"
+                        checked={scanMode === 'full_automation'}
+                        onChange={(e) => setScanMode(e.target.value)}
+                        disabled={slotsLoading || illuminationLoading}
+                      />
+                      <span>Full Automation</span>
+                      <TutorialTooltip text="Uses robotic arm to load samples from incubator. Requires an incubator slot selection." />
+                    </label>
+                    <label className="radio-label">
+                      <input
+                        type="radio"
+                        name="scanMode"
+                        value="microscope_only"
+                        checked={scanMode === 'microscope_only'}
+                        onChange={(e) => setScanMode(e.target.value)}
+                        disabled={slotsLoading || illuminationLoading}
+                      />
+                      <span>Microscope Only</span>
+                      <TutorialTooltip text="Direct microscope scanning without robotic arm. Sample must be manually placed on the microscope stage." />
+                    </label>
+                  </div>
+                </div>
+
                 <div className="form-group">
                   <label htmlFor="taskName" className="form-label">
                     Task Name
@@ -868,47 +1225,76 @@ const ImagingTasksModal = ({
                   )}
                 </div>
 
+                {/* Saved Data Type Selection - Available for both modes */}
                 <div className="form-group">
-                  <label htmlFor="incubatorSlot" className="form-label">
-                    Select Sample (from Incubator)
-                    <TutorialTooltip text="Choose the sample from the incubator that you want to image. Only named and available slots are shown." />
+                  <label htmlFor="savedDataType" className="form-label">
+                    Scan Type
+                    <TutorialTooltip text="Choose between Well Plate Scan (scan specific wells on a plate) or Flexible Positions (scan arbitrary stage positions)." />
                   </label>
                   <select
-                    id="incubatorSlot"
+                    id="savedDataType"
                     className="modal-input"
-                    value={incubatorSlot}
-                    onChange={(e) => setIncubatorSlot(e.target.value)}
-                    required
-                    disabled={slotsLoading || availableSlots.length === 0 || illuminationLoading}
+                    value={savedDataType}
+                    onChange={(e) => setSavedDataType(e.target.value)}
+                    disabled={slotsLoading || illuminationLoading}
                   >
-                    <option value="" disabled>
-                      {slotsLoading ? 'Loading samples...' : (availableSlots.length === 0 ? 'No named samples available' : 'Select a sample')}
-                    </option>
-                    {availableSlots.map(slot => (
-                      <option key={slot.value} value={slot.value} disabled={!slot.isAvailableForTask}>
-                        {slot.label}
-                      </option>
-                    ))}
+                    <option value="raw_images_well_plate">Well Plate Scan</option>
+                    <option value="raw_image_flexible">Flexible Positions</option>
                   </select>
-                  {slotsError && <p className="text-xs text-red-500 mt-1">{slotsError}</p>}
-                  {incubatorSlot && availableSlots.find(s => s.value === incubatorSlot) && (
-                    <p className="text-xs text-gray-600 mt-1">
-                      Well Plate Type: {availableSlots.find(s => s.value === incubatorSlot)?.wellPlateType || '96'} (from sample configuration)
-                    </p>
-                  )}
+                  <p className="text-xs text-gray-600 mt-1">
+                    {savedDataType === 'raw_images_well_plate' 
+                      ? 'Scan specific wells on a well plate using the grid below.' 
+                      : 'Scan arbitrary stage positions captured from the microscope.'}
+                  </p>
                 </div>
+
+                {/* Incubator Slot Selection - Only for Full Automation mode */}
+                {scanMode === 'full_automation' && (
+                  <div className="form-group">
+                    <label htmlFor="incubatorSlot" className="form-label">
+                      Select Sample (from Incubator)
+                      <TutorialTooltip text="Choose the sample from the incubator that you want to image. Only named and available slots are shown." />
+                    </label>
+                    <select
+                      id="incubatorSlot"
+                      className="modal-input"
+                      value={incubatorSlot}
+                      onChange={(e) => setIncubatorSlot(e.target.value)}
+                      required
+                      disabled={slotsLoading || availableSlots.length === 0 || illuminationLoading}
+                    >
+                      <option value="" disabled>
+                        {slotsLoading ? 'Loading samples...' : (availableSlots.length === 0 ? 'No named samples available' : 'Select a sample')}
+                      </option>
+                      {availableSlots.map(slot => (
+                        <option key={slot.value} value={slot.value} disabled={!slot.isAvailableForTask}>
+                          {slot.label}
+                        </option>
+                      ))}
+                    </select>
+                    {slotsError && <p className="text-xs text-red-500 mt-1">{slotsError}</p>}
+                    {incubatorSlot && availableSlots.find(s => s.value === incubatorSlot) && (
+                      <p className="text-xs text-gray-600 mt-1">
+                        Well Plate Type: {availableSlots.find(s => s.value === incubatorSlot)?.wellPlateType || '96'} (from sample configuration)
+                      </p>
+                    )}
+                  </div>
+                )}
               </fieldset>
 
               <fieldset className="modal-fieldset">
                   <legend className="modal-legend">
                       Imaging Zone & FOV
-                      <TutorialTooltip text="Define the area on the well plate to be imaged and the number of fields of view (FOVs) within each selected well."/>
+                      <TutorialTooltip text="Define the area to be imaged and the number of fields of view (FOVs). For well plates, select wells on the grid. For flexible positions, capture stage positions from the microscope."/>
                   </legend>
 
-                  <p className="text-sm mb-2 form-label">
-                      Select imaging area by clicking and dragging on the grid below.
-                      <TutorialTooltip text="Click individual wells to select them, or drag to select a rectangular area. The selected wells will be highlighted." />
-                  </p>
+                  {/* Show well plate grid for raw_images_well_plate scan type */}
+                  {savedDataType === 'raw_images_well_plate' && (
+                    <>
+                      <p className="text-sm mb-2 form-label">
+                          Select imaging area by clicking and dragging on the grid below.
+                          <TutorialTooltip text="Click individual wells to select them, or drag to select a rectangular area. The selected wells will be highlighted." />
+                      </p>
                   <p className="text-sm mb-2 form-label">
                     Selected Wells: {selectedWells.length > 0 ? selectedWells.join(', ') : 'None'}
                     {selectedWells.length > 0 && (
@@ -944,66 +1330,147 @@ const ImagingTasksModal = ({
                       ))}
                     </div>
                   </div>
-                   <p className="text-xs mt-1">
-                      Selected Wells: {selectedWells.length} wells ({selectedWells.length > 0 ? selectedWells.join(', ') : 'None'})
-                  </p>
+                      <p className="text-xs mt-1">
+                          Selected Wells: {selectedWells.length} wells ({selectedWells.length > 0 ? selectedWells.join(', ') : 'None'})
+                      </p>
+                    </>
+                  )}
 
-                  <div className="form-grid mt-3">
-                      <div className="form-group">
-                          <label htmlFor="nx" className="form-label">
-                              Nx (FOVs per well)
-                              <TutorialTooltip text="Number of Fields of View (FOVs) to capture along the X-axis within each selected well. E.g., 3 for a 3xM grid." />
-                          </label>
-                          <div className="input-container">
-                            <input
-                                id="nx"
-                                type="number"
-                                className={`modal-input ${getInputValidationClasses(
-                                  nxInput.isValid,
-                                  nxInput.hasUnsavedChanges,
-                                  ''
-                                )}`}
-                                value={nxInput.inputValue}
-                                onChange={nxInput.handleInputChange}
-                                onKeyDown={nxInput.handleKeyDown}
-                                onBlur={nxInput.handleBlur}
-                                min="1"
-                                max="20"
-                                required
-                                disabled={slotsLoading || illuminationLoading}
-                                placeholder="1-20"
-                            />
-                          </div>
+                  {/* Show flexible positions interface for raw_image_flexible scan type */}
+                  {savedDataType === 'raw_image_flexible' && (
+                    <>
+                      <p className="text-sm mb-2 form-label">
+                        Capture stage positions from the microscope or manually input coordinates.
+                        <TutorialTooltip text="Move the microscope stage to desired positions and click 'Capture Current Position', or manually enter coordinates with 'Add Manual Position'." />
+                      </p>
+                      
+                      <div className="position-buttons-group mb-3">
+                        <button
+                          type="button"
+                          onClick={handleCapturePosition}
+                          className="position-capture-btn"
+                          disabled={isCapturingPosition || slotsLoading || illuminationLoading || !microscopeControlService}
+                        >
+                          <i className="fas fa-crosshairs mr-1"></i>
+                          {isCapturingPosition ? 'Capturing...' : 'Capture Current Position'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleAddManualPosition}
+                          className="position-manual-btn"
+                          disabled={slotsLoading || illuminationLoading}
+                        >
+                          <i className="fas fa-keyboard mr-1"></i>
+                          Add Manual Position
+                        </button>
                       </div>
-                      <div className="form-group">
-                          <label htmlFor="ny" className="form-label">
-                              Ny (FOVs per well)
-                              <TutorialTooltip text="Number of Fields of View (FOVs) to capture along the Y-axis within each selected well. E.g., M for an Mx3 grid." />
-                          </label>
-                          <div className="input-container">
-                            <input
-                                id="ny"
-                                type="number"
-                                className={`modal-input ${getInputValidationClasses(
-                                  nyInput.isValid,
-                                  nyInput.hasUnsavedChanges,
-                                  ''
-                                )}`}
-                                value={nyInput.inputValue}
-                                onChange={nyInput.handleInputChange}
-                                onKeyDown={nyInput.handleKeyDown}
-                                onBlur={nyInput.handleBlur}
-                                min="1"
-                                max="20"
-                                required
-                                disabled={slotsLoading || illuminationLoading}
-                                placeholder="1-20"
-                            />
-                          </div>
-                      </div>
-                  </div>
 
-                  <div className="form-grid mt-3">
+                      {positions.length > 0 && (
+                        <div className="position-list">
+                          <p className="text-sm font-semibold mb-2">Captured Positions ({positions.length}):</p>
+                          {positions.map((position, index) => (
+                            <div key={index} className="position-item">
+                              <div className="position-info">
+                                <span className="position-name">{position.name}</span>
+                                <span className="position-coords">
+                                  X: {position.x.toFixed(2)}mm, Y: {position.y.toFixed(2)}mm, Z: {position.z.toFixed(2)}mm
+                                </span>
+                                <span className="position-grid">
+                                  Grid: {position.Nx}×{position.Ny}, Spacing: {position.dx}×{position.dy}mm
+                                </span>
+                              </div>
+                              <div className="position-actions">
+                                <button
+                                  type="button"
+                                  onClick={() => handleEditPosition(index)}
+                                  className="btn-edit"
+                                  title="Edit position parameters"
+                                  disabled={slotsLoading || illuminationLoading}
+                                >
+                                  <i className="fas fa-edit"></i>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeletePosition(index)}
+                                  className="btn-delete"
+                                  title="Delete position"
+                                  disabled={slotsLoading || illuminationLoading}
+                                >
+                                  <i className="fas fa-trash"></i>
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {positions.length === 0 && (
+                        <p className="text-xs text-gray-600 mt-2">
+                          No positions captured yet. Move the microscope stage to a desired location and click "Capture Current Position".
+                        </p>
+                      )}
+                    </>
+                  )}
+
+                  {/* FOV Grid Settings - Only show for well plate scans */}
+                  {savedDataType === 'raw_images_well_plate' && (
+                    <>
+                      <div className="form-grid mt-3">
+                        <div className="form-group">
+                            <label htmlFor="nx" className="form-label">
+                                Nx (FOVs per well)
+                                <TutorialTooltip text="Number of Fields of View (FOVs) to capture along the X-axis within each selected well. E.g., 3 for a 3xM grid." />
+                            </label>
+                            <div className="input-container">
+                              <input
+                                  id="nx"
+                                  type="number"
+                                  className={`modal-input ${getInputValidationClasses(
+                                    nxInput.isValid,
+                                    nxInput.hasUnsavedChanges,
+                                    ''
+                                  )}`}
+                                  value={nxInput.inputValue}
+                                  onChange={nxInput.handleInputChange}
+                                  onKeyDown={nxInput.handleKeyDown}
+                                  onBlur={nxInput.handleBlur}
+                                  min="1"
+                                  max="20"
+                                  required
+                                  disabled={slotsLoading || illuminationLoading}
+                                  placeholder="1-20"
+                              />
+                            </div>
+                        </div>
+                        <div className="form-group">
+                            <label htmlFor="ny" className="form-label">
+                                Ny (FOVs per well)
+                                <TutorialTooltip text="Number of Fields of View (FOVs) to capture along the Y-axis within each selected well. E.g., M for an Mx3 grid." />
+                            </label>
+                            <div className="input-container">
+                              <input
+                                  id="ny"
+                                  type="number"
+                                  className={`modal-input ${getInputValidationClasses(
+                                    nyInput.isValid,
+                                    nyInput.hasUnsavedChanges,
+                                    ''
+                                  )}`}
+                                  value={nyInput.inputValue}
+                                  onChange={nyInput.handleInputChange}
+                                  onKeyDown={nyInput.handleKeyDown}
+                                  onBlur={nyInput.handleBlur}
+                                  min="1"
+                                  max="20"
+                                  required
+                                  disabled={slotsLoading || illuminationLoading}
+                                  placeholder="1-20"
+                              />
+                            </div>
+                        </div>
+                      </div>
+
+                      <div className="form-grid mt-3">
                       <div className="form-group">
                           <label htmlFor="dx" className="form-label">
                               dx (X spacing in mm)
@@ -1058,11 +1525,13 @@ const ImagingTasksModal = ({
                             />
                           </div>
                       </div>
-                  </div>
-                   <p className="text-xs mt-1 form-label">
-                      FOV dx, dy defaults to {defaultSpacing.dx}mm, with ~10% overlap.
-                      <TutorialTooltip text={`The distance (dx, dy) between adjacent Fields of View (FOVs) defaults to ${defaultSpacing.dx}mm for this microscope type. This typically provides about 10% overlap between FOVs, ensuring complete coverage of the target area within the well. You can adjust these values above for different overlap requirements.`} />
-                  </p>
+                      </div>
+                      <p className="text-xs mt-1 form-label">
+                          FOV dx, dy defaults to {defaultSpacing.dx}mm, with ~10% overlap.
+                          <TutorialTooltip text={`The distance (dx, dy) between adjacent Fields of View (FOVs) defaults to ${defaultSpacing.dx}mm for this microscope type. This typically provides about 10% overlap between FOVs, ensuring complete coverage of the target area within the well. You can adjust these values above for different overlap requirements.`} />
+                      </p>
+                    </>
+                  )}
               </fieldset>
               
               <fieldset className="modal-fieldset">

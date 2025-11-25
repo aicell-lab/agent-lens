@@ -447,4 +447,163 @@ select.modal-input {
   width: 70px !important; /* Significantly shorter input boxes */
   padding: 0.25rem 0.4rem !important; /* Adjust padding for smaller size */
   font-size: 0.75rem !important; /* Ensure text size is small */
+}
+
+/* Scan Mode Radio Group Styles */
+.scan-mode-radio-group {
+  display: flex;
+  gap: 1.5rem;
+  margin-top: 0.5rem;
+}
+
+.scan-mode-radio-group .radio-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.scan-mode-radio-group input[type="radio"] {
+  cursor: pointer;
+  width: 16px;
+  height: 16px;
+}
+
+.scan-mode-radio-group input[type="radio"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.scan-mode-radio-group .radio-label span {
+  user-select: none;
+}
+
+/* Position Buttons Group */
+.position-buttons-group {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.position-capture-btn,
+.position-manual-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  color: white;
+}
+
+.position-capture-btn {
+  background-color: #007bff;
+}
+
+.position-capture-btn:hover:not(:disabled) {
+  background-color: #0056b3;
+}
+
+.position-manual-btn {
+  background-color: #28a745;
+}
+
+.position-manual-btn:hover:not(:disabled) {
+  background-color: #218838;
+}
+
+.position-capture-btn:disabled,
+.position-manual-btn:disabled {
+  background-color: #e9ecef;
+  color: #6c757d;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Position List Styles */
+.position-list {
+  border: 1px solid #dee2e6;
+  border-radius: 0.25rem;
+  padding: 0.75rem;
+  background-color: #f8f9fa;
+  margin-top: 0.5rem;
+}
+
+.position-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem;
+  margin-bottom: 0.5rem;
+  background-color: white;
+  border: 1px solid #dee2e6;
+  border-radius: 0.25rem;
+}
+
+.position-item:last-child {
+  margin-bottom: 0;
+}
+
+.position-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex-grow: 1;
+}
+
+.position-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #212529;
+}
+
+.position-coords,
+.position-grid {
+  font-size: 0.75rem;
+  color: #6c757d;
+}
+
+.position-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.position-actions button {
+  padding: 0.25rem 0.5rem;
+  border: none;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  font-size: 0.875rem;
+  transition: all 0.2s ease;
+}
+
+.position-actions .btn-edit {
+  background-color: #007bff;
+  color: white;
+}
+
+.position-actions .btn-edit:hover:not(:disabled) {
+  background-color: #0056b3;
+}
+
+.position-actions .btn-delete {
+  background-color: #dc3545;
+  color: white;
+}
+
+.position-actions .btn-delete:hover:not(:disabled) {
+  background-color: #c82333;
+}
+
+.position-actions button:disabled {
+  background-color: #e9ecef;
+  color: #6c757d;
+  cursor: not-allowed;
+  opacity: 0.6;
 } 
