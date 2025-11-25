@@ -1,14 +1,16 @@
-# make sure you have umap-learn installed:
-# pip install umap-learn plotly
+# make sure you have umap-learn and scikit-learn installed:
+# pip install umap-learn scikit-learn plotly
 
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.colors import Normalize
 import io
 import base64
 import os
 from typing import Optional, List, Dict
 from umap import UMAP
 from PIL import Image
+from sklearn.cluster import KMeans
 
 try:
     import plotly.graph_objects as go
@@ -135,17 +137,34 @@ def make_umap_cluster_figure_base64(
     )
     X_2d = umap_model.fit_transform(E)
 
-    # --- Plot ---
+    # --- Clustering on 2D UMAP coordinates ---
+    # Determine number of clusters (use sqrt of sample size, but between 2 and 10)
+    n_samples = len(X_2d)
+    n_clusters = max(2, min(10, int(np.sqrt(n_samples / 2))))
+    
+    kmeans = KMeans(n_clusters=n_clusters, random_state=random_state, n_init=10)
+    cluster_labels = kmeans.fit_predict(X_2d)
+
+    # --- Plot with cluster colors ---
     fig, ax = plt.subplots(figsize=(6, 5))
+    
+    # Use a colormap to assign different colors to each cluster
+    # Normalize cluster labels to [0, 1] range for colormap
+    norm = Normalize(vmin=0, vmax=n_clusters - 1)
+    cmap = plt.cm.tab10
+    colors = cmap(norm(cluster_labels))
+    
     ax.scatter(
         X_2d[:, 0],
         X_2d[:, 1],
         s=25,
-        c="gray",
+        c=colors,
         alpha=0.7,
+        edgecolors='white',
+        linewidths=0.5,
     )
 
-    ax.set_title("UMAP clustering (cosine distance)")
+    ax.set_title(f"UMAP clustering (cosine distance, {n_clusters} clusters)")
     ax.set_xlabel("UMAP-1")
     ax.set_ylabel("UMAP-2")
     fig.tight_layout()
@@ -164,11 +183,16 @@ def make_umap_cluster_figure_interactive(
     Interactive UMAP clustering visualization using Plotly.
     Returns HTML string that can be embedded in a webpage.
     
+    This function performs UMAP dimensionality reduction followed by KMeans clustering.
+    Each cluster is displayed with a different color in the interactive visualization.
+    The number of clusters is automatically determined based on the sample size (between 2 and 10).
+    
     Features:
     - Zoom and pan
     - Hover to see cell details (ID, area, etc.)
     - Click to select points
     - Export as PNG/SVG
+    - Color-coded clusters for easy identification
     
     Args:
         all_cells: List of cell dictionaries with 'embedding' key (and optionally 'id', 'area', etc.)
@@ -178,7 +202,7 @@ def make_umap_cluster_figure_interactive(
         n_jobs: Number of parallel jobs. -1 uses all CPU cores (default: None)
     
     Returns:
-        HTML string of interactive Plotly figure, or None if failed
+        HTML string of interactive Plotly figure with clustered visualization, or None if failed
     """
     if not PLOTLY_AVAILABLE:
         print("⚠️ Plotly not available. Install with: pip install plotly")
@@ -207,14 +231,20 @@ def make_umap_cluster_figure_interactive(
                 if image_b64_thumbnail and idx == 0:
                     print(f"✓ Resized images to 50x50 thumbnails (original: {len(image_b64_original)/1024:.1f}KB → thumbnail: {len(image_b64_thumbnail)/1024:.1f}KB)")
             
+            # Handle None values explicitly (using 'or' would fail for integer 0)
+            well_row = c.get("well_row")
+            well_col = c.get("well_col")
+            field_index = c.get("field_index")
+            cell_index = c.get("cell_index")
+            
             cell_info = {
                 "index": idx,
-                "id": c.get("id", f"cell_{idx}"),
+                "id": c.get("id") if c.get("id") is not None else f"cell_{idx}",
                 "image_b64": image_b64_thumbnail,  # Use resized thumbnail
-                "well_row": c.get("well_row", "?"),
-                "well_col": c.get("well_col", "?"),
-                "field_index": c.get("field_index", "?"),
-                "cell_index": c.get("cell_index", "?"),
+                "well_row": well_row if well_row is not None else "?",
+                "well_col": well_col if well_col is not None else "?",
+                "field_index": field_index if field_index is not None else "?",
+                "cell_index": cell_index if cell_index is not None else "?",
                 # Metadata fields
                 "area": metadata.get("area", 0),
                 "perimeter": metadata.get("perimeter", 0),
@@ -253,31 +283,138 @@ def make_umap_cluster_figure_interactive(
     )
     X_2d = umap_model.fit_transform(E)
     
+    # --- Clustering on 2D UMAP coordinates ---
+    # Determine number of clusters (use sqrt of sample size, but between 2 and 10)
+    n_samples = len(X_2d)
+    n_clusters = max(2, min(10, int(np.sqrt(n_samples / 2))))
+    
+    kmeans = KMeans(n_clusters=n_clusters, random_state=random_state, n_init=10)
+    cluster_labels = kmeans.fit_predict(X_2d)
+    
+    # Helper function to safely convert values to strings
+    def safe_str(val, default="?"):
+        """Safely convert value to string, handling None and other edge cases.
+        Always returns a string, never None."""
+        if val is None:
+            result = str(default)
+        else:
+            try:
+                result = str(val)
+                # Ensure we return a non-empty string
+                if not result:
+                    result = str(default)
+            except (TypeError, ValueError):
+                result = str(default)
+        
+        # Final safety check: ensure we never return None
+        if result is None:
+            result = "?"
+        return result
+    
+    # Helper function to safely format float values
+    def safe_float(val, default=0.0, fmt=".1f"):
+        """Safely format a float value, handling None."""
+        if val is None:
+            return "N/A"
+        try:
+            return f"{float(val):{fmt}}"
+        except (TypeError, ValueError):
+            return "N/A"
+    
     # --- Create interactive Plotly figure with rich hover info ---
     hover_text = []
     for i, cell in enumerate(cell_data):
-        text = (
-            f"<b>Cell ID:</b> {cell['id']}<br>"
-            f"<b>Location:</b> Well {cell['well_row']}{cell['well_col']}, "
-            f"Field {cell['field_index']}, Cell {cell['cell_index']}<br>"
-            f"<br>"
-            f"<b>Morphology:</b><br>"
-            f"  Area: {cell['area']:.1f} px²<br>"
-            f"  Perimeter: {cell['perimeter']:.1f} px<br>"
-            f"  Diameter: {cell['equivalent_diameter']:.1f} px<br>"
-            f"  Aspect Ratio: {cell['aspect_ratio']:.2f}<br>"
-            f"  Circularity: {cell['circularity']:.3f}<br>"
-            f"  Eccentricity: {cell['eccentricity']:.3f}<br>"
-            f"  Solidity: {cell['solidity']:.3f}<br>"
-            f"<br>"
-            f"<b>Intensity:</b><br>"
-            f"  Brightness: {cell['brightness']:.1f}<br>"
-            f"  Contrast: {cell['contrast']:.1f}<br>"
-            f"<br>"
-            f"<b>UMAP Coordinates:</b><br>"
-            f"  UMAP-1: {X_2d[i, 0]:.2f}<br>"
-            f"  UMAP-2: {X_2d[i, 1]:.2f}"
-        )
+        # Safely convert all location fields to strings (handle None and mixed types)
+        # Ensure we always get a string, never None
+        well_row_str = safe_str(cell.get('well_row'))
+        well_col_str = safe_str(cell.get('well_col'))
+        field_index_str = safe_str(cell.get('field_index'))
+        cell_index_str = safe_str(cell.get('cell_index'))
+        
+        # Debug: Check if any variable is None (should never happen with safe_str)
+        if well_row_str is None or well_col_str is None or field_index_str is None or cell_index_str is None:
+            print(f"⚠️ ERROR: Found None value in cell {i}:")
+            print(f"  Cell data: {cell}")
+            print(f"  well_row_str type: {type(well_row_str)}, value: {repr(well_row_str)}")
+            print(f"  well_col_str type: {type(well_col_str)}, value: {repr(well_col_str)}")
+            print(f"  field_index_str type: {type(field_index_str)}, value: {repr(field_index_str)}")
+            print(f"  cell_index_str type: {type(cell_index_str)}, value: {repr(cell_index_str)}")
+            print(f"  Raw cell values:")
+            print(f"    cell.get('well_row'): {repr(cell.get('well_row'))}")
+            print(f"    cell.get('well_col'): {repr(cell.get('well_col'))}")
+            print(f"    cell.get('field_index'): {repr(cell.get('field_index'))}")
+            print(f"    cell.get('cell_index'): {repr(cell.get('cell_index'))}")
+            # Force to strings as fallback
+            well_row_str = str(well_row_str) if well_row_str is not None else "?"
+            well_col_str = str(well_col_str) if well_col_str is not None else "?"
+            field_index_str = str(field_index_str) if field_index_str is not None else "?"
+            cell_index_str = str(cell_index_str) if cell_index_str is not None else "?"
+        
+        # Additional debug: Print values before f-string to catch any issues
+        try:
+            text = (
+                f"<b>Location:</b> Well {well_row_str}{well_col_str}, "
+                f"Field {field_index_str}, Cell {cell_index_str}<br>"
+                f"<br>"
+                f"<b>Morphology:</b><br>"
+                f"  Area: {safe_float(cell.get('area'), 0.0, '.1f')} px²<br>"
+                f"  Perimeter: {safe_float(cell.get('perimeter'), 0.0, '.1f')} px<br>"
+                f"  Diameter: {safe_float(cell.get('equivalent_diameter'), 0.0, '.1f')} px<br>"
+                f"  Aspect Ratio: {safe_float(cell.get('aspect_ratio'), 0.0, '.2f')}<br>"
+                f"  Circularity: {safe_float(cell.get('circularity'), 0.0, '.3f')}<br>"
+                f"  Eccentricity: {safe_float(cell.get('eccentricity'), 0.0, '.3f')}<br>"
+                f"  Solidity: {safe_float(cell.get('solidity'), 0.0, '.3f')}<br>"
+                f"<br>"
+                f"<b>Intensity:</b><br>"
+                f"  Brightness: {safe_float(cell.get('brightness'), None, '.1f')}<br>"
+                f"  Contrast: {safe_float(cell.get('contrast'), None, '.1f')}<br>"
+                f"<br>"
+                f"<b>UMAP Coordinates:</b><br>"
+                f"  UMAP-1: {X_2d[i, 0]:.2f}<br>"
+                f"  UMAP-2: {X_2d[i, 1]:.2f}"
+            )
+        except TypeError as e:
+            # Catch the format error and print detailed debug info
+            print(f"❌ ERROR formatting text for cell {i}:")
+            print(f"  Error: {e}")
+            print(f"  Cell data: {cell}")
+            print(f"  well_row_str type: {type(well_row_str)}, value: {repr(well_row_str)}")
+            print(f"  well_col_str type: {type(well_col_str)}, value: {repr(well_col_str)}")
+            print(f"  field_index_str type: {type(field_index_str)}, value: {repr(field_index_str)}")
+            print(f"  cell_index_str type: {type(cell_index_str)}, value: {repr(cell_index_str)}")
+            print(f"  Raw cell values:")
+            print(f"    cell.get('well_row'): {repr(cell.get('well_row'))}")
+            print(f"    cell.get('well_col'): {repr(cell.get('well_col'))}")
+            print(f"    cell.get('field_index'): {repr(cell.get('field_index'))}")
+            print(f"    cell.get('cell_index'): {repr(cell.get('cell_index'))}")
+            # Force all to safe strings
+            well_row_str = "?" if well_row_str is None else str(well_row_str)
+            well_col_str = "?" if well_col_str is None else str(well_col_str)
+            field_index_str = "?" if field_index_str is None else str(field_index_str)
+            cell_index_str = "?" if cell_index_str is None else str(cell_index_str)
+            # Retry with safe values using safe_float for all numeric fields
+            text = (
+                f"<b>Location:</b> Well {well_row_str}{well_col_str}, "
+                f"Field {field_index_str}, Cell {cell_index_str}<br>"
+                f"<br>"
+                f"<b>Morphology:</b><br>"
+                f"  Area: {safe_float(cell.get('area'), 0.0, '.1f')} px²<br>"
+                f"  Perimeter: {safe_float(cell.get('perimeter'), 0.0, '.1f')} px<br>"
+                f"  Diameter: {safe_float(cell.get('equivalent_diameter'), 0.0, '.1f')} px<br>"
+                f"  Aspect Ratio: {safe_float(cell.get('aspect_ratio'), 0.0, '.2f')}<br>"
+                f"  Circularity: {safe_float(cell.get('circularity'), 0.0, '.3f')}<br>"
+                f"  Eccentricity: {safe_float(cell.get('eccentricity'), 0.0, '.3f')}<br>"
+                f"  Solidity: {safe_float(cell.get('solidity'), 0.0, '.3f')}<br>"
+                f"<br>"
+                f"<b>Intensity:</b><br>"
+                f"  Brightness: {safe_float(cell.get('brightness'), None, '.1f')}<br>"
+                f"  Contrast: {safe_float(cell.get('contrast'), None, '.1f')}<br>"
+                f"<br>"
+                f"<b>UMAP Coordinates:</b><br>"
+                f"  UMAP-1: {X_2d[i, 0]:.2f}<br>"
+                f"  UMAP-2: {X_2d[i, 1]:.2f}"
+            )
+        
         hover_text.append(text)
     
     # Prepare customdata with all cell info including images
@@ -293,13 +430,25 @@ def make_umap_cluster_figure_interactive(
             cell['cell_index']
         ])
     
+    # Generate colors for each cluster using Plotly's discrete color sequence
+    # Use a predefined color palette that works across Plotly versions
+    try:
+        import plotly.colors as pc
+        colors_list = pc.qualitative.Set3[:n_clusters] if n_clusters <= 12 else pc.qualitative.Set3
+    except (ImportError, AttributeError):
+        # Fallback to a simple color list if plotly.colors is not available
+        colors_list = px.colors.qualitative.Set3[:n_clusters] if n_clusters <= 12 else px.colors.qualitative.Set3
+    
+    # Map cluster labels to colors
+    point_colors = [colors_list[label % len(colors_list)] for label in cluster_labels]
+    
     fig = go.Figure(data=go.Scattergl(
         x=X_2d[:, 0],
         y=X_2d[:, 1],
         mode='markers',
         marker=dict(
             size=6,
-            color='gray',
+            color=point_colors,
             opacity=0.7,
             line=dict(width=0.5, color='white')
         ),
@@ -310,7 +459,7 @@ def make_umap_cluster_figure_interactive(
     
     fig.update_layout(
         title={
-            'text': "Interactive UMAP Clustering (cosine distance)<br><sub>Hover over points to see cell details</sub>",
+            'text': f"Interactive UMAP Clustering (cosine distance, {n_clusters} clusters)<br><sub>Hover over points to see cell details</sub>",
             'x': 0.5,
             'xanchor': 'center'
         },
@@ -401,15 +550,14 @@ def make_umap_cluster_figure_interactive(
                     
                     if (point.customdata && point.customdata.length >= 7) {
                         var imageB64 = point.customdata[2];
-                        var cellId = point.customdata[1];
                         var wellRow = point.customdata[3];
                         var wellCol = point.customdata[4];
                         var fieldIdx = point.customdata[5];
                         var cellIdx = point.customdata[6];
                         
                         // Update info text
-                        info.innerHTML = '<b>' + cellId + '</b><br>Well ' + wellRow + wellCol + 
-                                        ', Field ' + fieldIdx + ', Cell ' + cellIdx;
+                        info.innerHTML = '<b>Well ' + wellRow + wellCol + 
+                                        ', Field ' + fieldIdx + ', Cell ' + cellIdx + '</b>';
                         
                         // Show image if available
                         if (imageB64 && imageB64.length > 0) {
