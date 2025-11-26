@@ -1463,6 +1463,10 @@ async def setup_service(server, server_id="agent-lens"):
         """
         Generate UMAP clustering visualization for cell embeddings via hypha-rpc.
         
+        This method performs UMAP dimensionality reduction followed by KMeans clustering.
+        Each cluster is displayed with a different color in the visualization.
+        The number of clusters is automatically determined based on the sample size (between 2 and 10).
+        
         This method runs UMAP computation in a thread pool to avoid blocking the asyncio event loop.
         For parallelism, set random_state=None and n_jobs=-1 (uses all CPU cores).
         
@@ -1474,7 +1478,7 @@ async def setup_service(server, server_id="agent-lens"):
             n_jobs: Number of parallel jobs. -1 uses all CPU cores, None auto-selects based on random_state
             
         Returns:
-            dict: JSON object with success flag and base64 PNG string, or None if failed
+            dict: JSON object with success flag and base64 PNG string of clustered visualization, or None if failed
         """
         try:
             if not all_cells or len(all_cells) == 0:
@@ -1524,7 +1528,29 @@ async def setup_service(server, server_id="agent-lens"):
         """
         Generate interactive UMAP clustering visualization (Plotly HTML) via hypha-rpc.
         
-        Returns HTML string that can be embedded in an iframe or div.
+        This method performs UMAP dimensionality reduction followed by KMeans clustering.
+        Each cluster is displayed with a different color in the interactive visualization.
+        The number of clusters is automatically determined based on the sample size (between 2 and 10).
+        
+        Features:
+        - Interactive zoom and pan
+        - Hover to see cell details (ID, area, morphology, etc.)
+        - Click to select points
+        - Export as PNG/SVG
+        - Color-coded clusters for easy identification
+        
+        This method runs UMAP computation in a thread pool to avoid blocking the asyncio event loop.
+        For parallelism, set random_state=None and n_jobs=-1 (uses all CPU cores).
+        
+        Args:
+            all_cells: List of cell dictionaries, each should have 'embedding' key
+            n_neighbors: Number of neighbors for UMAP (default: 15)
+            min_dist: Minimum distance for UMAP (default: 0.1)
+            random_state: Random state for reproducibility. If None, allows parallelism (default: None)
+            n_jobs: Number of parallel jobs. -1 uses all CPU cores, None auto-selects based on random_state
+            
+        Returns:
+            dict: JSON object with success flag and HTML string of clustered interactive visualization, or None if failed
         """
         try:
             if not all_cells or len(all_cells) == 0:
