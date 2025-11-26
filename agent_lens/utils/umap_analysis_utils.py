@@ -172,6 +172,148 @@ def make_umap_cluster_figure_base64(
     return fig_to_base64(fig)
 
 
+def make_umap_metadata_heatmap_figures_base64(
+    all_cells: list,
+    metadata_fields: List[str],
+    n_neighbors: int = 15,
+    min_dist: float = 0.1,
+    random_state: Optional[int] = None,
+    n_jobs: Optional[int] = 10,
+) -> List[Optional[str]]:
+    """
+    Generate multiple UMAP heatmap visualizations with consistent point locations.
+    
+    This function computes UMAP coordinates once and reuses them for all metadata fields,
+    ensuring that all plots have the same point locations but different colorings based on
+    different metadata fields. This allows easy comparison of how different metadata
+    distributions map to the same UMAP embedding space.
+    
+    Note: If random_state is set, UMAP will use single-threaded execution.
+    For parallelism, set random_state=None and n_jobs=-1 (uses all CPU cores).
+
+    Args:
+        all_cells: List of cell dictionaries, each should have 'embedding' and 'metadata' keys
+        metadata_fields: List of metadata field names to visualize (e.g., ['area', 'brightness'])
+        n_neighbors: Number of neighbors for UMAP (default: 15)
+        min_dist: Minimum distance for UMAP (default: 0.1)
+        random_state: Random state for reproducibility. If None, allows parallelism (default: None)
+        n_jobs: Number of parallel jobs. -1 uses all CPU cores, None uses 1 (default: None)
+
+    Returns:
+        List of base64 PNG strings, one for each metadata field. Returns empty list if failed.
+    """
+    if not all_cells:
+        return []
+    
+    if not metadata_fields or not isinstance(metadata_fields, list):
+        print("⚠️ metadata_fields must be a non-empty list")
+        return []
+    
+    # Filter out invalid metadata fields
+    valid_fields = [f for f in metadata_fields if f and isinstance(f, str)]
+    if not valid_fields:
+        print("⚠️ No valid metadata fields provided")
+        return []
+
+    # --- Collect embeddings ---
+    embeddings = []
+    cell_indices = []  # Track which cells have embeddings
+    
+    for idx, c in enumerate(all_cells):
+        if "embedding" in c:
+            embeddings.append(np.array(c["embedding"], dtype=float))
+            cell_indices.append(idx)
+
+    if len(embeddings) < 5:
+        print("⚠️ Too few cells with embeddings → visualization skipped.")
+        return []
+
+    E = np.vstack(embeddings)   # (N, D)
+
+    # --- Normalize embeddings (optional but good for cosine) ---
+    norms = np.linalg.norm(E, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    E = E / norms
+
+    # --- UMAP embedding (cosine metric) - COMPUTE ONCE ---
+    # Set n_jobs: -1 for all cores if random_state is None, otherwise use 1
+    # (UMAP forces single-threaded when random_state is set)
+    if n_jobs is None:
+        n_jobs = -1 if random_state is None else 1
+    
+    umap_model = UMAP(
+        n_components=2,
+        n_neighbors=min(n_neighbors, len(E) - 1),
+        min_dist=min_dist,
+        metric="cosine",
+        random_state=random_state,
+        n_jobs=n_jobs,
+    )
+    X_2d = umap_model.fit_transform(E)  # Same coordinates for all metadata fields
+
+    # --- Generate figure for each metadata field ---
+    results = []
+    
+    for metadata_field in valid_fields:
+        # Extract metadata values for this field
+        metadata_values = []
+        
+        for idx in cell_indices:
+            c = all_cells[idx]
+            # Extract metadata value, use 0.0 as default if missing
+            metadata = c.get("metadata", {})
+            value = metadata.get(metadata_field, 0.0)
+            # Convert to float, handle None and invalid types
+            try:
+                metadata_values.append(float(value))
+            except (TypeError, ValueError):
+                metadata_values.append(0.0)
+        
+        metadata_array = np.array(metadata_values)  # (N,)
+
+        # --- Normalize metadata values for colormap ---
+        # Handle edge case where all values are the same
+        metadata_min = np.min(metadata_array)
+        metadata_max = np.max(metadata_array)
+        
+        if metadata_max == metadata_min:
+            # All values are the same, use a single color (middle of colormap)
+            print(f"⚠️ All metadata values for '{metadata_field}' are the same ({metadata_min})")
+            metadata_norm = Normalize(vmin=metadata_min, vmax=metadata_max + 1e-6)  # Small offset for colorbar
+        else:
+            metadata_norm = Normalize(vmin=metadata_min, vmax=metadata_max)
+
+        # --- Plot with metadata-based colors (blue-green-yellow-red heatmap) ---
+        fig, ax = plt.subplots(figsize=(7, 5))
+        
+        # Use turbo colormap: blue -> cyan -> green -> yellow -> red (clean, perceptually uniform)
+        cmap = plt.cm.turbo
+        scatter = ax.scatter(
+            X_2d[:, 0],
+            X_2d[:, 1],
+            s=25,
+            c=metadata_array,  # Use actual values, not normalized
+            cmap=cmap,
+            norm=metadata_norm,
+            alpha=0.7,
+            edgecolors='white',
+            linewidths=0.5,
+        )
+        
+        # Add colorbar
+        cbar = plt.colorbar(scatter, ax=ax)
+        cbar.set_label(metadata_field, rotation=270, labelpad=15)
+        
+        ax.set_title(f"UMAP colored by {metadata_field}")
+        ax.set_xlabel("UMAP-1")
+        ax.set_ylabel("UMAP-2")
+        fig.tight_layout()
+
+        results.append(fig_to_base64(fig))
+    
+    return results
+
+
 def make_umap_cluster_figure_interactive(
     all_cells: list,
     n_neighbors: int = 15,

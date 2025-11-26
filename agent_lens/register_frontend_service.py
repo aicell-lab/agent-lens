@@ -1517,6 +1517,113 @@ async def setup_service(server, server_id="agent-lens"):
             logger.error(traceback.format_exc())
             raise
     
+    # Define hypha-rpc service method for UMAP metadata heatmap visualization
+    async def make_umap_metadata_heatmap_figure_base64_rpc(
+        all_cells: List[dict],
+        metadata_field,
+        n_neighbors: int = 15,
+        min_dist: float = 0.1,
+        random_state: Optional[int] = None,
+        n_jobs: Optional[int] = 16,
+    ) -> dict:
+        """
+        Generate UMAP visualization(s) with points colored by metadata values (blue-green-yellow-red heatmap) via hypha-rpc.
+        
+        This method computes UMAP coordinates once and reuses them for all metadata fields,
+        ensuring consistent point locations across all visualizations. When a list of metadata
+        fields is provided, all plots will have the same point positions but different colorings.
+        
+        This method runs UMAP computation in a thread pool to avoid blocking the asyncio event loop.
+        For parallelism, set random_state=None and n_jobs=-1 (uses all CPU cores).
+        
+        Args:
+            all_cells: List of cell dictionaries, each should have 'embedding' and 'metadata' keys
+            metadata_field: String name of metadata field, or list of metadata field names (e.g., 'area' or ['area', 'brightness'])
+            n_neighbors: Number of neighbors for UMAP (default: 15)
+            min_dist: Minimum distance for UMAP (default: 0.1)
+            random_state: Random state for reproducibility. If None, allows parallelism (default: None)
+            n_jobs: Number of parallel jobs. -1 uses all CPU cores, None auto-selects based on random_state
+            
+        Returns:
+            dict: JSON object with success flag and:
+                - If metadata_field is a string: single 'image_base64' field
+                - If metadata_field is a list: 'image_base64_list' field containing list of base64 strings
+        """
+        try:
+            if not all_cells or len(all_cells) == 0:
+                return {
+                    "success": False,
+                    "error": "No cells provided",
+                    "image_base64": None,
+                    "image_base64_list": None
+                }
+            
+            # Handle both string and list inputs
+            is_list = isinstance(metadata_field, list)
+            
+            if not metadata_field or (isinstance(metadata_field, str) and not metadata_field.strip()):
+                return {
+                    "success": False,
+                    "error": "metadata_field must be a non-empty string or list of strings",
+                    "image_base64": None,
+                    "image_base64_list": None
+                }
+            
+            if is_list and len(metadata_field) == 0:
+                return {
+                    "success": False,
+                    "error": "metadata_field list cannot be empty",
+                    "image_base64": None,
+                    "image_base64_list": None
+                }
+            
+            from agent_lens.utils.umap_analysis_utils import make_umap_metadata_heatmap_figures_base64
+            
+            # Run CPU-intensive UMAP computation in a thread pool to avoid blocking asyncio loop
+            # Convert single string to list for the function
+            metadata_fields = metadata_field if is_list else [metadata_field]
+            
+            image_base64_list = await asyncio.to_thread(
+                make_umap_metadata_heatmap_figures_base64,
+                all_cells=all_cells,
+                metadata_fields=metadata_fields,
+                n_neighbors=n_neighbors,
+                min_dist=min_dist,
+                random_state=random_state,
+                n_jobs=n_jobs,
+            )
+            
+            if not image_base64_list or len(image_base64_list) == 0:
+                return {
+                    "success": False,
+                    "error": f"Failed to generate UMAP metadata heatmap figure(s) (too few cells, invalid metadata_field(s), or other error)",
+                    "image_base64": None,
+                    "image_base64_list": None
+                }
+            
+            # Return format depends on input type
+            if is_list:
+                # Return list of images
+                return {
+                    "success": True,
+                    "image_base64_list": image_base64_list,
+                    "n_cells": len(all_cells),
+                    "metadata_fields": metadata_fields,
+                    "n_figures": len(image_base64_list)
+                }
+            else:
+                # Return single image for backward compatibility
+                return {
+                    "success": True,
+                    "image_base64": image_base64_list[0] if image_base64_list else None,
+                    "n_cells": len(all_cells),
+                    "metadata_field": metadata_field
+                }
+        except Exception as e:
+            logger.error(f"Error generating UMAP metadata heatmap figure via RPC: {e}")
+            logger.error(traceback.format_exc())
+            raise
+    
     # Define hypha-rpc service method for interactive UMAP (HTML)
     async def make_umap_cluster_figure_interactive_rpc(
         all_cells: List[dict],
@@ -1603,6 +1710,7 @@ async def setup_service(server, server_id="agent-lens"):
             # Register RPC methods for UMAP clustering
             "make_umap_cluster_figure_base64": make_umap_cluster_figure_base64_rpc,
             "make_umap_cluster_figure_interactive": make_umap_cluster_figure_interactive_rpc,
+            "make_umap_metadata_heatmap_figure_base64": make_umap_metadata_heatmap_figure_base64_rpc,
         }
     )
 

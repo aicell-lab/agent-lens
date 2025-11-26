@@ -1,17 +1,17 @@
 services:
   agent-lens:
-    image: ghcr.io/aicell-lab/agent-lens:sha-9c8a58d
+    image: ghcr.io/aicell-lab/agent-lens:sha-02e45c5
     container_name: agent-lens
     # Optimize image pulling
     pull_policy: if_not_present
     environment:
       - WORKSPACE_TOKEN=${WORKSPACE_TOKEN}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - CLIP_CACHE=/app/.cache  # CLIP models are cached here for faster startup
+      - CLIP_CACHE=/app/.cache  # BiomedCLIP models are cached here for faster startup (kept for backward compatibility)
       - JWT_SECRET=${JWT_SECRET}
       - REEF_WORKSPACE_TOKEN=${REEF_WORKSPACE_TOKEN}
       - HYPHA_AGENTS_TOKEN=${HYPHA_AGENTS_TOKEN}
-      # CLIP models are automatically preloaded in Docker mode for faster similarity search
+      # BiomedCLIP models are automatically preloaded in Docker mode for faster similarity search
       - NVIDIA_VISIBLE_DEVICES=all  # Make GPU visible to container
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility  # Enable GPU compute capabilities
     labels:
