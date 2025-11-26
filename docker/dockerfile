@@ -85,7 +85,7 @@ RUN npm config set prefix '/home/agent_lens/.npm-global' && \
 
 RUN pip install --upgrade pip
 # Install PyTorch with CUDA support before other dependencies
-# This ensures GPU support is available for CLIP model
+# This ensures GPU support is available for BiomedCLIP model
 RUN pip install --user torch==2.5.1 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 && \
     pip cache purge
 # Install remaining dependencies

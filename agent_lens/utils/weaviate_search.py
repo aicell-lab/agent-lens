@@ -7,7 +7,7 @@ import os
 from typing import List, Dict, Any, Optional
 from hypha_rpc import connect_to_server
 import numpy as np
-import clip
+from open_clip import create_model_from_pretrained, get_tokenizer
 import torch
 from agent_lens.log import setup_logging
 
@@ -21,10 +21,11 @@ WEAVIATE_SERVICE_NAME = "hypha-agents/weaviate"
 # Collection name - always use the existing 'Agentlens' collection (never create new collections)
 WEAVIATE_COLLECTION_NAME = "Agentlens"
 
-# CLIP model configuration
+# BiomedCLIP model configuration
 device = "cuda" if torch.cuda.is_available() else "cpu"
-_clip_model = None
-_clip_preprocess = None
+_biomedclip_model = None
+_biomedclip_preprocess = None
+_biomedclip_tokenizer = None
 
 # Configure CPU threads for PyTorch when using CPU
 if device == "cpu":
@@ -36,13 +37,16 @@ if device == "cpu":
     logger.info(f"CPU mode: Configured PyTorch to use {num_threads} threads (out of {cpu_count} available cores)")
 
 def _load_clip_model():
-    """Load CLIP ViT-B/32 model lazily and cache it in memory."""
-    global _clip_model, _clip_preprocess
-    if _clip_model is None:
-        logger.info(f"Loading CLIP ViT-B/32 on {device}")
-        _clip_model, _clip_preprocess = clip.load("ViT-B/32", device=device)
-        logger.info("CLIP model loaded")
-    return _clip_model, _clip_preprocess
+    """Load BiomedCLIP model lazily and cache it in memory."""
+    global _biomedclip_model, _biomedclip_preprocess, _biomedclip_tokenizer
+    if _biomedclip_model is None:
+        logger.info(f"Loading BiomedCLIP-PubMedBERT_256-vit_base_patch16_224 on {device}")
+        _biomedclip_model, _biomedclip_preprocess = create_model_from_pretrained('hf-hub:microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224')
+        _biomedclip_tokenizer = get_tokenizer('hf-hub:microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224')
+        _biomedclip_model.to(device)
+        _biomedclip_model.eval()
+        logger.info("BiomedCLIP model loaded")
+    return _biomedclip_model, _biomedclip_preprocess, _biomedclip_tokenizer
 
 def _normalize_features(features: np.ndarray) -> np.ndarray:
     """L2-normalize feature vectors."""
@@ -52,14 +56,16 @@ def _normalize_features(features: np.ndarray) -> np.ndarray:
     return features / (norm + 1e-12)
 
 async def generate_text_embedding(text_description: str) -> List[float]:
-    """Generate a unit-normalized CLIP embedding for text."""
-    model, preprocess = _load_clip_model()
+    """Generate a unit-normalized BiomedCLIP embedding for text."""
+    model, preprocess, tokenizer = _load_clip_model()
     
     try:
-        # Encode text
-        text = clip.tokenize([text_description]).to(device)
+        # Encode text using BiomedCLIP tokenizer
+        context_length = 256
+        texts = tokenizer([text_description], context_length=context_length).to(device)
         with torch.no_grad():
-            text_features = model.encode_text(text)
+            # Use encode_text method for text-only encoding
+            text_features = model.encode_text(texts)
             # Normalize to unit vector
             text_features = text_features / text_features.norm(dim=-1, keepdim=True)
         
@@ -69,11 +75,11 @@ async def generate_text_embedding(text_description: str) -> List[float]:
             torch.cuda.empty_cache()
 
 async def generate_image_embedding(image_bytes: bytes) -> List[float]:
-    """Generate a unit-normalized CLIP embedding for an image."""
+    """Generate a unit-normalized BiomedCLIP embedding for an image."""
     from PIL import Image
     import io
     
-    model, preprocess = _load_clip_model()
+    model, preprocess, tokenizer = _load_clip_model()
     image_tensor = None
     
     try:
@@ -83,7 +89,9 @@ async def generate_image_embedding(image_bytes: bytes) -> List[float]:
             image_tensor = preprocess(image).unsqueeze(0).to(device)
 
         with torch.no_grad():
-            image_features = model.encode_image(image_tensor).cpu().numpy()
+            # Use encode_image method for image-only encoding
+            image_features = model.encode_image(image_tensor)
+            image_features = image_features.cpu().numpy()
 
         embedding = _normalize_features(image_features)[0].astype(np.float32)
         return embedding.tolist()
@@ -95,12 +103,12 @@ async def generate_image_embedding(image_bytes: bytes) -> List[float]:
 
 async def generate_image_embeddings_batch(image_bytes_list: List[bytes]) -> List[List[float]]:
     """
-    Generate unit-normalized CLIP embeddings for multiple images in a single batch.
+    Generate unit-normalized BiomedCLIP embeddings for multiple images in a single batch.
     This is much faster than processing images individually, especially on GPU.
     
     The main optimizations are:
     1. Parallel image preprocessing using ThreadPoolExecutor (PIL operations release GIL)
-    2. Batching the CLIP model inference, which allows the GPU to process multiple images simultaneously
+    2. Batching the BiomedCLIP model inference, which allows the GPU to process multiple images simultaneously
     
     Args:
         image_bytes_list: List of image byte data to process
@@ -116,7 +124,7 @@ async def generate_image_embeddings_batch(image_bytes_list: List[bytes]) -> List
     if not image_bytes_list:
         return []
     
-    model, preprocess = _load_clip_model()
+    model, preprocess, tokenizer = _load_clip_model()
     
     # Preprocess images in parallel using ThreadPoolExecutor
     # PIL operations release the GIL, so threading provides speedup
@@ -165,7 +173,9 @@ async def generate_image_embeddings_batch(image_bytes_list: List[bytes]) -> List
         # Single batch inference (much faster than individual calls)
         # This is the key optimization - GPU processes all images at once
         with torch.no_grad():
-            image_features = model.encode_image(batch_tensor).cpu().numpy()
+            # Use encode_image method for batch image encoding
+            image_features = model.encode_image(batch_tensor)
+            image_features = image_features.cpu().numpy()
         
         # Normalize features
         normalized_features = _normalize_features(image_features).astype(np.float32)

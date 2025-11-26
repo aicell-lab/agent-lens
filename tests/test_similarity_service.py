@@ -50,47 +50,52 @@ class TestWeaviateSimilarityService:
 
     @staticmethod
     def _generate_clip_vector(text_description):
-        """Generate a CLIP vector for the given text description."""
-        import clip
+        """Generate a BiomedCLIP vector for the given text description."""
+        from open_clip import create_model_from_pretrained, get_tokenizer
         import torch
         import shutil
         from pathlib import Path
         
-        # Load CLIP model with retry logic for CI environments
+        # Load BiomedCLIP model with retry logic for CI environments
         device = "cuda" if torch.cuda.is_available() else "cpu"
         
         # Try to load the model with retry logic
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                model, preprocess = clip.load("ViT-B/32", device=device)
+                model, preprocess = create_model_from_pretrained('hf-hub:microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224')
+                tokenizer = get_tokenizer('hf-hub:microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224')
+                model.to(device)
+                model.eval()
                 break
             except RuntimeError as e:
-                if "SHA256 checksum does not not match" in str(e):
-                    print(f"CLIP model download corrupted (attempt {attempt + 1}/{max_retries}). Cleaning cache and retrying...")
-                    # Clean the CLIP cache and retry
-                    cache_dir = Path.home() / ".cache" / "clip"
+                if "SHA256 checksum does not not match" in str(e) or "corrupted" in str(e).lower():
+                    print(f"BiomedCLIP model download corrupted (attempt {attempt + 1}/{max_retries}). Cleaning cache and retrying...")
+                    # Clean the HuggingFace cache and retry
+                    cache_dir = Path.home() / ".cache" / "huggingface"
                     if cache_dir.exists():
                         shutil.rmtree(cache_dir)
-                        print(f"Cleared CLIP cache: {cache_dir}")
+                        print(f"Cleared HuggingFace cache: {cache_dir}")
                     
                     if attempt == max_retries - 1:
                         # On final attempt, create a mock vector instead of failing
-                        print("CLIP model download failed after retries. Using mock vector for testing.")
+                        print("BiomedCLIP model download failed after retries. Using mock vector for testing.")
                         return [0.1] * 512  # Return a mock 512-dimensional vector
                 else:
                     raise e
             except Exception as e:
                 if attempt == max_retries - 1:
-                    print(f"CLIP model loading failed after retries: {e}. Using mock vector for testing.")
+                    print(f"BiomedCLIP model loading failed after retries: {e}. Using mock vector for testing.")
                     return [0.1] * 512  # Return a mock 512-dimensional vector
                 else:
-                    print(f"CLIP model loading failed (attempt {attempt + 1}/{max_retries}): {e}. Retrying...")
+                    print(f"BiomedCLIP model loading failed (attempt {attempt + 1}/{max_retries}): {e}. Retrying...")
         
-        # Encode text
-        text = clip.tokenize([text_description]).to(device)
+        # Encode text using BiomedCLIP tokenizer
+        context_length = 256
+        texts = tokenizer([text_description], context_length=context_length).to(device)
         with torch.no_grad():
-            text_features = model.encode_text(text)
+            # Use encode_text method for text-only encoding
+            text_features = model.encode_text(texts)
             # Normalize to unit vector
             text_features = text_features / text_features.norm(dim=-1, keepdim=True)
         
@@ -156,8 +161,8 @@ class TestWeaviateSimilarityService:
         await service.disconnect()
 
     @pytest.mark.integration
-    @pytest.mark.slow  # Mark as slow test - requires CLIP model loading
-    @pytest.mark.timeout(600)  # 10 minutes timeout for CLIP model loading and Weaviate operations
+    @pytest.mark.slow  # Mark as slow test - requires BiomedCLIP model loading
+    @pytest.mark.timeout(600)  # 10 minutes timeout for BiomedCLIP model loading and Weaviate operations
     async def test_weaviate_collection_lifecycle(self, weaviate_service):
         """Test creating, using, and deleting a Weaviate collection."""
         collection_name = self._generate_test_collection_name()
@@ -221,10 +226,10 @@ class TestWeaviateSimilarityService:
                 }
                 test_images.append(image_data)
             
-            # Insert test image data with CLIP vectors and preview images
+            # Insert test image data with BiomedCLIP vectors and preview images
             insert_results = []
             for img_data in test_images:
-                # Generate CLIP vector for the image description
+                # Generate BiomedCLIP vector for the image description
                 clip_vector = self._generate_clip_vector(img_data["description"])
                 
                 # Generate test preview image
@@ -259,7 +264,7 @@ class TestWeaviateSimilarityService:
                 )
                 insert_results.append(result)
             
-            print(f"Inserted {len(insert_results)} objects with CLIP vectors")
+            print(f"Inserted {len(insert_results)} objects with BiomedCLIP vectors")
             
             # 4. Test text-based search
             print("Testing text-based search...")
@@ -284,7 +289,7 @@ class TestWeaviateSimilarityService:
             # 6. Test vector similarity search
             print("Performing vector similarity search...")
             
-            # Generate a query vector using CLIP
+            # Generate a query vector using BiomedCLIP
             query_vector = self._generate_clip_vector("microscopy image")
             
             # Search for similar images using the service method
@@ -397,8 +402,8 @@ class TestWeaviateSimilarityService:
             pass
 
     @pytest.mark.integration
-    @pytest.mark.slow  # Mark as slow test - requires CLIP model loading
-    @pytest.mark.timeout(600)  # 10 minutes timeout for CLIP model loading and text search operations
+    @pytest.mark.slow  # Mark as slow test - requires BiomedCLIP model loading
+    @pytest.mark.timeout(600)  # 10 minutes timeout for BiomedCLIP model loading and text search operations
     async def test_weaviate_text_search(self, weaviate_service):
         """Test text-based search functionality."""
         collection_name = self._generate_test_collection_name()
@@ -441,14 +446,14 @@ class TestWeaviateSimilarityService:
                 }
             ]
             
-            # Insert objects with CLIP vectors and preview images
+            # Insert objects with BiomedCLIP vectors and preview images
             for i, text_obj in enumerate(text_objects):
                 print(f"Processing text object {i+1}/{len(text_objects)}: {text_obj['title']}")
-                # Generate CLIP vector for the title + content
+                # Generate BiomedCLIP vector for the title + content
                 text_description = f"{text_obj['title']}: {text_obj['content']}"
-                print(f"Generating CLIP vector for: {text_description[:50]}...")
+                print(f"Generating BiomedCLIP vector for: {text_description[:50]}...")
                 clip_vector = self._generate_clip_vector(text_description)
-                print(f"✅ CLIP vector generated (length: {len(clip_vector)})")
+                print(f"✅ BiomedCLIP vector generated (length: {len(clip_vector)})")
                 
                 # Generate test preview image
                 preview_image = self._generate_test_preview_image()
@@ -582,14 +587,14 @@ class TestWeaviateSimilarityService:
                 print(f"Warning: Error cleaning up collection {collection_name}: {e}")
 
     @pytest.mark.unit
-    @pytest.mark.timeout(300)  # 5 minute timeout for CLIP model download
+    @pytest.mark.timeout(300)  # 5 minute timeout for BiomedCLIP model download
     def test_utility_functions(self):
         """Test utility functions for test data generation."""
-        # Test CLIP vector generation
+        # Test BiomedCLIP vector generation
         vector = TestWeaviateSimilarityService._generate_clip_vector("test microscopy image")
-        assert len(vector) == 512  # CLIP ViT-B/32 produces 512-dimensional vectors
+        assert len(vector) == 512  # BiomedCLIP produces 512-dimensional vectors (256 refers to context length, not embedding dimension)
         assert all(isinstance(v, float) for v in vector)
-        # CLIP vectors are normalized, so they can be negative (or mock vectors can be 0.1)
+        # BiomedCLIP vectors are normalized, so they can be negative (or mock vectors can be 0.1)
         assert all(-1 <= v <= 1 for v in vector)
         
         # Test collection name generation
@@ -658,7 +663,7 @@ class TestWeaviateSimilarityService:
                 async with session.post(text_url, params=text_data) as response:
                     assert response.status == 200
                     result = await response.json()
-                    assert result["model"] == "ViT-B/32"
+                    assert result["model"] == "BiomedCLIP-PubMedBERT_256-vit_base_patch16_224"
                     assert "embedding" in result
                     assert result["dimension"] == 512
                     assert result["text"] == "microscopy image of cells"
@@ -684,7 +689,7 @@ class TestWeaviateSimilarityService:
                 async with session.post(image_url, data=data) as response:
                     assert response.status == 200
                     result = await response.json()
-                    assert result["model"] == "ViT-B/32"
+                    assert result["model"] == "BiomedCLIP-PubMedBERT_256-vit_base_patch16_224"
                     assert "embedding" in result
                     assert result["dimension"] == 512
                     assert len(result["embedding"]) == 512
@@ -761,7 +766,7 @@ class TestWeaviateSimilarityService:
                 image_id = f"test_img_id_{i}"
                 description = descriptions[i]
                 
-                # Generate CLIP vector
+                # Generate BiomedCLIP vector
                 clip_vector = self._generate_clip_vector(description)
                 
                 # Generate test preview image
@@ -920,7 +925,7 @@ class TestWeaviateSimilarityService:
                 test_image.save(img_buffer, format='PNG')
                 img_buffer.seek(0)
                 
-                # Generate CLIP vector for the description
+                # Generate BiomedCLIP vector for the description
                 clip_vector = self._generate_clip_vector("test endpoint microscopy image")
                 
                 from aiohttp import FormData

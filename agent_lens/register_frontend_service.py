@@ -12,8 +12,8 @@ from fastapi.staticfiles import StaticFiles
 from agent_lens.utils.artifact_manager import AgentLensArtifactManager
 from hypha_rpc import connect_to_server
 import numpy as np
-# CLIP and Torch for embeddings
-import clip
+# BiomedCLIP and Torch for embeddings
+from open_clip import create_model_from_pretrained, get_tokenizer
 import torch
 import sys
 from fastapi.middleware.gzip import GZipMiddleware
@@ -30,38 +30,35 @@ from .log import setup_logging
 logger = setup_logging("agent_lens_frontend_service.log")
 
 
-# -------------------- CLIP Embedding Helpers --------------------
-# Lazy-load CLIP model for generating embeddings
+# -------------------- BiomedCLIP Embedding Helpers --------------------
+# Lazy-load BiomedCLIP model for generating embeddings
 # Note: CPU thread configuration is handled in weaviate_search.py
 device = "cuda" if torch.cuda.is_available() else "cpu"
-_clip_model = None
-_clip_preprocess = None
+_biomedclip_model = None
+_biomedclip_preprocess = None
+_biomedclip_tokenizer = None
 
 # Log GPU information at module load
 if torch.cuda.is_available():
-    logger.info("✓ CUDA available - GPU will be used for CLIP model")
+    logger.info("✓ CUDA available - GPU will be used for BiomedCLIP model")
     logger.info(f"  CUDA Device: {torch.cuda.get_device_name(0)}")
     logger.info(f"  CUDA Version: {torch.version.cuda}")
     logger.info(f"  PyTorch Version: {torch.__version__}")
 else:
-    logger.warning("⚠ CUDA not available - CLIP model will use CPU (slower)")
+    logger.warning("⚠ CUDA not available - BiomedCLIP model will use CPU (slower)")
     logger.warning("  Ensure Docker has GPU access configured (nvidia-container-toolkit)")
 
 def _load_clip_model():
-    """Load CLIP ViT-B/32 model lazily and cache it in memory."""
-    global _clip_model, _clip_preprocess
-    if _clip_model is None:
-        # Use CLIP_CACHE environment variable if set, otherwise use default
-        clip_cache_dir = os.getenv("CLIP_CACHE")
-        logger.info(f"Loading CLIP ViT-B/32 on {device}")
-        if clip_cache_dir:
-            logger.info(f"Using CLIP cache directory: {clip_cache_dir}")
-            _clip_model, _clip_preprocess = clip.load("ViT-B/32", device=device, download_root=clip_cache_dir)
-        else:
-            logger.info("Using default CLIP cache directory")
-            _clip_model, _clip_preprocess = clip.load("ViT-B/32", device=device)
-        logger.info("CLIP model loaded")
-    return _clip_model, _clip_preprocess
+    """Load BiomedCLIP model lazily and cache it in memory."""
+    global _biomedclip_model, _biomedclip_preprocess, _biomedclip_tokenizer
+    if _biomedclip_model is None:
+        logger.info(f"Loading BiomedCLIP-PubMedBERT_256-vit_base_patch16_224 on {device}")
+        _biomedclip_model, _biomedclip_preprocess = create_model_from_pretrained('hf-hub:microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224')
+        _biomedclip_tokenizer = get_tokenizer('hf-hub:microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224')
+        _biomedclip_model.to(device)
+        _biomedclip_model.eval()
+        logger.info("BiomedCLIP model loaded")
+    return _biomedclip_model, _biomedclip_preprocess, _biomedclip_tokenizer
 
 def _normalize_features(features: np.ndarray) -> np.ndarray:
     """L2-normalize feature vectors."""
@@ -139,7 +136,7 @@ def get_frontend_api():
 
     @app.post("/embedding/image")
     async def generate_image_embedding(image: UploadFile = File(...)):
-        """Generate a CLIP image embedding from an uploaded image.
+        """Generate a BiomedCLIP image embedding from an uploaded image.
 
         Returns a JSON object with a 512-d float array.
         """
@@ -151,7 +148,7 @@ def get_frontend_api():
                 raise HTTPException(status_code=400, detail="Empty image upload")
             from agent_lens.utils.weaviate_search import generate_image_embedding
             embedding = await generate_image_embedding(image_bytes)
-            return {"model": "ViT-B/32", "embedding": embedding, "dimension": len(embedding)}
+            return {"model": "BiomedCLIP-PubMedBERT_256-vit_base_patch16_224", "embedding": embedding, "dimension": len(embedding)}
         except HTTPException:
             raise
         except Exception as e:
@@ -161,7 +158,7 @@ def get_frontend_api():
 
     @app.post("/embedding/image-batch")
     async def generate_image_embedding_batch(images: List[UploadFile] = File(...)):
-        """Generate CLIP image embeddings from multiple uploaded images in batch.
+        """Generate BiomedCLIP image embeddings from multiple uploaded images in batch.
         
         This endpoint uses optimized batch processing with parallel I/O for significantly faster
         embedding generation, especially when using GPU acceleration.
@@ -174,9 +171,9 @@ def get_frontend_api():
                 {
                     "success": True,
                     "results": [
-                        {"success": True, "embedding": [...], "dimension": 512, "model": "ViT-B/32"},
+                        {"success": True, "embedding": [...], "dimension": 512, "model": "BiomedCLIP-PubMedBERT_256-vit_base_patch16_224"},
                         None,  # if failed
-                        {"success": True, "embedding": [...], "dimension": 512, "model": "ViT-B/32"},
+                        {"success": True, "embedding": [...], "dimension": 512, "model": "BiomedCLIP-PubMedBERT_256-vit_base_patch16_224"},
                     ],
                     "count": 3
                 }
@@ -230,7 +227,7 @@ def get_frontend_api():
                         "success": True,
                         "embedding": embedding,
                         "dimension": len(embedding),
-                        "model": "ViT-B/32"
+                        "model": "BiomedCLIP-PubMedBERT_256-vit_base_patch16_224"
                     }
                 # else: results[valid_idx] remains None
             
@@ -248,7 +245,7 @@ def get_frontend_api():
 
     @app.post("/embedding/text")
     async def generate_text_embedding_endpoint(text: str):
-        """Generate a CLIP text embedding from a text input.
+        """Generate a BiomedCLIP text embedding from a text input.
 
         Args:
             text (str): Text input to generate embedding for
@@ -263,7 +260,7 @@ def get_frontend_api():
             from agent_lens.utils.weaviate_search import generate_text_embedding
             embedding = await generate_text_embedding(text.strip())
             return {
-                "model": "ViT-B/32", 
+                "model": "BiomedCLIP-PubMedBERT_256-vit_base_patch16_224", 
                 "embedding": embedding, 
                 "dimension": len(embedding),
                 "text": text.strip()
@@ -1302,28 +1299,28 @@ def get_frontend_api():
 
 async def preload_clip_model():
     """
-    Preload CLIP model during service startup to avoid delays during first use.
-    This function loads both the CLIP model and the similarity service CLIP model.
+    Preload BiomedCLIP model during service startup to avoid delays during first use.
+    This function loads both the BiomedCLIP model and the similarity service BiomedCLIP model.
     """
-    logger.info("Preloading CLIP models for faster startup...")
+    logger.info("Preloading BiomedCLIP models for faster startup...")
     
     try:
-        # Preload CLIP model for frontend service
-        logger.info("Loading CLIP model for frontend service...")
+        # Preload BiomedCLIP model for frontend service
+        logger.info("Loading BiomedCLIP model for frontend service...")
         _load_clip_model()
-        logger.info("✓ Frontend CLIP model loaded successfully")
+        logger.info("✓ Frontend BiomedCLIP model loaded successfully")
         
-        # Preload CLIP model for similarity service
-        logger.info("Loading CLIP model for similarity service...")
-        from agent_lens.utils.weaviate_search import _load_clip_model as load_similarity_clip
-        load_similarity_clip()
-        logger.info("✓ Similarity service CLIP model loaded successfully")
+        # Preload BiomedCLIP model for similarity service
+        logger.info("Loading BiomedCLIP model for similarity service...")
+        from agent_lens.utils.weaviate_search import _load_clip_model as load_similarity_biomedclip
+        load_similarity_biomedclip()
+        logger.info("✓ Similarity service BiomedCLIP model loaded successfully")
         
-        logger.info("All CLIP models preloaded successfully - similarity search will be faster!")
+        logger.info("All BiomedCLIP models preloaded successfully - similarity search will be faster!")
         
     except Exception as e:
-        logger.warning(f"Failed to preload CLIP models: {e}")
-        logger.warning("CLIP will be loaded on first use (may cause delays)")
+        logger.warning(f"Failed to preload BiomedCLIP models: {e}")
+        logger.warning("BiomedCLIP will be loaded on first use (may cause delays)")
 
 async def setup_service(server, server_id="agent-lens"):
     """
@@ -1343,18 +1340,18 @@ async def setup_service(server, server_id="agent-lens"):
     if is_connect_server and not is_docker:
         server_id = "agent-lens-test"
     
-    # Preload CLIP models for faster startup (especially important in Docker)
+    # Preload BiomedCLIP models for faster startup (especially important in Docker)
     # Also preload in development if CLIP_PRELOAD environment variable is set
     should_preload = is_docker or os.getenv("CLIP_PRELOAD", "").lower() in ("true", "1", "yes")
     
     if should_preload:
         if is_docker:
-            logger.info("Docker mode detected - preloading CLIP models...")
+            logger.info("Docker mode detected - preloading BiomedCLIP models...")
         else:
-            logger.info("CLIP_PRELOAD environment variable set - preloading CLIP models...")
+            logger.info("CLIP_PRELOAD environment variable set - preloading BiomedCLIP models...")
         await preload_clip_model()
     else:
-        logger.info("CLIP models will be loaded on first use (set CLIP_PRELOAD=true to preload)")
+        logger.info("BiomedCLIP models will be loaded on first use (set CLIP_PRELOAD=true to preload)")
     
     # Ensure artifact_manager_instance is connected
     if artifact_manager_instance.server is None:
@@ -1369,7 +1366,7 @@ async def setup_service(server, server_id="agent-lens"):
     # Define simple hypha-rpc service method for text embedding generation
     async def generate_text_embedding_rpc(text: str) -> dict:
         """
-        Generate a CLIP text embedding via hypha-rpc.
+        Generate a BiomedCLIP text embedding via hypha-rpc.
         
         Args:
             text: Text input to generate embedding for
@@ -1384,7 +1381,7 @@ async def setup_service(server, server_id="agent-lens"):
             from agent_lens.utils.weaviate_search import generate_text_embedding
             embedding = await generate_text_embedding(text.strip())
             return {
-                "model": "ViT-B/32",
+                "model": "BiomedCLIP-PubMedBERT_256-vit_base_patch16_224",
                 "embedding": embedding,
                 "dimension": len(embedding),
                 "text": text.strip()
@@ -1397,7 +1394,7 @@ async def setup_service(server, server_id="agent-lens"):
     # Define simple hypha-rpc service method for batch image embedding generation
     async def generate_image_embeddings_batch_rpc(images_base64: List[str]) -> dict:
         """
-        Generate CLIP image embeddings for multiple images in batch via hypha-rpc.
+        Generate BiomedCLIP image embeddings for multiple images in batch via hypha-rpc.
         
         This endpoint uses optimized batch processing with parallel I/O for significantly faster
         embedding generation, especially when using GPU acceleration.
@@ -1439,7 +1436,7 @@ async def setup_service(server, server_id="agent-lens"):
                         "success": True,
                         "embedding": embedding,
                         "dimension": len(embedding),
-                        "model": "ViT-B/32"
+                        "model": "BiomedCLIP-PubMedBERT_256-vit_base_patch16_224"
                     }
             
             return {
