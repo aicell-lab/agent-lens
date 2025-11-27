@@ -1471,7 +1471,7 @@ async def setup_service(server, server_id="agent-lens"):
         For parallelism, set random_state=None and n_jobs=-1 (uses all CPU cores).
         
         Args:
-            all_cells: List of cell dictionaries, each should have 'embedding' key
+            all_cells: List of cell dictionaries, each should have 'embedding_vector' key
             n_neighbors: Number of neighbors for UMAP (default: 15)
             min_dist: Minimum distance for UMAP (default: 0.1)
             random_state: Random state for reproducibility. If None, allows parallelism (default: None)
@@ -1537,7 +1537,7 @@ async def setup_service(server, server_id="agent-lens"):
         For parallelism, set random_state=None and n_jobs=-1 (uses all CPU cores).
         
         Args:
-            all_cells: List of cell dictionaries, each should have 'embedding' and 'metadata' keys
+            all_cells: List of cell dictionaries, each should have 'embedding_vector' and 'metadata' keys
             metadata_field: String name of metadata field, or list of metadata field names (e.g., 'area' or ['area', 'brightness'])
             n_neighbors: Number of neighbors for UMAP (default: 15)
             min_dist: Minimum distance for UMAP (default: 0.1)
@@ -1650,7 +1650,7 @@ async def setup_service(server, server_id="agent-lens"):
         For parallelism, set random_state=None and n_jobs=-1 (uses all CPU cores).
         
         Args:
-            all_cells: List of cell dictionaries, each should have 'embedding' key
+            all_cells: List of cell dictionaries, each should have 'embedding_vector' key
             n_neighbors: Number of neighbors for UMAP (default: 15)
             min_dist: Minimum distance for UMAP (default: 0.1)
             random_state: Random state for reproducibility. If None, allows parallelism (default: None)

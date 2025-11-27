@@ -92,7 +92,7 @@ def make_umap_cluster_figure_base64(
     For parallelism, set random_state=None and n_jobs=-1 (uses all CPU cores).
 
     Args:
-        all_cells: List of cell dictionaries, each should have 'embedding' key
+        all_cells: List of cell dictionaries, each should have 'embedding_vector' key
         n_neighbors: Number of neighbors for UMAP (default: 15)
         min_dist: Minimum distance for UMAP (default: 0.1)
         random_state: Random state for reproducibility. If None, allows parallelism (default: None)
@@ -107,8 +107,8 @@ def make_umap_cluster_figure_base64(
     # --- Collect embeddings only ---
     embeddings = []
     for c in all_cells:
-        if "embedding" in c:
-            embeddings.append(np.array(c["embedding"], dtype=float))
+        if "embedding_vector" in c:
+            embeddings.append(np.array(c["embedding_vector"], dtype=float))
 
     if len(embeddings) < 5:
         print("⚠️ Too few cells with embeddings → clustering skipped.")
@@ -192,7 +192,7 @@ def make_umap_metadata_heatmap_figures_base64(
     For parallelism, set random_state=None and n_jobs=-1 (uses all CPU cores).
 
     Args:
-        all_cells: List of cell dictionaries, each should have 'embedding' and 'metadata' keys
+        all_cells: List of cell dictionaries, each should have 'embedding_vector' and 'metadata' keys
         metadata_fields: List of metadata field names to visualize (e.g., ['area', 'brightness'])
         n_neighbors: Number of neighbors for UMAP (default: 15)
         min_dist: Minimum distance for UMAP (default: 0.1)
@@ -220,8 +220,8 @@ def make_umap_metadata_heatmap_figures_base64(
     cell_indices = []  # Track which cells have embeddings
     
     for idx, c in enumerate(all_cells):
-        if "embedding" in c:
-            embeddings.append(np.array(c["embedding"], dtype=float))
+        if "embedding_vector" in c:
+            embeddings.append(np.array(c["embedding_vector"], dtype=float))
             cell_indices.append(idx)
 
     if len(embeddings) < 5:
@@ -337,7 +337,7 @@ def make_umap_cluster_figure_interactive(
     - Color-coded clusters for easy identification
     
     Args:
-        all_cells: List of cell dictionaries with 'embedding' key (and optionally 'id', 'area', etc.)
+        all_cells: List of cell dictionaries with 'embedding_vector' key (and optionally 'id', 'area', etc.)
         n_neighbors: Number of neighbors for UMAP (default: 15)
         min_dist: Minimum distance for UMAP (default: 0.1)
         random_state: Random state for reproducibility. If None, allows parallelism (default: None)
@@ -359,14 +359,14 @@ def make_umap_cluster_figure_interactive(
     
     print(f"🔄 Processing {len(all_cells)} cells...")
     for idx, c in enumerate(all_cells):
-        if "embedding" in c:
-            embeddings.append(np.array(c["embedding"], dtype=float))
+        if "embedding_vector" in c:
+            embeddings.append(np.array(c["embedding_vector"], dtype=float))
             
             # Extract all metadata
             metadata = c.get("metadata", {})
             
             # Resize image to 50x50 thumbnail if available
-            image_b64_original = c.get("image_b64", None)
+            image_b64_original = c.get("image", None)
             image_b64_thumbnail = None
             if image_b64_original:
                 image_b64_thumbnail = resize_image_base64(image_b64_original, size=(50, 50))
