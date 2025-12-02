@@ -127,6 +127,7 @@ const ImagingTasksModal = ({
   const [doReflectionAf, setDoReflectionAf] = useState(true);
   const [useFocusMap, setUseFocusMap] = useState(false);
   const [focusMapPoints, setFocusMapPoints] = useState([null, null, null]); // Array of 3 points, each is {x, y, z} or null
+  const [moveForAutofocus, setMoveForAutofocus] = useState(false); // For raw_image_flexible: move to another position for autofocus, then move back
   
   // State for visual well selection
   const [selectedWells, setSelectedWells] = useState([]); // Array of well IDs like ["A1", "B2", "C3"]
@@ -397,6 +398,7 @@ const ImagingTasksModal = ({
       setDoReflectionAf(true);
       setUseFocusMap(false);
       setFocusMapPoints([null, null, null]); // Reset focus map points
+      setMoveForAutofocus(false); // Reset move for autofocus
       setIntervalMinutes('30');
       setPendingTimePoints('');
       
@@ -987,6 +989,7 @@ const ImagingTasksModal = ({
     } else if (savedDataType === 'raw_image_flexible') {
       // Flexible positions fields
       taskDefinition.settings.positions = positions;
+      taskDefinition.settings.move_for_autofocus = moveForAutofocus;
     }
 
     // Add focus map points if enabled (only when contrast autofocus is enabled)
@@ -1163,6 +1166,9 @@ const ImagingTasksModal = ({
                     ))}
                   </ul>
                 </>
+              )}
+              {task.settings?.move_for_autofocus !== undefined && (
+                <p><strong>Move for Autofocus:</strong> {task.settings.move_for_autofocus ? 'Yes' : 'No'}</p>
               )}
               
               {/* Display well plate scan parameters */}
@@ -1470,6 +1476,26 @@ const ImagingTasksModal = ({
                           No positions captured yet. Move the microscope stage to a desired location and click "Capture Current Position".
                         </p>
                       )}
+
+                      {/* Move for Autofocus option - only for flexible positions */}
+                      <div className="form-group mt-3">
+                        <label className="flex items-center form-label">
+                          <input
+                            type="checkbox"
+                            className="form-checkbox h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 mr-2"
+                            checked={moveForAutofocus}
+                            onChange={(e) => setMoveForAutofocus(e.target.checked)}
+                            disabled={slotsLoading || illuminationLoading}
+                          />
+                          <span>
+                            Move for Autofocus
+                            <TutorialTooltip text="When enabled, if a position is not suitable for autofocus, the system will move a small distance to a nearby position, perform autofocus there, then move back to the original position for imaging. This is useful when imaging positions lack suitable features for autofocus." />
+                          </span>
+                        </label>
+                        <p className="text-xs text-gray-600 mt-1 ml-6">
+                          If a position is not suitable for autofocus, move to a nearby position, perform autofocus, then return to the original position for imaging.
+                        </p>
+                      </div>
                     </>
                   )}
 
