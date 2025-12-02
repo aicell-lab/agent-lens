@@ -125,6 +125,8 @@ const ImagingTasksModal = ({
   const [uploadLoading, setUploadLoading] = useState(false);
   const [doContrastAutofocus, setDoContrastAutofocus] = useState(false);
   const [doReflectionAf, setDoReflectionAf] = useState(true);
+  const [useFocusMap, setUseFocusMap] = useState(false);
+  const [focusMapPoints, setFocusMapPoints] = useState([null, null, null]); // Array of 3 points, each is {x, y, z} or null
   
   // State for visual well selection
   const [selectedWells, setSelectedWells] = useState([]); // Array of well IDs like ["A1", "B2", "C3"]
@@ -234,6 +236,26 @@ const ImagingTasksModal = ({
     },
     showNotification
   );
+
+  // Helper function to update a specific coordinate of a focus map point
+  const updateFocusMapPoint = (pointIndex, coordinate, value) => {
+    setFocusMapPoints(prev => {
+      const newPoints = [...prev];
+      if (!newPoints[pointIndex]) {
+        newPoints[pointIndex] = { x: null, y: null, z: null };
+      }
+      newPoints[pointIndex] = {
+        ...newPoints[pointIndex],
+        [coordinate]: value
+      };
+      return newPoints;
+    });
+  };
+
+  // Helper function to get current coordinate value for a point
+  const getFocusMapPointValue = (pointIndex, coordinate) => {
+    return focusMapPoints[pointIndex]?.[coordinate] ?? '';
+  };
 
   const fetchCurrentIlluminationSettings = useCallback(async () => {
     if (!microscopeControlService) {
@@ -373,6 +395,8 @@ const ImagingTasksModal = ({
       setPositions([]); // Clear positions array
       setDoContrastAutofocus(false);
       setDoReflectionAf(true);
+      setUseFocusMap(false);
+      setFocusMapPoints([null, null, null]); // Reset focus map points
       setIntervalMinutes('30');
       setPendingTimePoints('');
       
@@ -412,6 +436,14 @@ const ImagingTasksModal = ({
       // And also fetch/set incubator slot if needed for display.
     }
   }, [isOpen, task, incubatorControlService, fetchIncubatorSlots, fetchCurrentIlluminationSettings]);
+
+  // Automatically disable focus map if contrast autofocus is disabled
+  useEffect(() => {
+    if (!doContrastAutofocus && useFocusMap) {
+      setUseFocusMap(false);
+      setFocusMapPoints([null, null, null]);
+    }
+  }, [doContrastAutofocus, useFocusMap]);
 
   // Update selectedWells when drag selection completes
   useEffect(() => {
@@ -886,6 +918,18 @@ const ImagingTasksModal = ({
       return; 
     }
     
+    // Validate focus map points if enabled
+    if (useFocusMap) {
+      if (!doContrastAutofocus) {
+        showNotification('Focus map is only available when Contrast Autofocus is enabled.', 'warning');
+        return;
+      }
+      if (!focusMapPoints.every(p => p && p.x !== null && p.y !== null && p.z !== null)) {
+        showNotification('All 3 focus map points must have x, y, z coordinates.', 'warning');
+        return;
+      }
+    }
+    
     const timePointsArray = pendingTimePoints.split('\n').map(tp => tp.trim()).filter(tp => tp);
     if (timePointsArray.length === 0) { showNotification('At least one Pending Time Point is required.', 'warning'); return; }
 
@@ -943,6 +987,11 @@ const ImagingTasksModal = ({
     } else if (savedDataType === 'raw_image_flexible') {
       // Flexible positions fields
       taskDefinition.settings.positions = positions;
+    }
+
+    // Add focus map points if enabled (only when contrast autofocus is enabled)
+    if (useFocusMap && doContrastAutofocus && focusMapPoints.every(p => p && p.x !== null && p.y !== null && p.z !== null)) {
+      taskDefinition.settings.focus_map_points = focusMapPoints.map(p => [p.x, p.y, p.z]);
     }
 
     appendLog(`Creating new task: ${JSON.stringify(taskDefinition, null, 2)}`);
@@ -1129,6 +1178,18 @@ const ImagingTasksModal = ({
               
               <p><strong>Contrast AF:</strong> {task.settings?.do_contrast_autofocus ? 'Yes' : 'No'}</p>
               <p><strong>Reflection AF:</strong> {task.settings?.do_reflection_af ? 'Yes' : 'No'}</p>
+              {task.settings?.focus_map_points && task.settings.focus_map_points.length > 0 && (
+                <>
+                  <p><strong>Focus Map Points:</strong> {task.settings.focus_map_points.length} point(s)</p>
+                  <ul className="list-disc pl-5 max-h-20 overflow-y-auto">
+                    {task.settings.focus_map_points.map((point, idx) => (
+                      <li key={idx}>
+                        Point {idx + 1}: X={point[0]?.toFixed(2)}mm, Y={point[1]?.toFixed(2)}mm, Z={point[2]?.toFixed(2)}mm
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
               <p><strong>Pending Time Points:</strong> {task.settings?.pending_time_points?.length || 0}</p>
               <ul className="list-disc pl-5 max-h-20 overflow-y-auto">
                 {task.settings?.pending_time_points?.map(tp => <li key={tp}>{tp}</li>)}
@@ -1662,6 +1723,97 @@ const ImagingTasksModal = ({
                     </span>
                   </label>
                 </div>
+                <div className="form-group">
+                  <label className="flex items-center form-label">
+                    <input
+                      type="checkbox"
+                      className="form-checkbox h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 mr-2"
+                      checked={useFocusMap}
+                      onChange={(e) => setUseFocusMap(e.target.checked)}
+                      disabled={slotsLoading || illuminationLoading || !doContrastAutofocus}
+                    />
+                    <span>
+                      Use Focus Map (3 reference points)
+                      <TutorialTooltip text="Provide 3 reference points (x, y, z coordinates) for focus interpolation during contrast-based autofocus. Only available when Contrast Autofocus is enabled. The system will use these points to calculate optimal focus at different stage positions." />
+                    </span>
+                  </label>
+                  {!doContrastAutofocus && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Focus map is only available when Contrast Autofocus is enabled.
+                    </p>
+                  )}
+                </div>
+                {useFocusMap && doContrastAutofocus && (
+                  <div className="focus-map-points-container mt-3 p-3 bg-gray-50 rounded">
+                    <p className="text-sm font-semibold mb-2">Focus Map Points (in mm):</p>
+                    {[0, 1, 2].map((pointIndex) => (
+                      <div key={pointIndex} className="mb-3">
+                        <p className="text-xs font-medium mb-1">Point {pointIndex + 1}:</p>
+                        <div className="form-grid">
+                          <div className="form-group mb-0">
+                            <label htmlFor={`focus-map-x-${pointIndex}`} className="text-xs mb-0 form-label">X (mm)</label>
+                            <input
+                              id={`focus-map-x-${pointIndex}`}
+                              type="number"
+                              className="modal-input text-xs"
+                              value={getFocusMapPointValue(pointIndex, 'x')}
+                              onChange={(e) => {
+                                const value = e.target.value === '' ? null : parseFloat(e.target.value);
+                                if (value === null || !isNaN(value)) {
+                                  updateFocusMapPoint(pointIndex, 'x', value);
+                                }
+                              }}
+                              step="0.01"
+                              disabled={slotsLoading || illuminationLoading}
+                              placeholder="X coordinate"
+                            />
+                          </div>
+                          <div className="form-group mb-0">
+                            <label htmlFor={`focus-map-y-${pointIndex}`} className="text-xs mb-0 form-label">Y (mm)</label>
+                            <input
+                              id={`focus-map-y-${pointIndex}`}
+                              type="number"
+                              className="modal-input text-xs"
+                              value={getFocusMapPointValue(pointIndex, 'y')}
+                              onChange={(e) => {
+                                const value = e.target.value === '' ? null : parseFloat(e.target.value);
+                                if (value === null || !isNaN(value)) {
+                                  updateFocusMapPoint(pointIndex, 'y', value);
+                                }
+                              }}
+                              step="0.01"
+                              disabled={slotsLoading || illuminationLoading}
+                              placeholder="Y coordinate"
+                            />
+                          </div>
+                          <div className="form-group mb-0">
+                            <label htmlFor={`focus-map-z-${pointIndex}`} className="text-xs mb-0 form-label">Z (mm)</label>
+                            <input
+                              id={`focus-map-z-${pointIndex}`}
+                              type="number"
+                              className="modal-input text-xs"
+                              value={getFocusMapPointValue(pointIndex, 'z')}
+                              onChange={(e) => {
+                                const value = e.target.value === '' ? null : parseFloat(e.target.value);
+                                if (value === null || !isNaN(value)) {
+                                  updateFocusMapPoint(pointIndex, 'z', value);
+                                }
+                              }}
+                              step="0.01"
+                              disabled={slotsLoading || illuminationLoading}
+                              placeholder="Z coordinate"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    {useFocusMap && !focusMapPoints.every(p => p && p.x !== null && p.y !== null && p.z !== null) && (
+                      <p className="text-xs text-red-500 mt-2">
+                        All 3 focus map points must have x, y, z coordinates.
+                      </p>
+                    )}
+                  </div>
+                )}
               </fieldset>
 
               <fieldset className="modal-fieldset">
