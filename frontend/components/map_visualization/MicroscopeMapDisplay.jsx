@@ -1363,7 +1363,24 @@ const MicroscopeMapDisplay = forwardRef(({
 
 
   // Calculate stage dimensions from configuration (moved early to avoid dependency issues)
+  // For simulated microscope with example data, use the zarr image extent
   const stageDimensions = useMemo(() => {
+    // For simulated microscope in historical data mode, use zarr image extent
+    if (isSimulatedMicroscopeSelected && isHistoricalDataMode && artifactZarrLoaderRef.current) {
+      const extent = artifactZarrLoaderRef.current.getImageExtent();
+      if (extent) {
+        console.log(`📐 Using zarr image extent for stage dimensions: ${extent.width.toFixed(1)}×${extent.height.toFixed(1)}mm`);
+        return {
+          width: extent.width,
+          height: extent.height,
+          xMin: extent.xMin,
+          xMax: extent.xMax,
+          yMin: extent.yMin,
+          yMax: extent.yMax
+        };
+      }
+    }
+    
     if (!microscopeConfiguration?.limits?.software_pos_limit) {
       return { width: 100, height: 70 }; // Default dimensions in mm
     }
@@ -1378,7 +1395,7 @@ const MicroscopeMapDisplay = forwardRef(({
       yMin: limits.y_negative || 0,
       yMax: limits.y_positive
     };
-  }, [microscopeConfiguration]);
+  }, [microscopeConfiguration, isSimulatedMicroscopeSelected, isHistoricalDataMode]);
 
   // Calculate dynamic bounds for scan parameters based on microscope configuration
   const scanBounds = useMemo(() => {
@@ -1920,6 +1937,45 @@ const MicroscopeMapDisplay = forwardRef(({
       }
     }
   }, [mapViewMode, autoFittedScale, autoFittedPan, appendLog, currentStagePosition, stageDimensions, pixelsPerMm, containerDimensions]);
+  
+  // Auto-load example data when entering FREE_PAN mode for simulated microscope
+  useEffect(() => {
+    if (mapViewMode === 'FREE_PAN' && isSimulatedMicroscopeSelected && !isHistoricalDataMode) {
+      console.log('🔄 Auto-loading example data for simulated microscope in FREE_PAN mode');
+      
+      // Set historical mode and example data
+      setIsHistoricalDataMode(true);
+      setStitchedTiles([]); // Clear all loaded tiles
+      
+      // Set a mock gallery and dataset for the example data
+      setSelectedGallery({ id: 'example-gallery', manifest: { name: 'Example Data' } });
+      setSelectedHistoricalDataset({ 
+        id: 'example-image-data', 
+        manifest: { name: 'U2OS Full Plate' } 
+      });
+      
+      // Create a Browse Data layer if it doesn't exist
+      setLayers(prev => {
+        const existingBrowseLayer = prev.find(layer => layer.type === 'load-server');
+        if (!existingBrowseLayer) {
+          const browseDataLayer = {
+            id: `browse-data-${Date.now()}`,
+            name: 'Example Data',
+            type: 'load-server',
+            visible: true,
+            channels: [],
+            readonly: false
+          };
+          return [...prev, browseDataLayer];
+        }
+        return prev;
+      });
+      
+      if (appendLog) {
+        appendLog('Auto-loading example OME-Zarr dataset for simulated microscope...');
+      }
+    }
+  }, [mapViewMode, isSimulatedMicroscopeSelected, isHistoricalDataMode, appendLog]);
   
   // Switch back to FOV_FITTED mode
   const fitToView = useCallback(() => {
@@ -3797,12 +3853,23 @@ const MicroscopeMapDisplay = forwardRef(({
   }, [showBrowseDataModal]);
 
   // Fetch datasets when a gallery is selected
+  // Skip for simulated microscope with example data (no artifact manager needed)
   useEffect(() => {
     if (!selectedGallery) {
       setDatasets([]);
       setDatasetsError(null);
       return;
     }
+    
+    // Skip artifact manager fetch for simulated microscope example data
+    if (isSimulatedMicroscopeSelected && selectedGallery.id === 'example-gallery') {
+      // For simulated microscope, we use hardcoded example data - no need to fetch
+      setDatasets([{ id: 'example-image-data', manifest: { name: 'U2OS Full Plate' } }]);
+      setDatasetsLoading(false);
+      setDatasetsError(null);
+      return;
+    }
+    
     setDatasetsLoading(true);
     setDatasetsError(null);
     setDatasets([]);
@@ -3818,7 +3885,7 @@ const MicroscopeMapDisplay = forwardRef(({
       })
       .catch(e => setDatasetsError(e.message))
       .finally(() => setDatasetsLoading(false));
-  }, [selectedGallery, selectedMicroscopeId]);
+  }, [selectedGallery, selectedMicroscopeId, isSimulatedMicroscopeSelected]);
 
   // Add state for selected dataset in historical mode
   const [selectedHistoricalDataset, setSelectedHistoricalDataset] = useState(null);
@@ -4177,20 +4244,8 @@ const MicroscopeMapDisplay = forwardRef(({
       try {
         console.log('[Zarr Channels] Loading channel metadata for dataset:', selectedHistoricalDataset.id);
         
-        // Get available wells first to find a sample well for metadata
-        const availableWells = await artifactZarrLoaderRef.current.getAvailableWells(selectedHistoricalDataset.id);
-        if (availableWells.length === 0) {
-          console.warn('[Zarr Channels] No available wells found');
-          return;
-        }
-        
-        // Use first available well to get channel metadata
-        const sampleWell = availableWells[0];
-        const correctDatasetId = artifactZarrLoaderRef.current.extractDatasetId(selectedHistoricalDataset.id);
-        const baseUrl = `${artifactZarrLoaderRef.current.baseUrl}/${correctDatasetId}/zip-files/well_${sampleWell}_96.zip/~/data.zarr/`;
-        
-        // Get active channel metadata from zattrs
-        const channelMetadata = await artifactZarrLoaderRef.current.getActiveChannelsFromZattrs(baseUrl);
+        // For simulated microscope, get channel metadata directly (no wells)
+        const channelMetadata = await artifactZarrLoaderRef.current.getActiveChannelsFromZattrs();
         if (channelMetadata && channelMetadata.activeChannels.length > 0) {
           console.log(`[Zarr Channels] Found ${channelMetadata.activeChannels.length} active channels`);
           initializeZarrChannelsFromMetadata(channelMetadata);
@@ -4475,422 +4530,68 @@ const MicroscopeMapDisplay = forwardRef(({
       // Mark this request as active for browse data
       browseDataRequestsRef.current.add(requestKey);
       setIsBrowseDataLoading(true);
-      
-      try {
-        // Get all possible intersecting wells using well plate configuration
-        const allIntersectingWells = getIntersectingWells(
-          clampedTopLeft.x, clampedBottomRight.x, 
-          clampedTopLeft.y, clampedBottomRight.y
-        );
-        if (allIntersectingWells.length === 0) {
-          if (appendLog) appendLog('Historical data: No wells intersect with this region');
-          return;
-        }
-        // Use artifactZarrLoader to filter only visible wells (center or overlap)
-        const visibleWells = artifactZarrLoaderRef.current.getVisibleWellsInRegion(
-          allIntersectingWells,
-          clampedTopLeft.x, clampedBottomRight.x,
-          clampedTopLeft.y, clampedBottomRight.y
-        );
-        console.log(`📊 Region analysis: (${clampedTopLeft.x.toFixed(3)}, ${clampedTopLeft.y.toFixed(3)}) to (${clampedBottomRight.x.toFixed(3)}, ${clampedBottomRight.y.toFixed(3)})`);
-        console.log(`📊 Found ${allIntersectingWells.length} intersecting wells: ${allIntersectingWells.map(w => w.id).join(', ')}`);
-        console.log(`📊 Found ${visibleWells.length} visible wells: ${visibleWells.map(w => w.id).join(', ')}`);
-        if (visibleWells.length === 0) {
-          if (appendLog) appendLog('Historical data: No visible wells in this region');
-          return;
-        }
-        
-        // 🚀 OPTIMIZATION: Get available wells from dataset metadata first!
-        console.log(`🔍 Getting available wells from dataset metadata...`);
-        const availableWellIds = await artifactZarrLoaderRef.current.getAvailableWells(selectedHistoricalDataset.id);
-        
-        // Filter visible wells to only include those that actually exist
-        const existingVisibleWells = visibleWells.filter(well => availableWellIds.includes(well.id));
-        
-        console.log(`📊 Well filtering: ${visibleWells.length} visible wells, ${availableWellIds.length} available wells, ${existingVisibleWells.length} existing visible wells`);
-        
-        if (existingVisibleWells.length === 0) {
-          if (appendLog) appendLog('Historical data: No existing wells in visible region');
-          return;
-        }
-        
-        // 🚀 MAXIMUM SPEED: Process all existing wells in parallel!
-        console.log(`🚀 Processing ${existingVisibleWells.length} existing wells in parallel for scale ${scaleLevel}`);
-        const startTime = Date.now();
-        
-        const wellProcessingPromises = existingVisibleWells.map(async (wellInfo) => {
-          const wellStartTime = Date.now();
-          const wellRegion = calculateWellRegion(
-            wellInfo,
-            clampedTopLeft.x, clampedBottomRight.x,
-            clampedTopLeft.y, clampedBottomRight.y
-          );
-          
-          // Skip wells with no valid intersection
-          if (!wellRegion) {
-            console.log(`⚠️ Skipping well ${wellInfo.id} - no valid intersection with region`);
-            return null;
-          }
-          
-          // Use artifactZarrLoader's proper coordinate conversion instead of simple conversion
-          // First, get the metadata to understand the image dimensions and pixel size
-          const correctDatasetId = artifactZarrLoaderRef.current.extractDatasetId(selectedHistoricalDataset.id);
-          const baseUrl = `${artifactZarrLoaderRef.current.baseUrl}/${correctDatasetId}/zip-files/well_${wellInfo.id}_96.zip/~/data.zarr/`;
-          
-          // Convert channel name to index (needed for chunk check)
-          // For historical data, we need to determine the correct channel index
-          // First, try to get available chunks to see what channels are available
-          const tempAvailableChunks = await artifactZarrLoaderRef.current.getAvailableChunks(baseUrl, scaleLevel);
-          let channelIndex = 0; // Default fallback
-          
-          if (tempAvailableChunks && tempAvailableChunks.length > 0) {
-            // Extract unique channel indices from available chunks
-            const channelIndices = [...new Set(tempAvailableChunks.map(chunk => {
-              const parts = chunk.split('.');
-              return parseInt(parts[1], 10); // Second part is channel index
-            }))].sort((a, b) => a - b);
-            
-            console.log(`🔍 Available channel indices for well ${wellInfo.id}: ${channelIndices.join(', ')}`);
-            
-            // Use the first available channel (usually the most common one)
-            channelIndex = channelIndices[0];
-            console.log(`🔍 Using channel index ${channelIndex} for well ${wellInfo.id}`);
-          }
-          const metadata = await artifactZarrLoaderRef.current.fetchZarrMetadata(baseUrl, scaleLevel);
-          
-          if (!metadata) {
-            console.log(`❌ No metadata available for well ${wellInfo.id} scale ${scaleLevel}`);
-            return null;
-          }
-          
-          // Get pixel size for proper coordinate conversion
-          const pixelSizeUm = artifactZarrLoaderRef.current.getPixelSizeFromMetadata(metadata, scaleLevel);
-          
-          // Convert well region coordinates to pixel coordinates using proper method
-          const centerPixelCoords = artifactZarrLoaderRef.current.stageToPixelCoords(
-            wellRegion.centerX, wellRegion.centerY, scaleLevel, pixelSizeUm, metadata
-          );
-          
-          // Calculate region bounds in pixels
-          const halfWidthPx = Math.floor((wellRegion.width_mm * 1000) / (pixelSizeUm * Math.pow(4, scaleLevel)) / 2);
-          const halfHeightPx = Math.floor((wellRegion.height_mm * 1000) / (pixelSizeUm * Math.pow(4, scaleLevel)) / 2);
-          
-          const regionStartX = centerPixelCoords.x - halfWidthPx;
-          const regionStartY = centerPixelCoords.y - halfHeightPx;
-          const regionEndX = centerPixelCoords.x + halfWidthPx;
-          const regionEndY = centerPixelCoords.y + halfHeightPx;
-          
-          console.log(`🔍 Well ${wellInfo.id} region: center=(${wellRegion.centerX.toFixed(2)}, ${wellRegion.centerY.toFixed(2)}) mm, ` +
-                     `pixel center=(${centerPixelCoords.x}, ${centerPixelCoords.y}), ` +
-                     `bounds=(${regionStartX}, ${regionStartY}) to (${regionEndX}, ${regionEndY})`);
-          
-          // Check available chunks for this well and region
-          const availableChunks = await artifactZarrLoaderRef.current.getAvailableChunksForRegion(
-            selectedHistoricalDataset.id,
-            wellInfo.id,
-            scaleLevel,
-            regionStartX, regionStartY, regionEndX, regionEndY,
-            0, channelIndex
-          );
-          
-          const wellEndTime = Date.now();
-          const wellDuration = wellEndTime - wellStartTime;
-          
-          if (availableChunks.length > 0) {
-            console.log(`✅ Well ${wellInfo.id} has ${availableChunks.length} available chunks for scale ${scaleLevel} (${wellDuration}ms)`);
-            return {
-              wellId: wellInfo.id,
-              centerX: wellRegion.centerX,
-              centerY: wellRegion.centerY,
-              width_mm: wellRegion.width_mm,
-              height_mm: wellRegion.height_mm,
-              channel: activeChannel,
-              scaleLevel,
-              timepoint: 0,
-              datasetId: selectedHistoricalDataset.id,
-              outputFormat: 'base64',
-              intersectionBounds: wellRegion.intersectionBounds
-            };
-          } else {
-            console.log(`❌ Well ${wellInfo.id} has no available chunks for scale ${scaleLevel} (${wellDuration}ms)`);
-            return null;
-          }
-        });
-        
-        // Wait for all wells to be processed in parallel
-        const wellProcessingResults = await Promise.all(wellProcessingPromises);
-        const wellRequests = wellProcessingResults.filter(result => result !== null);
-        
-        const totalDuration = Date.now() - startTime;
-        console.log(`⚡ Parallel well processing completed: ${wellRequests.length}/${visibleWells.length} wells in ${totalDuration}ms`);
-        
-        if (wellRequests.length === 0) {
-          if (appendLog) appendLog('Historical data: No available chunks in visible wells');
-          return;
-        }
 
-        
-        // 🚀 REAL-TIME CHUNK LOADING: Load wells progressively with live updates!
-        console.log(`🚀 REAL-TIME: Starting progressive loading for ${wellRequests.length} wells`);
+      try {
+        // Calculate center of visible region
+        const centerX = (clampedTopLeft.x + clampedBottomRight.x) / 2;
+        const centerY = (clampedTopLeft.y + clampedBottomRight.y) / 2;
         
         // Check if we should use multi-channel loading
         const useMultiChannel = shouldUseMultiChannelLoading();
         const enabledChannels = useMultiChannel ? getEnabledZarrChannels() : [];
         
+        console.log(`📖 Loading region: center=(${centerX.toFixed(2)}, ${centerY.toFixed(2)})mm, size=${width_mm.toFixed(1)}×${height_mm.toFixed(1)}mm, scale=${scaleLevel}`);
         console.log(`🎨 Loading mode: ${useMultiChannel ? 'Multi-channel' : 'Single-channel'}, channels: ${enabledChannels.length}`);
         
         setIsRealTimeLoading(true);
         
-        // Clear previous progress
-        setRealTimeChunkProgress(new Map());
-        setRealTimeWellProgress(new Map());
-        
-        // Track completed wells for final processing
-        const completedWells = new Map();
-        
-        // Real-time chunk progress callback with merged channel support
-        const onChunkProgress = (wellId, loadedChunks, totalChunks, partialCanvas) => {
-          console.log(`🔄 REAL-TIME: Well ${wellId} progress: ${loadedChunks}/${totalChunks} chunks loaded (merged channels)`);
-          
-
-          
-          // 🚀 REAL-TIME MERGED TILE UPDATES: Show progressively merged channels during loading
-          const now = Date.now();
-          const lastUpdate = chunkProgressUpdateTimes.current.get(wellId) || 0;
-          const UPDATE_INTERVAL = 200; // Only update state every 200ms per well
-          
-          // Always update progress state for real-time feedback
-          setRealTimeChunkProgress(prev => {
-            const newProgress = new Map(prev);
-            newProgress.set(wellId, { loadedChunks, totalChunks, partialCanvas });
-            return newProgress;
-          });
-          
-          // Update last update time
-          chunkProgressUpdateTimes.current.set(wellId, now);
-          
-          // 🚀 FREQUENT TILE UPDATES: Create tiles more frequently for smooth progress visualization
-          const progressPercentage = (loadedChunks / totalChunks) * 100;
-          
-          // Create tiles more frequently for better progress visualization
-          const shouldCreateTile = progressPercentage >= 10 && progressPercentage % 10 === 0 || 
-                                  loadedChunks % Math.max(1, Math.floor(totalChunks / 10)) === 0 || 
-                                  loadedChunks === totalChunks;
-          
-          if (partialCanvas && loadedChunks > 0 && shouldCreateTile) {
-            const wellRequest = wellRequests.find(req => req.wellId === wellId);
-            if (!wellRequest) return;
-            
-            // 🚀 IMPROVED QUALITY: Use higher quality for partial tiles for better visual feedback
-            const quality = loadedChunks === totalChunks ? 0.95 : 0.85;
-            const partialDataUrl = partialCanvas.toDataURL('image/jpeg', quality);
-            
-            // Calculate bounds (use intersection bounds for now, will be updated with actual bounds later)
-            const wellBounds = {
-              topLeft: {
-                x: wellRequest.intersectionBounds.minX,
-                y: wellRequest.intersectionBounds.minY
-              },
-              bottomRight: {
-                x: wellRequest.intersectionBounds.maxX,
-                y: wellRequest.intersectionBounds.maxY
-              }
-            };
-            
-            // 🎨 GRADUAL REPLACEMENT: Use PNG format to preserve alpha transparency for unloaded areas
-            // This allows old lower-resolution tiles to show through transparently
-            const loadingProgress = loadedChunks / totalChunks;
-            const usePNG = loadedChunks < totalChunks; // Use PNG for partial tiles to preserve alpha
-            const partialDataUrlWithAlpha = usePNG ? 
-              partialCanvas.toDataURL('image/png') : // PNG preserves alpha transparency
-              partialDataUrl; // Use JPEG for completed tiles (smaller file size)
-            
-            // Create temporary tile with merged channel data
-            const tempTile = {
-              data: partialDataUrlWithAlpha,
-              bounds: wellBounds,
-              width_mm: wellRequest.width_mm,
-              height_mm: wellRequest.height_mm,
-              scale: scaleLevel,
-              channel: useMultiChannel ? 
-                enabledChannels.map(ch => ch.channelName).sort().join(',') : 
-                activeChannel,
-              timestamp: Date.now(),
-              isHistorical: true,
-              datasetId: selectedHistoricalDataset.id,
-              wellId: wellId,
-              isPartial: loadedChunks < totalChunks, // Mark as partial for potential cleanup
-              progress: `${loadedChunks}/${totalChunks}`,
-              loadingProgress, // Normalized 0-1 progress for z-index calculation
-              metadata: {
-                isMultiChannel: useMultiChannel,
-                channelsUsed: useMultiChannel ? enabledChannels.map(ch => ch.channelName) : [activeChannel],
-                isMerged: useMultiChannel, // Indicate this is a merged result
-                loadingProgress: `${loadedChunks}/${totalChunks}`
-              }
-            };
-            
-            // Add or update tile with partial data
-            addOrUpdateTile(tempTile);
+        // Load region directly from zarr (no wells)
+        const result = await artifactZarrLoaderRef.current.loadRegion(
+          centerX,
+          centerY,
+          width_mm,
+          height_mm,
+          useMultiChannel ? enabledChannels : [{ channelName: activeChannel, enabled: true, min: 0, max: 255, color: 'FFFFFF' }],
+          scaleLevel,
+          0, // timepoint
+          (loaded, total, canvas) => {
+            console.log(`🔄 Loading progress: ${loaded}/${total} channels`);
           }
-        };
+        );
         
-        // Well completion callback
-        const onWellComplete = (wellId, finalResult) => {
-          console.log(`✅ REAL-TIME: Well ${wellId} completed loading`);
+        if (result && result.success) {
+          console.log(`✅ Region loaded: ${result.width}×${result.height}px`);
           
-          // Store completed well result
-          completedWells.set(wellId, finalResult);
-          
-          // Update well progress
-          setRealTimeWellProgress(prev => {
-            const newProgress = new Map(prev);
-            newProgress.set(wellId, { status: 'completed', result: finalResult });
-            return newProgress;
-          });
-          
-          // Create final tile with complete data
-          const wellRequest = wellRequests.find(req => req.wellId === wellId);
-          if (!wellRequest) return;
-          
-          // CRITICAL FIX: Use actual stage bounds if available for accurate positioning
-          let wellBounds;
-          if (finalResult.metadata.actualStageBounds) {
-            // Use the actual extracted bounds from zarr loader
-            const actualBounds = finalResult.metadata.actualStageBounds;
-            // Convert well-relative bounds to absolute bounds
-            const wellInfo = existingVisibleWells.find(w => w.id === wellId);
-            wellBounds = {
-              topLeft: {
-                x: wellInfo.centerX + actualBounds.startX,
-                y: wellInfo.centerY + actualBounds.startY
-              },
-              bottomRight: {
-                x: wellInfo.centerX + actualBounds.endX,
-                y: wellInfo.centerY + actualBounds.endY
-              }
-            };
-            console.log(`🎯 Using actual zarr bounds for ${wellId}: rel(${actualBounds.startX.toFixed(2)}, ${actualBounds.startY.toFixed(2)}) to (${actualBounds.endX.toFixed(2)}, ${actualBounds.endY.toFixed(2)})`);
-          } else {
-            // Fallback to calculated intersection bounds
-            wellBounds = {
-              topLeft: {
-                x: wellRequest.intersectionBounds.minX,
-                y: wellRequest.intersectionBounds.minY
-              },
-              bottomRight: {
-                x: wellRequest.intersectionBounds.maxX,
-                y: wellRequest.intersectionBounds.maxY
-              }
-            };
-            console.log(`⚠️ Using fallback intersection bounds for ${wellId}`);
-          }
-          
-          // DIAGNOSTIC: Log coordinate transformation for debugging (condensed)
-          const centerX = (wellBounds.topLeft.x + wellBounds.bottomRight.x) / 2;
-          const centerY = (wellBounds.topLeft.y + wellBounds.bottomRight.y) / 2;
-          console.log(`📍 ${wellId}: rel(${wellRequest.centerX.toFixed(2)}, ${wellRequest.centerY.toFixed(2)}) → center(${centerX.toFixed(1)}, ${centerY.toFixed(1)}) ${finalResult.metadata.width_mm.toFixed(1)}×${finalResult.metadata.height_mm.toFixed(1)}mm`);
-          
-          // Create final tile with complete merged data
-          const finalTile = {
-            data: `data:image/png;base64,${finalResult.data}`,
-            bounds: wellBounds,
-            width_mm: finalResult.metadata.width_mm,
-            height_mm: finalResult.metadata.height_mm,
+          // Create tile from result
+          const tile = {
+            data: `data:image/png;base64,${result.data}`,
+            bounds: result.bounds,
+            width_mm: result.width_mm,
+            height_mm: result.height_mm,
             scale: scaleLevel,
             channel: useMultiChannel ? 
-              finalResult.metadata.channelsUsed?.sort().join(',') || enabledChannels.map(ch => ch.channelName).sort().join(',') : 
+              result.metadata.channelsUsed?.sort().join(',') : 
               activeChannel,
             timestamp: Date.now(),
             isHistorical: true,
-            datasetId: selectedHistoricalDataset.id,
-            wellId: wellId,
-            isPartial: false, // Mark as complete
-            loadingProgress: 1.0, // 100% complete for cleanup logic
-            metadata: {
-              ...finalResult.metadata,
-              isMultiChannel: useMultiChannel,
-              channelsUsed: finalResult.metadata.channelsUsed || (useMultiChannel ? enabledChannels.map(ch => ch.channelName) : [activeChannel]),
-              isMerged: useMultiChannel, // Indicate this is a merged result
-              loadingProgress: 'complete'
-            }
+            datasetId: selectedHistoricalDataset?.id || 'example',
+            isPartial: false,
+            loadingProgress: 1.0,
+            metadata: result.metadata
           };
           
-          // Replace partial tile with complete tile
-          addOrUpdateTile(finalTile);
-        };
-        
-        // 🚀 REQUEST CANCELLATION: Check if we need to cancel previous request
-        const currentRequestKey = getTileKey(bounds, scaleLevel, activeChannel, selectedHistoricalDataset?.name || 'historical');
-        if (lastRequestKey && lastRequestKey !== currentRequestKey) {
-          console.log(`🔄 User moved to new position, cancelling previous request: ${lastRequestKey} → ${currentRequestKey}`);
-          if (currentCancellableRequest) {
-            const cancelledCount = currentCancellableRequest.cancel();
-            console.log(`🚫 Cancelled ${cancelledCount} pending requests for previous position`);
-          }
-        }
-        
-        // Update request tracking  
-        setLastRequestKey(currentRequestKey);
-        
-        // Start real-time loading with cancellation support - run in separate thread to prevent blocking
-        const { promise: wellResultsPromise, cancel: cancelWellRequests } = 
-          await new Promise((resolve) => {
-            setTimeout(() => {
-              const result = artifactZarrLoaderRef.current.getMultipleWellRegionsRealTimeCancellable(
-                wellRequests, 
-                onChunkProgress, 
-                onWellComplete,
-                useMultiChannel,
-                enabledChannels
-              );
-              resolve(result);
-            }, 0); // Run in next tick to prevent blocking
-          });
-        
-        // Store cancellation function for potential future cancellation
-        setCurrentCancellableRequest({ 
-          cancel: cancelWellRequests, 
-          requestKey: currentRequestKey,
-          startTime: Date.now()
-        });
-        
-        const wellResults = await wellResultsPromise;
-        
-        // Process final results
-        const successfulResults = wellResults.filter(result => result.success);
-        if (successfulResults.length > 0) {
-          console.log(`✅ REAL-TIME: Completed loading ${successfulResults.length}/${wellRequests.length} well regions`);
-          
-          // Clean up old tiles for this scale/channel combination to prevent memory bloat
-          // For multi-channel, use the actual channels that were loaded (not all enabled channels)
-          const channelKey = useMultiChannel ? 
-            (successfulResults[0]?.metadata?.channelsUsed?.sort().join(',') || enabledChannels.map(ch => ch.channelName).sort().join(',')) : 
-            getChannelString();
-          cleanupOldTiles(scaleLevel, channelKey);
+          // Add tile to display
+          addOrUpdateTile(tile);
           
           if (appendLog) {
-            appendLog(`✅ REAL-TIME: Loaded ${successfulResults.length} historical well tiles for scale ${scaleLevel}`);
+            appendLog(`✅ Loaded region at scale ${scaleLevel}`);
           }
         } else {
-          console.warn(`No wells available in this region`);
-          if (appendLog) appendLog(`No wells available in this region`);
+          console.warn('Failed to load region:', result?.message);
         }
         
-        // Clear real-time loading state
         setIsRealTimeLoading(false);
-        setRealTimeChunkProgress(new Map());
-        setRealTimeWellProgress(new Map());
         
-        // 🚀 PERFORMANCE OPTIMIZATION: Clean up progress tracking
-        chunkProgressUpdateTimes.current.clear();
-        
-
-        
-        // Clear cancellation state for completed request
-        if (currentCancellableRequest && currentCancellableRequest.requestKey === currentRequestKey) {
-          setCurrentCancellableRequest(null);
-        }
       } catch (error) {
         console.error('Failed to load historical tiles:', error);
         if (appendLog) appendLog(`Failed to load historical tiles: ${error.message}`);
@@ -6553,12 +6254,12 @@ const MicroscopeMapDisplay = forwardRef(({
       {/* Browse Data Modal */}
       {showBrowseDataModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-gray-800 border border-gray-600 rounded-lg shadow-xl max-w-3xl w-full text-white">
+          <div className={`bg-gray-800 border border-gray-600 rounded-lg shadow-xl ${isSimulatedMicroscopeSelected ? 'max-w-md' : 'max-w-3xl'} w-full text-white`}>
             {/* Modal Header */}
             <div className="flex justify-between items-center p-4 border-b border-gray-600">
               <h3 className="text-lg font-semibold text-gray-200 flex items-center">
                 <i className="fas fa-database text-blue-400 mr-2"></i>
-                Browse Imaging Data
+                {isSimulatedMicroscopeSelected ? 'Load Example Data' : 'Browse Imaging Data'}
               </h3>
               <button
                 onClick={() => setShowBrowseDataModal(false)}
@@ -6568,95 +6269,167 @@ const MicroscopeMapDisplay = forwardRef(({
                 ×
               </button>
             </div>
-            {/* Notice */}
-            <div className="bg-blue-900 bg-opacity-40 text-blue-200 text-xs p-2 px-4 border-b border-blue-700">
-              This is for data browsing, for management, please go to <a href="https://hypha.aicell.io/agent-lens#artifacts" target="_blank" rel="noopener noreferrer" className="underline text-blue-300">https://hypha.aicell.io/agent-lens#artifacts</a> if you have access.
-            </div>
-            {/* Modal Body: Two columns */}
-            <div className="flex flex-row divide-x divide-gray-700" style={{ minHeight: '350px' }}>
-              {/* Experiments/Galleries List (Left) */}
-              <div className="flex-1 flex flex-col">
-                <div className="p-4 border-b border-gray-600">
-                  <div className="text-gray-300 font-medium mb-2">All Experiment Galleries</div>
-                  {galleriesLoading && <div className="text-xs text-gray-400">Loading galleries...</div>}
-                  {galleriesError && <div className="text-xs text-red-400">{galleriesError}</div>}
-                  {!galleriesLoading && !galleriesError && galleries.length === 0 && (
-                    <div className="text-xs text-gray-400">No galleries found.</div>
-                  )}
+            
+            {/* Simulated Microscope: Simplified UI for example data */}
+            {isSimulatedMicroscopeSelected ? (
+              <div className="p-6">
+                {/* Example Data Info */}
+                <div className="bg-gray-700 rounded-lg p-4 mb-4">
+                  <div className="flex items-center mb-3">
+                    <i className="fas fa-microscope text-green-400 text-2xl mr-3"></i>
+                    <div>
+                      <div className="text-white font-medium">Example OME-Zarr Dataset</div>
+                      <div className="text-gray-400 text-sm">U2OS Full Plate Imaging</div>
+                    </div>
+                  </div>
+                  <div className="text-gray-300 text-sm space-y-1">
+                    <div><span className="text-gray-500">Shape:</span> 20 timepoints × 6 channels × 247,296 × 361,984 pixels</div>
+                    <div><span className="text-gray-500">Scale levels:</span> 6 (0-5)</div>
+                    <div><span className="text-gray-500">Pixel size:</span> 0.31 µm/px</div>
+                  </div>
                 </div>
-                {/* Scrollable Galleries List */}
-                <div className="flex-1 overflow-y-auto p-4" style={{ maxHeight: '250px' }}>
-                  <ul className="space-y-1">
-                    {galleries.map(gal => (
-                      <li key={gal.id}>
-                        <button
-                          className={`w-full text-left px-2 py-1 rounded text-sm ${selectedGallery && selectedGallery.id === gal.id ? 'bg-blue-700 text-white' : 'bg-gray-700 text-gray-200 hover:bg-blue-800'}`}
-                          onClick={() => setSelectedGallery(gal)}
-                        >
-                          {gal.manifest?.name || gal.alias || gal.id}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
+                
+                {/* Notice */}
+                <div className="bg-blue-900 bg-opacity-40 text-blue-200 text-xs p-3 rounded mb-4">
+                  <i className="fas fa-info-circle mr-1"></i>
+                  This example dataset is streamed from the server. Pan and zoom to explore different regions.
                 </div>
-                {/* View Gallery in Map Button */}
-                <div className="p-4 border-t border-gray-600">
-                  <button
-                    className="w-full px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-                    disabled={!selectedGallery}
-                    onClick={() => {
-                      setShowBrowseDataModal(false);
-                      setIsHistoricalDataMode(true);
-                      setStitchedTiles([]); // Clear all loaded tiles
-                      
-                      // Create a Browse Data layer if it doesn't exist
-                      setLayers(prev => {
-                        const existingBrowseLayer = prev.find(layer => layer.type === 'load-server');
-                        if (!existingBrowseLayer) {
-                          const browseDataLayer = {
-                            id: `browse-data-${Date.now()}`,
-                            name: 'Browse Data',
-                            type: 'load-server',
-                            visible: true,
-                            channels: [],
-                            readonly: false
-                          };
-                          return [...prev, browseDataLayer];
-                        }
-                        return prev;
-                      });
-                    }}
-                  >
-                    <i className="fas fa-map-marked-alt mr-1"></i>
-                    View Gallery in Map
-                  </button>
-                </div>
+                
+                {/* Load Button */}
+                <button
+                  className="w-full px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors"
+                  onClick={() => {
+                    setShowBrowseDataModal(false);
+                    setIsHistoricalDataMode(true);
+                    setStitchedTiles([]); // Clear all loaded tiles
+                    
+                    // Set a mock gallery and dataset for the example data
+                    setSelectedGallery({ id: 'example-gallery', manifest: { name: 'Example Data' } });
+                    setSelectedHistoricalDataset({ 
+                      id: 'example-image-data', 
+                      manifest: { name: 'U2OS Full Plate' } 
+                    });
+                    
+                    // Create a Browse Data layer if it doesn't exist
+                    setLayers(prev => {
+                      const existingBrowseLayer = prev.find(layer => layer.type === 'load-server');
+                      if (!existingBrowseLayer) {
+                        const browseDataLayer = {
+                          id: `browse-data-${Date.now()}`,
+                          name: 'Example Data',
+                          type: 'load-server',
+                          visible: true,
+                          channels: [],
+                          readonly: false
+                        };
+                        return [...prev, browseDataLayer];
+                      }
+                      return prev;
+                    });
+                    
+                    if (appendLog) {
+                      appendLog('Loading example OME-Zarr dataset...');
+                    }
+                  }}
+                >
+                  <i className="fas fa-play mr-2"></i>
+                  Load Example Data
+                </button>
               </div>
-              {/* Datasets List (Right) */}
-              <div className="flex-1 flex flex-col">
-                <div className="p-4 border-b border-gray-600">
-                  <div className="text-gray-300 font-medium mb-2">Datasets</div>
-                  {!selectedGallery && <div className="text-xs text-gray-400">Select a gallery to view datasets.</div>}
-                  {datasetsLoading && <div className="text-xs text-gray-400">Loading datasets...</div>}
-                  {datasetsError && <div className="text-xs text-red-400">{datasetsError}</div>}
-                  {!datasetsLoading && !datasetsError && selectedGallery && datasets.length === 0 && (
-                    <div className="text-xs text-gray-400">No datasets found in this gallery.</div>
-                  )}
+            ) : (
+              /* Real Microscope: Full gallery/dataset selection UI */
+              <>
+                {/* Notice */}
+                <div className="bg-blue-900 bg-opacity-40 text-blue-200 text-xs p-2 px-4 border-b border-blue-700">
+                  This is for data browsing, for management, please go to <a href="https://hypha.aicell.io/agent-lens#artifacts" target="_blank" rel="noopener noreferrer" className="underline text-blue-300">https://hypha.aicell.io/agent-lens#artifacts</a> if you have access.
                 </div>
-                {/* Scrollable Datasets List */}
-                <div className="flex-1 overflow-y-auto p-4" style={{ maxHeight: '250px' }}>
-                  <ul className="space-y-1">
-                    {datasets.map(ds => (
-                      <li key={ds.id}>
-                        <div className="px-2 py-1 rounded bg-gray-700 text-gray-200 text-sm">
-                          {ds.manifest?.name || ds.alias || ds.id}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
+                {/* Modal Body: Two columns */}
+                <div className="flex flex-row divide-x divide-gray-700" style={{ minHeight: '350px' }}>
+                  {/* Experiments/Galleries List (Left) */}
+                  <div className="flex-1 flex flex-col">
+                    <div className="p-4 border-b border-gray-600">
+                      <div className="text-gray-300 font-medium mb-2">All Experiment Galleries</div>
+                      {galleriesLoading && <div className="text-xs text-gray-400">Loading galleries...</div>}
+                      {galleriesError && <div className="text-xs text-red-400">{galleriesError}</div>}
+                      {!galleriesLoading && !galleriesError && galleries.length === 0 && (
+                        <div className="text-xs text-gray-400">No galleries found.</div>
+                      )}
+                    </div>
+                    {/* Scrollable Galleries List */}
+                    <div className="flex-1 overflow-y-auto p-4" style={{ maxHeight: '250px' }}>
+                      <ul className="space-y-1">
+                        {galleries.map(gal => (
+                          <li key={gal.id}>
+                            <button
+                              className={`w-full text-left px-2 py-1 rounded text-sm ${selectedGallery && selectedGallery.id === gal.id ? 'bg-blue-700 text-white' : 'bg-gray-700 text-gray-200 hover:bg-blue-800'}`}
+                              onClick={() => setSelectedGallery(gal)}
+                            >
+                              {gal.manifest?.name || gal.alias || gal.id}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                    {/* View Gallery in Map Button */}
+                    <div className="p-4 border-t border-gray-600">
+                      <button
+                        className="w-full px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                        disabled={!selectedGallery}
+                        onClick={() => {
+                          setShowBrowseDataModal(false);
+                          setIsHistoricalDataMode(true);
+                          setStitchedTiles([]); // Clear all loaded tiles
+                          
+                          // Create a Browse Data layer if it doesn't exist
+                          setLayers(prev => {
+                            const existingBrowseLayer = prev.find(layer => layer.type === 'load-server');
+                            if (!existingBrowseLayer) {
+                              const browseDataLayer = {
+                                id: `browse-data-${Date.now()}`,
+                                name: 'Browse Data',
+                                type: 'load-server',
+                                visible: true,
+                                channels: [],
+                                readonly: false
+                              };
+                              return [...prev, browseDataLayer];
+                            }
+                            return prev;
+                          });
+                        }}
+                      >
+                        <i className="fas fa-map-marked-alt mr-1"></i>
+                        View Gallery in Map
+                      </button>
+                    </div>
+                  </div>
+                  {/* Datasets List (Right) */}
+                  <div className="flex-1 flex flex-col">
+                    <div className="p-4 border-b border-gray-600">
+                      <div className="text-gray-300 font-medium mb-2">Datasets</div>
+                      {!selectedGallery && <div className="text-xs text-gray-400">Select a gallery to view datasets.</div>}
+                      {datasetsLoading && <div className="text-xs text-gray-400">Loading datasets...</div>}
+                      {datasetsError && <div className="text-xs text-red-400">{datasetsError}</div>}
+                      {!datasetsLoading && !datasetsError && selectedGallery && datasets.length === 0 && (
+                        <div className="text-xs text-gray-400">No datasets found in this gallery.</div>
+                      )}
+                    </div>
+                    {/* Scrollable Datasets List */}
+                    <div className="flex-1 overflow-y-auto p-4" style={{ maxHeight: '250px' }}>
+                      <ul className="space-y-1">
+                        {datasets.map(ds => (
+                          <li key={ds.id}>
+                            <div className="px-2 py-1 rounded bg-gray-700 text-gray-200 text-sm">
+                              {ds.manifest?.name || ds.alias || ds.id}
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
+              </>
+            )}
           </div>
         </div>
       )}

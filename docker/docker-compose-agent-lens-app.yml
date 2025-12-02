@@ -1,6 +1,6 @@
 services:
   agent-lens:
-    image: ghcr.io/aicell-lab/agent-lens:sha-48a59a8
+    image: ghcr.io/aicell-lab/agent-lens:sha-638e253
     container_name: agent-lens
     # Optimize image pulling
     pull_policy: if_not_present
@@ -18,6 +18,8 @@ services:
       - "autoheal.enable=true"
     volumes:
       - agent-lens-cache:/app/.cache
+      # Mount zarr dataset from host to container (same path)
+      - /media/reef/harddisk/offline_stitch_20251201-u2os-full-plate_2025-12-01_17-00-56.154975/data.zarr:/media/reef/harddisk/offline_stitch_20251201-u2os-full-plate_2025-12-01_17-00-56.154975/data.zarr:ro
     # GPU support: Use runtime for docker-compose, or deploy.resources for docker swarm
     runtime: nvidia
     deploy:

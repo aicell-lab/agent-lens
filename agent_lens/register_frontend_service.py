@@ -5,9 +5,10 @@ that serves the frontend application.
 
 import os
 from typing import List, Optional
+from pathlib import Path
 from fastapi import FastAPI
-from fastapi import UploadFile, File, HTTPException, Form
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi import UploadFile, File, HTTPException, Form, Request
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from agent_lens.utils.artifact_manager import AgentLensArtifactManager
 from hypha_rpc import connect_to_server
@@ -82,6 +83,9 @@ current_application_id = None
 SERVER_URL = "https://hypha.aicell.io"
 WORKSPACE_TOKEN = os.getenv("WORKSPACE_TOKEN")
 
+# OME-Zarr dataset path for streaming
+ZARR_DATASET_PATH = "/media/reef/harddisk/offline_stitch_20251201-u2os-full-plate_2025-12-01_17-00-56.154975/data.zarr"
+
 async def get_artifact_manager():
     """Get a new connection to the artifact manager."""
     api = await connect_to_server(
@@ -89,6 +93,43 @@ async def get_artifact_manager():
     )
     artifact_manager = await api.get_service("public/artifact-manager")
     return api, artifact_manager
+
+def validate_zarr_path(file_path: str) -> Path:
+    """
+    Validate and resolve a file path within the zarr dataset directory.
+    
+    Args:
+        file_path: Relative path within the zarr dataset
+        
+    Returns:
+        Path: Resolved absolute path to the file
+        
+    Raises:
+        HTTPException: If path is invalid or outside zarr directory
+    """
+    # Resolve the base zarr directory
+    zarr_base = Path(ZARR_DATASET_PATH).resolve()
+    
+    # Normalize the requested file path (remove leading slashes, handle ..)
+    normalized_path = file_path.lstrip('/')
+    if not normalized_path:
+        # Root path - serve .zgroup if it exists
+        normalized_path = ".zgroup"
+    
+    # Resolve the full path
+    requested_path = (zarr_base / normalized_path).resolve()
+    
+    # Security check: ensure the resolved path is within the zarr directory
+    try:
+        requested_path.relative_to(zarr_base)
+    except ValueError:
+        # Path is outside the zarr directory - security violation
+        raise HTTPException(
+            status_code=403,
+            detail=f"Access denied: Path outside zarr dataset directory"
+        )
+    
+    return requested_path
 
 def get_frontend_api():
     """
@@ -486,6 +527,80 @@ def get_frontend_api():
             logger.error(traceback.format_exc())
             from fastapi.responses import JSONResponse
             return JSONResponse(content={"error": str(e)}, status_code=404)
+
+    @app.get("/example-image-data.zarr")
+    @app.options("/example-image-data.zarr")
+    async def stream_zarr_root(request: Request):
+        """
+        Handle root zarr endpoint - serves .zgroup file.
+        """
+        return await stream_zarr_file(".zgroup", request)
+    
+    @app.get("/example-image-data.zarr/{file_path:path}")
+    @app.options("/example-image-data.zarr/{file_path:path}")
+    async def stream_zarr_file(file_path: str, request: Request):
+        """
+        Stream OME-Zarr dataset files from local filesystem.
+        
+        This endpoint serves zarr metadata files (.zgroup, .zarray, .zattrs) and chunk files
+        with HTTP Range request support and CORS headers for compatibility with vizarr
+        and other zarr viewers.
+        
+        Args:
+            file_path: Relative path within the zarr dataset (e.g., ".zgroup", "0/.zarray", "0/0/0/0/0")
+            request: FastAPI request object for handling OPTIONS and Range requests
+            
+        Returns:
+            FileResponse: File content with appropriate headers
+        """
+        # Handle OPTIONS request for CORS preflight
+        if request.method == "OPTIONS":
+            return Response(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "Range",
+                    "Access-Control-Expose-Headers": "Content-Length, Content-Range",
+                }
+            )
+        
+        try:
+            # Validate and resolve the file path
+            resolved_path = validate_zarr_path(file_path)
+            
+            # Check if file exists
+            if not resolved_path.exists():
+                logger.warning(f"Zarr file not found: {file_path} (resolved: {resolved_path})")
+                raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
+            
+            # Determine content type based on file extension
+            content_type = "application/octet-stream"  # Default for chunk files
+            if resolved_path.suffix in [".zgroup", ".zarray", ".zattrs"]:
+                content_type = "application/json"
+            
+            # Create FileResponse with Range request support
+            # FastAPI's FileResponse automatically handles HTTP Range requests
+            response = FileResponse(
+                path=str(resolved_path),
+                media_type=content_type,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "Range",
+                    "Access-Control-Expose-Headers": "Content-Length, Content-Range",
+                }
+            )
+            
+            logger.debug(f"Serving zarr file: {file_path} (content-type: {content_type})")
+            return response
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error streaming zarr file {file_path}: {e}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
 
     #########################################################################################
     # These endpoints are used by new microscope map display

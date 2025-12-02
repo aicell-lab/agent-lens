@@ -6,13 +6,15 @@
   "scripts": {
     "test:hypha-agents:integration": "node hypha-agents-integration/test-integration.js",
     "test:hypha-agents:kernel": "node hypha-agents-integration/test-kernel-service.js",
-    "test:hypha-agents:connection": "node hypha-agents-integration/test-hypha-connection.js"
+    "test:hypha-agents:connection": "node hypha-agents-integration/test-hypha-connection.js",
+    "test:zarr-streaming": "node test_zarr_streaming.js"
   },
   "devDependencies": {
     "dotenv": "^16.0.0"
   },
   "dependencies": {
     "hypha-rpc": "^0.20.83",
-    "openai": "^4.0.0"
+    "openai": "^4.0.0",
+    "zarrita": "^0.4.0"
   }
 }
