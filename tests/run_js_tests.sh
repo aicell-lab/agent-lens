@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # JavaScript Test Runner for ArtifactZarrLoader
-# This script runs the JavaScript tests that make real HTTP requests
+# This script runs the frontend integration tests for ArtifactZarrLoader
 
 echo "🔬 JavaScript ArtifactZarrLoader Test Runner"
 echo "=============================================="
@@ -25,13 +25,13 @@ if [ ! -f "frontend/utils/artifactZarrLoader.js" ]; then
 fi
 
 # Run the JavaScript test
-echo "📁 Running JavaScript tests..."
-echo "🚀 Making real HTTP requests to artifact manager..."
+echo "📁 Running frontend integration tests..."
+echo "🚀 Testing ArtifactZarrLoader integration..."
 echo ""
 
 # Run the test with Node.js from the tests directory
 cd tests
-node test_artifact_zarr_loader.js
+node test_frontend_integration.js
 
 # Capture exit code
 EXIT_CODE=$?

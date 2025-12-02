@@ -23,9 +23,12 @@ async function testFrontendIntegration() {
     // Test 2: Check if methods exist (simulating React component usage)
     console.log('🧪 Test 2: Method Availability');
     const requiredMethods = [
-      'getHistoricalStitchedRegion',
+      'loadRegion',
+      'getMultipleWellRegionsRealTimeCancellable',
       'clearCaches',
-      'cancelActiveRequests'
+      'cancelActiveRequests',
+      'getImageExtent',
+      'openArray'
     ];
     
     for (const method of requiredMethods) {
@@ -54,33 +57,25 @@ async function testFrontendIntegration() {
     }
     console.log('✅ Cleanup completed');
     
-    // Test 4: Simulate historical data loading call
-    console.log('🧪 Test 4: Historical Data Loading Simulation');
+    // Test 4: Test basic functionality
+    console.log('🧪 Test 4: Basic Functionality Test');
     const newLoader = new ArtifactZarrLoader();
     
-    // Simulate the call that would be made from loadHistoricalTiles
-    const mockCall = async () => {
-      try {
-        const result = await newLoader.getHistoricalStitchedRegion(
-          0, // centerX_mm
-          0, // centerY_mm
-          10, // width_mm
-          10, // height_mm
-          '96', // well_plate_type
-          0, // scale_level
-          'BF LED matrix full', // channel
-          0, // timepoint_index
-          'base64', // output_format
-          'test-dataset' // dataset_id
-        );
-        return result;
-      } catch (error) {
-        return { success: false, message: error.message };
-      }
-    };
+    // Test getImageExtent
+    const extent = newLoader.getImageExtent();
+    console.log(`✅ Image extent: X[${extent.xMin}, ${extent.xMax}]mm, Y[${extent.yMin}, ${extent.yMax}]mm`);
     
-    const result = await mockCall();
-    console.log(`✅ Historical data loading simulation completed: ${result.success ? 'Success' : 'Failed (expected for test data)'}`);
+    // Test getImageDimensions
+    const dims = newLoader.getImageDimensions(0);
+    console.log(`✅ Image dimensions at scale 0: ${dims.x}×${dims.y} pixels`);
+    
+    // Test pixel size
+    const pixelSize = newLoader.getPixelSize(0);
+    console.log(`✅ Pixel size at scale 0: ${pixelSize.toFixed(3)} µm/pixel`);
+    
+    // Note: We skip actual data loading in Node.js environment since it requires DOM APIs (canvas, document)
+    // The loadRegion method requires browser environment with canvas support
+    console.log(`✅ Basic functionality tests completed (data loading requires browser environment)`);
     
     // Cleanup
     newLoader.clearCaches();
@@ -92,7 +87,7 @@ async function testFrontendIntegration() {
     console.log('✅ ArtifactZarrLoader is ready for frontend integration');
     console.log('✅ React component lifecycle simulation successful');
     console.log('✅ Method availability verified');
-    console.log('✅ Historical data loading interface verified');
+    console.log('✅ Basic functionality verified');
     
     return true;
     
