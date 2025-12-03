@@ -84,7 +84,7 @@ SERVER_URL = "https://hypha.aicell.io"
 WORKSPACE_TOKEN = os.getenv("WORKSPACE_TOKEN")
 
 # OME-Zarr dataset path for streaming
-ZARR_DATASET_PATH = "/media/reef/harddisk/offline_stitch_20251201-u2os-full-plate_2025-12-01_17-00-56.154975/data.zarr"
+ZARR_DATASET_PATH = "/home/tao/Documents/example-zarr/data.zarr"
 
 async def get_artifact_manager():
     """Get a new connection to the artifact manager."""
@@ -571,7 +571,6 @@ def get_frontend_api():
             
             # Check if file exists
             if not resolved_path.exists():
-                logger.warning(f"Zarr file not found: {file_path} (resolved: {resolved_path})")
                 raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
             
             # Determine content type based on file extension
