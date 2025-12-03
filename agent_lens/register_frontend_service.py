@@ -18,6 +18,7 @@ import clip
 import torch
 import sys
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.middleware.cors import CORSMiddleware
 import uuid
 import traceback
 import asyncio
@@ -139,6 +140,18 @@ def get_frontend_api():
         function: The FastAPI application.
     """
     app = FastAPI()
+    
+    # Add CORS middleware to allow cross-origin requests (e.g., from vizarr)
+    # This must be added before other middleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],  # Allow all origins
+        allow_credentials=False,  # Set to False when using allow_origins=["*"]
+        allow_methods=["GET", "OPTIONS"],  # Allow GET and OPTIONS for CORS preflight
+        allow_headers=["Range"],  # Allow Range header for HTTP Range requests
+        expose_headers=["Content-Length", "Content-Range"],  # Expose headers needed by zarr clients
+    )
+    
     # Add compression middleware to reduce bandwidth
     app.add_middleware(GZipMiddleware, minimum_size=500)
     
