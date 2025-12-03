@@ -1362,25 +1362,9 @@ const MicroscopeMapDisplay = forwardRef(({
   }, [experiments]);
 
 
-  // Calculate stage dimensions from configuration (moved early to avoid dependency issues)
-  // For simulated microscope with example data, use the zarr image extent
+  // Calculate stage dimensions from microscope configuration (moved early to avoid dependency issues)
+  // ALWAYS use microscope configuration for consistent well plate positioning
   const stageDimensions = useMemo(() => {
-    // For simulated microscope in historical data mode, use zarr image extent
-    if (isSimulatedMicroscopeSelected && isHistoricalDataMode && artifactZarrLoaderRef.current) {
-      const extent = artifactZarrLoaderRef.current.getImageExtent();
-      if (extent) {
-        console.log(`📐 Using zarr image extent for stage dimensions: ${extent.width.toFixed(1)}×${extent.height.toFixed(1)}mm`);
-        return {
-          width: extent.width,
-          height: extent.height,
-          xMin: extent.xMin,
-          xMax: extent.xMax,
-          yMin: extent.yMin,
-          yMax: extent.yMax
-        };
-      }
-    }
-    
     if (!microscopeConfiguration?.limits?.software_pos_limit) {
       return { width: 100, height: 70 }; // Default dimensions in mm
     }
@@ -1395,7 +1379,7 @@ const MicroscopeMapDisplay = forwardRef(({
       yMin: limits.y_negative || 0,
       yMax: limits.y_positive
     };
-  }, [microscopeConfiguration, isSimulatedMicroscopeSelected, isHistoricalDataMode]);
+  }, [microscopeConfiguration]);
 
   // Calculate dynamic bounds for scan parameters based on microscope configuration
   const scanBounds = useMemo(() => {
@@ -4265,11 +4249,24 @@ const MicroscopeMapDisplay = forwardRef(({
 
   
   // Initialize ArtifactZarrLoader for historical data
-  // Initialize the loader when component mounts
+  // Initialize the loader when component mounts and load metadata from .zattrs
   useEffect(() => {
-    if (!artifactZarrLoaderRef.current) {
-      artifactZarrLoaderRef.current = new ArtifactZarrLoader();
-    }
+    const initLoader = async () => {
+      if (!artifactZarrLoaderRef.current) {
+        artifactZarrLoaderRef.current = new ArtifactZarrLoader();
+      }
+      
+      // Initialize the loader (loads metadata from .zattrs dynamically)
+      // Wellplate offset is now loaded automatically from .zattrs (squid_canvas.wellplate_offset)
+      try {
+        await artifactZarrLoaderRef.current.init();
+        console.log('✅ ArtifactZarrLoader initialized with metadata from .zattrs');
+      } catch (error) {
+        console.error('❌ Failed to initialize ArtifactZarrLoader:', error);
+      }
+    };
+    
+    initLoader();
     
     // Cleanup on unmount
     return () => {
