@@ -74,7 +74,7 @@ class ArtifactZarrLoader {
    */
   async _loadMetadata() {
     try {
-      console.log(`📥 Loading zarr metadata from ${this.baseUrl}/.zattrs...`);
+      console.log(`📥 Loading zarr metadata from ${this.baseUrl}/.zattrs`);
       
       const response = await fetch(`${this.baseUrl}/.zattrs`);
       if (!response.ok) {

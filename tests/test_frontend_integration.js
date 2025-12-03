@@ -61,6 +61,9 @@ async function testFrontendIntegration() {
     console.log('🧪 Test 4: Basic Functionality Test');
     const newLoader = new ArtifactZarrLoader();
     
+    // Initialize the loader to load metadata from .zattrs
+    await newLoader.init();
+    
     // Test getImageExtent
     const extent = newLoader.getImageExtent();
     console.log(`✅ Image extent: X[${extent.xMin}, ${extent.xMax}]mm, Y[${extent.yMin}, ${extent.yMax}]mm`);

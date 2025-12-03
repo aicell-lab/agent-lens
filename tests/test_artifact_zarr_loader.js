@@ -67,6 +67,8 @@ async function testArtifactZarrLoader() {
     // Test 3: Image extent and dimensions
     console.log('\n🧪 Test 3: Image Extent and Dimensions');
     try {
+      // Initialize the loader to load metadata from .zattrs
+      await loader.init();
       const extent = loader.getImageExtent();
       console.log(`✅ Image extent: X[${extent.xMin}, ${extent.xMax}]mm, Y[${extent.yMin}, ${extent.yMax}]mm`);
       
