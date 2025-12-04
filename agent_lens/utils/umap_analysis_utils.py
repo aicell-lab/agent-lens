@@ -172,146 +172,12 @@ def make_umap_cluster_figure_base64(
     return fig_to_base64(fig)
 
 
-def make_umap_metadata_heatmap_figures_base64(
-    all_cells: list,
-    metadata_fields: List[str],
-    n_neighbors: int = 15,
-    min_dist: float = 0.1,
-    random_state: Optional[int] = None,
-    n_jobs: Optional[int] = 10,
-) -> List[Optional[str]]:
-    """
-    Generate multiple UMAP heatmap visualizations with consistent point locations.
-    
-    This function computes UMAP coordinates once and reuses them for all metadata fields,
-    ensuring that all plots have the same point locations but different colorings based on
-    different metadata fields. This allows easy comparison of how different metadata
-    distributions map to the same UMAP embedding space.
-    
-    Note: If random_state is set, UMAP will use single-threaded execution.
-    For parallelism, set random_state=None and n_jobs=-1 (uses all CPU cores).
-
-    Args:
-        all_cells: List of cell dictionaries, each should have 'embedding_vector' and 'metadata' keys
-        metadata_fields: List of metadata field names to visualize (e.g., ['area', 'brightness'])
-        n_neighbors: Number of neighbors for UMAP (default: 15)
-        min_dist: Minimum distance for UMAP (default: 0.1)
-        random_state: Random state for reproducibility. If None, allows parallelism (default: None)
-        n_jobs: Number of parallel jobs. -1 uses all CPU cores, None uses 1 (default: None)
-
-    Returns:
-        List of base64 PNG strings, one for each metadata field. Returns empty list if failed.
-    """
-    if not all_cells:
-        return []
-    
-    if not metadata_fields or not isinstance(metadata_fields, list):
-        print("⚠️ metadata_fields must be a non-empty list")
-        return []
-    
-    # Filter out invalid metadata fields
-    valid_fields = [f for f in metadata_fields if f and isinstance(f, str)]
-    if not valid_fields:
-        print("⚠️ No valid metadata fields provided")
-        return []
-
-    # --- Collect embeddings ---
-    embeddings = []
-    cell_indices = []  # Track which cells have embeddings
-    
-    for idx, c in enumerate(all_cells):
-        if "embedding_vector" in c:
-            embeddings.append(np.array(c["embedding_vector"], dtype=float))
-            cell_indices.append(idx)
-
-    if len(embeddings) < 5:
-        print("⚠️ Too few cells with embeddings → visualization skipped.")
-        return []
-
-    E = np.vstack(embeddings)   # (N, D)
-
-    # --- Normalize embeddings (optional but good for cosine) ---
-    norms = np.linalg.norm(E, axis=1, keepdims=True)
-    norms[norms == 0] = 1.0
-    E = E / norms
-
-    # --- UMAP embedding (cosine metric) - COMPUTE ONCE ---
-    # Set n_jobs: -1 for all cores if random_state is None, otherwise use 1
-    # (UMAP forces single-threaded when random_state is set)
-    if n_jobs is None:
-        n_jobs = -1 if random_state is None else 1
-    
-    umap_model = UMAP(
-        n_components=2,
-        n_neighbors=min(n_neighbors, len(E) - 1),
-        min_dist=min_dist,
-        metric="cosine",
-        random_state=random_state,
-        n_jobs=n_jobs,
-    )
-    X_2d = umap_model.fit_transform(E)  # Same coordinates for all metadata fields
-
-    # --- Generate figure for each metadata field ---
-    results = []
-    
-    for metadata_field in valid_fields:
-        # Extract metadata values for this field
-        metadata_values = []
-        
-        for idx in cell_indices:
-            c = all_cells[idx]
-            # Extract metadata value, use 0.0 as default if missing
-            metadata = c.get("metadata", {})
-            value = metadata.get(metadata_field, 0.0)
-            # Convert to float, handle None and invalid types
-            try:
-                metadata_values.append(float(value))
-            except (TypeError, ValueError):
-                metadata_values.append(0.0)
-        
-        metadata_array = np.array(metadata_values)  # (N,)
-
-        # --- Normalize metadata values for colormap ---
-        # Handle edge case where all values are the same
-        metadata_min = np.min(metadata_array)
-        metadata_max = np.max(metadata_array)
-        
-        if metadata_max == metadata_min:
-            # All values are the same, use a single color (middle of colormap)
-            print(f"⚠️ All metadata values for '{metadata_field}' are the same ({metadata_min})")
-            metadata_norm = Normalize(vmin=metadata_min, vmax=metadata_max + 1e-6)  # Small offset for colorbar
-        else:
-            metadata_norm = Normalize(vmin=metadata_min, vmax=metadata_max)
-
-        # --- Plot with metadata-based colors (blue-green-yellow-red heatmap) ---
-        fig, ax = plt.subplots(figsize=(7, 5))
-        
-        # Use turbo colormap: blue -> cyan -> green -> yellow -> red (clean, perceptually uniform)
-        cmap = plt.cm.turbo
-        scatter = ax.scatter(
-            X_2d[:, 0],
-            X_2d[:, 1],
-            s=25,
-            c=metadata_array,  # Use actual values, not normalized
-            cmap=cmap,
-            norm=metadata_norm,
-            alpha=0.7,
-            edgecolors='white',
-            linewidths=0.5,
-        )
-        
-        # Add colorbar
-        cbar = plt.colorbar(scatter, ax=ax)
-        cbar.set_label(metadata_field, rotation=270, labelpad=15)
-        
-        ax.set_title(f"UMAP colored by {metadata_field}")
-        ax.set_xlabel("UMAP-1")
-        ax.set_ylabel("UMAP-2")
-        fig.tight_layout()
-
-        results.append(fig_to_base64(fig))
-    
-    return results
+# Default metadata fields for heatmap visualization tabs
+DEFAULT_METADATA_FIELDS = [
+    'area', 'perimeter', 'equivalent_diameter', 'aspect_ratio',
+    'circularity', 'eccentricity', 'solidity', 'convexity',
+    'brightness', 'contrast', 'homogeneity', 'energy', 'correlation'
+]
 
 
 def make_umap_cluster_figure_interactive(
@@ -320,21 +186,21 @@ def make_umap_cluster_figure_interactive(
     min_dist: float = 0.1,
     random_state: Optional[int] = None,
     n_jobs: Optional[int] = None,
+    metadata_fields: Optional[List[str]] = None,
 ) -> Optional[str]:
     """
-    Interactive UMAP clustering visualization using Plotly.
+    Interactive UMAP visualization using Plotly with switchable coloring modes.
     Returns HTML string that can be embedded in a webpage.
     
     This function performs UMAP dimensionality reduction followed by KMeans clustering.
-    Each cluster is displayed with a different color in the interactive visualization.
-    The number of clusters is automatically determined based on the sample size (between 2 and 10).
+    Users can switch between cluster coloring and metadata heatmaps using tab buttons.
     
     Features:
     - Zoom and pan
-    - Hover to see cell details (ID, area, etc.)
-    - Click to select points
+    - Hover to see cell details (ID, area, etc.) with cell image thumbnail
+    - Tab buttons to switch between Cluster view and metadata heatmaps
+    - Turbo colormap for metadata heatmaps with colorbar
     - Export as PNG/SVG
-    - Color-coded clusters for easy identification
     
     Args:
         all_cells: List of cell dictionaries with 'embedding_vector' key (and optionally 'id', 'area', etc.)
@@ -342,10 +208,14 @@ def make_umap_cluster_figure_interactive(
         min_dist: Minimum distance for UMAP (default: 0.1)
         random_state: Random state for reproducibility. If None, allows parallelism (default: None)
         n_jobs: Number of parallel jobs. -1 uses all CPU cores (default: None)
+        metadata_fields: List of metadata field names for heatmap tabs. If None, uses DEFAULT_METADATA_FIELDS
     
     Returns:
-        HTML string of interactive Plotly figure with clustered visualization, or None if failed
+        HTML string of interactive Plotly figure with tab controls, or None if failed
     """
+    # Use default metadata fields if not provided
+    if metadata_fields is None:
+        metadata_fields = DEFAULT_METADATA_FIELDS
     if not PLOTLY_AVAILABLE:
         print("⚠️ Plotly not available. Install with: pip install plotly")
         return None
@@ -362,8 +232,16 @@ def make_umap_cluster_figure_interactive(
         if "embedding_vector" in c:
             embeddings.append(np.array(c["embedding_vector"], dtype=float))
             
-            # Extract all metadata
-            metadata = c.get("metadata", {})
+            # Extract all metadata - check both direct fields and nested 'metadata' dict
+            # First try direct access (new format), then try nested 'metadata' dict (old format)
+            def get_field(field_name):
+                """Get field value from cell, checking both direct and nested metadata."""
+                if field_name in c and c[field_name] is not None:
+                    return c[field_name]
+                metadata = c.get("metadata", {})
+                if metadata and field_name in metadata:
+                    return metadata[field_name]
+                return None
             
             # Resize image to 50x50 thumbnail if available
             image_b64_original = c.get("image", None)
@@ -373,31 +251,30 @@ def make_umap_cluster_figure_interactive(
                 if image_b64_thumbnail and idx == 0:
                     print(f"✓ Resized images to 50x50 thumbnails (original: {len(image_b64_original)/1024:.1f}KB → thumbnail: {len(image_b64_thumbnail)/1024:.1f}KB)")
             
-            # Handle None values explicitly (using 'or' would fail for integer 0)
+            # Handle None values explicitly
             well_row = c.get("well_row")
             well_col = c.get("well_col")
             field_index = c.get("field_index")
-            cell_index = c.get("cell_index")
+            cell_index = c.get("cell_index") or c.get("field_cell_index")
             
             cell_info = {
                 "index": idx,
-                "id": c.get("id") if c.get("id") is not None else f"cell_{idx}",
-                "image_b64": image_b64_thumbnail,  # Use resized thumbnail
+                "id": c.get("id") or c.get("cell_id") or f"cell_{idx}",
+                "image_b64": image_b64_thumbnail,
                 "well_row": well_row if well_row is not None else "?",
                 "well_col": well_col if well_col is not None else "?",
                 "field_index": field_index if field_index is not None else "?",
                 "cell_index": cell_index if cell_index is not None else "?",
-                # Metadata fields
-                "area": metadata.get("area", 0),
-                "perimeter": metadata.get("perimeter", 0),
-                "equivalent_diameter": metadata.get("equivalent_diameter", 0),
-                "aspect_ratio": metadata.get("aspect_ratio", 0),
-                "circularity": metadata.get("circularity", 0),
-                "eccentricity": metadata.get("eccentricity", 0),
-                "solidity": metadata.get("solidity", 0),
-                "brightness": metadata.get("brightness", 0),
-                "contrast": metadata.get("contrast", 0),
             }
+            
+            # Extract all metadata fields
+            for field in metadata_fields:
+                val = get_field(field)
+                try:
+                    cell_info[field] = float(val) if val is not None else 0.0
+                except (TypeError, ValueError):
+                    cell_info[field] = 0.0
+            
             cell_data.append(cell_info)
     
     if len(embeddings) < 5:
@@ -415,6 +292,7 @@ def make_umap_cluster_figure_interactive(
     if n_jobs is None:
         n_jobs = -1 if random_state is None else 1
     
+    print(f"🔄 Computing UMAP embedding...")
     umap_model = UMAP(
         n_components=2,
         n_neighbors=min(n_neighbors, len(E) - 1),
@@ -426,36 +304,24 @@ def make_umap_cluster_figure_interactive(
     X_2d = umap_model.fit_transform(E)
     
     # --- Clustering on 2D UMAP coordinates ---
-    # Determine number of clusters (use sqrt of sample size, but between 2 and 10)
     n_samples = len(X_2d)
     n_clusters = max(2, min(10, int(np.sqrt(n_samples / 2))))
     
+    print(f"🔄 Computing {n_clusters} clusters...")
     kmeans = KMeans(n_clusters=n_clusters, random_state=random_state, n_init=10)
     cluster_labels = kmeans.fit_predict(X_2d)
     
-    # Helper function to safely convert values to strings
+    # --- Helper functions ---
     def safe_str(val, default="?"):
-        """Safely convert value to string, handling None and other edge cases.
-        Always returns a string, never None."""
         if val is None:
-            result = str(default)
-        else:
-            try:
-                result = str(val)
-                # Ensure we return a non-empty string
-                if not result:
-                    result = str(default)
-            except (TypeError, ValueError):
-                result = str(default)
-        
-        # Final safety check: ensure we never return None
-        if result is None:
-            result = "?"
-        return result
+            return str(default)
+        try:
+            result = str(val)
+            return result if result else str(default)
+        except (TypeError, ValueError):
+            return str(default)
     
-    # Helper function to safely format float values
     def safe_float(val, default=0.0, fmt=".1f"):
-        """Safely format a float value, handling None."""
         if val is None:
             return "N/A"
         try:
@@ -463,103 +329,38 @@ def make_umap_cluster_figure_interactive(
         except (TypeError, ValueError):
             return "N/A"
     
-    # --- Create interactive Plotly figure with rich hover info ---
+    # --- Build hover text ---
     hover_text = []
     for i, cell in enumerate(cell_data):
-        # Safely convert all location fields to strings (handle None and mixed types)
-        # Ensure we always get a string, never None
         well_row_str = safe_str(cell.get('well_row'))
         well_col_str = safe_str(cell.get('well_col'))
         field_index_str = safe_str(cell.get('field_index'))
         cell_index_str = safe_str(cell.get('cell_index'))
         
-        # Debug: Check if any variable is None (should never happen with safe_str)
-        if well_row_str is None or well_col_str is None or field_index_str is None or cell_index_str is None:
-            print(f"⚠️ ERROR: Found None value in cell {i}:")
-            print(f"  Cell data: {cell}")
-            print(f"  well_row_str type: {type(well_row_str)}, value: {repr(well_row_str)}")
-            print(f"  well_col_str type: {type(well_col_str)}, value: {repr(well_col_str)}")
-            print(f"  field_index_str type: {type(field_index_str)}, value: {repr(field_index_str)}")
-            print(f"  cell_index_str type: {type(cell_index_str)}, value: {repr(cell_index_str)}")
-            print(f"  Raw cell values:")
-            print(f"    cell.get('well_row'): {repr(cell.get('well_row'))}")
-            print(f"    cell.get('well_col'): {repr(cell.get('well_col'))}")
-            print(f"    cell.get('field_index'): {repr(cell.get('field_index'))}")
-            print(f"    cell.get('cell_index'): {repr(cell.get('cell_index'))}")
-            # Force to strings as fallback
-            well_row_str = str(well_row_str) if well_row_str is not None else "?"
-            well_col_str = str(well_col_str) if well_col_str is not None else "?"
-            field_index_str = str(field_index_str) if field_index_str is not None else "?"
-            cell_index_str = str(cell_index_str) if cell_index_str is not None else "?"
-        
-        # Additional debug: Print values before f-string to catch any issues
-        try:
-            text = (
-                f"<b>Location:</b> Well {well_row_str}{well_col_str}, "
-                f"Field {field_index_str}, Cell {cell_index_str}<br>"
-                f"<br>"
-                f"<b>Morphology:</b><br>"
-                f"  Area: {safe_float(cell.get('area'), 0.0, '.1f')} px²<br>"
-                f"  Perimeter: {safe_float(cell.get('perimeter'), 0.0, '.1f')} px<br>"
-                f"  Diameter: {safe_float(cell.get('equivalent_diameter'), 0.0, '.1f')} px<br>"
-                f"  Aspect Ratio: {safe_float(cell.get('aspect_ratio'), 0.0, '.2f')}<br>"
-                f"  Circularity: {safe_float(cell.get('circularity'), 0.0, '.3f')}<br>"
-                f"  Eccentricity: {safe_float(cell.get('eccentricity'), 0.0, '.3f')}<br>"
-                f"  Solidity: {safe_float(cell.get('solidity'), 0.0, '.3f')}<br>"
-                f"<br>"
-                f"<b>Intensity:</b><br>"
-                f"  Brightness: {safe_float(cell.get('brightness'), None, '.1f')}<br>"
-                f"  Contrast: {safe_float(cell.get('contrast'), None, '.1f')}<br>"
-                f"<br>"
-                f"<b>UMAP Coordinates:</b><br>"
-                f"  UMAP-1: {X_2d[i, 0]:.2f}<br>"
-                f"  UMAP-2: {X_2d[i, 1]:.2f}"
-            )
-        except TypeError as e:
-            # Catch the format error and print detailed debug info
-            print(f"❌ ERROR formatting text for cell {i}:")
-            print(f"  Error: {e}")
-            print(f"  Cell data: {cell}")
-            print(f"  well_row_str type: {type(well_row_str)}, value: {repr(well_row_str)}")
-            print(f"  well_col_str type: {type(well_col_str)}, value: {repr(well_col_str)}")
-            print(f"  field_index_str type: {type(field_index_str)}, value: {repr(field_index_str)}")
-            print(f"  cell_index_str type: {type(cell_index_str)}, value: {repr(cell_index_str)}")
-            print(f"  Raw cell values:")
-            print(f"    cell.get('well_row'): {repr(cell.get('well_row'))}")
-            print(f"    cell.get('well_col'): {repr(cell.get('well_col'))}")
-            print(f"    cell.get('field_index'): {repr(cell.get('field_index'))}")
-            print(f"    cell.get('cell_index'): {repr(cell.get('cell_index'))}")
-            # Force all to safe strings
-            well_row_str = "?" if well_row_str is None else str(well_row_str)
-            well_col_str = "?" if well_col_str is None else str(well_col_str)
-            field_index_str = "?" if field_index_str is None else str(field_index_str)
-            cell_index_str = "?" if cell_index_str is None else str(cell_index_str)
-            # Retry with safe values using safe_float for all numeric fields
-            text = (
-                f"<b>Location:</b> Well {well_row_str}{well_col_str}, "
-                f"Field {field_index_str}, Cell {cell_index_str}<br>"
-                f"<br>"
-                f"<b>Morphology:</b><br>"
-                f"  Area: {safe_float(cell.get('area'), 0.0, '.1f')} px²<br>"
-                f"  Perimeter: {safe_float(cell.get('perimeter'), 0.0, '.1f')} px<br>"
-                f"  Diameter: {safe_float(cell.get('equivalent_diameter'), 0.0, '.1f')} px<br>"
-                f"  Aspect Ratio: {safe_float(cell.get('aspect_ratio'), 0.0, '.2f')}<br>"
-                f"  Circularity: {safe_float(cell.get('circularity'), 0.0, '.3f')}<br>"
-                f"  Eccentricity: {safe_float(cell.get('eccentricity'), 0.0, '.3f')}<br>"
-                f"  Solidity: {safe_float(cell.get('solidity'), 0.0, '.3f')}<br>"
-                f"<br>"
-                f"<b>Intensity:</b><br>"
-                f"  Brightness: {safe_float(cell.get('brightness'), None, '.1f')}<br>"
-                f"  Contrast: {safe_float(cell.get('contrast'), None, '.1f')}<br>"
-                f"<br>"
-                f"<b>UMAP Coordinates:</b><br>"
-                f"  UMAP-1: {X_2d[i, 0]:.2f}<br>"
-                f"  UMAP-2: {X_2d[i, 1]:.2f}"
-            )
-        
+        text = (
+            f"<b>Location:</b> Well {well_row_str}{well_col_str}, "
+            f"Field {field_index_str}, Cell {cell_index_str}<br>"
+            f"<br>"
+            f"<b>Morphology:</b><br>"
+            f"  Area: {safe_float(cell.get('area'), 0.0, '.1f')} px²<br>"
+            f"  Perimeter: {safe_float(cell.get('perimeter'), 0.0, '.1f')} px<br>"
+            f"  Diameter: {safe_float(cell.get('equivalent_diameter'), 0.0, '.1f')} px<br>"
+            f"  Aspect Ratio: {safe_float(cell.get('aspect_ratio'), 0.0, '.2f')}<br>"
+            f"  Circularity: {safe_float(cell.get('circularity'), 0.0, '.3f')}<br>"
+            f"  Eccentricity: {safe_float(cell.get('eccentricity'), 0.0, '.3f')}<br>"
+            f"  Solidity: {safe_float(cell.get('solidity'), 0.0, '.3f')}<br>"
+            f"<br>"
+            f"<b>Intensity:</b><br>"
+            f"  Brightness: {safe_float(cell.get('brightness'), None, '.1f')}<br>"
+            f"  Contrast: {safe_float(cell.get('contrast'), None, '.1f')}<br>"
+            f"<br>"
+            f"<b>UMAP Coordinates:</b><br>"
+            f"  UMAP-1: {X_2d[i, 0]:.2f}<br>"
+            f"  UMAP-2: {X_2d[i, 1]:.2f}"
+        )
         hover_text.append(text)
     
-    # Prepare customdata with all cell info including images
+    # --- Prepare customdata ---
     customdata = []
     for cell in cell_data:
         customdata.append([
@@ -572,61 +373,168 @@ def make_umap_cluster_figure_interactive(
             cell['cell_index']
         ])
     
-    # Generate colors for each cluster using Plotly's discrete color sequence
-    # Use a predefined color palette that works across Plotly versions
+    # --- Generate cluster colors ---
     try:
         import plotly.colors as pc
         colors_list = pc.qualitative.Set3[:n_clusters] if n_clusters <= 12 else pc.qualitative.Set3
     except (ImportError, AttributeError):
-        # Fallback to a simple color list if plotly.colors is not available
         colors_list = px.colors.qualitative.Set3[:n_clusters] if n_clusters <= 12 else px.colors.qualitative.Set3
     
-    # Map cluster labels to colors
-    point_colors = [colors_list[label % len(colors_list)] for label in cluster_labels]
+    cluster_colors = [colors_list[label % len(colors_list)] for label in cluster_labels]
     
+    # --- Pre-compute metadata color arrays for JavaScript ---
+    # We'll pass normalized values (0-1) and compute turbo colors in JS
+    metadata_arrays = {}
+    metadata_ranges = {}
+    
+    for field in metadata_fields:
+        values = np.array([cell.get(field, 0.0) for cell in cell_data])
+        vmin, vmax = float(np.min(values)), float(np.max(values))
+        if vmax == vmin:
+            vmax = vmin + 1e-6  # Avoid division by zero
+        # Normalize to 0-1
+        normalized = ((values - vmin) / (vmax - vmin)).tolist()
+        metadata_arrays[field] = normalized
+        metadata_ranges[field] = {"min": vmin, "max": vmax}
+    
+    # --- Create Plotly figure ---
     fig = go.Figure(data=go.Scattergl(
         x=X_2d[:, 0],
         y=X_2d[:, 1],
         mode='markers',
         marker=dict(
             size=6,
-            color=point_colors,
+            color=cluster_colors,
             opacity=0.7,
             line=dict(width=0.5, color='white')
         ),
         text=hover_text,
-        hovertemplate='%{text}<extra></extra>',  # Use custom hover template
+        hovertemplate='%{text}<extra></extra>',
         customdata=customdata,
     ))
     
     fig.update_layout(
         title={
-            'text': f"Interactive UMAP Clustering (cosine distance, {n_clusters} clusters)<br><sub>Hover over points to see cell details</sub>",
+            'text': f"UMAP Visualization ({n_clusters} clusters, {n_samples} cells)<br><sub>Use tabs to switch coloring mode</sub>",
             'x': 0.5,
             'xanchor': 'center'
         },
         xaxis_title="UMAP-1",
         yaxis_title="UMAP-2",
-        width=1000,
-        height=700,
+        width=770,
+        height=525,
         hovermode='closest',
         template='plotly_white',
-        # Enable modebar buttons
-        modebar=dict(
-            orientation='v',
-            bgcolor='rgba(255,255,255,0.7)'
-        ),
-        # Add some padding
-        margin=dict(l=50, r=50, t=80, b=50)
+        modebar=dict(orientation='v', bgcolor='rgba(255,255,255,0.7)'),
+        margin=dict(l=40, r=100, t=80, b=40)  # Extra right margin for colorbar
     )
     
-    # Add custom JavaScript to show images on hover
+    # --- Generate HTML ---
     html = fig.to_html(include_plotlyjs='cdn', div_id='umap-plot')
     
-    # Inject custom CSS and JavaScript for image display on hover
-    custom_script = """
+    # --- Inject custom CSS, JavaScript, and tab controls ---
+    import json
+    
+    # Convert data to JSON for JavaScript
+    cluster_colors_json = json.dumps(cluster_colors)
+    metadata_arrays_json = json.dumps(metadata_arrays)
+    metadata_ranges_json = json.dumps(metadata_ranges)
+    metadata_fields_json = json.dumps(metadata_fields)
+    
+    # Generate tab buttons dynamically from metadata_fields
+    def get_display_name(field_name: str) -> str:
+        """Convert field_name to a human-readable display name."""
+        # Special cases for common fields
+        special_names = {
+            'equivalent_diameter': 'Diameter',
+            'aspect_ratio': 'Aspect Ratio',
+        }
+        if field_name in special_names:
+            return special_names[field_name]
+        # Default: capitalize and replace underscores
+        return field_name.replace('_', ' ').title()
+    
+    # Build tab buttons HTML
+    tab_buttons = ['<button class="color-tab active" data-mode="cluster">Cluster</button>']
+    for field in metadata_fields:
+        display_name = get_display_name(field)
+        tab_buttons.append(f'<button class="color-tab" data-mode="{field}">{display_name}</button>')
+    tab_buttons_html = '\n        '.join(tab_buttons)
+    
+    custom_script = f"""
     <style>
-    #cell-image-popup {
+    /* Tab bar styling */
+    #color-mode-tabs {{
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        padding: 8px;
+        background: #f8f9fa;
+        border-radius: 8px;
+        margin-bottom: 8px;
+        max-width: 770px;
+    }}
+    
+    .color-tab {{
+        padding: 4px 10px;
+        border: 1px solid #dee2e6;
+        border-radius: 4px;
+        background: white;
+        cursor: pointer;
+        font-size: 11px;
+        font-family: Arial, sans-serif;
+        transition: all 0.2s;
+    }}
+    
+    .color-tab:hover {{
+        background: #e9ecef;
+    }}
+    
+    .color-tab.active {{
+        background: #0d6efd;
+        color: white;
+        border-color: #0d6efd;
+    }}
+    
+    /* Colorbar styling */
+    #colorbar-container {{
+        position: absolute;
+        right: 15px;
+        top: 120px;
+        width: 70px;
+        height: 220px;
+        display: none;
+    }}
+    
+    #colorbar-gradient {{
+        width: 18px;
+        height: 180px;
+        background: linear-gradient(to top, 
+            #30123b, #4662d7, #35aac3, #6cce5a, #faba39, #f66b19, #d93806, #7a0403);
+        border: 1px solid #ccc;
+        border-radius: 2px;
+    }}
+    
+    #colorbar-labels {{
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        height: 180px;
+        margin-left: 4px;
+        font-size: 10px;
+        font-family: Arial, sans-serif;
+    }}
+    
+    #colorbar-title {{
+        text-align: center;
+        font-size: 12px;
+        font-weight: bold;
+        margin-bottom: 5px;
+        font-family: Arial, sans-serif;
+    }}
+    
+    /* Cell image popup */
+    #cell-image-popup {{
         position: fixed;
         display: none;
         z-index: 10000;
@@ -636,124 +544,215 @@ def make_umap_cluster_figure_interactive(
         padding: 8px;
         box-shadow: 0 4px 6px rgba(0,0,0,0.3);
         pointer-events: none;
-    }
-    #cell-image-popup img {
+    }}
+    
+    #cell-image-popup img {{
         width: 50px;
         height: 50px;
         display: block;
         border-radius: 4px;
-        image-rendering: pixelated; /* Crisp pixel art rendering for small images */
-        image-rendering: -moz-crisp-edges;
-        image-rendering: crisp-edges;
-    }
-    #cell-image-popup .cell-info {
+        image-rendering: pixelated;
+    }}
+    
+    #cell-image-popup .cell-info {{
         margin-top: 8px;
         font-size: 11px;
         font-family: Arial, sans-serif;
         color: #333;
-        line-height: 1.4;
-    }
-    #cell-image-popup .error {
-        color: #999;
-        font-style: italic;
-    }
+    }}
+    
+    .umap-container {{
+        position: relative;
+    }}
     </style>
     
+    <!-- Tab controls -->
+    <div id="color-mode-tabs">
+        {tab_buttons_html}
+    </div>
+    
+    <!-- Colorbar for heatmap modes -->
+    <div class="umap-container">
+        <div id="colorbar-container">
+            <div id="colorbar-title">Value</div>
+            <div style="display: flex;">
+                <div id="colorbar-gradient"></div>
+                <div id="colorbar-labels">
+                    <span id="colorbar-max">1.0</span>
+                    <span id="colorbar-mid">0.5</span>
+                    <span id="colorbar-min">0.0</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Cell image popup -->
     <div id="cell-image-popup">
         <img id="cell-image" src="" alt="Cell Image" style="display:none;">
         <div class="cell-info" id="cell-info"></div>
     </div>
     
     <script>
-    (function() {
-        // Wait for Plotly to be ready
-        function initImagePopup() {
-            var plot = document.getElementById('umap-plot');
-            if (!plot) {
-                console.error('UMAP plot element not found');
-                return;
-            }
+    (function() {{
+        // Data from Python
+        var clusterColors = {cluster_colors_json};
+        var metadataArrays = {metadata_arrays_json};
+        var metadataRanges = {metadata_ranges_json};
+        var metadataFields = {metadata_fields_json};
+        
+        // Turbo colormap (approximate, 8 key colors)
+        var turboColors = [
+            [48, 18, 59],    // Dark blue
+            [70, 98, 215],   // Blue
+            [53, 170, 195],  // Cyan
+            [108, 206, 90],  // Green
+            [250, 186, 57],  // Yellow
+            [246, 107, 25],  // Orange
+            [217, 56, 6],    // Red-orange
+            [122, 4, 3]      // Dark red
+        ];
+        
+        function interpolateTurbo(t) {{
+            // t is 0-1, interpolate through turbo colormap
+            t = Math.max(0, Math.min(1, t));
+            var idx = t * (turboColors.length - 1);
+            var lower = Math.floor(idx);
+            var upper = Math.ceil(idx);
+            var frac = idx - lower;
             
+            if (lower === upper) {{
+                return 'rgb(' + turboColors[lower].join(',') + ')';
+            }}
+            
+            var r = Math.round(turboColors[lower][0] * (1 - frac) + turboColors[upper][0] * frac);
+            var g = Math.round(turboColors[lower][1] * (1 - frac) + turboColors[upper][1] * frac);
+            var b = Math.round(turboColors[lower][2] * (1 - frac) + turboColors[upper][2] * frac);
+            
+            return 'rgb(' + r + ',' + g + ',' + b + ')';
+        }}
+        
+        function getMetadataColors(fieldName) {{
+            var normalized = metadataArrays[fieldName];
+            if (!normalized) return clusterColors;
+            
+            return normalized.map(function(val) {{
+                return interpolateTurbo(val);
+            }});
+        }}
+        
+        function updateColorbar(fieldName, show) {{
+            var container = document.getElementById('colorbar-container');
+            if (!show) {{
+                container.style.display = 'none';
+                return;
+            }}
+            
+            container.style.display = 'block';
+            var range = metadataRanges[fieldName];
+            
+            document.getElementById('colorbar-title').textContent = fieldName;
+            document.getElementById('colorbar-max').textContent = range.max.toFixed(2);
+            document.getElementById('colorbar-mid').textContent = ((range.min + range.max) / 2).toFixed(2);
+            document.getElementById('colorbar-min').textContent = range.min.toFixed(2);
+        }}
+        
+        function initTabs() {{
+            var plot = document.getElementById('umap-plot');
+            var tabs = document.querySelectorAll('.color-tab');
+            
+            tabs.forEach(function(tab) {{
+                tab.addEventListener('click', function() {{
+                    // Update active state
+                    tabs.forEach(function(t) {{ t.classList.remove('active'); }});
+                    tab.classList.add('active');
+                    
+                    var mode = tab.getAttribute('data-mode');
+                    var newColors;
+                    
+                    if (mode === 'cluster') {{
+                        newColors = clusterColors;
+                        updateColorbar(null, false);
+                    }} else {{
+                        newColors = getMetadataColors(mode);
+                        updateColorbar(mode, true);
+                    }}
+                    
+                    // Update plot colors
+                    Plotly.restyle(plot, {{'marker.color': [newColors]}});
+                }});
+            }});
+        }}
+        
+        function initImagePopup() {{
+            var plot = document.getElementById('umap-plot');
             var popup = document.getElementById('cell-image-popup');
             var img = document.getElementById('cell-image');
             var info = document.getElementById('cell-info');
             
-            if (!popup || !img || !info) {
-                console.error('Popup elements not found');
-                return;
-            }
+            if (!plot || !popup) return;
             
-            console.log('Image popup initialized');
-            
-            plot.on('plotly_hover', function(data) {
-                try {
+            plot.on('plotly_hover', function(data) {{
+                try {{
                     var point = data.points[0];
-                    console.log('Hover event:', point.customdata);
-                    
-                    if (point.customdata && point.customdata.length >= 7) {
+                    if (point.customdata && point.customdata.length >= 7) {{
                         var imageB64 = point.customdata[2];
                         var wellRow = point.customdata[3];
                         var wellCol = point.customdata[4];
                         var fieldIdx = point.customdata[5];
                         var cellIdx = point.customdata[6];
                         
-                        // Update info text
                         info.innerHTML = '<b>Well ' + wellRow + wellCol + 
                                         ', Field ' + fieldIdx + ', Cell ' + cellIdx + '</b>';
                         
-                        // Show image if available
-                        if (imageB64 && imageB64.length > 0) {
+                        if (imageB64 && imageB64.length > 0) {{
                             img.src = 'data:image/png;base64,' + imageB64;
                             img.style.display = 'block';
-                            img.onerror = function() {
-                                console.error('Failed to load image');
-                                img.style.display = 'none';
-                                info.innerHTML += '<br><span class="error">Image failed to load</span>';
-                            };
-                        } else {
+                        }} else {{
                             img.style.display = 'none';
-                            info.innerHTML += '<br><span class="error">No image available</span>';
-                        }
+                        }}
                         
-                        // Position popup
                         popup.style.display = 'block';
                         var x = data.event.pageX + 15;
                         var y = data.event.pageY + 15;
                         
-                        // Keep popup on screen
-                        if (x + 250 > window.innerWidth) {
-                            x = data.event.pageX - 265;
-                        }
-                        if (y + 300 > window.innerHeight) {
-                            y = data.event.pageY - 310;
-                        }
+                        if (x + 150 > window.innerWidth) x = data.event.pageX - 165;
+                        if (y + 150 > window.innerHeight) y = data.event.pageY - 165;
                         
                         popup.style.left = x + 'px';
                         popup.style.top = y + 'px';
-                    }
-                } catch (e) {
-                    console.error('Error in hover handler:', e);
-                }
-            });
+                    }}
+                }} catch (e) {{
+                    console.error('Hover error:', e);
+                }}
+            }});
             
-            plot.on('plotly_unhover', function() {
+            plot.on('plotly_unhover', function() {{
                 popup.style.display = 'none';
                 img.style.display = 'none';
-            });
-        }
+            }});
+        }}
         
-        // Try to initialize immediately or wait for DOMContentLoaded
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', initImagePopup);
-        } else {
-            // DOM already loaded, wait a bit for Plotly to render
-            setTimeout(initImagePopup, 100);
-        }
-    })();
+        // Initialize when ready
+        if (document.readyState === 'loading') {{
+            document.addEventListener('DOMContentLoaded', function() {{
+                setTimeout(function() {{
+                    initTabs();
+                    initImagePopup();
+                }}, 100);
+            }});
+        }} else {{
+            setTimeout(function() {{
+                initTabs();
+                initImagePopup();
+            }}, 100);
+        }}
+    }})();
     </script>
     """
     
-    # Insert custom script before closing body tag
-    html = html.replace('</body>', custom_script + '</body>')
+    # Insert custom elements before the plot div
+    html = html.replace('<div id="umap-plot"', custom_script + '<div id="umap-plot"')
+    
+    print(f"✓ Generated interactive UMAP with {len(metadata_fields)} metadata color modes")
     
     return html
