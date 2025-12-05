@@ -1496,8 +1496,8 @@ async def setup_service(server, server_id="agent-lens"):
             logger.warning("Some endpoints may not function correctly.")
     
     # Define simple hypha-rpc service method for text embedding generation
-    @schema_function(skip_self=True)
-    async def generate_text_embedding_rpc(self, text: str) -> dict:
+    @schema_function()
+    async def generate_text_embedding_rpc(text: str) -> dict:
         """
         Generate a CLIP text embedding via hypha-rpc.
         
@@ -1525,8 +1525,8 @@ async def setup_service(server, server_id="agent-lens"):
             raise
     
     # Define simple hypha-rpc service method for batch image embedding generation
-    @schema_function(skip_self=True)
-    async def generate_image_embeddings_batch_rpc(self, images_base64: List[str]) -> dict:
+    @schema_function()
+    async def generate_image_embeddings_batch_rpc(images_base64: List[str]) -> dict:
         """
         Generate CLIP image embeddings for multiple images in batch via hypha-rpc.
         
@@ -1584,9 +1584,8 @@ async def setup_service(server, server_id="agent-lens"):
             raise
     
     # Define hypha-rpc service method for interactive UMAP (HTML)
-    @schema_function(skip_self=True)
+    @schema_function()
     async def make_umap_cluster_figure_interactive_rpc(
-        self,
         all_cells: List[dict],
         n_neighbors: int = 15,
         min_dist: float = 0.1,
