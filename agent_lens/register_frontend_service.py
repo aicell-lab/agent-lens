@@ -12,6 +12,8 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from agent_lens.utils.artifact_manager import AgentLensArtifactManager
 from hypha_rpc import connect_to_server
+from hypha_rpc.utils.schema import schema_function
+
 import numpy as np
 # CLIP and Torch for embeddings
 import clip
@@ -1494,7 +1496,8 @@ async def setup_service(server, server_id="agent-lens"):
             logger.warning("Some endpoints may not function correctly.")
     
     # Define simple hypha-rpc service method for text embedding generation
-    async def generate_text_embedding_rpc(text: str) -> dict:
+    @schema_function(skip_self=True)
+    async def generate_text_embedding_rpc(self, text: str) -> dict:
         """
         Generate a CLIP text embedding via hypha-rpc.
         
@@ -1522,7 +1525,8 @@ async def setup_service(server, server_id="agent-lens"):
             raise
     
     # Define simple hypha-rpc service method for batch image embedding generation
-    async def generate_image_embeddings_batch_rpc(images_base64: List[str]) -> dict:
+    @schema_function(skip_self=True)
+    async def generate_image_embeddings_batch_rpc(self, images_base64: List[str]) -> dict:
         """
         Generate CLIP image embeddings for multiple images in batch via hypha-rpc.
         
@@ -1579,73 +1583,10 @@ async def setup_service(server, server_id="agent-lens"):
             logger.error(traceback.format_exc())
             raise
     
-    # Define hypha-rpc service method for UMAP clustering
-    async def make_umap_cluster_figure_base64_rpc(
-        all_cells: List[dict],
-        n_neighbors: int = 15,
-        min_dist: float = 0.1,
-        random_state: Optional[int] = None,
-        n_jobs: Optional[int] = 16,
-    ) -> dict:
-        """
-        Generate UMAP clustering visualization for cell embeddings via hypha-rpc.
-        
-        This method performs UMAP dimensionality reduction followed by KMeans clustering.
-        Each cluster is displayed with a different color in the visualization.
-        The number of clusters is automatically determined based on the sample size (between 2 and 10).
-        
-        This method runs UMAP computation in a thread pool to avoid blocking the asyncio event loop.
-        For parallelism, set random_state=None and n_jobs=-1 (uses all CPU cores).
-        
-        Args:
-            all_cells: List of cell dictionaries, each should have 'embedding_vector' key
-            n_neighbors: Number of neighbors for UMAP (default: 15)
-            min_dist: Minimum distance for UMAP (default: 0.1)
-            random_state: Random state for reproducibility. If None, allows parallelism (default: None)
-            n_jobs: Number of parallel jobs. -1 uses all CPU cores, None auto-selects based on random_state
-            
-        Returns:
-            dict: JSON object with success flag and base64 PNG string of clustered visualization, or None if failed
-        """
-        try:
-            if not all_cells or len(all_cells) == 0:
-                return {
-                    "success": False,
-                    "error": "No cells provided",
-                    "image_base64": None
-                }
-            
-            from agent_lens.utils.umap_analysis_utils import make_umap_cluster_figure_base64
-            
-            # Run CPU-intensive UMAP computation in a thread pool to avoid blocking asyncio loop
-            image_base64 = await asyncio.to_thread(
-                make_umap_cluster_figure_base64,
-                all_cells=all_cells,
-                n_neighbors=n_neighbors,
-                min_dist=min_dist,
-                random_state=random_state,
-                n_jobs=n_jobs,
-            )
-            
-            if image_base64 is None:
-                return {
-                    "success": False,
-                    "error": "Failed to generate UMAP cluster figure (too few cells or other error)",
-                    "image_base64": None
-                }
-            
-            return {
-                "success": True,
-                "image_base64": image_base64,
-                "n_cells": len(all_cells)
-            }
-        except Exception as e:
-            logger.error(f"Error generating UMAP cluster figure via RPC: {e}")
-            logger.error(traceback.format_exc())
-            raise
-    
     # Define hypha-rpc service method for interactive UMAP (HTML)
+    @schema_function(skip_self=True)
     async def make_umap_cluster_figure_interactive_rpc(
+        self,
         all_cells: List[dict],
         n_neighbors: int = 15,
         min_dist: float = 0.1,
@@ -1731,7 +1672,6 @@ async def setup_service(server, server_id="agent-lens"):
             "generate_text_embedding": generate_text_embedding_rpc,
             "generate_image_embeddings_batch": generate_image_embeddings_batch_rpc,
             # Register RPC methods for UMAP clustering
-            "make_umap_cluster_figure_base64": make_umap_cluster_figure_base64_rpc,
             "make_umap_cluster_figure_interactive": make_umap_cluster_figure_interactive_rpc,
         }
     )
