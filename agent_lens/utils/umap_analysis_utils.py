@@ -174,8 +174,8 @@ def make_umap_cluster_figure_base64(
 
 # Default metadata fields for heatmap visualization tabs
 DEFAULT_METADATA_FIELDS = [
-    'area', 'perimeter', 'equivalent_diameter', 'aspect_ratio',
-    'circularity', 'eccentricity', 'solidity', 'convexity',
+    'area', 'perimeter', 'equivalent_diameter',
+    'aspect_ratio', 'circularity', 'eccentricity', 'solidity', 'convexity',
     'brightness', 'contrast', 'homogeneity', 'energy', 'correlation'
 ]
 
@@ -275,6 +275,25 @@ def make_umap_cluster_figure_interactive(
                 except (TypeError, ValueError):
                     cell_info[field] = 0.0
             
+            # Extract fluorescence intensity fields (mean_intensity_*)
+            for key in c:
+                if key.startswith('mean_intensity_'):
+                    val = c.get(key)
+                    try:
+                        cell_info[key] = float(val) if val is not None else None
+                    except (TypeError, ValueError):
+                        cell_info[key] = None
+            # Also check nested metadata for fluorescence fields
+            metadata = c.get("metadata", {})
+            if metadata:
+                for key in metadata:
+                    if key.startswith('mean_intensity_'):
+                        val = metadata.get(key)
+                        try:
+                            cell_info[key] = float(val) if val is not None else None
+                        except (TypeError, ValueError):
+                            cell_info[key] = None
+            
             cell_data.append(cell_info)
     
     if len(embeddings) < 5:
@@ -337,26 +356,43 @@ def make_umap_cluster_figure_interactive(
         field_index_str = safe_str(cell.get('field_index'))
         cell_index_str = safe_str(cell.get('cell_index'))
         
+        # Build fluorescence intensity lines dynamically
+        fluo_lines = ""
+        for key in cell:
+            if key.startswith('mean_intensity_') and cell.get(key) is not None:
+                channel_name = key.replace('mean_intensity_', '').replace('_', ' ')
+                # Shorten channel names for display
+                if 'Fluorescence' in channel_name:
+                    channel_name = channel_name.replace('Fluorescence ', '').replace(' nm Ex', 'nm')
+                fluo_lines += f"  {channel_name}: {safe_float(cell.get(key), None, '.1f')}<br>"
+        
         text = (
-            f"<b>Location:</b> Well {well_row_str}{well_col_str}, "
-            f"Field {field_index_str}, Cell {cell_index_str}<br>"
+            f"<span style='font-size:9px;'>"
+            f"<b>Well {well_row_str}{well_col_str}, Field {field_index_str}, Cell {cell_index_str}</b><br>"
             f"<br>"
             f"<b>Morphology:</b><br>"
             f"  Area: {safe_float(cell.get('area'), 0.0, '.1f')} px²<br>"
             f"  Perimeter: {safe_float(cell.get('perimeter'), 0.0, '.1f')} px<br>"
             f"  Diameter: {safe_float(cell.get('equivalent_diameter'), 0.0, '.1f')} px<br>"
-            f"  Aspect Ratio: {safe_float(cell.get('aspect_ratio'), 0.0, '.2f')}<br>"
-            f"  Circularity: {safe_float(cell.get('circularity'), 0.0, '.3f')}<br>"
-            f"  Eccentricity: {safe_float(cell.get('eccentricity'), 0.0, '.3f')}<br>"
-            f"  Solidity: {safe_float(cell.get('solidity'), 0.0, '.3f')}<br>"
+            f"  BBox: {safe_float(cell.get('bbox_width'), 0.0, '.0f')}×{safe_float(cell.get('bbox_height'), 0.0, '.0f')} px<br>"
+            f"  Aspect: {safe_float(cell.get('aspect_ratio'), 0.0, '.2f')}<br>"
+            f"  Circ: {safe_float(cell.get('circularity'), 0.0, '.3f')}, Ecc: {safe_float(cell.get('eccentricity'), 0.0, '.3f')}<br>"
+            f"  Solid: {safe_float(cell.get('solidity'), 0.0, '.3f')}, Conv: {safe_float(cell.get('convexity'), 0.0, '.3f')}<br>"
             f"<br>"
-            f"<b>Intensity:</b><br>"
-            f"  Brightness: {safe_float(cell.get('brightness'), None, '.1f')}<br>"
-            f"  Contrast: {safe_float(cell.get('contrast'), None, '.1f')}<br>"
+            f"<b>Texture:</b><br>"
+            f"  Bright: {safe_float(cell.get('brightness'), None, '.1f')}, Contr: {safe_float(cell.get('contrast'), None, '.1f')}<br>"
+            f"  Homog: {safe_float(cell.get('homogeneity'), None, '.3f')}, Energy: {safe_float(cell.get('energy'), None, '.3f')}<br>"
+            f"  Corr: {safe_float(cell.get('correlation'), None, '.3f')}<br>"
+        )
+        
+        # Add fluorescence section if available
+        if fluo_lines:
+            text += f"<br><b>Fluorescence:</b><br>{fluo_lines}"
+        
+        text += (
             f"<br>"
-            f"<b>UMAP Coordinates:</b><br>"
-            f"  UMAP-1: {X_2d[i, 0]:.2f}<br>"
-            f"  UMAP-2: {X_2d[i, 1]:.2f}"
+            f"<b>UMAP:</b> ({X_2d[i, 0]:.2f}, {X_2d[i, 1]:.2f})"
+            f"</span>"
         )
         hover_text.append(text)
     
@@ -417,7 +453,8 @@ def make_umap_cluster_figure_interactive(
         title={
             'text': f"UMAP Visualization ({n_clusters} clusters, {n_samples} cells)<br><sub>Use tabs to switch coloring mode</sub>",
             'x': 0.5,
-            'xanchor': 'center'
+            'xanchor': 'center',
+            'font': {'size': 12}
         },
         xaxis_title="UMAP-1",
         yaxis_title="UMAP-2",
@@ -426,7 +463,12 @@ def make_umap_cluster_figure_interactive(
         hovermode='closest',
         template='plotly_white',
         modebar=dict(orientation='v', bgcolor='rgba(255,255,255,0.7)'),
-        margin=dict(l=40, r=100, t=80, b=40)  # Extra right margin for colorbar
+        margin=dict(l=40, r=100, t=80, b=40),  # Extra right margin for colorbar
+        hoverlabel=dict(
+            font=dict(size=9, family='Arial, sans-serif'),
+            bgcolor='rgba(255,255,255,0.95)',
+            bordercolor='#333'
+        )
     )
     
     # --- Generate HTML ---
@@ -455,7 +497,7 @@ def make_umap_cluster_figure_interactive(
         return field_name.replace('_', ' ').title()
     
     # Build tab buttons HTML
-    tab_buttons = ['<button class="color-tab active" data-mode="cluster">Cluster</button>']
+    tab_buttons = ['<button class="color-tab active" data-mode="cluster">Embedding Vector Cluster</button>']
     for field in metadata_fields:
         display_name = get_display_name(field)
         tab_buttons.append(f'<button class="color-tab" data-mode="{field}">{display_name}</button>')
@@ -496,53 +538,61 @@ def make_umap_cluster_figure_interactive(
         border-color: #0d6efd;
     }}
     
-    /* Colorbar styling */
+    /* Colorbar styling - inline display to prevent clipping */
     #colorbar-container {{
-        position: absolute;
-        right: 15px;
-        top: 120px;
-        width: 70px;
-        height: 220px;
         display: none;
+        flex-direction: row;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        background: #f8f9fa;
+        border-radius: 6px;
+        margin-top: 8px;
+        max-width: 770px;
+    }}
+    
+    #colorbar-title {{
+        font-size: 11px;
+        font-weight: bold;
+        font-family: Arial, sans-serif;
+        min-width: 80px;
     }}
     
     #colorbar-gradient {{
-        width: 18px;
-        height: 180px;
-        background: linear-gradient(to top, 
+        width: 200px;
+        height: 16px;
+        background: linear-gradient(to right, 
             #30123b, #4662d7, #35aac3, #6cce5a, #faba39, #f66b19, #d93806, #7a0403);
         border: 1px solid #ccc;
         border-radius: 2px;
+        flex-shrink: 0;
     }}
     
     #colorbar-labels {{
         display: flex;
-        flex-direction: column;
+        flex-direction: row;
         justify-content: space-between;
-        height: 180px;
-        margin-left: 4px;
-        font-size: 10px;
+        width: 200px;
+        font-size: 9px;
         font-family: Arial, sans-serif;
+        margin-top: 2px;
     }}
     
-    #colorbar-title {{
-        text-align: center;
-        font-size: 12px;
-        font-weight: bold;
-        margin-bottom: 5px;
-        font-family: Arial, sans-serif;
+    #colorbar-inner {{
+        display: flex;
+        flex-direction: column;
     }}
     
-    /* Cell image popup */
+    /* Cell image popup with thumbnail */
     #cell-image-popup {{
         position: fixed;
         display: none;
         z-index: 10000;
         background: white;
         border: 2px solid #333;
-        border-radius: 8px;
-        padding: 8px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        border-radius: 6px;
+        padding: 6px;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.3);
         pointer-events: none;
     }}
     
@@ -550,19 +600,29 @@ def make_umap_cluster_figure_interactive(
         width: 50px;
         height: 50px;
         display: block;
-        border-radius: 4px;
+        border-radius: 3px;
         image-rendering: pixelated;
+        border: 1px solid #ddd;
     }}
     
     #cell-image-popup .cell-info {{
-        margin-top: 8px;
-        font-size: 11px;
+        margin-top: 4px;
+        font-size: 9px;
         font-family: Arial, sans-serif;
         color: #333;
+        max-width: 80px;
+        text-align: center;
     }}
     
     .umap-container {{
-        position: relative;
+        display: flex;
+        flex-direction: column;
+        max-width: 770px;
+    }}
+    
+    /* Smaller hover tooltip font */
+    .plotly .hoverlayer .hovertext text {{
+        font-size: 9px !important;
     }}
     </style>
     
@@ -571,17 +631,15 @@ def make_umap_cluster_figure_interactive(
         {tab_buttons_html}
     </div>
     
-    <!-- Colorbar for heatmap modes -->
-    <div class="umap-container">
-        <div id="colorbar-container">
-            <div id="colorbar-title">Value</div>
-            <div style="display: flex;">
-                <div id="colorbar-gradient"></div>
-                <div id="colorbar-labels">
-                    <span id="colorbar-max">1.0</span>
-                    <span id="colorbar-mid">0.5</span>
-                    <span id="colorbar-min">0.0</span>
-                </div>
+    <!-- Colorbar for heatmap modes - horizontal inline layout -->
+    <div id="colorbar-container">
+        <div id="colorbar-title">Value</div>
+        <div id="colorbar-inner">
+            <div id="colorbar-gradient"></div>
+            <div id="colorbar-labels">
+                <span id="colorbar-min">0.0</span>
+                <span id="colorbar-mid">0.5</span>
+                <span id="colorbar-max">1.0</span>
             </div>
         </div>
     </div>
@@ -647,13 +705,15 @@ def make_umap_cluster_figure_interactive(
                 return;
             }}
             
-            container.style.display = 'block';
+            container.style.display = 'flex';
             var range = metadataRanges[fieldName];
             
-            document.getElementById('colorbar-title').textContent = fieldName;
-            document.getElementById('colorbar-max').textContent = range.max.toFixed(2);
-            document.getElementById('colorbar-mid').textContent = ((range.min + range.max) / 2).toFixed(2);
+            // Format field name for display
+            var displayName = fieldName.replace(/_/g, ' ').replace(/\\b\\w/g, function(l) {{ return l.toUpperCase(); }});
+            document.getElementById('colorbar-title').textContent = displayName + ':';
             document.getElementById('colorbar-min').textContent = range.min.toFixed(2);
+            document.getElementById('colorbar-mid').textContent = ((range.min + range.max) / 2).toFixed(2);
+            document.getElementById('colorbar-max').textContent = range.max.toFixed(2);
         }}
         
         function initTabs() {{
@@ -695,28 +755,38 @@ def make_umap_cluster_figure_interactive(
                 try {{
                     var point = data.points[0];
                     if (point.customdata && point.customdata.length >= 7) {{
+                        var cellIndex = point.customdata[0];
+                        var cellId = point.customdata[1];
                         var imageB64 = point.customdata[2];
                         var wellRow = point.customdata[3];
                         var wellCol = point.customdata[4];
                         var fieldIdx = point.customdata[5];
                         var cellIdx = point.customdata[6];
                         
-                        info.innerHTML = '<b>Well ' + wellRow + wellCol + 
-                                        ', Field ' + fieldIdx + ', Cell ' + cellIdx + '</b>';
+                        // Build info text
+                        var infoText = '<b>' + wellRow + wellCol + '-F' + fieldIdx + '-C' + cellIdx + '</b>';
+                        info.innerHTML = infoText;
                         
+                        // Show 50x50 thumbnail if available
                         if (imageB64 && imageB64.length > 0) {{
                             img.src = 'data:image/png;base64,' + imageB64;
                             img.style.display = 'block';
+                            img.title = 'Cell ' + cellIdx + ' (50×50 thumbnail)';
                         }} else {{
                             img.style.display = 'none';
                         }}
                         
                         popup.style.display = 'block';
-                        var x = data.event.pageX + 15;
-                        var y = data.event.pageY + 15;
                         
-                        if (x + 150 > window.innerWidth) x = data.event.pageX - 165;
-                        if (y + 150 > window.innerHeight) y = data.event.pageY - 165;
+                        // Position thumbnail on LEFT side of cursor to avoid covering metadata tooltip
+                        var popupWidth = 80;  // approximate popup width
+                        var x = data.event.pageX - popupWidth - 15;  // Left of cursor
+                        var y = data.event.pageY - 30;  // Slightly above cursor
+                        
+                        // Keep popup on screen - if too far left, move to right side
+                        if (x < 10) x = data.event.pageX + 15;
+                        if (y < 10) y = 10;
+                        if (y + 100 > window.innerHeight) y = window.innerHeight - 110;
                         
                         popup.style.left = x + 'px';
                         popup.style.top = y + 'px';
