@@ -17,7 +17,7 @@ import * as zarr from "zarrita";
 const ZARR_ENDPOINT = "https://hypha.aicell.io/agent-lens/apps/agent-lens/example-image-data.zarr";
 
 // Hardcoded OME-Zarr structure (to avoid listing 3 million chunks)
-// Based on: /home/tao/Documents/example-zarr/data.zarr
+// Based on: /mnt/shared_documents/offline_stitch_20251201-u2os-full-plate_2025-12-01_17-00-56.154975/data.zarr
 const ZARR_STRUCTURE = {
   format: 2, // zarr_format: 2
   scaleLevels: [0, 1, 2, 3, 4, 5], // Scale levels (multiscale pyramid)

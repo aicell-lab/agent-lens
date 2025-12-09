@@ -1154,8 +1154,10 @@ const MicroscopeMapDisplay = forwardRef(({
     const activeChannels = [...channelMetadata.activeChannels];
     
     activeChannels.forEach(channel => {
+      // Use the 'active' field from zarr metadata to set initial enabled state
+      // This comes from the 'activate' field in the zarr .zattrs file
       newConfigs[channel.label] = {
-        enabled: true, // Auto-enable all active channels as requested
+        enabled: channel.active ?? false, // Use active status from zarr metadata
         min: channel.window.start,
         max: channel.window.end,
         color: channel.color,
@@ -1165,7 +1167,9 @@ const MicroscopeMapDisplay = forwardRef(({
       };
     });
     
-    console.log(`🎨 Initialized ${Object.keys(newConfigs).length} zarr channels:`, Object.keys(newConfigs));
+    const enabledCount = Object.values(newConfigs).filter(c => c.enabled).length;
+    console.log(`🎨 Initialized ${Object.keys(newConfigs).length} zarr channels (${enabledCount} enabled):`, 
+      Object.entries(newConfigs).map(([name, config]) => `${name}(${config.enabled ? 'enabled' : 'disabled'})`).join(', '));
     setZarrChannelConfigs(newConfigs);
     setAvailableZarrChannels(activeChannels);
     setIsMultiChannelMode(Object.keys(newConfigs).length > 1);
@@ -4257,7 +4261,6 @@ const MicroscopeMapDisplay = forwardRef(({
       }
       
       // Initialize the loader (loads metadata from .zattrs dynamically)
-      // Wellplate offset is now loaded automatically from .zattrs (squid_canvas.wellplate_offset)
       try {
         await artifactZarrLoaderRef.current.init();
         console.log('✅ ArtifactZarrLoader initialized with metadata from .zattrs');

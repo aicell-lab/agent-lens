@@ -26,28 +26,6 @@ class ArtifactZarrLoader {
     this.initialized = false;
     this.initPromise = null;
     
-    // Coordinate offset to align zarr data with current microscope well plate position
-    // This offset is SUBTRACTED from requested coordinates before fetching data
-    // Example: If zarr well is at (27, 18) but microscope says (32, 20),
-    //          set offset to (5, 2) so requests for (32, 20) fetch from (27, 18)
-    this.coordinateOffset = { x: 0, y: 0 };
-  }
-  
-  /**
-   * Set coordinate offset to align zarr data with microscope well plate configuration
-   * @param {number} dx - X offset in mm (microscope_x - zarr_x)
-   * @param {number} dy - Y offset in mm (microscope_y - zarr_y)
-   */
-  setCoordinateOffset(dx, dy) {
-    this.coordinateOffset = { x: dx, y: dy };
-    console.log(`📍 Zarr coordinate offset set to: X=${dx.toFixed(2)}mm, Y=${dy.toFixed(2)}mm`);
-  }
-  
-  /**
-   * Get current coordinate offset
-   */
-  getCoordinateOffset() {
-    return { ...this.coordinateOffset };
   }
   
   /**
@@ -74,15 +52,12 @@ class ArtifactZarrLoader {
    */
   async _loadMetadata() {
     try {
-      console.log(`📥 Loading zarr metadata from ${this.baseUrl}/.zattrs`);
-      
       const response = await fetch(`${this.baseUrl}/.zattrs`);
       if (!response.ok) {
         throw new Error(`Failed to fetch .zattrs: ${response.status} ${response.statusText}`);
       }
       
       const zattrs = await response.json();
-      console.log(`✅ Loaded .zattrs metadata`);
       
       // Parse multiscales info
       const multiscales = zattrs.multiscales?.[0];
@@ -96,24 +71,25 @@ class ArtifactZarrLoader {
       // Get pixel size from first scale level's coordinate transformation
       const pixelSizeUm = multiscales.datasets[0]?.coordinateTransformations?.[0]?.scale?.[3] || 0.311688;
       
-      // Parse squid_canvas info for stage limits
+      // Parse squid_canvas info for canvas dimensions
       const squidCanvas = zattrs.squid_canvas;
       if (!squidCanvas) {
         throw new Error('No squid_canvas found in .zattrs');
       }
       
-      const stageLimits = squidCanvas.stage_limits;
-      if (!stageLimits) {
-        throw new Error('No stage_limits found in squid_canvas');
-      }
+      // Get canvas dimensions (default: 120mm x 80mm)
+      const canvasWidthMm = squidCanvas.canvas_width_mm ?? 120;
+      const canvasHeightMm = squidCanvas.canvas_height_mm ?? 80;
       
       // Parse omero channels
       const omeroChannels = zattrs.omero?.channels || [];
+      
       const channels = omeroChannels.map((ch, index) => ({
         index,
         label: ch.label,
         color: ch.color,
-        active: ch.active,
+        // Zarr uses 'activate' field, map it to 'active' for consistency
+        active: ch.activate ?? ch.active ?? false,
         window: ch.window || { start: 0, end: 255 }
       }));
       
@@ -131,49 +107,32 @@ class ArtifactZarrLoader {
         shape: zarray.shape,  // [T, C, Z, Y, X]
         chunks: zarray.chunks,
         channels,
-        stageLimits: {
-          xMin: stageLimits.x_negative,
-          xMax: stageLimits.x_positive,
-          yMin: stageLimits.y_negative,
-          yMax: stageLimits.y_positive
-        },
+        canvasWidthMm,
+        canvasHeightMm,
         // Store original mappings for channel lookups
         channelMapping: squidCanvas.channel_mapping || {},
         zarrIndexMapping: squidCanvas.zarr_index_mapping || {}
       };
       
-      // Load wellplate offset from .zattrs if present
-      // This allows the zarr data to specify the offset needed to align with microscope config
-      const wellplateOffset = squidCanvas.wellplate_offset;
-      if (wellplateOffset) {
-        this.coordinateOffset = {
-          x: wellplateOffset.x_mm || 0,
-          y: wellplateOffset.y_mm || 0
-        };
-        console.log(`📍 Loaded wellplate offset from .zattrs: X=${this.coordinateOffset.x}mm, Y=${this.coordinateOffset.y}mm`);
-      } else {
-        console.log(`📍 No wellplate_offset in .zattrs, using default (0, 0)`);
-      }
-      
-      // Calculate image extent from stage limits
-      const limits = this.structure.stageLimits;
+      // Calculate image extent from canvas dimensions (canvas starts at 0, 0)
       this.imageExtent = {
-        xMin: limits.xMin,
-        xMax: limits.xMax,
-        yMin: limits.yMin,
-        yMax: limits.yMax,
-        width: limits.xMax - limits.xMin,
-        height: limits.yMax - limits.yMin
+        xMin: 0,
+        xMax: canvasWidthMm,
+        yMin: 0,
+        yMax: canvasHeightMm,
+        width: canvasWidthMm,
+        height: canvasHeightMm
       };
       
-      console.log(`📐 Zarr image extent (from .zattrs): X[${this.imageExtent.xMin}, ${this.imageExtent.xMax}]mm, Y[${this.imageExtent.yMin}, ${this.imageExtent.yMax}]mm`);
-      console.log(`📊 Shape: ${JSON.stringify(this.structure.shape)}, Pixel size: ${this.structure.pixelSizeUm}µm`);
-      console.log(`🎨 Channels: ${channels.map(c => c.label).join(', ')}`);
+      // Summary log
+      const activeChannels = channels.filter(c => c.active).map(c => c.label);
+      console.log(`✅ Zarr initialized: ${canvasWidthMm}×${canvasHeightMm}mm, ${channels.length} channels (${activeChannels.length} active), ${scaleLevels.length} scale levels`);
       
       this.initialized = true;
       
     } catch (error) {
       console.error(`❌ Failed to load zarr metadata: ${error.message}`);
+      console.error(`❌ Error stack:`, error.stack);
       throw error;
     }
   }
@@ -204,10 +163,8 @@ class ArtifactZarrLoader {
       return this.arrayCache.get(scaleLevel);
     }
 
-    console.log(`📦 Opening zarr array at scale level ${scaleLevel}...`);
     const store = new zarr.FetchStore(`${this.baseUrl}/${scaleLevel}`);
     const arr = await zarr.open(store, { kind: "array" });
-    console.log(`✅ Array opened: shape=${JSON.stringify(arr.shape)}`);
     
     this.arrayCache.set(scaleLevel, arr);
     return arr;
@@ -233,7 +190,7 @@ class ArtifactZarrLoader {
 
   /**
    * Convert stage coordinates (mm) to pixel coordinates
-   * Applies coordinate offset to align zarr data with microscope well plate
+   * Canvas starts at (0, 0)
    */
   stageToPixel(x_mm, y_mm, scaleLevel = 0) {
     const dims = this.getImageDimensions(scaleLevel);
@@ -241,21 +198,16 @@ class ArtifactZarrLoader {
     
     if (!ext) return { x: 0, y: 0 };
     
-    // Apply coordinate offset: subtract offset to convert microscope coords to zarr coords
-    // Example: microscope requests (32, 20), offset is (5, 2), zarr coords are (27, 18)
-    const adjusted_x = x_mm - this.coordinateOffset.x;
-    const adjusted_y = y_mm - this.coordinateOffset.y;
-    
-    // Map adjusted stage coordinates to pixel coordinates
-    const x_px = Math.round((adjusted_x - ext.xMin) / (ext.xMax - ext.xMin) * dims.x);
-    const y_px = Math.round((adjusted_y - ext.yMin) / (ext.yMax - ext.yMin) * dims.y);
+    // Map stage coordinates to pixel coordinates (canvas starts at 0, 0)
+    const x_px = Math.round((x_mm / ext.width) * dims.x);
+    const y_px = Math.round((y_mm / ext.height) * dims.y);
     
     return { x: x_px, y: y_px };
   }
 
   /**
    * Convert pixel coordinates to stage coordinates (mm)
-   * Applies coordinate offset to report in microscope coordinate system
+   * Canvas starts at (0, 0)
    */
   pixelToStage(x_px, y_px, scaleLevel = 0) {
     const dims = this.getImageDimensions(scaleLevel);
@@ -263,13 +215,9 @@ class ArtifactZarrLoader {
     
     if (!ext) return { x: 0, y: 0 };
     
-    // Map pixel coordinates to zarr stage coordinates
-    const zarr_x = ext.xMin + (x_px / dims.x) * (ext.xMax - ext.xMin);
-    const zarr_y = ext.yMin + (y_px / dims.y) * (ext.yMax - ext.yMin);
-    
-    // Apply coordinate offset: add offset to convert zarr coords to microscope coords
-    const x_mm = zarr_x + this.coordinateOffset.x;
-    const y_mm = zarr_y + this.coordinateOffset.y;
+    // Map pixel coordinates to stage coordinates (canvas starts at 0, 0)
+    const x_mm = (x_px / dims.x) * ext.width;
+    const y_mm = (y_px / dims.y) * ext.height;
     
     return { x: x_mm, y: y_mm };
   }
@@ -295,9 +243,6 @@ class ArtifactZarrLoader {
       
       // Check if requested region is within image bounds
       const ext = this.imageExtent;
-      if (centerX_mm < ext.xMin || centerX_mm > ext.xMax || centerY_mm < ext.yMin || centerY_mm > ext.yMax) {
-        console.warn(`⚠️ Requested center (${centerX_mm.toFixed(1)}, ${centerY_mm.toFixed(1)})mm is outside image bounds [${ext.xMin.toFixed(1)}, ${ext.xMax.toFixed(1)}] × [${ext.yMin.toFixed(1)}, ${ext.yMax.toFixed(1)}]mm`);
-      }
       
       // Convert to pixels
       const center = this.stageToPixel(centerX_mm, centerY_mm, scaleLevel);
@@ -318,14 +263,6 @@ class ArtifactZarrLoader {
       const regionWidth = xEnd - xStart;
       const regionHeight = yEnd - yStart;
       
-      // Log if region was clamped significantly
-      const requestedArea = widthPx * heightPx;
-      const actualArea = regionWidth * regionHeight;
-      if (actualArea < requestedArea * 0.5) {
-        console.warn(`⚠️ Region clamped significantly: requested ${widthPx}×${heightPx}px, got ${regionWidth}×${regionHeight}px (${(actualArea/requestedArea*100).toFixed(0)}%)`);
-      }
-      
-      console.log(`📖 Loading region: scale=${scaleLevel}, pixels=[${xStart}:${xEnd}, ${yStart}:${yEnd}] (${regionWidth}×${regionHeight}px)`);
       
       // Get enabled channels
       const enabledChannels = (channelConfigs || []).filter(c => c.enabled);
@@ -547,11 +484,12 @@ class ArtifactZarrLoader {
     await this.ensureInitialized();
     
     // Return channels with their actual active status from .zattrs
+    // Use the 'active' field that was parsed from 'activate' in zarr metadata
     return {
       activeChannels: this.structure.channels.map((ch, idx) => ({
         index: ch.index,
         label: ch.label,
-        active: idx === 0 ? true : ch.active, // First channel active by default
+        active: ch.active, // Use the parsed active status from zarr (mapped from 'activate')
         color: ch.color,
         window: ch.window || { start: 0, end: 255 },
         coefficient: 1.0,
