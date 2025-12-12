@@ -319,6 +319,7 @@ def get_frontend_api():
             from agent_lens.utils.weaviate_search import generate_text_embedding
             embedding = await generate_text_embedding(text.strip())
             return {
+                "success": True,
                 "model": "ViT-B/32", 
                 "embedding": embedding, 
                 "dimension": len(embedding),
@@ -1514,6 +1515,7 @@ async def setup_service(server, server_id="agent-lens"):
             from agent_lens.utils.weaviate_search import generate_text_embedding
             embedding = await generate_text_embedding(text.strip())
             return {
+                "success": True,
                 "model": "ViT-B/32",
                 "embedding": embedding,
                 "dimension": len(embedding),
