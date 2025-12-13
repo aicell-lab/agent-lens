@@ -16,7 +16,7 @@ from hypha_rpc.utils.schema import schema_function
 
 import numpy as np
 # CLIP and Torch for embeddings
-import clip
+import open_clip
 import torch
 import sys
 from fastapi.middleware.gzip import GZipMiddleware
@@ -52,19 +52,26 @@ else:
     logger.warning("  Ensure Docker has GPU access configured (nvidia-container-toolkit)")
 
 def _load_clip_model():
-    """Load CLIP ViT-B/32 model lazily and cache it in memory."""
+    """Load CLIP ViT-L/14 model lazily and cache it in memory using open-clip."""
     global _clip_model, _clip_preprocess
     if _clip_model is None:
         # Use CLIP_CACHE environment variable if set, otherwise use default
         clip_cache_dir = os.getenv("CLIP_CACHE")
-        logger.info(f"Loading CLIP ViT-B/32 on {device}")
+        logger.info(f"Loading CLIP ViT-L/14 on {device}")
         if clip_cache_dir:
             logger.info(f"Using CLIP cache directory: {clip_cache_dir}")
-            _clip_model, _clip_preprocess = clip.load("ViT-B/32", device=device, download_root=clip_cache_dir)
+            # Set cache directory for open-clip
+            os.environ["TORCH_HOME"] = clip_cache_dir
         else:
             logger.info("Using default CLIP cache directory")
-            _clip_model, _clip_preprocess = clip.load("ViT-B/32", device=device)
-        logger.info("CLIP model loaded")
+        # Load ViT-L/14 using open-clip (supports larger models than standard CLIP)
+        _clip_model, _, _clip_preprocess = open_clip.create_model_and_transforms(
+            'ViT-L-14',
+            pretrained='openai',  # Use OpenAI's pretrained weights
+            device=device
+        )
+        _clip_model.eval()
+        logger.info("CLIP ViT-L/14 model loaded")
     return _clip_model, _clip_preprocess
 
 def _normalize_features(features: np.ndarray) -> np.ndarray:
@@ -207,7 +214,7 @@ def get_frontend_api():
                 raise HTTPException(status_code=400, detail="Empty image upload")
             from agent_lens.utils.weaviate_search import generate_image_embedding
             embedding = await generate_image_embedding(image_bytes)
-            return {"model": "ViT-B/32", "embedding": embedding, "dimension": len(embedding)}
+            return {"model": "ViT-L/14", "embedding": embedding, "dimension": len(embedding)}
         except HTTPException:
             raise
         except Exception as e:
@@ -230,9 +237,9 @@ def get_frontend_api():
                 {
                     "success": True,
                     "results": [
-                        {"success": True, "embedding": [...], "dimension": 512, "model": "ViT-B/32"},
+                        {"success": True, "embedding": [...], "dimension": 512, "model": "ViT-L/14"},
                         None,  # if failed
-                        {"success": True, "embedding": [...], "dimension": 512, "model": "ViT-B/32"},
+                        {"success": True, "embedding": [...], "dimension": 512, "model": "ViT-L/14"},
                     ],
                     "count": 3
                 }
@@ -286,7 +293,7 @@ def get_frontend_api():
                         "success": True,
                         "embedding": embedding,
                         "dimension": len(embedding),
-                        "model": "ViT-B/32"
+                        "model": "ViT-L/14"
                     }
                 # else: results[valid_idx] remains None
             
@@ -320,7 +327,7 @@ def get_frontend_api():
             embedding = await generate_text_embedding(text.strip())
             return {
                 "success": True,
-                "model": "ViT-B/32", 
+                "model": "ViT-L/14", 
                 "embedding": embedding, 
                 "dimension": len(embedding),
                 "text": text.strip()
@@ -1516,7 +1523,7 @@ async def setup_service(server, server_id="agent-lens"):
             embedding = await generate_text_embedding(text.strip())
             return {
                 "success": True,
-                "model": "ViT-B/32",
+                "model": "ViT-L/14",
                 "embedding": embedding,
                 "dimension": len(embedding),
                 "text": text.strip()
@@ -1572,7 +1579,7 @@ async def setup_service(server, server_id="agent-lens"):
                         "success": True,
                         "embedding": embedding,
                         "dimension": len(embedding),
-                        "model": "ViT-B/32"
+                        "model": "ViT-L/14"
                     }
             
             return {

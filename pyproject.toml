@@ -44,7 +44,7 @@ dependencies = [
     
     # AI and machine learning
     "torch==2.5.1",
-    "clip @ git+https://github.com/openai/CLIP.git",
+    "open-clip-torch>=2.20.0",  # Supports ViT-L/14 and other larger CLIP models
     "scikit-learn>=1.3.0",
     
     # Data visualization and analysis

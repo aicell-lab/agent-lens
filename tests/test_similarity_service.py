@@ -51,7 +51,7 @@ class TestWeaviateSimilarityService:
     @staticmethod
     def _generate_clip_vector(text_description):
         """Generate a CLIP vector for the given text description."""
-        import clip
+        import open_clip
         import torch
         import shutil
         from pathlib import Path
@@ -63,10 +63,15 @@ class TestWeaviateSimilarityService:
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                model, preprocess = clip.load("ViT-B/32", device=device)
+                model, _, preprocess = open_clip.create_model_and_transforms(
+                    'ViT-L-14',
+                    pretrained='openai',
+                    device=device
+                )
+                model.eval()
                 break
             except RuntimeError as e:
-                if "SHA256 checksum does not not match" in str(e):
+                if "SHA256 checksum does not not match" in str(e) or "checksum" in str(e).lower():
                     print(f"CLIP model download corrupted (attempt {attempt + 1}/{max_retries}). Cleaning cache and retrying...")
                     # Clean the CLIP cache and retry
                     cache_dir = Path.home() / ".cache" / "clip"
@@ -77,18 +82,18 @@ class TestWeaviateSimilarityService:
                     if attempt == max_retries - 1:
                         # On final attempt, create a mock vector instead of failing
                         print("CLIP model download failed after retries. Using mock vector for testing.")
-                        return [0.1] * 512  # Return a mock 512-dimensional vector
+                        return [0.1] * 768  # ViT-L/14 has 768-dimensional embeddings
                 else:
                     raise e
             except Exception as e:
                 if attempt == max_retries - 1:
                     print(f"CLIP model loading failed after retries: {e}. Using mock vector for testing.")
-                    return [0.1] * 512  # Return a mock 512-dimensional vector
+                    return [0.1] * 768  # ViT-L/14 has 768-dimensional embeddings
                 else:
                     print(f"CLIP model loading failed (attempt {attempt + 1}/{max_retries}): {e}. Retrying...")
         
-        # Encode text
-        text = clip.tokenize([text_description]).to(device)
+        # Encode text using open-clip tokenizer
+        text = open_clip.tokenize([text_description]).to(device)
         with torch.no_grad():
             text_features = model.encode_text(text)
             # Normalize to unit vector
@@ -587,7 +592,7 @@ class TestWeaviateSimilarityService:
         """Test utility functions for test data generation."""
         # Test CLIP vector generation
         vector = TestWeaviateSimilarityService._generate_clip_vector("test microscopy image")
-        assert len(vector) == 512  # CLIP ViT-B/32 produces 512-dimensional vectors
+        assert len(vector) == 512  # CLIP ViT-L/14 produces 512-dimensional vectors
         assert all(isinstance(v, float) for v in vector)
         # CLIP vectors are normalized, so they can be negative (or mock vectors can be 0.1)
         assert all(-1 <= v <= 1 for v in vector)
@@ -658,7 +663,7 @@ class TestWeaviateSimilarityService:
                 async with session.post(text_url, params=text_data) as response:
                     assert response.status == 200
                     result = await response.json()
-                    assert result["model"] == "ViT-B/32"
+                    assert result["model"] == "ViT-L/14"
                     assert "embedding" in result
                     assert result["dimension"] == 512
                     assert result["text"] == "microscopy image of cells"
@@ -684,7 +689,7 @@ class TestWeaviateSimilarityService:
                 async with session.post(image_url, data=data) as response:
                     assert response.status == 200
                     result = await response.json()
-                    assert result["model"] == "ViT-B/32"
+                    assert result["model"] == "ViT-L/14"
                     assert "embedding" in result
                     assert result["dimension"] == 512
                     assert len(result["embedding"]) == 512

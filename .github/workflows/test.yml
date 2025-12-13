@@ -104,7 +104,7 @@ jobs:
         try:
             device = 'cuda' if torch.cuda.is_available() else 'cpu'
             print(f'Downloading CLIP model to device: {device}')
-            model, preprocess = clip.load('ViT-B/32', device=device)
+            model, preprocess = clip.load('ViT-L/14', device=device)
             print('✅ CLIP model downloaded successfully')
         except Exception as e:
             print(f'⚠️ CLIP model download failed: {e}')

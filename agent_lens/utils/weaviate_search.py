@@ -7,7 +7,7 @@ import os
 from typing import List, Dict, Any, Optional
 from hypha_rpc import connect_to_server
 import numpy as np
-import clip
+import open_clip
 import torch
 from agent_lens.log import setup_logging
 
@@ -36,12 +36,18 @@ if device == "cpu":
     logger.info(f"CPU mode: Configured PyTorch to use {num_threads} threads (out of {cpu_count} available cores)")
 
 def _load_clip_model():
-    """Load CLIP ViT-B/32 model lazily and cache it in memory."""
+    """Load CLIP ViT-L/14 model lazily and cache it in memory using open-clip."""
     global _clip_model, _clip_preprocess
     if _clip_model is None:
-        logger.info(f"Loading CLIP ViT-B/32 on {device}")
-        _clip_model, _clip_preprocess = clip.load("ViT-B/32", device=device)
-        logger.info("CLIP model loaded")
+        logger.info(f"Loading CLIP ViT-L/14 on {device}")
+        # Load ViT-L/14 using open-clip (supports larger models than standard CLIP)
+        _clip_model, _, _clip_preprocess = open_clip.create_model_and_transforms(
+            'ViT-L-14',
+            pretrained='openai',  # Use OpenAI's pretrained weights
+            device=device
+        )
+        _clip_model.eval()
+        logger.info("CLIP ViT-L/14 model loaded")
     return _clip_model, _clip_preprocess
 
 async def generate_text_embedding(text_description: str) -> List[float]:
@@ -49,8 +55,8 @@ async def generate_text_embedding(text_description: str) -> List[float]:
     model, preprocess = _load_clip_model()
     
     try:
-        # Encode text
-        text = clip.tokenize([text_description]).to(device)
+        # Encode text using open-clip tokenizer
+        text = open_clip.tokenize([text_description]).to(device)
         with torch.no_grad():
             text_features = model.encode_text(text)
         
