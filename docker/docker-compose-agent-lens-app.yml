@@ -1,6 +1,6 @@
 services:
   agent-lens:
-    image: ghcr.io/aicell-lab/agent-lens:sha-4f2a650
+    image: ghcr.io/aicell-lab/agent-lens:sha-1f85cce
     container_name: agent-lens
     # Optimize image pulling
     pull_policy: if_not_present
@@ -36,7 +36,7 @@ services:
         window: 120s
     healthcheck:
       test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/agent-lens/services/probes/liveness | jq -e '.status == \"ok\"'"]
-      interval: 600s
+      interval: 60s
       timeout: 120s
       retries: 3
       start_period: 300s
@@ -71,7 +71,7 @@ services:
       - /mnt/shared_documents/offline_stitch_20251201-u2os-full-plate_2025-12-01_17-00-56.154975/data.zarr:/mnt/shared_documents/offline_stitch_20251201-u2os-full-plate_2025-12-01_17-00-56.154975/data.zarr:ro
     healthcheck:
       test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/agent-lens/services/squid-control-simulation/is_service_healthy | jq -e '.status == \"ok\"'"]
-      interval: 600s
+      interval: 60s
       timeout: 30s
       retries: 1
       start_period: 120s

@@ -50,8 +50,20 @@ def _load_clip_model():
         logger.info("CLIP ViT-L/14 model loaded")
     return _clip_model, _clip_preprocess
 
+def _normalize_features(features: np.ndarray) -> np.ndarray:
+    """L2-normalize feature vectors to unit length.
+    
+    This is essential for consistent similarity calculations in Weaviate and UMAP.
+    Without normalization, embeddings with different magnitudes will produce
+    incorrect similarity scores.
+    """
+    if features.ndim == 1:
+        features = np.expand_dims(features, axis=0)
+    norm = np.linalg.norm(features, axis=1, keepdims=True)
+    return features / (norm + 1e-12)
+
 async def generate_text_embedding(text_description: str) -> List[float]:
-    """Generate a CLIP embedding for text."""
+    """Generate a unit-normalized CLIP embedding for text."""
     model, preprocess = _load_clip_model()
     
     try:
@@ -59,6 +71,8 @@ async def generate_text_embedding(text_description: str) -> List[float]:
         text = open_clip.tokenize([text_description]).to(device)
         with torch.no_grad():
             text_features = model.encode_text(text)
+            # Normalize to unit vector
+            text_features = text_features / text_features.norm(dim=-1, keepdim=True)
         
         return text_features.cpu().numpy()[0].astype(np.float32).tolist()
     finally:
@@ -66,7 +80,7 @@ async def generate_text_embedding(text_description: str) -> List[float]:
             torch.cuda.empty_cache()
 
 async def generate_image_embedding(image_bytes: bytes) -> List[float]:
-    """Generate a CLIP embedding for an image."""
+    """Generate a unit-normalized CLIP embedding for an image."""
     from PIL import Image
     import io
     
@@ -82,7 +96,7 @@ async def generate_image_embedding(image_bytes: bytes) -> List[float]:
         with torch.no_grad():
             image_features = model.encode_image(image_tensor).cpu().numpy()
 
-        embedding = image_features[0].astype(np.float32)
+        embedding = _normalize_features(image_features)[0].astype(np.float32)
         return embedding.tolist()
     finally:
         if image_tensor is not None:
@@ -92,7 +106,7 @@ async def generate_image_embedding(image_bytes: bytes) -> List[float]:
 
 async def generate_image_embeddings_batch(image_bytes_list: List[bytes]) -> List[List[float]]:
     """
-    Generate CLIP embeddings for multiple images in a single batch.
+    Generate unit-normalized CLIP embeddings for multiple images in a single batch.
     This is much faster than processing images individually, especially on GPU.
     
     The main optimizations are:
@@ -164,13 +178,13 @@ async def generate_image_embeddings_batch(image_bytes_list: List[bytes]) -> List
         with torch.no_grad():
             image_features = model.encode_image(batch_tensor).cpu().numpy()
         
-        # Convert to float32
-        image_features = image_features.astype(np.float32)
+        # Normalize features to unit length (essential for consistent similarity calculations)
+        normalized_features = _normalize_features(image_features).astype(np.float32)
         
         # Map results back to original order
         results = [None] * len(image_bytes_list)
         for batch_idx, original_idx in index_mapping.items():
-            results[original_idx] = image_features[batch_idx].tolist()
+            results[original_idx] = normalized_features[batch_idx].tolist()
         
         return results
         
