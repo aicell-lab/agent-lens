@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from agent_lens.utils.artifact_manager import AgentLensArtifactManager
 from hypha_rpc import connect_to_server
 from hypha_rpc.utils.schema import schema_function
+from skimage.feature import graycomatrix, graycoprops
 
 import numpy as np
 # CLIP and Torch for embeddings
@@ -27,7 +28,14 @@ import asyncio
 import base64
 # Import similarity search utilities
 from agent_lens.utils.weaviate_search import similarity_service, WEAVIATE_COLLECTION_NAME
+from PIL import Image as PILImage
+from io import BytesIO
+from typing import Dict, Any, Tuple, List
+from skimage.feature import graycomatrix, graycoprops
+from skimage.measure import regionprops
 
+import math
+import io
 # Configure logging
 from .log import setup_logging
 
@@ -1585,6 +1593,396 @@ async def setup_service(server, server_id="agent-lens"):
             logger.error(traceback.format_exc())
             raise
     
+        
+    # Helper function to process a single cell (runs in parallel threads)
+    fixed_channel_order = ['BF_LED_matrix_full', 'Fluorescence_405_nm_Ex', 'Fluorescence_488_nm_Ex', 'Fluorescence_638_nm_Ex', 'Fluorescence_561_nm_Ex', 'Fluorescence_730_nm_Ex']
+
+    def _process_single_cell(
+        poly: Dict[str, Any],
+        poly_index: int,
+        image_data_np: np.ndarray,
+        mask: np.ndarray,
+        brightfield: np.ndarray,
+        fixed_channel_order: List[str]
+    ) -> Tuple[int, Optional[Dict[str, Any]], Optional[str]]:
+        """
+        Process a single cell to extract metadata and generate cell image.
+        This function is designed to be run in parallel threads.
+        
+        Args:
+            poly: Cell polygon dict with "id", "polygons", and "bbox" keys
+            poly_index: Original index of this polygon in the input list (for ordering)
+            image_data_np: Image array of shape (H, W, C)
+            mask: Instance mask array of shape (H, W) with cell IDs
+            brightfield: Brightfield channel array of shape (H, W)
+            fixed_channel_order: List of channel names
+        
+        Returns:
+            Tuple of (poly_index, metadata_dict, cell_image_base64) or (poly_index, None, None) if failed
+        """
+        cell_id = poly.get("id")
+        if cell_id is None:
+            return (poly_index, None, None)
+        
+        try:
+            # Initialize metadata dict
+            metadata = {"cell_id": cell_id}
+            
+            # Create binary mask for this cell
+            cell_mask = (mask == cell_id).astype(np.uint8)
+            
+            if np.sum(cell_mask) == 0:
+                # Cell not found in mask, skip
+                return (poly_index, None, None)
+            
+            # Get region properties
+            props = regionprops(cell_mask)
+            if len(props) == 0:
+                return (poly_index, None, None)
+            prop = props[0]
+            
+            # Extract bounding box
+            min_row, min_col, max_row, max_col = prop.bbox
+            
+            # Extract cell image region with padding
+            padding = 5
+            H, W = image_data_np.shape[:2]
+            y_min = max(0, min_row - padding)
+            y_max = min(H, max_row + padding)
+            x_min = max(0, min_col - padding)
+            x_max = min(W, max_col + padding)
+            
+            # Extract only brightfield channel (channel 0) for cell image
+            if image_data_np.ndim == 3:
+                # Extract only channel 0 (brightfield)
+                cell_image_region = image_data_np[y_min:y_max, x_min:x_max, 0].copy()
+            else:
+                # Already 2D, use as is
+                cell_image_region = image_data_np[y_min:y_max, x_min:x_max].copy()
+            
+            # Crop cell mask to same region
+            cell_mask_region = cell_mask[y_min:y_max, x_min:x_max]
+            
+            # Convert brightfield (grayscale) to RGB uint8 for embedding generation
+            # Stack the single channel 3 times to create RGB (grayscale to RGB)
+            cell_image_rgb = np.stack([cell_image_region] * 3, axis=-1)
+            
+            # Ensure uint8
+            if cell_image_rgb.dtype != np.uint8:
+                if cell_image_rgb.max() > 255:
+                    cell_image_rgb = (cell_image_rgb / cell_image_rgb.max() * 255).astype(np.uint8)
+                else:
+                    cell_image_rgb = cell_image_rgb.astype(np.uint8)
+            
+            # Apply cell mask to isolate the cell (set background to black)
+            cell_mask_3d = np.expand_dims(cell_mask_region, axis=2)
+            cell_image_rgb = cell_image_rgb * cell_mask_3d
+            
+            # Convert to PIL Image and encode as base64 PNG
+            cell_pil = PILImage.fromarray(cell_image_rgb, mode='RGB')
+            buffer = BytesIO()
+            cell_pil.save(buffer, format='PNG')
+            cell_image_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+            
+            # Morphological features
+            try:
+                metadata["area"] = float(prop.area)
+            except:
+                metadata["area"] = None
+            
+            try:
+                metadata["perimeter"] = float(prop.perimeter)
+            except:
+                metadata["perimeter"] = None
+            
+            try:
+                metadata["equivalent_diameter"] = float(prop.equivalent_diameter)
+            except:
+                metadata["equivalent_diameter"] = None
+            
+            try:
+                metadata["bbox_width"] = float(max_col - min_col)
+                metadata["bbox_height"] = float(max_row - min_row)
+            except:
+                metadata["bbox_width"] = None
+                metadata["bbox_height"] = None
+            
+            try:
+                if prop.minor_axis_length > 0:
+                    metadata["aspect_ratio"] = float(prop.major_axis_length / prop.minor_axis_length)
+                else:
+                    metadata["aspect_ratio"] = None
+            except:
+                metadata["aspect_ratio"] = None
+            
+            try:
+                if metadata["perimeter"] is not None and metadata["perimeter"] > 0 and metadata["area"] is not None:
+                    metadata["circularity"] = float(4 * math.pi * metadata["area"] / (metadata["perimeter"] ** 2))
+                else:
+                    metadata["circularity"] = None
+            except:
+                metadata["circularity"] = None
+            
+            try:
+                metadata["eccentricity"] = float(prop.eccentricity)
+            except:
+                metadata["eccentricity"] = None
+            
+            try:
+                metadata["solidity"] = float(prop.solidity)
+            except:
+                metadata["solidity"] = None
+            
+            try:
+                if metadata["perimeter"] is not None and metadata["perimeter"] > 0:
+                    convex_perimeter = float(prop.perimeter_crofton)
+                    metadata["convexity"] = float(convex_perimeter / metadata["perimeter"])
+                else:
+                    metadata["convexity"] = None
+            except:
+                metadata["convexity"] = None
+            
+            # Intensity/texture features
+            try:
+                # Convert to grayscale if needed
+                if brightfield.ndim == 3:
+                    if brightfield.shape[2] == 3:
+                        gray = 0.299 * brightfield[:, :, 0] + 0.587 * brightfield[:, :, 1] + 0.114 * brightfield[:, :, 2]
+                    else:
+                        gray = brightfield[:, :, 0]
+                else:
+                    gray = brightfield.copy()
+                
+                # Extract cell pixels
+                cell_pixels = gray[cell_mask > 0]
+                
+                if len(cell_pixels) == 0:
+                    metadata["brightness"] = None
+                    metadata["contrast"] = None
+                    metadata["homogeneity"] = None
+                    metadata["energy"] = None
+                    metadata["correlation"] = None
+                    
+                    # Mean fluorescence intensity for each channel (set to None when no pixels)
+                    try:
+                        if image_data_np.ndim == 3:
+                            for channel_idx in range(1, min(6, image_data_np.shape[2])):  # Channels 1-5 (skip brightfield)
+                                channel_name = fixed_channel_order[channel_idx] if channel_idx < len(fixed_channel_order) else f"channel_{channel_idx}"
+                                field_name = f"mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
+                                metadata[field_name] = None
+                    except Exception as e:
+                        # If fluorescence calculation fails, continue without it
+                        pass
+                else:
+                    # Mean brightness
+                    metadata["brightness"] = float(np.mean(cell_pixels))
+                    
+                    # Mean fluorescence intensity for each channel
+                    try:
+                        if image_data_np.ndim == 3:
+                            for channel_idx in range(1, min(6, image_data_np.shape[2])):  # Channels 1-5 (skip brightfield)
+                                channel_name = fixed_channel_order[channel_idx] if channel_idx < len(fixed_channel_order) else f"channel_{channel_idx}"
+                                channel_data = image_data_np[:, :, channel_idx]
+                                channel_pixels = channel_data[cell_mask > 0]
+                                
+                                if len(channel_pixels) > 0 and channel_data.max() > 0:
+                                    # Create sanitized field name (remove spaces, special chars)
+                                    field_name = f"mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
+                                    metadata[field_name] = float(np.mean(channel_pixels))
+                                else:
+                                    field_name = f"mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
+                                    metadata[field_name] = None
+                    except Exception as e:
+                        # If fluorescence calculation fails, continue without it
+                        pass
+                    
+                    # GLCM features if enough pixels
+                    if len(cell_pixels) >= 4:
+                        # Ensure uint8
+                        if gray.dtype != np.uint8:
+                            if gray.max() > 0:
+                                gray = ((gray - gray.min()) / (gray.max() - gray.min()) * 255).astype(np.uint8)
+                            else:
+                                gray = gray.astype(np.uint8)
+                        
+                        # Mask background
+                        cell_region = gray.copy()
+                        cell_region[cell_mask == 0] = 0
+                        
+                        angles = [0, np.pi / 4, np.pi / 2, 3 * np.pi / 4]
+                        glcm = graycomatrix(
+                            cell_region,
+                            distances=[1],
+                            angles=angles,
+                            levels=256,
+                            symmetric=True,
+                            normed=True
+                        )
+                        
+                        contrast_vals = graycoprops(glcm, "contrast")[0]
+                        homogeneity_vals = graycoprops(glcm, "homogeneity")[0]
+                        energy_vals = graycoprops(glcm, "energy")[0]
+                        correlation_vals = graycoprops(glcm, "correlation")[0]
+                        
+                        metadata["contrast"] = float(np.mean(contrast_vals))
+                        metadata["homogeneity"] = float(np.mean(homogeneity_vals))
+                        metadata["energy"] = float(np.mean(energy_vals))
+                        metadata["correlation"] = float(np.mean(correlation_vals))
+                    else:
+                        metadata["contrast"] = None
+                        metadata["homogeneity"] = None
+                        metadata["energy"] = None
+                        metadata["correlation"] = None
+            except:
+                metadata["brightness"] = None
+                metadata["contrast"] = None
+                metadata["homogeneity"] = None
+                metadata["energy"] = None
+                metadata["correlation"] = None
+                
+                # Mean fluorescence intensity for each channel (set to None on error)
+                try:
+                    if image_data_np.ndim == 3:
+                        for channel_idx in range(1, min(6, image_data_np.shape[2])):  # Channels 1-5 (skip brightfield)
+                            channel_name = fixed_channel_order[channel_idx] if channel_idx < len(fixed_channel_order) else f"channel_{channel_idx}"
+                            field_name = f"mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
+                            metadata[field_name] = None
+                except Exception as e:
+                    # If fluorescence calculation fails, continue without it
+                    pass
+            
+            # Add image to metadata (will add embedding_vector after batch processing)
+            metadata["image"] = cell_image_base64
+            
+            return (poly_index, metadata, cell_image_base64)
+            
+        except Exception as e:
+            # Skip this cell if processing fails
+            print(f"Error processing cell {cell_id}: {e}")
+            return (poly_index, None, None)
+
+
+    # extract cell metadata
+    async def build_cell_records(
+        cell_polygons: List[Dict[str, Any]], 
+        image_data_np: np.ndarray, 
+        segmentation_mask: np.ndarray,
+        max_workers: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Extract morphological and intensity/texture metadata for each cell.
+        Also extracts single cell images, generates embeddings, and adds them to metadata.
+        
+        This function uses multithreading to process cells in parallel for improved performance.
+        
+        Args:
+            cell_polygons: List of dicts with "id", "polygons", and "bbox" keys
+            image_data_np: Image array of shape (H, W, C) - uses channel 0 (brightfield)
+            segmentation_mask: Instance mask array of shape (H, W) with cell IDs
+            max_workers: Maximum number of worker threads (default: None = auto-detect CPU count)
+        
+        Returns:
+            List of metadata dictionaries, one per cell, with 'image' and 'embedding_vector' fields
+        """
+        import concurrent.futures
+        import os
+        
+        # Extract brightfield channel
+        brightfield = image_data_np[:, :, 0] if image_data_np.ndim == 3 else image_data_np
+        
+        # Ensure mask is numpy array
+        if isinstance(segmentation_mask, str):
+            mask_bytes = base64.b64decode(segmentation_mask)
+            mask_img = PILImage.open(io.BytesIO(mask_bytes))
+            mask = np.array(mask_img).astype(np.uint32)
+        else:
+            mask = segmentation_mask.astype(np.uint32)
+        
+        if max_workers is None:
+            max_workers = min(len(cell_polygons), os.cpu_count() or 4)
+        
+        # Step 1: Process cells in parallel using ThreadPoolExecutor
+        # Prepare arguments for parallel processing
+        process_args = [
+            (poly, idx, image_data_np, mask, brightfield, fixed_channel_order)
+            for idx, poly in enumerate(cell_polygons)
+        ]
+        
+        # Process cells in parallel
+        results_with_indices = []
+        cell_images_base64 = []
+        cell_indices = []
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all tasks and convert to asyncio futures to avoid blocking the event loop
+            async_futures = []
+            future_to_index = {}
+            
+            for args in process_args:
+                thread_future = executor.submit(_process_single_cell, *args)
+                # Convert concurrent.futures.Future to asyncio.Future to avoid blocking
+                asyncio_future = asyncio.wrap_future(thread_future)
+                async_futures.append(asyncio_future)
+                future_to_index[asyncio_future] = args[1]
+            
+            # Collect results as they complete (non-blocking with asyncio)
+            for asyncio_future in asyncio.as_completed(async_futures):
+                try:
+                    poly_index, metadata, cell_image_base64 = await asyncio_future
+                    if metadata is not None:
+                        results_with_indices.append((poly_index, metadata))
+                        if cell_image_base64 is not None:
+                            cell_images_base64.append(cell_image_base64)
+                            cell_indices.append(len(results_with_indices) - 1)
+                except Exception as e:
+                    original_index = future_to_index.get(asyncio_future, "unknown")
+                    print(f"Error processing cell at index {original_index}: {e}")
+        
+        # Sort results by original polygon index to maintain order
+        results_with_indices.sort(key=lambda x: x[0])
+        results = [metadata for _, metadata in results_with_indices]
+        
+        # Step 2: Generate embeddings in batch via RPC service
+        if len(cell_images_base64) > 0:
+            try:
+                print(f"Generating embeddings for {len(cell_images_base64)} cell images...")
+                embedding_result = await generate_image_embeddings_batch_rpc(
+                    cell_images_base64
+                )
+                
+                if embedding_result and embedding_result.get("success"):
+                    embeddings = embedding_result.get("results", [])
+                    
+                    # Step 3: Map embeddings back to results
+                    for idx, embedding_data in enumerate(embeddings):
+                        if idx < len(cell_indices):
+                            result_idx = cell_indices[idx]
+                            if result_idx < len(results):
+                                if embedding_data is not None and embedding_data.get("success"):
+                                    results[result_idx]["embedding_vector"] = embedding_data.get("embedding", None)
+                                else:
+                                    results[result_idx]["embedding_vector"] = None
+                        else:
+                            print(f"Warning: Embedding index {idx} out of range for cell_indices")
+                else:
+                    print(f"Warning: Embedding generation failed or returned no results")
+                    # Set all embeddings to None
+                    for result in results:
+                        if "embedding_vector" not in result:
+                            result["embedding_vector"] = None
+            except Exception as e:
+                print(f"Error generating embeddings: {e}")
+                # Set all embeddings to None on error
+                for result in results:
+                    if "embedding_vector" not in result:
+                        result["embedding_vector"] = None
+        else:
+            # No images to process
+            for result in results:
+                result["embedding_vector"] = None
+        
+        return results
+            
     # Define hypha-rpc service method for interactive UMAP (HTML)
     @schema_function()
     async def make_umap_cluster_figure_interactive_rpc(
@@ -1672,6 +2070,7 @@ async def setup_service(server, server_id="agent-lens"):
             # Register RPC methods for embedding generation
             "generate_text_embedding": generate_text_embedding_rpc,
             "generate_image_embeddings_batch": generate_image_embeddings_batch_rpc,
+            "build_cell_records": build_cell_records,
             # Register RPC methods for UMAP clustering
             "make_umap_cluster_figure_interactive": make_umap_cluster_figure_interactive_rpc,
         }
