@@ -16,9 +16,6 @@ from hypha_rpc.utils.schema import schema_function
 from skimage.feature import graycomatrix, graycoprops
 
 import numpy as np
-# CLIP and Torch for embeddings
-import clip
-import torch
 import sys
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.cors import CORSMiddleware
@@ -40,48 +37,6 @@ import io
 from .log import setup_logging
 
 logger = setup_logging("agent_lens_frontend_service.log")
-
-
-# -------------------- CLIP Embedding Helpers --------------------
-# Lazy-load CLIP model for generating embeddings
-# Note: CPU thread configuration is handled in weaviate_search.py
-device = "cuda" if torch.cuda.is_available() else "cpu"
-_clip_model = None
-_clip_preprocess = None
-
-# Log GPU information at module load
-if torch.cuda.is_available():
-    logger.info("✓ CUDA available - GPU will be used for CLIP model")
-    logger.info(f"  CUDA Device: {torch.cuda.get_device_name(0)}")
-    logger.info(f"  CUDA Version: {torch.version.cuda}")
-    logger.info(f"  PyTorch Version: {torch.__version__}")
-else:
-    logger.warning("⚠ CUDA not available - CLIP model will use CPU (slower)")
-    logger.warning("  Ensure Docker has GPU access configured (nvidia-container-toolkit)")
-
-def _load_clip_model():
-    """Load CLIP ViT-B/32 model lazily and cache it in memory."""
-    global _clip_model, _clip_preprocess
-    if _clip_model is None:
-        # Use CLIP_CACHE environment variable if set, otherwise use default
-        clip_cache_dir = os.getenv("CLIP_CACHE")
-        logger.info(f"Loading CLIP ViT-B/32 on {device}")
-        if clip_cache_dir:
-            logger.info(f"Using CLIP cache directory: {clip_cache_dir}")
-            _clip_model, _clip_preprocess = clip.load("ViT-B/32", device=device, download_root=clip_cache_dir)
-        else:
-            logger.info("Using default CLIP cache directory")
-            _clip_model, _clip_preprocess = clip.load("ViT-B/32", device=device)
-        logger.info("CLIP model loaded")
-    return _clip_model, _clip_preprocess
-
-def _normalize_features(features: np.ndarray) -> np.ndarray:
-    """L2-normalize feature vectors."""
-    if features.ndim == 1:
-        features = np.expand_dims(features, axis=0)
-    norm = np.linalg.norm(features, axis=1, keepdims=True)
-    return features / (norm + 1e-12)
-
 
 DEFAULT_CHANNEL = "BF_LED_matrix_full"
 
@@ -1441,26 +1396,19 @@ def get_frontend_api():
 async def preload_clip_model():
     """
     Preload CLIP model during service startup to avoid delays during first use.
-    This function loads both the CLIP model and the similarity service CLIP model.
+    Uses the shared CLIP model from weaviate_search.py.
     """
-    logger.info("Preloading CLIP models for faster startup...")
+    logger.info("Preloading CLIP model for faster startup...")
     
     try:
-        # Preload CLIP model for frontend service
-        logger.info("Loading CLIP model for frontend service...")
+        # Preload CLIP model (shared with similarity service)
+        logger.info("Loading CLIP model...")
+        from agent_lens.utils.weaviate_search import _load_clip_model
         _load_clip_model()
-        logger.info("✓ Frontend CLIP model loaded successfully")
-        
-        # Preload CLIP model for similarity service
-        logger.info("Loading CLIP model for similarity service...")
-        from agent_lens.utils.weaviate_search import _load_clip_model as load_similarity_clip
-        load_similarity_clip()
-        logger.info("✓ Similarity service CLIP model loaded successfully")
-        
-        logger.info("All CLIP models preloaded successfully - similarity search will be faster!")
+        logger.info("✓ CLIP model loaded successfully - similarity search will be faster!")
         
     except Exception as e:
-        logger.warning(f"Failed to preload CLIP models: {e}")
+        logger.warning(f"Failed to preload CLIP model: {e}")
         logger.warning("CLIP will be loaded on first use (may cause delays)")
 
 async def setup_service(server, server_id="agent-lens"):
@@ -1481,18 +1429,9 @@ async def setup_service(server, server_id="agent-lens"):
     if is_connect_server and not is_docker:
         server_id = "agent-lens-test"
     
-    # Preload CLIP models for faster startup (especially important in Docker)
-    # Also preload in development if CLIP_PRELOAD environment variable is set
-    should_preload = is_docker or os.getenv("CLIP_PRELOAD", "").lower() in ("true", "1", "yes")
-    
-    if should_preload:
-        if is_docker:
-            logger.info("Docker mode detected - preloading CLIP models...")
-        else:
-            logger.info("CLIP_PRELOAD environment variable set - preloading CLIP models...")
-        await preload_clip_model()
-    else:
-        logger.info("CLIP models will be loaded on first use (set CLIP_PRELOAD=true to preload)")
+    # Preload CLIP model for faster startup
+    logger.info("Preloading CLIP model...")
+    await preload_clip_model()
     
     # Ensure artifact_manager_instance is connected
     if artifact_manager_instance.server is None:
