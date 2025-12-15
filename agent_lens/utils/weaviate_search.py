@@ -84,7 +84,6 @@ async def generate_image_embedding(image_bytes: bytes) -> List[float]:
     try:
         with Image.open(io.BytesIO(image_bytes)) as image:
             image = image.convert("RGB")
-            image.thumbnail((224, 224), Image.Resampling.LANCZOS)
             image_tensor = preprocess(image).unsqueeze(0).to(device)
 
         with torch.no_grad():
@@ -130,7 +129,6 @@ async def generate_image_embeddings_batch(image_bytes_list: List[bytes]) -> List
         try:
             with Image.open(io.BytesIO(img_bytes)) as image:
                 image = image.convert("RGB")
-                image.thumbnail((224, 224), Image.Resampling.LANCZOS)
                 preprocessed = preprocess(image)
                 return preprocessed, idx, None
         except Exception as e:
