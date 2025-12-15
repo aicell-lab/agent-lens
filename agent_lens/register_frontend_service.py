@@ -168,7 +168,7 @@ def get_frontend_api():
             image_bytes = await image.read()
             if not image_bytes:
                 raise HTTPException(status_code=400, detail="Empty image upload")
-            from agent_lens.utils.weaviate_search import generate_image_embedding
+            from agent_lens.utils.embedding_generator import generate_image_embedding
             embedding = await generate_image_embedding(image_bytes)
             return {"model": "ViT-B/32", "embedding": embedding, "dimension": len(embedding)}
         except HTTPException:
@@ -204,7 +204,7 @@ def get_frontend_api():
             if not images or len(images) == 0:
                 raise HTTPException(status_code=400, detail="At least one image is required")
             
-            from agent_lens.utils.weaviate_search import generate_image_embeddings_batch
+            from agent_lens.utils.embedding_generator import generate_image_embeddings_batch
             
             # Parallel image reading for faster I/O
             async def read_image(idx: int, image: UploadFile):
@@ -279,7 +279,7 @@ def get_frontend_api():
             if not text or not text.strip():
                 raise HTTPException(status_code=400, detail="Text input cannot be empty")
             
-            from agent_lens.utils.weaviate_search import generate_text_embedding
+            from agent_lens.utils.embedding_generator import generate_text_embedding
             embedding = await generate_text_embedding(text.strip())
             return {
                 "success": True,
@@ -1403,7 +1403,7 @@ async def preload_clip_model():
     try:
         # Preload CLIP model (shared with similarity service)
         logger.info("Loading CLIP model...")
-        from agent_lens.utils.weaviate_search import _load_clip_model
+        from agent_lens.utils.embedding_generator import _load_clip_model
         _load_clip_model()
         logger.info("✓ CLIP model loaded successfully - similarity search will be faster!")
         
@@ -1459,7 +1459,7 @@ async def setup_service(server, server_id="agent-lens"):
             if not text or not text.strip():
                 raise ValueError("Text input cannot be empty")
             
-            from agent_lens.utils.weaviate_search import generate_text_embedding
+            from agent_lens.utils.embedding_generator import generate_text_embedding
             embedding = await generate_text_embedding(text.strip())
             return {
                 "success": True,
@@ -1508,7 +1508,7 @@ async def setup_service(server, server_id="agent-lens"):
             if not image_bytes_list:
                 raise ValueError("No valid images found in request")
             
-            from agent_lens.utils.weaviate_search import generate_image_embeddings_batch
+            from agent_lens.utils.embedding_generator import generate_image_embeddings_batch
             embeddings = await generate_image_embeddings_batch(image_bytes_list)
             
             # Map results back to original order
