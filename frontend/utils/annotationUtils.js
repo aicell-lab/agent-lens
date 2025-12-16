@@ -145,7 +145,8 @@ export function generateAnnotationData(annotation, wellInfo, channelInfo = null)
   // Include embedding data if available
   if (annotation.embeddings) {
     annotationData.embeddings = {
-      imageEmbedding: annotation.embeddings.imageEmbedding,
+      clipEmbedding: annotation.embeddings.clipEmbedding,
+      dinoEmbedding: annotation.embeddings.dinoEmbedding,
       textEmbedding: annotation.embeddings.textEmbedding,
       generatedAt: annotation.embeddings.generatedAt
     };

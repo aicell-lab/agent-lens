@@ -321,7 +321,11 @@ export async function generateImageEmbedding(imageBlob) {
     }
 
     const result = await response.json();
-    return result.embedding;
+    // Return both CLIP and DINOv2 embeddings
+    return {
+      clipEmbedding: result.clip_embedding,
+      dinoEmbedding: result.dino_embedding
+    };
   } catch (error) {
     console.error('Error generating image embedding:', error);
     throw error;
@@ -331,7 +335,7 @@ export async function generateImageEmbedding(imageBlob) {
 /**
  * Generate image embeddings from multiple image blobs in batch
  * @param {Array<Blob>} imageBlobs - Array of image blobs
- * @returns {Promise<Array<Array<number>|null>>} Array of embedding vectors (null for failed images)
+ * @returns {Promise<Array<Object|null>>} Array of embedding objects with clipEmbedding and dinoEmbedding (null for failed images)
  */
 export async function generateImageEmbeddingBatch(imageBlobs) {
   try {
@@ -357,8 +361,11 @@ export async function generateImageEmbeddingBatch(imageBlobs) {
 
     const result = await response.json();
     
-    // Convert results to array of embeddings (null for failed)
-    return result.results.map(r => r?.embedding || null);
+    // Convert results to array of embedding objects (null for failed)
+    return result.results.map(r => r ? {
+      clipEmbedding: r.clip_embedding,
+      dinoEmbedding: r.dino_embedding
+    } : null);
   } catch (error) {
     console.error('Error generating batch image embeddings:', error);
     throw error;
@@ -390,7 +397,7 @@ export async function generateTextEmbedding(description) {
     }
 
     const result = await response.json();
-    return result.embedding;
+    return result.clip_embedding;
   } catch (error) {
     console.error('Error generating text embedding:', error);
     throw error;
@@ -466,13 +473,14 @@ export async function generateAnnotationEmbeddings(canvas, annotation, mapScale,
     );
 
     // Generate embeddings in parallel
-    const [imageEmbedding, textEmbedding] = await Promise.all([
+    const [imageEmbeddings, textEmbedding] = await Promise.all([
       generateImageEmbedding(imageBlob),
       generateTextEmbedding(annotation.description || '')
     ]);
 
     const result = {
-      imageEmbedding,
+      clipEmbedding: imageEmbeddings.clipEmbedding,
+      dinoEmbedding: imageEmbeddings.dinoEmbedding,
       textEmbedding,
       generatedAt: new Date().toISOString()
     };

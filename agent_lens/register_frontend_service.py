@@ -158,9 +158,13 @@ def get_frontend_api():
 
     @app.post("/embedding/image")
     async def generate_image_embedding(image: UploadFile = File(...)):
-        """Generate a CLIP image embedding from an uploaded image.
+        """Generate both CLIP and DINOv2 image embeddings from an uploaded image.
+        
+        Returns both embeddings:
+        - CLIP (512D) for image-text similarity
+        - DINOv2 (768D) for image-image similarity
 
-        Returns a JSON object with a 512-d float array.
+        Returns a JSON object with both embedding arrays.
         """
         try:
             if not image.content_type or not image.content_type.startswith("image/"):
@@ -169,8 +173,13 @@ def get_frontend_api():
             if not image_bytes:
                 raise HTTPException(status_code=400, detail="Empty image upload")
             from agent_lens.utils.embedding_generator import generate_image_embedding
-            embedding = await generate_image_embedding(image_bytes)
-            return {"model": "ViT-B/32", "embedding": embedding, "dimension": len(embedding)}
+            embeddings = await generate_image_embedding(image_bytes)
+            return {
+                "clip_embedding": embeddings["clip_embedding"],
+                "clip_dimension": len(embeddings["clip_embedding"]),
+                "dino_embedding": embeddings["dino_embedding"],
+                "dino_dimension": len(embeddings["dino_embedding"])
+            }
         except HTTPException:
             raise
         except Exception as e:
@@ -180,10 +189,14 @@ def get_frontend_api():
 
     @app.post("/embedding/image-batch")
     async def generate_image_embedding_batch(images: List[UploadFile] = File(...)):
-        """Generate CLIP image embeddings from multiple uploaded images in batch.
+        """Generate both CLIP and DINOv2 image embeddings from multiple uploaded images in batch.
         
         This endpoint uses optimized batch processing with parallel I/O for significantly faster
         embedding generation, especially when using GPU acceleration.
+        
+        Returns both embeddings for each image:
+        - CLIP (512D) for image-text similarity
+        - DINOv2 (768D) for image-image similarity
 
         Args:
             images: List of image files to process
@@ -193,9 +206,15 @@ def get_frontend_api():
                 {
                     "success": True,
                     "results": [
-                        {"success": True, "embedding": [...], "dimension": 512, "model": "ViT-B/32"},
+                        {
+                            "success": True,
+                            "clip_embedding": [...],
+                            "clip_dimension": 512,
+                            "dino_embedding": [...],
+                            "dino_dimension": 768
+                        },
                         None,  # if failed
-                        {"success": True, "embedding": [...], "dimension": 512, "model": "ViT-B/32"},
+                        {...}
                     ],
                     "count": 3
                 }
@@ -243,13 +262,14 @@ def get_frontend_api():
             
             # Map results back to original order
             results = [None] * len(images)
-            for valid_idx, embedding in zip(valid_indices, embeddings):
-                if embedding is not None:
+            for valid_idx, embedding_dict in zip(valid_indices, embeddings):
+                if embedding_dict is not None:
                     results[valid_idx] = {
                         "success": True,
-                        "embedding": embedding,
-                        "dimension": len(embedding),
-                        "model": "ViT-B/32"
+                        "clip_embedding": embedding_dict["clip_embedding"],
+                        "clip_dimension": len(embedding_dict["clip_embedding"]) if embedding_dict["clip_embedding"] else 0,
+                        "dino_embedding": embedding_dict["dino_embedding"],
+                        "dino_dimension": len(embedding_dict["dino_embedding"]) if embedding_dict["dino_embedding"] else 0
                     }
                 # else: results[valid_idx] remains None
             
@@ -283,8 +303,7 @@ def get_frontend_api():
             embedding = await generate_text_embedding(text.strip())
             return {
                 "success": True,
-                "model": "ViT-B/32", 
-                "embedding": embedding, 
+                "clip_embedding": embedding, 
                 "dimension": len(embedding),
                 "text": text.strip()
             }
@@ -1393,23 +1412,27 @@ def get_frontend_api():
     return serve_fastapi
 
 
-async def preload_clip_model():
+async def preload_embedding_models():
     """
-    Preload CLIP model during service startup to avoid delays during first use.
-    Uses the shared CLIP model from weaviate_search.py.
+    Preload embedding models during service startup to avoid delays during first use.
+    Uses the shared embedding models from weaviate_search.py.
     """
-    logger.info("Preloading CLIP model for faster startup...")
+    logger.info("Preloading embedding models for faster startup...")
     
     try:
         # Preload CLIP model (shared with similarity service)
         logger.info("Loading CLIP model...")
         from agent_lens.utils.embedding_generator import _load_clip_model
         _load_clip_model()
-        logger.info("✓ CLIP model loaded successfully - similarity search will be faster!")
+        # Preload DINOv2 model (shared with similarity service)
+        logger.info("Loading DINOv2 model...")
+        from agent_lens.utils.embedding_generator import _load_dinov2_model
+        _load_dinov2_model()
+        logger.info("✓ Embedding models loaded successfully - similarity search will be faster!")
         
     except Exception as e:
-        logger.warning(f"Failed to preload CLIP model: {e}")
-        logger.warning("CLIP will be loaded on first use (may cause delays)")
+        logger.warning(f"Failed to preload embedding models: {e}")
+        logger.warning("Embedding models will be loaded on first use (may cause delays)")
 
 async def setup_service(server, server_id="agent-lens"):
     """
@@ -1429,9 +1452,9 @@ async def setup_service(server, server_id="agent-lens"):
     if is_connect_server and not is_docker:
         server_id = "agent-lens-test"
     
-    # Preload CLIP model for faster startup
-    logger.info("Preloading CLIP model...")
-    await preload_clip_model()
+    # Preload embedding models for faster startup
+    logger.info("Preloading embedding models...")
+    await preload_embedding_models()
     
     # Ensure artifact_manager_instance is connected
     if artifact_manager_instance.server is None:
@@ -1463,8 +1486,7 @@ async def setup_service(server, server_id="agent-lens"):
             embedding = await generate_text_embedding(text.strip())
             return {
                 "success": True,
-                "model": "ViT-B/32",
-                "embedding": embedding,
+                "clip_embedding": embedding,
                 "dimension": len(embedding),
                 "text": text.strip()
             }
@@ -1477,16 +1499,35 @@ async def setup_service(server, server_id="agent-lens"):
     @schema_function()
     async def generate_image_embeddings_batch_rpc(images_base64: List[str]) -> dict:
         """
-        Generate CLIP image embeddings for multiple images in batch via hypha-rpc.
+        Generate both CLIP and DINOv2 image embeddings for multiple images in batch via hypha-rpc.
         
         This endpoint uses optimized batch processing with parallel I/O for significantly faster
         embedding generation, especially when using GPU acceleration.
+        
+        Returns both embeddings for each image:
+        - CLIP (512D) for image-text similarity
+        - DINOv2 (768D) for image-image similarity
         
         Args:
             images_base64: List of base64-encoded image data strings
             
         Returns:
             dict: JSON object with success flag, results array, and count
+                {
+                    "success": True,
+                    "results": [
+                        {
+                            "success": True,
+                            "clip_embedding": [...],
+                            "clip_dimension": 512,
+                            "dino_embedding": [...],
+                            "dino_dimension": 768
+                        },
+                        None,  # if failed
+                        {...}
+                    ],
+                    "count": N
+                }
         """
         try:
             if not images_base64 or len(images_base64) == 0:
@@ -1513,13 +1554,14 @@ async def setup_service(server, server_id="agent-lens"):
             
             # Map results back to original order
             results = [None] * len(images_base64)
-            for valid_idx, embedding in zip(valid_indices, embeddings):
-                if embedding is not None:
+            for valid_idx, embedding_dict in zip(valid_indices, embeddings):
+                if embedding_dict is not None:
                     results[valid_idx] = {
                         "success": True,
-                        "embedding": embedding,
-                        "dimension": len(embedding),
-                        "model": "ViT-B/32"
+                        "clip_embedding": embedding_dict["clip_embedding"],
+                        "clip_dimension": len(embedding_dict["clip_embedding"]) if embedding_dict["clip_embedding"] else 0,
+                        "dino_embedding": embedding_dict["dino_embedding"],
+                        "dino_dimension": len(embedding_dict["dino_embedding"]) if embedding_dict["dino_embedding"] else 0
                     }
             
             return {
@@ -1821,7 +1863,7 @@ async def setup_service(server, server_id="agent-lens"):
             max_workers: Maximum number of worker threads (default: None = auto-detect CPU count)
         
         Returns:
-            List of metadata dictionaries, one per cell, with 'image' and 'embedding_vector' fields
+            List of metadata dictionaries, one per cell, with 'image', 'clip_embedding', and 'dino_embedding' fields
         """
         import concurrent.futures
         import os
@@ -1898,27 +1940,34 @@ async def setup_service(server, server_id="agent-lens"):
                             result_idx = cell_indices[idx]
                             if result_idx < len(results):
                                 if embedding_data is not None and embedding_data.get("success"):
-                                    results[result_idx]["embedding_vector"] = embedding_data.get("embedding", None)
+                                    results[result_idx]["clip_embedding"] = embedding_data.get("clip_embedding", None)
+                                    results[result_idx]["dino_embedding"] = embedding_data.get("dino_embedding", None)
                                 else:
-                                    results[result_idx]["embedding_vector"] = None
+                                    results[result_idx]["clip_embedding"] = None
+                                    results[result_idx]["dino_embedding"] = None
                         else:
                             print(f"Warning: Embedding index {idx} out of range for cell_indices")
                 else:
                     print(f"Warning: Embedding generation failed or returned no results")
                     # Set all embeddings to None
                     for result in results:
-                        if "embedding_vector" not in result:
-                            result["embedding_vector"] = None
+                        if "clip_embedding" not in result:
+                            result["clip_embedding"] = None
+                        if "dino_embedding" not in result:
+                            result["dino_embedding"] = None
             except Exception as e:
                 print(f"Error generating embeddings: {e}")
                 # Set all embeddings to None on error
                 for result in results:
-                    if "embedding_vector" not in result:
-                        result["embedding_vector"] = None
+                    if "clip_embedding" not in result:
+                        result["clip_embedding"] = None
+                    if "dino_embedding" not in result:
+                        result["dino_embedding"] = None
         else:
             # No images to process
             for result in results:
-                result["embedding_vector"] = None
+                result["clip_embedding"] = None
+                result["dino_embedding"] = None
         
         return results
             

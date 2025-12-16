@@ -220,13 +220,14 @@ const AnnotationImagePreview = ({
             const { generateImageEmbedding, generateTextEmbedding } = await import('../../utils/annotationEmbeddingService');
             
             // Generate embeddings using the same image blob
-            const [imageEmbedding, textEmbedding] = await Promise.all([
+            const [imageEmbeddings, textEmbedding] = await Promise.all([
               generateImageEmbedding(imageBlob),
               generateTextEmbedding(annotation.description || '')
             ]);
             
             const embeddings = {
-              imageEmbedding,
+              clipEmbedding: imageEmbeddings.clipEmbedding,
+              dinoEmbedding: imageEmbeddings.dinoEmbedding,
               textEmbedding,
               generatedAt: new Date().toISOString(),
               extractedImageDataUrl  // Store the data URL for preview generation
@@ -528,10 +529,10 @@ const SimilaritySearchPanel = ({
   };
 
   const handleUpload = async () => {
-    // Only upload annotations that have image embeddings
+    // Only upload annotations that have image embeddings (either CLIP or DINOv2)
     const annotationsWithEmbeddings = annotations.filter(annotation => 
       annotation.embeddings && 
-      annotation.embeddings.imageEmbedding
+      (annotation.embeddings.clipEmbedding || annotation.embeddings.dinoEmbedding)
     );
 
     if (annotationsWithEmbeddings.length === 0) {
@@ -594,7 +595,8 @@ const SimilaritySearchPanel = ({
             hasExtractedImageDataUrl: !!annotation.extractedImageDataUrl,
             hasEmbeddingsExtractedImageDataUrl: !!annotation.embeddings?.extractedImageDataUrl,
             hasEmbeddings: !!annotation.embeddings,
-            hasImageEmbedding: !!annotation.embeddings?.imageEmbedding,
+            hasClipEmbedding: !!annotation.embeddings?.clipEmbedding,
+            hasDinoEmbedding: !!annotation.embeddings?.dinoEmbedding,
             finalExtractedImageDataUrl: !!extractedImageDataUrl
           });
           
@@ -626,9 +628,14 @@ const SimilaritySearchPanel = ({
           }
           
           // CRITICAL: Add the pre-generated image embedding to request body
-          if (annotation.embeddings && annotation.embeddings.imageEmbedding) {
-            requestBody.append('image_embedding', JSON.stringify(annotation.embeddings.imageEmbedding));
-            console.log(`🔗 Sending pre-generated image embedding for annotation ${annotation.id}`);
+          // Use DINOv2 embedding for image-image similarity search
+          if (annotation.embeddings && annotation.embeddings.dinoEmbedding) {
+            requestBody.append('image_embedding', JSON.stringify(annotation.embeddings.dinoEmbedding));
+            console.log(`🔗 Sending pre-generated DINOv2 embedding for annotation ${annotation.id}`);
+          } else if (annotation.embeddings && annotation.embeddings.clipEmbedding) {
+            // Fallback to CLIP if DINOv2 not available
+            requestBody.append('image_embedding', JSON.stringify(annotation.embeddings.clipEmbedding));
+            console.log(`🔗 Sending pre-generated CLIP embedding for annotation ${annotation.id}`);
           } else {
             console.warn(`⚠️ No image embedding found for annotation ${annotation.id} - upload will fail`);
           }
@@ -1502,7 +1509,7 @@ const SimilaritySearchPanel = ({
                       </div>
                       <div className="annotation-item-actions">
                         {/* Find Similar button - only show if annotation has image embeddings */}
-                        {annotation.embeddings?.imageEmbedding && (
+                        {(annotation.embeddings?.clipEmbedding || annotation.embeddings?.dinoEmbedding) && (
                           <button
                             onClick={() => handleFindSimilar(annotation)}
                             className="annotation-action-btn"
@@ -1552,7 +1559,7 @@ const SimilaritySearchPanel = ({
               <button
                 onClick={handleUpload}
                 className="annotation-action-btn"
-                disabled={annotations.filter(a => a.embeddings?.imageEmbedding).length === 0}
+                disabled={annotations.filter(a => a.embeddings?.clipEmbedding || a.embeddings?.dinoEmbedding).length === 0}
                 title="Upload annotations with embeddings to Weaviate"
               >
                 <i className="fas fa-cloud-upload-alt"></i>
