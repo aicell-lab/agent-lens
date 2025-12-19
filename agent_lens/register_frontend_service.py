@@ -1584,7 +1584,8 @@ async def setup_service(server, server_id="agent-lens"):
         image_data_np: np.ndarray,
         mask: np.ndarray,
         brightfield: np.ndarray,
-        fixed_channel_order: List[str]
+        fixed_channel_order: List[str],
+        background_bright_value: float,
     ) -> Tuple[int, Optional[Dict[str, Any]], Optional[str]]:
         """
         Process a single cell to extract metadata and generate cell image.
@@ -1648,16 +1649,22 @@ async def setup_service(server, server_id="agent-lens"):
             # Stack the single channel 3 times to create RGB (grayscale to RGB)
             cell_image_rgb = np.stack([cell_image_region] * 3, axis=-1)
             
-            # Ensure uint8
+            # Ensure uint8 (and compute matching uint8 background value)
             if cell_image_rgb.dtype != np.uint8:
-                if cell_image_rgb.max() > 255:
-                    cell_image_rgb = (cell_image_rgb / cell_image_rgb.max() * 255).astype(np.uint8)
+                max_val = float(cell_image_rgb.max()) if cell_image_rgb.size else 0.0
+                if max_val > 255:
+                    scale = 255.0 / max_val
+                    cell_image_rgb = (cell_image_rgb * scale).astype(np.uint8)
+                    bg_u8 = int(np.clip(background_bright_value * scale, 0, 255))
                 else:
                     cell_image_rgb = cell_image_rgb.astype(np.uint8)
+                    bg_u8 = int(np.clip(background_bright_value, 0, 255))
+            else:
+                bg_u8 = int(np.clip(background_bright_value, 0, 255))
             
-            # Apply cell mask to isolate the cell (set background to black)
-            cell_mask_3d = np.expand_dims(cell_mask_region, axis=2)
-            cell_image_rgb = cell_image_rgb * cell_mask_3d
+            # Apply cell mask to isolate the cell (fill outside-cell pixels with background bright value)
+            cell_mask_3d = np.expand_dims(cell_mask_region.astype(bool), axis=2)
+            cell_image_rgb = np.where(cell_mask_3d, cell_image_rgb, bg_u8).astype(np.uint8)
             
             # Convert to PIL Image and encode as base64 PNG
             cell_pil = PILImage.fromarray(cell_image_rgb, mode='RGB')
@@ -1879,13 +1886,19 @@ async def setup_service(server, server_id="agent-lens"):
         else:
             mask = segmentation_mask.astype(np.uint32)
         
+        # Compute a global background bright value from non-cell pixels (mask == 0)
+        non_cell_pixels = brightfield[mask == 0]
+        if non_cell_pixels.size == 0:
+            raise ValueError("No non-cell pixels found (mask==0). Cannot compute background median.")
+        background_bright_value = float(np.median(non_cell_pixels))
+        
         if max_workers is None:
             max_workers = min(len(cell_polygons), os.cpu_count() or 4)
         
         # Step 1: Process cells in parallel using ThreadPoolExecutor
         # Prepare arguments for parallel processing
         process_args = [
-            (poly, idx, image_data_np, mask, brightfield, fixed_channel_order)
+            (poly, idx, image_data_np, mask, brightfield, fixed_channel_order, background_bright_value)
             for idx, poly in enumerate(cell_polygons)
         ]
         

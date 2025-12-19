@@ -272,13 +272,16 @@ async def generate_image_embedding_dinov2(image_bytes: bytes) -> List[float]:
                 outputs = model(**inputs)
         
         # Extract CLS token (first token of last_hidden_state)
-        cls_embedding = outputs.last_hidden_state[:, 0, :]  # (1, 768)
-        
+        patch_tokens = outputs.last_hidden_state[:, 1, :]  # drop the first token, which is the [CLS] token
+
+        #Patch tokens
+        deno_embeddings = np.mean(patch_tokens, axis=1)
+
         # L2 normalize for cosine similarity
-        cls_embedding = torch.nn.functional.normalize(cls_embedding, dim=-1)
+        deno_embeddings = torch.nn.functional.normalize(deno_embeddings, dim=-1)
         
         # Convert to numpy and return as list
-        embedding = cls_embedding.squeeze(0).float().cpu().numpy().astype(np.float32)
+        embedding = deno_embeddings.squeeze(0).float().cpu().numpy().astype(np.float32)
         return embedding.tolist()
         
     finally:
@@ -357,13 +360,17 @@ async def generate_image_embeddings_batch_dinov2(image_bytes_list: List[bytes]) 
                 outputs = model(pixel_values=batch_tensor)
         
         # Extract CLS tokens (first token of last_hidden_state)
-        cls_embeddings = outputs.last_hidden_state[:, 0, :]  # (B, 768)
+        patch_tokens = outputs.last_hidden_state[:, 1, :]  # drop the first token, which is the [CLS] token
+
+        #Patch tokens
+        deno_embeddings = np.mean(patch_tokens, axis=1)
+
         
         # L2 normalize for cosine similarity
-        cls_embeddings = torch.nn.functional.normalize(cls_embeddings, dim=-1)
+        deno_embeddings = torch.nn.functional.normalize(deno_embeddings, dim=-1)
         
         # Convert to numpy
-        normalized_features = cls_embeddings.float().cpu().numpy().astype(np.float32)
+        normalized_features = deno_embeddings.float().cpu().numpy().astype(np.float32)
         
         # Map results back to original order
         results = [None] * len(image_bytes_list)
