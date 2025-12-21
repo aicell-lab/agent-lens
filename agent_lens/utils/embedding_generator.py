@@ -266,13 +266,13 @@ async def generate_image_embedding_dinov2(image_bytes: bytes) -> List[float]:
         # Use mixed precision for GPU efficiency
         with torch.no_grad():
             if device == "cuda":
-                with torch.cuda.amp.autocast(dtype=torch.float16):
+                with torch.amp.autocast('cuda', dtype=torch.float16):
                     outputs = model(**inputs)
             else:
                 outputs = model(**inputs)
         
         # Extract CLS token (first token of last_hidden_state)
-        patch_tokens = outputs.last_hidden_state[:, 1, :]  # drop the first token, which is the [CLS] token
+        patch_tokens = outputs.last_hidden_state[:, 1:, :]  # drop the first token, which is the [CLS] token
 
         #Patch tokens
         deno_embeddings = np.mean(patch_tokens, axis=1)
@@ -354,16 +354,16 @@ async def generate_image_embeddings_batch_dinov2(image_bytes_list: List[bytes]) 
         # Single batch inference with mixed precision
         with torch.no_grad():
             if device == "cuda":
-                with torch.cuda.amp.autocast(dtype=torch.float16):
+                with torch.amp.autocast('cuda', dtype=torch.float16):
                     outputs = model(pixel_values=batch_tensor)
             else:
                 outputs = model(pixel_values=batch_tensor)
         
         # Extract CLS tokens (first token of last_hidden_state)
-        patch_tokens = outputs.last_hidden_state[:, 1, :]  # drop the first token, which is the [CLS] token
+        patch_tokens = outputs.last_hidden_state[:, 1:, :]  # drop the first token, which is the [CLS] token
 
-        #Patch tokens
-        deno_embeddings = np.mean(patch_tokens, axis=1)
+        # Average patch tokens (use torch.mean with dim parameter, not np.mean)
+        deno_embeddings = torch.mean(patch_tokens, dim=1)
 
         
         # L2 normalize for cosine similarity
