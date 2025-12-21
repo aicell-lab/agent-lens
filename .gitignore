@@ -30,5 +30,5 @@ coverage/
 # IDE settings (user-specific)
 .vscode/
 
-# Jupyter notebooks (user-specific)
+# Jupyter notebooks
 *.ipynb
