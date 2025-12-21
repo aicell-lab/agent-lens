@@ -19,7 +19,7 @@ services:
     volumes:
       - agent-lens-cache:/app/.cache
       # Mount zarr dataset from host to container (same path)
-      - /mnt/shared_documents/offline_stitch_20251201-u2os-full-plate_2025-12-01_17-00-56.154975/data.zarr:/mnt/shared_documents/offline_stitch_20251201-u2os-full-plate_2025-12-01_17-00-56.154975/data.zarr:ro
+      - /mnt/shared_documents/offline_stitch_20251215-fullplate_2025-12-16_16-50-51.505093/data.zarr:/mnt/shared_documents/offline_stitch_20251215-fullplate_2025-12-16_16-50-51.505093/data.zarr:ro
     # GPU support: Use runtime for docker-compose, or deploy.resources for docker swarm
     runtime: nvidia
     deploy:
@@ -68,7 +68,7 @@ services:
     volumes:
       - squid-control-cache:/app/.cache
       # Mount zarr dataset from host to container (same path)
-      - /mnt/shared_documents/offline_stitch_20251201-u2os-full-plate_2025-12-01_17-00-56.154975/data.zarr:/mnt/shared_documents/offline_stitch_20251201-u2os-full-plate_2025-12-01_17-00-56.154975/data.zarr:ro
+      - /mnt/shared_documents/offline_stitch_20251215-fullplate_2025-12-16_16-50-51.505093/data.zarr:/mnt/shared_documents/offline_stitch_20251215-fullplate_2025-12-16_16-50-51.505093/data.zarr:ro
     healthcheck:
       test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/agent-lens/services/squid-control-simulation/is_service_healthy | jq -e '.status == \"ok\"'"]
       interval: 60s
