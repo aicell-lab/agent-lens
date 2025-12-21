@@ -271,11 +271,13 @@ async def generate_image_embedding_dinov2(image_bytes: bytes) -> List[float]:
             else:
                 outputs = model(**inputs)
         
-        # Extract CLS token (first token of last_hidden_state)
+        # Extract patch tokens (skip CLS token at index 0)
+        # CLS token would be: last_hidden_state[:, 0, :]
+        # Patch tokens are: last_hidden_state[:, 1:, :]
         patch_tokens = outputs.last_hidden_state[:, 1:, :]  # drop the first token, which is the [CLS] token
 
-        #Patch tokens
-        deno_embeddings = np.mean(patch_tokens, axis=1)
+        # Average patch tokens (NOT using CLS token)
+        deno_embeddings = torch.mean(patch_tokens, dim=1)
 
         # L2 normalize for cosine similarity
         deno_embeddings = torch.nn.functional.normalize(deno_embeddings, dim=-1)
@@ -359,10 +361,12 @@ async def generate_image_embeddings_batch_dinov2(image_bytes_list: List[bytes]) 
             else:
                 outputs = model(pixel_values=batch_tensor)
         
-        # Extract CLS tokens (first token of last_hidden_state)
+        # Extract patch tokens (skip CLS token at index 0)
+        # CLS token would be: last_hidden_state[:, 0, :]
+        # Patch tokens are: last_hidden_state[:, 1:, :]
         patch_tokens = outputs.last_hidden_state[:, 1:, :]  # drop the first token, which is the [CLS] token
 
-        # Average patch tokens (use torch.mean with dim parameter, not np.mean)
+        # Average patch tokens (NOT using CLS token)
         deno_embeddings = torch.mean(patch_tokens, dim=1)
 
         
