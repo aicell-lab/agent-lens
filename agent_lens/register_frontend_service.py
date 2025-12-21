@@ -1623,17 +1623,30 @@ async def setup_service(server, server_id="agent-lens"):
                 return (poly_index, None, None)
             prop = props[0]
             
-            # Extract bounding box
+            # Extract bounding box and expand it by a fixed factor (e.g., 1.3x) centered on the cell
             min_row, min_col, max_row, max_col = prop.bbox
-            
-            # Extract cell image region with padding
-            padding = 5
+
             H, W = image_data_np.shape[:2]
-            y_min = max(0, min_row - padding)
-            y_max = min(H, max_row + padding)
-            x_min = max(0, min_col - padding)
-            x_max = min(W, max_col + padding)
-            
+            scale = 1.3  # expansion factor for bounding box (consistent for every cell)
+
+            # Center of bbox
+            cy = (min_row + max_row) / 2.0
+            cx = (min_col + max_col) / 2.0
+
+            # Original height/width
+            bbox_h = max_row - min_row
+            bbox_w = max_col - min_col
+
+            # Expanded dimensions
+            new_h = int(np.round(bbox_h * scale))
+            new_w = int(np.round(bbox_w * scale))
+
+            # Calculate new coordinates, keep within image bounds
+            y_min = int(np.clip(cy - new_h / 2.0, 0, H))
+            y_max = int(np.clip(cy + new_h / 2.0, 0, H))
+            x_min = int(np.clip(cx - new_w / 2.0, 0, W))
+            x_max = int(np.clip(cx + new_w / 2.0, 0, W))
+
             # Extract only brightfield channel (channel 0) for cell image
             if image_data_np.ndim == 3:
                 # Extract only channel 0 (brightfield)
@@ -1641,10 +1654,9 @@ async def setup_service(server, server_id="agent-lens"):
             else:
                 # Already 2D, use as is
                 cell_image_region = image_data_np[y_min:y_max, x_min:x_max].copy()
-            
+
             # Crop cell mask to same region
             cell_mask_region = cell_mask[y_min:y_max, x_min:x_max]
-            
             # Convert brightfield (grayscale) to RGB uint8 for embedding generation
             # Stack the single channel 3 times to create RGB (grayscale to RGB)
             cell_image_rgb = np.stack([cell_image_region] * 3, axis=-1)
