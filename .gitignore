@@ -31,4 +31,4 @@ coverage/
 .vscode/
 
 # Jupyter notebooks (user-specific)
-docs/hypha-agents-notebook.ipynb
+*.ipynb
