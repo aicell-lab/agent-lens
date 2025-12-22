@@ -1655,8 +1655,33 @@ async def setup_service(server, server_id="agent-lens"):
                 # Already 2D, use as is
                 cell_image_region = image_data_np[y_min:y_max, x_min:x_max].copy()
 
-            # Crop cell mask to same region
-            cell_mask_region = cell_mask[y_min:y_max, x_min:x_max]
+            # Apply percentile normalization (1-99%) to grayscale crop for stable DINO embeddings
+            # This should be done on grayscale before converting to RGB
+            p_low = None
+            p_high = None
+            if cell_image_region.size > 0:
+                p_low = np.percentile(cell_image_region, 1.0)
+                p_high = np.percentile(cell_image_region, 99.0)
+                
+                # Clamp values to percentile range
+                cell_image_region = np.clip(cell_image_region, p_low, p_high)
+                
+                # Scale to 0-255 range if there's any variation
+                if p_high > p_low:
+                    cell_image_region = ((cell_image_region - p_low) / (p_high - p_low) * 255.0)
+                else:
+                    # All pixels have the same value, set to middle gray
+                    cell_image_region = np.full_like(cell_image_region, 128.0)
+                
+                # Convert to uint8 after normalization
+                cell_image_region = cell_image_region.astype(np.uint8)
+            else:
+                cell_image_region = cell_image_region.astype(np.uint8)
+
+            # Crop masks to same region
+            cell_mask_region = cell_mask[y_min:y_max, x_min:x_max]  # Target cell mask
+            mask_region = mask[y_min:y_max, x_min:x_max]  # Full mask with all cell IDs
+            
             # Convert brightfield (grayscale) to RGB uint8 for embedding generation
             # Stack the single channel 3 times to create RGB (grayscale to RGB)
             cell_image_rgb = np.stack([cell_image_region] * 3, axis=-1)
@@ -1960,18 +1985,35 @@ async def setup_service(server, server_id="agent-lens"):
                     embeddings = embedding_result.get("results", [])
                     
                     # Step 3: Map embeddings back to results
+                    # embeddings[idx] corresponds to cell_images_base64[idx]
+                    # cell_indices[idx] tells us which result index that image belongs to
+                    if len(embeddings) != len(cell_indices):
+                        print(f"Warning: Mismatch between embeddings count ({len(embeddings)}) and cell_indices count ({len(cell_indices)})")
+                    
                     for idx, embedding_data in enumerate(embeddings):
-                        if idx < len(cell_indices):
-                            result_idx = cell_indices[idx]
-                            if result_idx < len(results):
-                                if embedding_data is not None and embedding_data.get("success"):
-                                    results[result_idx]["clip_embedding"] = embedding_data.get("clip_embedding", None)
-                                    results[result_idx]["dino_embedding"] = embedding_data.get("dino_embedding", None)
-                                else:
-                                    results[result_idx]["clip_embedding"] = None
-                                    results[result_idx]["dino_embedding"] = None
+                        if idx >= len(cell_indices):
+                            print(f"Warning: Embedding index {idx} out of range for cell_indices (len={len(cell_indices)})")
+                            continue
+                        
+                        result_idx = cell_indices[idx]
+                        if result_idx >= len(results):
+                            print(f"Warning: Result index {result_idx} out of range for results (len={len(results)})")
+                            continue
+                        
+                        # Handle None embeddings (failed decoding or processing)
+                        if embedding_data is None:
+                            results[result_idx]["clip_embedding"] = None
+                            results[result_idx]["dino_embedding"] = None
+                            continue
+                        
+                        # Handle successful embeddings
+                        if embedding_data.get("success"):
+                            results[result_idx]["clip_embedding"] = embedding_data.get("clip_embedding", None)
+                            results[result_idx]["dino_embedding"] = embedding_data.get("dino_embedding", None)
                         else:
-                            print(f"Warning: Embedding index {idx} out of range for cell_indices")
+                            # Embedding generation failed for this image
+                            results[result_idx]["clip_embedding"] = None
+                            results[result_idx]["dino_embedding"] = None
                 else:
                     print(f"Warning: Embedding generation failed or returned no results")
                     # Set all embeddings to None
