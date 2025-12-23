@@ -168,7 +168,7 @@ def get_frontend_api():
             image_bytes = await image.read()
             if not image_bytes:
                 raise HTTPException(status_code=400, detail="Empty image upload")
-            from agent_lens.utils.weaviate_search import generate_image_embedding
+            from agent_lens.utils.embedding_generator import generate_image_embedding
             embedding = await generate_image_embedding(image_bytes)
             return {"model": "ViT-B/32", "embedding": embedding, "dimension": len(embedding)}
         except HTTPException:
@@ -204,7 +204,7 @@ def get_frontend_api():
             if not images or len(images) == 0:
                 raise HTTPException(status_code=400, detail="At least one image is required")
             
-            from agent_lens.utils.weaviate_search import generate_image_embeddings_batch
+            from agent_lens.utils.embedding_generator import generate_image_embeddings_batch
             
             # Parallel image reading for faster I/O
             async def read_image(idx: int, image: UploadFile):
@@ -279,7 +279,7 @@ def get_frontend_api():
             if not text or not text.strip():
                 raise HTTPException(status_code=400, detail="Text input cannot be empty")
             
-            from agent_lens.utils.weaviate_search import generate_text_embedding
+            from agent_lens.utils.embedding_generator import generate_text_embedding
             embedding = await generate_text_embedding(text.strip())
             return {
                 "success": True,
@@ -1403,7 +1403,7 @@ async def preload_clip_model():
     try:
         # Preload CLIP model (shared with similarity service)
         logger.info("Loading CLIP model...")
-        from agent_lens.utils.weaviate_search import _load_clip_model
+        from agent_lens.utils.embedding_generator import _load_clip_model
         _load_clip_model()
         logger.info("✓ CLIP model loaded successfully - similarity search will be faster!")
         
@@ -1459,7 +1459,7 @@ async def setup_service(server, server_id="agent-lens"):
             if not text or not text.strip():
                 raise ValueError("Text input cannot be empty")
             
-            from agent_lens.utils.weaviate_search import generate_text_embedding
+            from agent_lens.utils.embedding_generator import generate_text_embedding
             embedding = await generate_text_embedding(text.strip())
             return {
                 "success": True,
@@ -1508,7 +1508,7 @@ async def setup_service(server, server_id="agent-lens"):
             if not image_bytes_list:
                 raise ValueError("No valid images found in request")
             
-            from agent_lens.utils.weaviate_search import generate_image_embeddings_batch
+            from agent_lens.utils.embedding_generator import generate_image_embeddings_batch
             embeddings = await generate_image_embeddings_batch(image_bytes_list)
             
             # Map results back to original order
@@ -1542,7 +1542,8 @@ async def setup_service(server, server_id="agent-lens"):
         image_data_np: np.ndarray,
         mask: np.ndarray,
         brightfield: np.ndarray,
-        fixed_channel_order: List[str]
+        fixed_channel_order: List[str],
+        background_bright_value: float,
     ) -> Tuple[int, Optional[Dict[str, Any]], Optional[str]]:
         """
         Process a single cell to extract metadata and generate cell image.
@@ -1580,16 +1581,29 @@ async def setup_service(server, server_id="agent-lens"):
                 return (poly_index, None, None)
             prop = props[0]
             
-            # Extract bounding box
+            # Extract bounding box and expand it by a fixed factor (e.g., 1.3x) centered on the cell
             min_row, min_col, max_row, max_col = prop.bbox
-            
-            # Extract cell image region with padding
-            padding = 5
+
             H, W = image_data_np.shape[:2]
-            y_min = max(0, min_row - padding)
-            y_max = min(H, max_row + padding)
-            x_min = max(0, min_col - padding)
-            x_max = min(W, max_col + padding)
+            scale = 1.3  # expansion factor for bounding box (consistent for every cell)
+
+            # Center of bbox
+            cy = (min_row + max_row) / 2.0
+            cx = (min_col + max_col) / 2.0
+
+            # Original height/width
+            bbox_h = max_row - min_row
+            bbox_w = max_col - min_col
+
+            # Expanded dimensions
+            new_h = int(np.round(bbox_h * scale))
+            new_w = int(np.round(bbox_w * scale))
+
+            # Calculate new coordinates, keep within image bounds
+            y_min = int(np.clip(cy - new_h / 2.0, 0, H))
+            y_max = int(np.clip(cy + new_h / 2.0, 0, H))
+            x_min = int(np.clip(cx - new_w / 2.0, 0, W))
+            x_max = int(np.clip(cx + new_w / 2.0, 0, W))
             
             # Extract only brightfield channel (channel 0) for cell image
             if image_data_np.ndim == 3:
@@ -1598,24 +1612,54 @@ async def setup_service(server, server_id="agent-lens"):
             else:
                 # Already 2D, use as is
                 cell_image_region = image_data_np[y_min:y_max, x_min:x_max].copy()
-            
-            # Crop cell mask to same region
-            cell_mask_region = cell_mask[y_min:y_max, x_min:x_max]
+
+            # Apply percentile normalization (1-99%) to grayscale crop for stable CLIP embeddings
+            # This should be done on grayscale before converting to RGB
+            p_low = None
+            p_high = None
+            if cell_image_region.size > 0:
+                p_low = np.percentile(cell_image_region, 1.0)
+                p_high = np.percentile(cell_image_region, 99.0)
+                
+                # Clamp values to percentile range
+                cell_image_region = np.clip(cell_image_region, p_low, p_high)
+                
+                # Scale to 0-255 range if there's any variation
+                if p_high > p_low:
+                    cell_image_region = ((cell_image_region - p_low) / (p_high - p_low) * 255.0)
+                else:
+                    # All pixels have the same value, set to middle gray
+                    cell_image_region = np.full_like(cell_image_region, 128.0)
+                
+                # Convert to uint8 after normalization
+                cell_image_region = cell_image_region.astype(np.uint8)
+            else:
+                cell_image_region = cell_image_region.astype(np.uint8)
+
+            # Crop masks to same region
+            cell_mask_region = cell_mask[y_min:y_max, x_min:x_max]  # Target cell mask
+            mask_region = mask[y_min:y_max, x_min:x_max]  # Full mask with all cell IDs
             
             # Convert brightfield (grayscale) to RGB uint8 for embedding generation
             # Stack the single channel 3 times to create RGB (grayscale to RGB)
             cell_image_rgb = np.stack([cell_image_region] * 3, axis=-1)
             
-            # Ensure uint8
+            # Ensure uint8 (and compute matching uint8 background value)
             if cell_image_rgb.dtype != np.uint8:
-                if cell_image_rgb.max() > 255:
-                    cell_image_rgb = (cell_image_rgb / cell_image_rgb.max() * 255).astype(np.uint8)
+                max_val = float(cell_image_rgb.max()) if cell_image_rgb.size else 0.0
+                if max_val > 255:
+                    scale = 255.0 / max_val
+                    cell_image_rgb = (cell_image_rgb * scale).astype(np.uint8)
+                    bg_u8 = int(np.clip(background_bright_value * scale, 0, 255))
                 else:
                     cell_image_rgb = cell_image_rgb.astype(np.uint8)
+                    bg_u8 = int(np.clip(background_bright_value, 0, 255))
+            else:
+                bg_u8 = int(np.clip(background_bright_value, 0, 255))
             
-            # Apply cell mask to isolate the cell (set background to black)
-            cell_mask_3d = np.expand_dims(cell_mask_region, axis=2)
-            cell_image_rgb = cell_image_rgb * cell_mask_3d
+            # Apply cell mask to isolate the cell (fill outside-cell pixels with background bright value)
+            cell_mask_3d = np.expand_dims(cell_mask_region.astype(bool), axis=2)
+            cell_image_rgb = np.where(cell_mask_3d, cell_image_rgb, bg_u8).astype(np.uint8)
             
             # Convert to PIL Image and encode as base64 PNG
             cell_pil = PILImage.fromarray(cell_image_rgb, mode='RGB')
@@ -1837,13 +1881,19 @@ async def setup_service(server, server_id="agent-lens"):
         else:
             mask = segmentation_mask.astype(np.uint32)
         
+        # Compute a global background bright value from non-cell pixels (mask == 0)
+        non_cell_pixels = brightfield[mask == 0]
+        if non_cell_pixels.size == 0:
+            raise ValueError("No non-cell pixels found (mask==0). Cannot compute background median.")
+        background_bright_value = float(np.median(non_cell_pixels))
+        
         if max_workers is None:
             max_workers = min(len(cell_polygons), os.cpu_count() or 4)
         
         # Step 1: Process cells in parallel using ThreadPoolExecutor
         # Prepare arguments for parallel processing
         process_args = [
-            (poly, idx, image_data_np, mask, brightfield, fixed_channel_order)
+            (poly, idx, image_data_np, mask, brightfield, fixed_channel_order, background_bright_value)
             for idx, poly in enumerate(cell_polygons)
         ]
         
