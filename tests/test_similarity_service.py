@@ -668,10 +668,10 @@ class TestWeaviateSimilarityService:
                 print("🧪 Testing image embedding endpoint...")
                 image_url = f"{service_url}/embedding/image"
                 
-                # Create a simple test image (1x1 pixel PNG)
+                # Create a simple test image (224x224 pixel PNG - standard size for vision models)
                 import io
                 from PIL import Image
-                test_image = Image.new('RGB', (1, 1), color='red')
+                test_image = Image.new('RGB', (224, 224), color='red')
                 img_buffer = io.BytesIO()
                 test_image.save(img_buffer, format='PNG')
                 img_buffer.seek(0)
