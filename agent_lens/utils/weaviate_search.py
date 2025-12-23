@@ -551,7 +551,13 @@ class WeaviateSimilarityService:
     async def search_by_image(self, collection_name: str, application_id: str,
                             image_bytes: bytes, limit: int = 10) -> List[Dict[str, Any]]:
         """Search for similar images using image query."""
-        query_vector = await generate_image_embedding(image_bytes)
+        # generate_image_embedding returns a dict with both clip_embedding and dino_embedding
+        # For image-image similarity, we use DINOv2 embedding
+        embeddings = await generate_image_embedding(image_bytes)
+        query_vector = embeddings.get("dino_embedding")
+        if query_vector is None:
+            # Fallback to CLIP embedding if DINOv2 is not available
+            query_vector = embeddings.get("clip_embedding")
         return await self.search_similar_images(collection_name, application_id, query_vector, limit)
     
     async def fetch_by_uuid(self, collection_name: str, application_id: str,
