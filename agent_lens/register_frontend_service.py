@@ -2103,7 +2103,8 @@ async def setup_service(server, server_id="agent-lens"):
         For parallelism, set random_state=None and n_jobs=-1 (uses all CPU cores).
         
         Args:
-            all_cells: List of cell dictionaries, each should have 'embedding_vector' key
+            all_cells: List of cell dictionaries, each should have 'dino_embedding', 'clip_embedding', or 'embedding_vector' key
+                (prefers dino_embedding for image-image similarity, then clip_embedding, then embedding_vector)
             n_neighbors: Number of neighbors for UMAP (default: 15)
             min_dist: Minimum distance for UMAP (default: 0.1)
             random_state: Random state for reproducibility. If None, allows parallelism (default: None)
@@ -2121,7 +2122,10 @@ async def setup_service(server, server_id="agent-lens"):
                     "html": None
                 }
             
-            from agent_lens.utils.umap_analysis_utils import make_umap_cluster_figure_interactive
+            from agent_lens.utils.umap_analysis_utils import (
+                make_umap_cluster_figure_interactive,
+                PLOTLY_AVAILABLE
+            )
             
             # Run in thread pool to avoid blocking
             html = await asyncio.to_thread(
@@ -2135,10 +2139,23 @@ async def setup_service(server, server_id="agent-lens"):
             )
             
             if html is None:
+                # Provide more specific error message
+                cells_with_embeddings = sum(1 for c in all_cells 
+                                           if c.get("dino_embedding") or c.get("clip_embedding") or c.get("embedding_vector"))
+                
+                if not PLOTLY_AVAILABLE:
+                    error_msg = "Plotly is not available. Install with: pip install plotly"
+                elif cells_with_embeddings < 5:
+                    error_msg = f"Too few cells with embeddings ({cells_with_embeddings}/{len(all_cells)}). Need at least 5 cells with dino_embedding, clip_embedding, or embedding_vector."
+                else:
+                    error_msg = "Failed to generate interactive UMAP figure (unknown error)"
+                
                 return {
                     "success": False,
-                    "error": "Failed to generate interactive UMAP figure (Plotly not available or too few cells)",
-                    "html": None
+                    "error": error_msg,
+                    "html": None,
+                    "cells_with_embeddings": cells_with_embeddings,
+                    "total_cells": len(all_cells)
                 }
             
             return {
