@@ -1578,6 +1578,39 @@ async def setup_service(server, server_id="agent-lens"):
     # Helper function to process a single cell (runs in parallel threads)
     fixed_channel_order = ['BF_LED_matrix_full', 'Fluorescence_405_nm_Ex', 'Fluorescence_488_nm_Ex', 'Fluorescence_638_nm_Ex', 'Fluorescence_561_nm_Ex', 'Fluorescence_730_nm_Ex']
 
+    def resize_and_pad_to_square_rgb(cell_rgb_u8: np.ndarray, out_size: int, pad_value: int) -> np.ndarray:
+        """
+        Resize and pad cell image to a square for consistent embedding.
+        
+        This ensures all cells have the same input size (224x224 for CLIP or DINOv2),
+        preventing the embedding generator from doing variable cropping that can change
+        the embedding based on the original crop's aspect ratio.
+        
+        Args:
+            cell_rgb_u8: (H,W,3) uint8 RGB image
+            out_size: Target square size (e.g., 224 for CLIP or DINOv2)
+            pad_value: Padding value 0..255 (typically background brightness)
+            
+        Returns:
+            (out_size, out_size, 3) uint8 RGB image
+        """
+        assert cell_rgb_u8.dtype == np.uint8 and cell_rgb_u8.ndim == 3 and cell_rgb_u8.shape[2] == 3
+
+        pil = PILImage.fromarray(cell_rgb_u8, mode="RGB")
+        w, h = pil.size
+
+        # Scale so the whole crop fits inside out_size
+        scale = out_size / max(w, h)
+        new_w = max(1, int(round(w * scale)))
+        new_h = max(1, int(round(h * scale)))
+
+        pil = pil.resize((new_w, new_h), PILImage.Resampling.LANCZOS)
+
+        canvas = PILImage.new("RGB", (out_size, out_size), color=(pad_value, pad_value, pad_value))
+        canvas.paste(pil, ((out_size - new_w)//2, (out_size - new_h)//2))
+
+        return np.array(canvas, dtype=np.uint8)
+
     def _process_single_cell(
         poly: Dict[str, Any],
         poly_index: int,
@@ -1702,6 +1735,10 @@ async def setup_service(server, server_id="agent-lens"):
             # Apply cell mask to isolate the cell (fill outside-cell pixels with background bright value)
             cell_mask_3d = np.expand_dims(cell_mask_region.astype(bool), axis=2)
             cell_image_rgb = np.where(cell_mask_3d, cell_image_rgb, bg_u8).astype(np.uint8)
+            
+            # Resize and pad to 224x224 square for consistent embedding
+            # This prevents the embedding generator from doing variable cropping
+            cell_image_rgb = resize_and_pad_to_square_rgb(cell_image_rgb, out_size=224, pad_value=bg_u8)
             
             # Convert to PIL Image and encode as base64 PNG
             cell_pil = PILImage.fromarray(cell_image_rgb, mode='RGB')
