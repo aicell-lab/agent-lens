@@ -658,21 +658,20 @@ class TestWeaviateSimilarityService:
                 async with session.post(text_url, params=text_data) as response:
                     assert response.status == 200
                     result = await response.json()
-                    assert result["model"] == "ViT-B/32"
-                    assert "embedding" in result
+                    assert "clip_embedding" in result
                     assert result["dimension"] == 512
                     assert result["text"] == "microscopy image of cells"
-                    assert len(result["embedding"]) == 512
+                    assert len(result["clip_embedding"]) == 512
                     print("✅ Text embedding generated successfully")
                 
                 # Test image embedding endpoint
                 print("🧪 Testing image embedding endpoint...")
                 image_url = f"{service_url}/embedding/image"
                 
-                # Create a simple test image (1x1 pixel PNG)
+                # Create a simple test image (224x224 pixel PNG - standard size for vision models)
                 import io
                 from PIL import Image
-                test_image = Image.new('RGB', (1, 1), color='red')
+                test_image = Image.new('RGB', (224, 224), color='red')
                 img_buffer = io.BytesIO()
                 test_image.save(img_buffer, format='PNG')
                 img_buffer.seek(0)
@@ -684,10 +683,9 @@ class TestWeaviateSimilarityService:
                 async with session.post(image_url, data=data) as response:
                     assert response.status == 200
                     result = await response.json()
-                    assert result["model"] == "ViT-B/32"
-                    assert "embedding" in result
-                    assert result["dimension"] == 512
-                    assert len(result["embedding"]) == 512
+                    assert "clip_embedding" in result
+                    assert result["clip_dimension"] == 512
+                    assert len(result["clip_embedding"]) == 512
                     print("✅ Image embedding generated successfully")
                 
                 # Test error cases

@@ -92,7 +92,8 @@ def make_umap_cluster_figure_base64(
     For parallelism, set random_state=None and n_jobs=-1 (uses all CPU cores).
 
     Args:
-        all_cells: List of cell dictionaries, each should have 'embedding_vector' key
+        all_cells: List of cell dictionaries, each should have 'dino_embedding', 'clip_embedding', or 'embedding_vector' key
+            (prefers dino_embedding for image-image similarity, then clip_embedding, then embedding_vector)
         n_neighbors: Number of neighbors for UMAP (default: 15)
         min_dist: Minimum distance for UMAP (default: 0.1)
         random_state: Random state for reproducibility. If None, allows parallelism (default: None)
@@ -105,13 +106,28 @@ def make_umap_cluster_figure_base64(
         return None
 
     # --- Collect embeddings only ---
+    # Support multiple embedding formats: dino_embedding (preferred for image-image), clip_embedding, or embedding_vector
     embeddings = []
+    cells_with_embeddings = 0
     for c in all_cells:
-        if "embedding_vector" in c:
-            embeddings.append(np.array(c["embedding_vector"], dtype=float))
+        embedding = None
+        # Prefer DINOv2 for image-image similarity, then CLIP, then generic embedding_vector
+        if "dino_embedding" in c and c["dino_embedding"] is not None:
+            embedding = c["dino_embedding"]
+        elif "clip_embedding" in c and c["clip_embedding"] is not None:
+            embedding = c["clip_embedding"]
+        elif "embedding_vector" in c and c["embedding_vector"] is not None:
+            embedding = c["embedding_vector"]
+        
+        if embedding is not None:
+            try:
+                embeddings.append(np.array(embedding, dtype=float))
+                cells_with_embeddings += 1
+            except (ValueError, TypeError) as e:
+                print(f"⚠️ Failed to convert embedding for cell: {e}")
 
     if len(embeddings) < 5:
-        print("⚠️ Too few cells with embeddings → clustering skipped.")
+        print(f"⚠️ Too few cells with embeddings ({cells_with_embeddings}/{len(all_cells)}) → clustering skipped. Need at least 5 cells with embeddings.")
         return None
 
     E = np.vstack(embeddings)   # (N, D)
@@ -203,7 +219,9 @@ def make_umap_cluster_figure_interactive(
     - Export as PNG/SVG
     
     Args:
-        all_cells: List of cell dictionaries with 'embedding_vector' key (and optionally 'id', 'area', etc.)
+        all_cells: List of cell dictionaries with 'dino_embedding', 'clip_embedding', or 'embedding_vector' key
+            (prefers dino_embedding for image-image similarity, then clip_embedding, then embedding_vector)
+            and optionally 'id', 'area', etc. for metadata visualization
         n_neighbors: Number of neighbors for UMAP (default: 15)
         min_dist: Minimum distance for UMAP (default: 0.1)
         random_state: Random state for reproducibility. If None, allows parallelism (default: None)
@@ -224,80 +242,99 @@ def make_umap_cluster_figure_interactive(
         return None
     
     # --- Collect embeddings and metadata ---
+    # Support multiple embedding formats: dino_embedding (preferred for image-image), clip_embedding, or embedding_vector
     embeddings = []
     cell_data = []
+    cells_with_embeddings = 0
     
     print(f"🔄 Processing {len(all_cells)} cells...")
     for idx, c in enumerate(all_cells):
-        if "embedding_vector" in c:
-            embeddings.append(np.array(c["embedding_vector"], dtype=float))
-            
-            # Extract all metadata - check both direct fields and nested 'metadata' dict
-            # First try direct access (new format), then try nested 'metadata' dict (old format)
-            def get_field(field_name):
-                """Get field value from cell, checking both direct and nested metadata."""
-                if field_name in c and c[field_name] is not None:
-                    return c[field_name]
-                metadata = c.get("metadata", {})
-                if metadata and field_name in metadata:
-                    return metadata[field_name]
-                return None
-            
-            # Resize image to 50x50 thumbnail if available
-            image_b64_original = c.get("image", None)
-            image_b64_thumbnail = None
-            if image_b64_original:
-                image_b64_thumbnail = resize_image_base64(image_b64_original, size=(50, 50))
-                if image_b64_thumbnail and idx == 0:
-                    print(f"✓ Resized images to 50x50 thumbnails (original: {len(image_b64_original)/1024:.1f}KB → thumbnail: {len(image_b64_thumbnail)/1024:.1f}KB)")
-            
-            # Handle None values explicitly
-            well_row = c.get("well_row")
-            well_col = c.get("well_col")
-            field_index = c.get("field_index")
-            cell_index = c.get("cell_index") or c.get("field_cell_index")
-            
-            cell_info = {
-                "index": idx,
-                "id": c.get("id") or c.get("cell_id") or f"cell_{idx}",
-                "image_b64": image_b64_thumbnail,
-                "well_row": well_row if well_row is not None else "?",
-                "well_col": well_col if well_col is not None else "?",
-                "field_index": field_index if field_index is not None else "?",
-                "cell_index": cell_index if cell_index is not None else "?",
-            }
-            
-            # Extract all metadata fields
-            for field in metadata_fields:
-                val = get_field(field)
+        embedding = None
+        # Prefer DINOv2 for image-image similarity, then CLIP, then generic embedding_vector
+        if "dino_embedding" in c and c["dino_embedding"] is not None:
+            embedding = c["dino_embedding"]
+        elif "clip_embedding" in c and c["clip_embedding"] is not None:
+            embedding = c["clip_embedding"]
+        elif "embedding_vector" in c and c["embedding_vector"] is not None:
+            embedding = c["embedding_vector"]
+        
+        if embedding is not None:
+            try:
+                embeddings.append(np.array(embedding, dtype=float))
+                cells_with_embeddings += 1
+            except (ValueError, TypeError) as e:
+                print(f"⚠️ Failed to convert embedding for cell {idx}: {e}")
+                continue
+        else:
+            # Skip cells without embeddings
+            continue
+        
+        # Extract all metadata - check both direct fields and nested 'metadata' dict
+        # First try direct access (new format), then try nested 'metadata' dict (old format)
+        def get_field(field_name):
+            """Get field value from cell, checking both direct and nested metadata."""
+            if field_name in c and c[field_name] is not None:
+                return c[field_name]
+            metadata = c.get("metadata", {})
+            if metadata and field_name in metadata:
+                return metadata[field_name]
+            return None
+        
+        # Resize image to 50x50 thumbnail if available
+        image_b64_original = c.get("image", None)
+        image_b64_thumbnail = None
+        if image_b64_original:
+            image_b64_thumbnail = resize_image_base64(image_b64_original, size=(50, 50))
+            if image_b64_thumbnail and idx == 0:
+                print(f"✓ Resized images to 50x50 thumbnails (original: {len(image_b64_original)/1024:.1f}KB → thumbnail: {len(image_b64_thumbnail)/1024:.1f}KB)")
+        
+        # Handle None values explicitly
+        well_row = c.get("well_row")
+        well_col = c.get("well_col")
+        field_index = c.get("field_index")
+        cell_index = c.get("cell_index") or c.get("field_cell_index")
+        
+        cell_info = {
+            "index": idx,
+            "id": c.get("id") or c.get("cell_id") or f"cell_{idx}",
+            "image_b64": image_b64_thumbnail,
+            "well_row": well_row if well_row is not None else "?",
+            "well_col": well_col if well_col is not None else "?",
+            "field_index": field_index if field_index is not None else "?",
+            "cell_index": cell_index if cell_index is not None else "?",
+        }
+        
+        # Extract all metadata fields
+        for field in metadata_fields:
+            val = get_field(field)
+            try:
+                cell_info[field] = float(val) if val is not None else 0.0
+            except (TypeError, ValueError):
+                cell_info[field] = 0.0
+        
+        # Extract fluorescence intensity fields (mean_intensity_*)
+        for key in c:
+            if key.startswith('mean_intensity_'):
+                val = c.get(key)
                 try:
-                    cell_info[field] = float(val) if val is not None else 0.0
+                    cell_info[key] = float(val) if val is not None else None
                 except (TypeError, ValueError):
-                    cell_info[field] = 0.0
-            
-            # Extract fluorescence intensity fields (mean_intensity_*)
-            for key in c:
+                    cell_info[key] = None
+        # Also check nested metadata for fluorescence fields
+        metadata = c.get("metadata", {})
+        if metadata:
+            for key in metadata:
                 if key.startswith('mean_intensity_'):
-                    val = c.get(key)
+                    val = metadata.get(key)
                     try:
                         cell_info[key] = float(val) if val is not None else None
                     except (TypeError, ValueError):
                         cell_info[key] = None
-            # Also check nested metadata for fluorescence fields
-            metadata = c.get("metadata", {})
-            if metadata:
-                for key in metadata:
-                    if key.startswith('mean_intensity_'):
-                        val = metadata.get(key)
-                        try:
-                            cell_info[key] = float(val) if val is not None else None
-                        except (TypeError, ValueError):
-                            cell_info[key] = None
-            
-            cell_data.append(cell_info)
+        
+        cell_data.append(cell_info)
     
     if len(embeddings) < 5:
-        print("⚠️ Too few cells with embeddings → clustering skipped.")
+        print(f"⚠️ Too few cells with embeddings ({cells_with_embeddings}/{len(all_cells)}) → clustering skipped. Need at least 5 cells with embeddings.")
         return None
     
     E = np.vstack(embeddings)   # (N, D)
@@ -472,7 +509,8 @@ def make_umap_cluster_figure_interactive(
     )
     
     # --- Generate HTML ---
-    html = fig.to_html(include_plotlyjs='cdn', div_id='umap-plot')
+    # Use full_html=True to ensure proper HTML structure with DOCTYPE, head, and body tags
+    html = fig.to_html(include_plotlyjs='cdn', div_id='umap-plot', full_html=True)
     
     # --- Inject custom CSS, JavaScript, and tab controls ---
     import json
@@ -824,5 +862,7 @@ def make_umap_cluster_figure_interactive(
     html = html.replace('<div id="umap-plot"', custom_script + '<div id="umap-plot"')
     
     print(f"✓ Generated interactive UMAP with {len(metadata_fields)} metadata color modes")
+    print(f"✓ UMAP coordinates range: X=[{X_2d[:, 0].min():.2f}, {X_2d[:, 0].max():.2f}], Y=[{X_2d[:, 1].min():.2f}, {X_2d[:, 1].max():.2f}]")
+    print(f"✓ HTML length: {len(html)} characters")
     
     return html

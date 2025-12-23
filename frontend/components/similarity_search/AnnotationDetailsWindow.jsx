@@ -293,7 +293,8 @@ const AnnotationDetailsWindow = ({
               // Include embeddings if available
               if (annotation.embeddings) {
                 exportData.embeddings = {
-                  imageEmbedding: annotation.embeddings.imageEmbedding,
+                  clipEmbedding: annotation.embeddings.clipEmbedding,
+                  dinoEmbedding: annotation.embeddings.dinoEmbedding,
                   textEmbedding: annotation.embeddings.textEmbedding,
                   generatedAt: annotation.embeddings.generatedAt
                 };

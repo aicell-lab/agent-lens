@@ -439,7 +439,7 @@ export const processSegmentationPolygon = async (
     // Generate image embedding (text embedding not needed for segmentation)
     const { generateImageEmbedding } = await import('./annotationEmbeddingService');
     
-    const imageEmbedding = await generateImageEmbedding(imageBlob);
+    const imageEmbeddings = await generateImageEmbedding(imageBlob);
 
     // Generate 50x50 preview
     const { generatePreviewFromDataUrl } = await import('./previewImageUtils');
@@ -460,7 +460,8 @@ export const processSegmentationPolygon = async (
       annotation: annotation,
       metadata: metadata,
       embeddings: {
-        imageEmbedding,
+        clipEmbedding: imageEmbeddings.clipEmbedding,
+        dinoEmbedding: imageEmbeddings.dinoEmbedding,
         textEmbedding: null, // Not needed for segmentation annotations
         extractedImageDataUrl
       },
@@ -867,9 +868,9 @@ export const batchProcessSegmentationPolygons = async (
       // Step 5: Process results - create final annotation objects
       for (let i = 0; i < validBatchData.length; i++) {
         const data = validBatchData[i];
-        const imageEmbedding = imageEmbeddings[i];
+        const imageEmbeddingObj = imageEmbeddings[i];
 
-        if (!imageEmbedding) {
+        if (!imageEmbeddingObj) {
           failedCount++;
           failedPolygons.push({ 
             index: data.globalIndex, 
@@ -907,7 +908,8 @@ export const batchProcessSegmentationPolygons = async (
           annotation: data.annotation,
           metadata: metadata,
           embeddings: {
-            imageEmbedding,
+            clipEmbedding: imageEmbeddingObj.clipEmbedding,
+            dinoEmbedding: imageEmbeddingObj.dinoEmbedding,
             textEmbedding: null, // Not needed for segmentation annotations
             extractedImageDataUrl: null
           },

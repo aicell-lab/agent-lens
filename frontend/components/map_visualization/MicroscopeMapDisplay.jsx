@@ -4046,7 +4046,9 @@ const MicroscopeMapDisplay = forwardRef(({
 
   // Image similarity search handler (for Find Similar button in SimilaritySearchPanel)
   const handleFindSimilar = useCallback(async (annotation) => {
-    if (!annotation.embeddings?.imageEmbedding) {
+    // Use DINOv2 embedding for image-image similarity search, fallback to CLIP
+    const imageEmbedding = annotation.embeddings?.dinoEmbedding || annotation.embeddings?.clipEmbedding;
+    if (!imageEmbedding) {
       showNotification('This annotation does not have embeddings. Cannot search for similar cells.', 'warning');
       return;
     }
@@ -4088,7 +4090,7 @@ const MicroscopeMapDisplay = forwardRef(({
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(annotation.embeddings.imageEmbedding)
+        body: JSON.stringify(imageEmbedding)
       });
 
       if (response.ok) {

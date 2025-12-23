@@ -158,9 +158,13 @@ def get_frontend_api():
 
     @app.post("/embedding/image")
     async def generate_image_embedding(image: UploadFile = File(...)):
-        """Generate a CLIP image embedding from an uploaded image.
+        """Generate both CLIP and DINOv2 image embeddings from an uploaded image.
+        
+        Returns both embeddings:
+        - CLIP (512D) for image-text similarity
+        - DINOv2 (768D) for image-image similarity
 
-        Returns a JSON object with a 512-d float array.
+        Returns a JSON object with both embedding arrays.
         """
         try:
             if not image.content_type or not image.content_type.startswith("image/"):
@@ -168,9 +172,14 @@ def get_frontend_api():
             image_bytes = await image.read()
             if not image_bytes:
                 raise HTTPException(status_code=400, detail="Empty image upload")
-            from agent_lens.utils.weaviate_search import generate_image_embedding
-            embedding = await generate_image_embedding(image_bytes)
-            return {"model": "ViT-B/32", "embedding": embedding, "dimension": len(embedding)}
+            from agent_lens.utils.embedding_generator import generate_image_embedding
+            embeddings = await generate_image_embedding(image_bytes)
+            return {
+                "clip_embedding": embeddings["clip_embedding"],
+                "clip_dimension": len(embeddings["clip_embedding"]),
+                "dino_embedding": embeddings["dino_embedding"],
+                "dino_dimension": len(embeddings["dino_embedding"])
+            }
         except HTTPException:
             raise
         except Exception as e:
@@ -180,10 +189,14 @@ def get_frontend_api():
 
     @app.post("/embedding/image-batch")
     async def generate_image_embedding_batch(images: List[UploadFile] = File(...)):
-        """Generate CLIP image embeddings from multiple uploaded images in batch.
+        """Generate both CLIP and DINOv2 image embeddings from multiple uploaded images in batch.
         
         This endpoint uses optimized batch processing with parallel I/O for significantly faster
         embedding generation, especially when using GPU acceleration.
+        
+        Returns both embeddings for each image:
+        - CLIP (512D) for image-text similarity
+        - DINOv2 (768D) for image-image similarity
 
         Args:
             images: List of image files to process
@@ -193,9 +206,15 @@ def get_frontend_api():
                 {
                     "success": True,
                     "results": [
-                        {"success": True, "embedding": [...], "dimension": 512, "model": "ViT-B/32"},
+                        {
+                            "success": True,
+                            "clip_embedding": [...],
+                            "clip_dimension": 512,
+                            "dino_embedding": [...],
+                            "dino_dimension": 768
+                        },
                         None,  # if failed
-                        {"success": True, "embedding": [...], "dimension": 512, "model": "ViT-B/32"},
+                        {...}
                     ],
                     "count": 3
                 }
@@ -204,7 +223,7 @@ def get_frontend_api():
             if not images or len(images) == 0:
                 raise HTTPException(status_code=400, detail="At least one image is required")
             
-            from agent_lens.utils.weaviate_search import generate_image_embeddings_batch
+            from agent_lens.utils.embedding_generator import generate_image_embeddings_batch
             
             # Parallel image reading for faster I/O
             async def read_image(idx: int, image: UploadFile):
@@ -243,13 +262,14 @@ def get_frontend_api():
             
             # Map results back to original order
             results = [None] * len(images)
-            for valid_idx, embedding in zip(valid_indices, embeddings):
-                if embedding is not None:
+            for valid_idx, embedding_dict in zip(valid_indices, embeddings):
+                if embedding_dict is not None:
                     results[valid_idx] = {
                         "success": True,
-                        "embedding": embedding,
-                        "dimension": len(embedding),
-                        "model": "ViT-B/32"
+                        "clip_embedding": embedding_dict["clip_embedding"],
+                        "clip_dimension": len(embedding_dict["clip_embedding"]) if embedding_dict["clip_embedding"] else 0,
+                        "dino_embedding": embedding_dict["dino_embedding"],
+                        "dino_dimension": len(embedding_dict["dino_embedding"]) if embedding_dict["dino_embedding"] else 0
                     }
                 # else: results[valid_idx] remains None
             
@@ -279,12 +299,11 @@ def get_frontend_api():
             if not text or not text.strip():
                 raise HTTPException(status_code=400, detail="Text input cannot be empty")
             
-            from agent_lens.utils.weaviate_search import generate_text_embedding
+            from agent_lens.utils.embedding_generator import generate_text_embedding
             embedding = await generate_text_embedding(text.strip())
             return {
                 "success": True,
-                "model": "ViT-B/32", 
-                "embedding": embedding, 
+                "clip_embedding": embedding, 
                 "dimension": len(embedding),
                 "text": text.strip()
             }
@@ -1393,23 +1412,27 @@ def get_frontend_api():
     return serve_fastapi
 
 
-async def preload_clip_model():
+async def preload_embedding_models():
     """
-    Preload CLIP model during service startup to avoid delays during first use.
-    Uses the shared CLIP model from weaviate_search.py.
+    Preload embedding models during service startup to avoid delays during first use.
+    Uses the shared embedding models from weaviate_search.py.
     """
-    logger.info("Preloading CLIP model for faster startup...")
+    logger.info("Preloading embedding models for faster startup...")
     
     try:
         # Preload CLIP model (shared with similarity service)
         logger.info("Loading CLIP model...")
-        from agent_lens.utils.weaviate_search import _load_clip_model
+        from agent_lens.utils.embedding_generator import _load_clip_model
         _load_clip_model()
-        logger.info("✓ CLIP model loaded successfully - similarity search will be faster!")
+        # Preload DINOv2 model (shared with similarity service)
+        logger.info("Loading DINOv2 model...")
+        from agent_lens.utils.embedding_generator import _load_dinov2_model
+        _load_dinov2_model()
+        logger.info("✓ Embedding models loaded successfully - similarity search will be faster!")
         
     except Exception as e:
-        logger.warning(f"Failed to preload CLIP model: {e}")
-        logger.warning("CLIP will be loaded on first use (may cause delays)")
+        logger.warning(f"Failed to preload embedding models: {e}")
+        logger.warning("Embedding models will be loaded on first use (may cause delays)")
 
 async def setup_service(server, server_id="agent-lens"):
     """
@@ -1429,9 +1452,9 @@ async def setup_service(server, server_id="agent-lens"):
     if is_connect_server and not is_docker:
         server_id = "agent-lens-test"
     
-    # Preload CLIP model for faster startup
-    logger.info("Preloading CLIP model...")
-    await preload_clip_model()
+    # Preload embedding models for faster startup
+    logger.info("Preloading embedding models...")
+    await preload_embedding_models()
     
     # Ensure artifact_manager_instance is connected
     if artifact_manager_instance.server is None:
@@ -1459,12 +1482,11 @@ async def setup_service(server, server_id="agent-lens"):
             if not text or not text.strip():
                 raise ValueError("Text input cannot be empty")
             
-            from agent_lens.utils.weaviate_search import generate_text_embedding
+            from agent_lens.utils.embedding_generator import generate_text_embedding
             embedding = await generate_text_embedding(text.strip())
             return {
                 "success": True,
-                "model": "ViT-B/32",
-                "embedding": embedding,
+                "clip_embedding": embedding,
                 "dimension": len(embedding),
                 "text": text.strip()
             }
@@ -1477,16 +1499,35 @@ async def setup_service(server, server_id="agent-lens"):
     @schema_function()
     async def generate_image_embeddings_batch_rpc(images_base64: List[str]) -> dict:
         """
-        Generate CLIP image embeddings for multiple images in batch via hypha-rpc.
+        Generate both CLIP and DINOv2 image embeddings for multiple images in batch via hypha-rpc.
         
         This endpoint uses optimized batch processing with parallel I/O for significantly faster
         embedding generation, especially when using GPU acceleration.
+        
+        Returns both embeddings for each image:
+        - CLIP (512D) for image-text similarity
+        - DINOv2 (768D) for image-image similarity
         
         Args:
             images_base64: List of base64-encoded image data strings
             
         Returns:
             dict: JSON object with success flag, results array, and count
+                {
+                    "success": True,
+                    "results": [
+                        {
+                            "success": True,
+                            "clip_embedding": [...],
+                            "clip_dimension": 512,
+                            "dino_embedding": [...],
+                            "dino_dimension": 768
+                        },
+                        None,  # if failed
+                        {...}
+                    ],
+                    "count": N
+                }
         """
         try:
             if not images_base64 or len(images_base64) == 0:
@@ -1508,18 +1549,19 @@ async def setup_service(server, server_id="agent-lens"):
             if not image_bytes_list:
                 raise ValueError("No valid images found in request")
             
-            from agent_lens.utils.weaviate_search import generate_image_embeddings_batch
+            from agent_lens.utils.embedding_generator import generate_image_embeddings_batch
             embeddings = await generate_image_embeddings_batch(image_bytes_list)
             
             # Map results back to original order
             results = [None] * len(images_base64)
-            for valid_idx, embedding in zip(valid_indices, embeddings):
-                if embedding is not None:
+            for valid_idx, embedding_dict in zip(valid_indices, embeddings):
+                if embedding_dict is not None:
                     results[valid_idx] = {
                         "success": True,
-                        "embedding": embedding,
-                        "dimension": len(embedding),
-                        "model": "ViT-B/32"
+                        "clip_embedding": embedding_dict["clip_embedding"],
+                        "clip_dimension": len(embedding_dict["clip_embedding"]) if embedding_dict["clip_embedding"] else 0,
+                        "dino_embedding": embedding_dict["dino_embedding"],
+                        "dino_dimension": len(embedding_dict["dino_embedding"]) if embedding_dict["dino_embedding"] else 0
                     }
             
             return {
@@ -1536,13 +1578,47 @@ async def setup_service(server, server_id="agent-lens"):
     # Helper function to process a single cell (runs in parallel threads)
     fixed_channel_order = ['BF_LED_matrix_full', 'Fluorescence_405_nm_Ex', 'Fluorescence_488_nm_Ex', 'Fluorescence_638_nm_Ex', 'Fluorescence_561_nm_Ex', 'Fluorescence_730_nm_Ex']
 
+    def resize_and_pad_to_square_rgb(cell_rgb_u8: np.ndarray, out_size: int, pad_value: int) -> np.ndarray:
+        """
+        Resize and pad cell image to a square for consistent embedding.
+        
+        This ensures all cells have the same input size (224x224 for CLIP or DINOv2),
+        preventing the embedding generator from doing variable cropping that can change
+        the embedding based on the original crop's aspect ratio.
+        
+        Args:
+            cell_rgb_u8: (H,W,3) uint8 RGB image
+            out_size: Target square size (e.g., 224 for CLIP or DINOv2)
+            pad_value: Padding value 0..255 (typically background brightness)
+            
+        Returns:
+            (out_size, out_size, 3) uint8 RGB image
+        """
+        assert cell_rgb_u8.dtype == np.uint8 and cell_rgb_u8.ndim == 3 and cell_rgb_u8.shape[2] == 3
+
+        pil = PILImage.fromarray(cell_rgb_u8, mode="RGB")
+        w, h = pil.size
+
+        # Scale so the whole crop fits inside out_size
+        scale = out_size / max(w, h)
+        new_w = max(1, int(round(w * scale)))
+        new_h = max(1, int(round(h * scale)))
+
+        pil = pil.resize((new_w, new_h), PILImage.Resampling.LANCZOS)
+
+        canvas = PILImage.new("RGB", (out_size, out_size), color=(pad_value, pad_value, pad_value))
+        canvas.paste(pil, ((out_size - new_w)//2, (out_size - new_h)//2))
+
+        return np.array(canvas, dtype=np.uint8)
+
     def _process_single_cell(
         poly: Dict[str, Any],
         poly_index: int,
         image_data_np: np.ndarray,
         mask: np.ndarray,
         brightfield: np.ndarray,
-        fixed_channel_order: List[str]
+        fixed_channel_order: List[str],
+        background_bright_value: float,
     ) -> Tuple[int, Optional[Dict[str, Any]], Optional[str]]:
         """
         Process a single cell to extract metadata and generate cell image.
@@ -1580,17 +1656,30 @@ async def setup_service(server, server_id="agent-lens"):
                 return (poly_index, None, None)
             prop = props[0]
             
-            # Extract bounding box
+            # Extract bounding box and expand it by a fixed factor (e.g., 1.3x) centered on the cell
             min_row, min_col, max_row, max_col = prop.bbox
-            
-            # Extract cell image region with padding
-            padding = 5
+
             H, W = image_data_np.shape[:2]
-            y_min = max(0, min_row - padding)
-            y_max = min(H, max_row + padding)
-            x_min = max(0, min_col - padding)
-            x_max = min(W, max_col + padding)
-            
+            scale = 1.3  # expansion factor for bounding box (consistent for every cell)
+
+            # Center of bbox
+            cy = (min_row + max_row) / 2.0
+            cx = (min_col + max_col) / 2.0
+
+            # Original height/width
+            bbox_h = max_row - min_row
+            bbox_w = max_col - min_col
+
+            # Expanded dimensions
+            new_h = int(np.round(bbox_h * scale))
+            new_w = int(np.round(bbox_w * scale))
+
+            # Calculate new coordinates, keep within image bounds
+            y_min = int(np.clip(cy - new_h / 2.0, 0, H))
+            y_max = int(np.clip(cy + new_h / 2.0, 0, H))
+            x_min = int(np.clip(cx - new_w / 2.0, 0, W))
+            x_max = int(np.clip(cx + new_w / 2.0, 0, W))
+
             # Extract only brightfield channel (channel 0) for cell image
             if image_data_np.ndim == 3:
                 # Extract only channel 0 (brightfield)
@@ -1598,24 +1687,58 @@ async def setup_service(server, server_id="agent-lens"):
             else:
                 # Already 2D, use as is
                 cell_image_region = image_data_np[y_min:y_max, x_min:x_max].copy()
-            
-            # Crop cell mask to same region
-            cell_mask_region = cell_mask[y_min:y_max, x_min:x_max]
+
+            # Apply percentile normalization (1-99%) to grayscale crop for stable DINO embeddings
+            # This should be done on grayscale before converting to RGB
+            p_low = None
+            p_high = None
+            if cell_image_region.size > 0:
+                p_low = np.percentile(cell_image_region, 1.0)
+                p_high = np.percentile(cell_image_region, 99.0)
+                
+                # Clamp values to percentile range
+                cell_image_region = np.clip(cell_image_region, p_low, p_high)
+                
+                # Scale to 0-255 range if there's any variation
+                if p_high > p_low:
+                    cell_image_region = ((cell_image_region - p_low) / (p_high - p_low) * 255.0)
+                else:
+                    # All pixels have the same value, set to middle gray
+                    cell_image_region = np.full_like(cell_image_region, 128.0)
+                
+                # Convert to uint8 after normalization
+                cell_image_region = cell_image_region.astype(np.uint8)
+            else:
+                cell_image_region = cell_image_region.astype(np.uint8)
+
+            # Crop masks to same region
+            cell_mask_region = cell_mask[y_min:y_max, x_min:x_max]  # Target cell mask
+            mask_region = mask[y_min:y_max, x_min:x_max]  # Full mask with all cell IDs
             
             # Convert brightfield (grayscale) to RGB uint8 for embedding generation
             # Stack the single channel 3 times to create RGB (grayscale to RGB)
             cell_image_rgb = np.stack([cell_image_region] * 3, axis=-1)
             
-            # Ensure uint8
+            # Ensure uint8 (and compute matching uint8 background value)
             if cell_image_rgb.dtype != np.uint8:
-                if cell_image_rgb.max() > 255:
-                    cell_image_rgb = (cell_image_rgb / cell_image_rgb.max() * 255).astype(np.uint8)
+                max_val = float(cell_image_rgb.max()) if cell_image_rgb.size else 0.0
+                if max_val > 255:
+                    scale = 255.0 / max_val
+                    cell_image_rgb = (cell_image_rgb * scale).astype(np.uint8)
+                    bg_u8 = int(np.clip(background_bright_value * scale, 0, 255))
                 else:
                     cell_image_rgb = cell_image_rgb.astype(np.uint8)
+                    bg_u8 = int(np.clip(background_bright_value, 0, 255))
+            else:
+                bg_u8 = int(np.clip(background_bright_value, 0, 255))
             
-            # Apply cell mask to isolate the cell (set background to black)
-            cell_mask_3d = np.expand_dims(cell_mask_region, axis=2)
-            cell_image_rgb = cell_image_rgb * cell_mask_3d
+            # Apply cell mask to isolate the cell (fill outside-cell pixels with background bright value)
+            cell_mask_3d = np.expand_dims(cell_mask_region.astype(bool), axis=2)
+            cell_image_rgb = np.where(cell_mask_3d, cell_image_rgb, bg_u8).astype(np.uint8)
+            
+            # Resize and pad to 224x224 square for consistent embedding
+            # This prevents the embedding generator from doing variable cropping
+            cell_image_rgb = resize_and_pad_to_square_rgb(cell_image_rgb, out_size=224, pad_value=bg_u8)
             
             # Convert to PIL Image and encode as base64 PNG
             cell_pil = PILImage.fromarray(cell_image_rgb, mode='RGB')
@@ -1821,7 +1944,7 @@ async def setup_service(server, server_id="agent-lens"):
             max_workers: Maximum number of worker threads (default: None = auto-detect CPU count)
         
         Returns:
-            List of metadata dictionaries, one per cell, with 'image' and 'embedding_vector' fields
+            List of metadata dictionaries, one per cell, with 'image', 'clip_embedding', and 'dino_embedding' fields
         """
         import concurrent.futures
         import os
@@ -1837,13 +1960,19 @@ async def setup_service(server, server_id="agent-lens"):
         else:
             mask = segmentation_mask.astype(np.uint32)
         
+        # Compute a global background bright value from non-cell pixels (mask == 0)
+        non_cell_pixels = brightfield[mask == 0]
+        if non_cell_pixels.size == 0:
+            raise ValueError("No non-cell pixels found (mask==0). Cannot compute background median.")
+        background_bright_value = float(np.median(non_cell_pixels))
+        
         if max_workers is None:
             max_workers = min(len(cell_polygons), os.cpu_count() or 4)
         
         # Step 1: Process cells in parallel using ThreadPoolExecutor
         # Prepare arguments for parallel processing
         process_args = [
-            (poly, idx, image_data_np, mask, brightfield, fixed_channel_order)
+            (poly, idx, image_data_np, mask, brightfield, fixed_channel_order, background_bright_value)
             for idx, poly in enumerate(cell_polygons)
         ]
         
@@ -1893,32 +2022,56 @@ async def setup_service(server, server_id="agent-lens"):
                     embeddings = embedding_result.get("results", [])
                     
                     # Step 3: Map embeddings back to results
+                    # embeddings[idx] corresponds to cell_images_base64[idx]
+                    # cell_indices[idx] tells us which result index that image belongs to
+                    if len(embeddings) != len(cell_indices):
+                        print(f"Warning: Mismatch between embeddings count ({len(embeddings)}) and cell_indices count ({len(cell_indices)})")
+                    
                     for idx, embedding_data in enumerate(embeddings):
-                        if idx < len(cell_indices):
-                            result_idx = cell_indices[idx]
-                            if result_idx < len(results):
-                                if embedding_data is not None and embedding_data.get("success"):
-                                    results[result_idx]["embedding_vector"] = embedding_data.get("embedding", None)
-                                else:
-                                    results[result_idx]["embedding_vector"] = None
+                        if idx >= len(cell_indices):
+                            print(f"Warning: Embedding index {idx} out of range for cell_indices (len={len(cell_indices)})")
+                            continue
+                        
+                        result_idx = cell_indices[idx]
+                        if result_idx >= len(results):
+                            print(f"Warning: Result index {result_idx} out of range for results (len={len(results)})")
+                            continue
+                        
+                        # Handle None embeddings (failed decoding or processing)
+                        if embedding_data is None:
+                            results[result_idx]["clip_embedding"] = None
+                            results[result_idx]["dino_embedding"] = None
+                            continue
+                        
+                        # Handle successful embeddings
+                        if embedding_data.get("success"):
+                            results[result_idx]["clip_embedding"] = embedding_data.get("clip_embedding", None)
+                            results[result_idx]["dino_embedding"] = embedding_data.get("dino_embedding", None)
                         else:
-                            print(f"Warning: Embedding index {idx} out of range for cell_indices")
+                            # Embedding generation failed for this image
+                            results[result_idx]["clip_embedding"] = None
+                            results[result_idx]["dino_embedding"] = None
                 else:
                     print(f"Warning: Embedding generation failed or returned no results")
                     # Set all embeddings to None
                     for result in results:
-                        if "embedding_vector" not in result:
-                            result["embedding_vector"] = None
+                        if "clip_embedding" not in result:
+                            result["clip_embedding"] = None
+                        if "dino_embedding" not in result:
+                            result["dino_embedding"] = None
             except Exception as e:
                 print(f"Error generating embeddings: {e}")
                 # Set all embeddings to None on error
                 for result in results:
-                    if "embedding_vector" not in result:
-                        result["embedding_vector"] = None
+                    if "clip_embedding" not in result:
+                        result["clip_embedding"] = None
+                    if "dino_embedding" not in result:
+                        result["dino_embedding"] = None
         else:
             # No images to process
             for result in results:
-                result["embedding_vector"] = None
+                result["clip_embedding"] = None
+                result["dino_embedding"] = None
         
         return results
             
@@ -1950,7 +2103,8 @@ async def setup_service(server, server_id="agent-lens"):
         For parallelism, set random_state=None and n_jobs=-1 (uses all CPU cores).
         
         Args:
-            all_cells: List of cell dictionaries, each should have 'embedding_vector' key
+            all_cells: List of cell dictionaries, each should have 'dino_embedding', 'clip_embedding', or 'embedding_vector' key
+                (prefers dino_embedding for image-image similarity, then clip_embedding, then embedding_vector)
             n_neighbors: Number of neighbors for UMAP (default: 15)
             min_dist: Minimum distance for UMAP (default: 0.1)
             random_state: Random state for reproducibility. If None, allows parallelism (default: None)
@@ -1968,7 +2122,10 @@ async def setup_service(server, server_id="agent-lens"):
                     "html": None
                 }
             
-            from agent_lens.utils.umap_analysis_utils import make_umap_cluster_figure_interactive
+            from agent_lens.utils.umap_analysis_utils import (
+                make_umap_cluster_figure_interactive,
+                PLOTLY_AVAILABLE
+            )
             
             # Run in thread pool to avoid blocking
             html = await asyncio.to_thread(
@@ -1982,10 +2139,23 @@ async def setup_service(server, server_id="agent-lens"):
             )
             
             if html is None:
+                # Provide more specific error message
+                cells_with_embeddings = sum(1 for c in all_cells 
+                                           if c.get("dino_embedding") or c.get("clip_embedding") or c.get("embedding_vector"))
+                
+                if not PLOTLY_AVAILABLE:
+                    error_msg = "Plotly is not available. Install with: pip install plotly"
+                elif cells_with_embeddings < 5:
+                    error_msg = f"Too few cells with embeddings ({cells_with_embeddings}/{len(all_cells)}). Need at least 5 cells with dino_embedding, clip_embedding, or embedding_vector."
+                else:
+                    error_msg = "Failed to generate interactive UMAP figure (unknown error)"
+                
                 return {
                     "success": False,
-                    "error": "Failed to generate interactive UMAP figure (Plotly not available or too few cells)",
-                    "html": None
+                    "error": error_msg,
+                    "html": None,
+                    "cells_with_embeddings": cells_with_embeddings,
+                    "total_cells": len(all_cells)
                 }
             
             return {
