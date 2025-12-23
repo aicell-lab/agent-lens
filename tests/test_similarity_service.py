@@ -658,11 +658,10 @@ class TestWeaviateSimilarityService:
                 async with session.post(text_url, params=text_data) as response:
                     assert response.status == 200
                     result = await response.json()
-                    assert result["model"] == "ViT-B/32"
-                    assert "embedding" in result
+                    assert "clip_embedding" in result
                     assert result["dimension"] == 512
                     assert result["text"] == "microscopy image of cells"
-                    assert len(result["embedding"]) == 512
+                    assert len(result["clip_embedding"]) == 512
                     print("✅ Text embedding generated successfully")
                 
                 # Test image embedding endpoint
@@ -684,10 +683,9 @@ class TestWeaviateSimilarityService:
                 async with session.post(image_url, data=data) as response:
                     assert response.status == 200
                     result = await response.json()
-                    assert result["model"] == "ViT-B/32"
-                    assert "embedding" in result
-                    assert result["dimension"] == 512
-                    assert len(result["embedding"]) == 512
+                    assert "clip_embedding" in result
+                    assert result["clip_dimension"] == 512
+                    assert len(result["clip_embedding"]) == 512
                     print("✅ Image embedding generated successfully")
                 
                 # Test error cases
