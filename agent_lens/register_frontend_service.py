@@ -1833,8 +1833,8 @@ async def setup_service(server, server_id="agent-lens"):
                                 field_name = f"mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
                                 metadata[field_name] = None
                                 # Also set top20_mean to None
-                                top20_field_name = f"top20_mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
-                                metadata[top20_field_name] = None
+                                top10_field_name = f"top10_mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
+                                metadata[top10_field_name] = None
                     except Exception as e:
                         # If fluorescence calculation fails, continue without it
                         pass
@@ -1855,28 +1855,28 @@ async def setup_service(server, server_id="agent-lens"):
                                     field_name = f"mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
                                     metadata[field_name] = float(np.mean(channel_pixels))
                                     
-                                    # Top 20% brightest pixels mean (approximates nuclear intensity)
-                                    # Get top 20% brightest pixels directly (no background subtraction)
+                                    # Top 10% brightest pixels mean (approximates nuclear intensity)
+                                    # Get top 10% brightest pixels directly (no background subtraction)
                                     if len(channel_pixels) > 0:
-                                        # Calculate how many pixels represent top 20%
-                                        top_20_percent_count = max(1, int(np.ceil(len(channel_pixels) * 0.2)))
-                                        # Sort and take top 20% brightest pixels
+                                        # Calculate how many pixels represent top 10%
+                                        top_10_percent_count = max(1, int(np.ceil(len(channel_pixels) * 0.1)))
+                                        # Sort and take top 10% brightest pixels
                                         sorted_pixels = np.sort(channel_pixels)
-                                        top_20_pixels = sorted_pixels[-top_20_percent_count:]
-                                        top20_mean = float(np.mean(top_20_pixels))
+                                        top_10_pixels = sorted_pixels[-top_10_percent_count:]
+                                        top10_mean = float(np.mean(top_10_pixels))
                                         
                                         # Store as top20_mean_intensity_{channel_name}
-                                        top20_field_name = f"top20_mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
-                                        metadata[top20_field_name] = top20_mean
+                                        top10_field_name = f"top10_mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
+                                        metadata[top10_field_name] = top10_mean
                                     else:
-                                        top20_field_name = f"top20_mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
-                                        metadata[top20_field_name] = None
+                                        top10_field_name = f"top10_mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
+                                        metadata[top10_field_name] = None
                                 else:
                                     field_name = f"mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
                                     metadata[field_name] = None
-                                    # Also set top20_mean to None
-                                    top20_field_name = f"top20_mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
-                                    metadata[top20_field_name] = None
+                                    # Also set top10_mean to None
+                                    top10_field_name = f"top10_mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
+                                    metadata[top10_field_name] = None
                     except Exception as e:
                         # If fluorescence calculation fails, continue without it
                         pass
@@ -1932,9 +1932,9 @@ async def setup_service(server, server_id="agent-lens"):
                             channel_name = fixed_channel_order[channel_idx] if channel_idx < len(fixed_channel_order) else f"channel_{channel_idx}"
                             field_name = f"mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
                             metadata[field_name] = None
-                            # Also set top20_mean to None on error
-                            top20_field_name = f"top20_mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
-                            metadata[top20_field_name] = None
+                            # Also set top10_mean to None on error
+                            top10_field_name = f"top10_mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
+                            metadata[top10_field_name] = None
                 except Exception as e:
                     # If fluorescence calculation fails, continue without it
                     pass
