@@ -1832,6 +1832,9 @@ async def setup_service(server, server_id="agent-lens"):
                                 channel_name = fixed_channel_order[channel_idx] if channel_idx < len(fixed_channel_order) else f"channel_{channel_idx}"
                                 field_name = f"mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
                                 metadata[field_name] = None
+                                # Also set top20_mean to None
+                                top20_field_name = f"top20_mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
+                                metadata[top20_field_name] = None
                     except Exception as e:
                         # If fluorescence calculation fails, continue without it
                         pass
@@ -1851,9 +1854,29 @@ async def setup_service(server, server_id="agent-lens"):
                                     # Create sanitized field name (remove spaces, special chars)
                                     field_name = f"mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
                                     metadata[field_name] = float(np.mean(channel_pixels))
+                                    
+                                    # Top 20% brightest pixels mean (approximates nuclear intensity)
+                                    # Get top 20% brightest pixels directly (no background subtraction)
+                                    if len(channel_pixels) > 0:
+                                        # Calculate how many pixels represent top 20%
+                                        top_20_percent_count = max(1, int(np.ceil(len(channel_pixels) * 0.2)))
+                                        # Sort and take top 20% brightest pixels
+                                        sorted_pixels = np.sort(channel_pixels)
+                                        top_20_pixels = sorted_pixels[-top_20_percent_count:]
+                                        top20_mean = float(np.mean(top_20_pixels))
+                                        
+                                        # Store as top20_mean_intensity_{channel_name}
+                                        top20_field_name = f"top20_mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
+                                        metadata[top20_field_name] = top20_mean
+                                    else:
+                                        top20_field_name = f"top20_mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
+                                        metadata[top20_field_name] = None
                                 else:
                                     field_name = f"mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
                                     metadata[field_name] = None
+                                    # Also set top20_mean to None
+                                    top20_field_name = f"top20_mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
+                                    metadata[top20_field_name] = None
                     except Exception as e:
                         # If fluorescence calculation fails, continue without it
                         pass
@@ -1909,6 +1932,9 @@ async def setup_service(server, server_id="agent-lens"):
                             channel_name = fixed_channel_order[channel_idx] if channel_idx < len(fixed_channel_order) else f"channel_{channel_idx}"
                             field_name = f"mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
                             metadata[field_name] = None
+                            # Also set top20_mean to None on error
+                            top20_field_name = f"top20_mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
+                            metadata[top20_field_name] = None
                 except Exception as e:
                     # If fluorescence calculation fails, continue without it
                     pass
