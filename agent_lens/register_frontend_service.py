@@ -1746,6 +1746,43 @@ async def setup_service(server, server_id="agent-lens"):
             cell_pil.save(buffer, format='PNG')
             cell_image_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
             
+            # Extract fluorescent channel images (channels 1-5)
+            fluorescent_images = {}
+            if image_data_np.ndim == 3 and image_data_np.shape[2] > 1:
+                for channel_idx in range(1, min(6, image_data_np.shape[2])):
+                    channel_name = fixed_channel_order[channel_idx] if channel_idx < len(fixed_channel_order) else f"channel_{channel_idx}"
+                    
+                    # Extract channel data from the same bounding box region
+                    channel_region = image_data_np[y_min:y_max, x_min:x_max, channel_idx].copy()
+                    
+                    # NO normalization - keep raw values
+                    # Convert to uint8 if needed (scale if uint16)
+                    if channel_region.dtype == np.uint16:
+                        # Scale uint16 to uint8 range
+                        channel_region = (channel_region / 256).astype(np.uint8)
+                    elif channel_region.dtype != np.uint8:
+                        channel_region = channel_region.astype(np.uint8)
+                    
+                    # Convert to RGB (grayscale to RGB - all channels same)
+                    channel_rgb = np.stack([channel_region] * 3, axis=-1)
+                    
+                    # Apply cell mask - fill outside with BLACK (0) instead of background value
+                    cell_mask_3d = np.expand_dims(cell_mask_region.astype(bool), axis=2)
+                    channel_rgb = np.where(cell_mask_3d, channel_rgb, 0).astype(np.uint8)
+                    
+                    # Resize and pad to 224x224 with BLACK padding (0)
+                    channel_rgb = resize_and_pad_to_square_rgb(channel_rgb, out_size=224, pad_value=0)
+                    
+                    # Convert to PIL and encode as base64 PNG
+                    channel_pil = PILImage.fromarray(channel_rgb, mode='RGB')
+                    buffer = BytesIO()
+                    channel_pil.save(buffer, format='PNG')
+                    channel_image_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+                    
+                    # Store with sanitized field name
+                    field_name = f"image_{channel_name.replace(' ', '_').replace('-', '_')}"
+                    fluorescent_images[field_name] = channel_image_base64
+            
             # Morphological features
             try:
                 metadata["area"] = float(prop.area)
@@ -1865,7 +1902,7 @@ async def setup_service(server, server_id="agent-lens"):
                                         top_10_pixels = sorted_pixels[-top_10_percent_count:]
                                         top10_mean = float(np.mean(top_10_pixels))
                                         
-                                        # Store as top20_mean_intensity_{channel_name}
+                                        # Store as top10_mean_intensity_{channel_name}
                                         top10_field_name = f"top10_mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
                                         metadata[top10_field_name] = top10_mean
                                     else:
@@ -1941,6 +1978,10 @@ async def setup_service(server, server_id="agent-lens"):
             
             # Add image to metadata (will add embedding_vector after batch processing)
             metadata["image"] = cell_image_base64
+            
+            # Add fluorescent channel images
+            for field_name, image_base64 in fluorescent_images.items():
+                metadata[field_name] = image_base64
             
             return (poly_index, metadata, cell_image_base64)
             
