@@ -1619,6 +1619,7 @@ async def setup_service(server, server_id="agent-lens"):
         brightfield: np.ndarray,
         fixed_channel_order: List[str],
         background_bright_value: float,
+        background_fluorescence: Dict[int, float],
     ) -> Tuple[int, Optional[Dict[str, Any]], Optional[str]]:
         """
         Process a single cell to extract metadata and generate cell image.
@@ -1631,6 +1632,8 @@ async def setup_service(server, server_id="agent-lens"):
             mask: Instance mask array of shape (H, W) with cell IDs
             brightfield: Brightfield channel array of shape (H, W)
             fixed_channel_order: List of channel names
+            background_bright_value: Background value for brightfield channel
+            background_fluorescence: Dict mapping channel_idx to background value for fluorescent channels
         
         Returns:
             Tuple of (poly_index, metadata_dict, cell_image_base64) or (poly_index, None, None) if failed
@@ -1755,12 +1758,16 @@ async def setup_service(server, server_id="agent-lens"):
                     # Extract channel data from the same bounding box region
                     channel_region = image_data_np[y_min:y_max, x_min:x_max, channel_idx].copy()
                     
-                    # NO normalization - keep raw values
-                    # Convert to uint8 if needed (scale if uint16)
+                    # Apply background subtraction before converting to uint8
+                    bg_value = background_fluorescence.get(channel_idx, 0.0)
                     if channel_region.dtype == np.uint16:
+                        # For uint16, subtract background before scaling
+                        channel_region = np.maximum(channel_region.astype(np.float32) - bg_value, 0.0)
                         # Scale uint16 to uint8 range
                         channel_region = (channel_region / 256).astype(np.uint8)
-                    elif channel_region.dtype != np.uint8:
+                    else:
+                        # For other types, subtract background and clip
+                        channel_region = np.maximum(channel_region.astype(np.float32) - bg_value, 0.0)
                         channel_region = channel_region.astype(np.uint8)
                     
                     # Convert to RGB (grayscale to RGB - all channels same)
@@ -1888,17 +1895,23 @@ async def setup_service(server, server_id="agent-lens"):
                                 channel_pixels = channel_data[cell_mask > 0]
                                 
                                 if len(channel_pixels) > 0 and channel_data.max() > 0:
+                                    # Get background value for this channel
+                                    bg_value = background_fluorescence.get(channel_idx, 0.0)
+                                    
+                                    # Subtract background and clip to zero
+                                    channel_pixels_corrected = np.maximum(channel_pixels - bg_value, 0.0)
+                                    
                                     # Create sanitized field name (remove spaces, special chars)
                                     field_name = f"mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
-                                    metadata[field_name] = float(np.mean(channel_pixels))
+                                    metadata[field_name] = float(np.mean(channel_pixels_corrected))
                                     
                                     # Top 10% brightest pixels mean (approximates nuclear intensity)
-                                    # Get top 10% brightest pixels directly (no background subtraction)
-                                    if len(channel_pixels) > 0:
+                                    # Apply background subtraction before sorting
+                                    if len(channel_pixels_corrected) > 0:
                                         # Calculate how many pixels represent top 10%
-                                        top_10_percent_count = max(1, int(np.ceil(len(channel_pixels) * 0.1)))
+                                        top_10_percent_count = max(1, int(np.ceil(len(channel_pixels_corrected) * 0.1)))
                                         # Sort and take top 10% brightest pixels
-                                        sorted_pixels = np.sort(channel_pixels)
+                                        sorted_pixels = np.sort(channel_pixels_corrected)
                                         top_10_pixels = sorted_pixels[-top_10_percent_count:]
                                         top10_mean = float(np.mean(top_10_pixels))
                                         
@@ -2033,13 +2046,33 @@ async def setup_service(server, server_id="agent-lens"):
             raise ValueError("No non-cell pixels found (mask==0). Cannot compute background median.")
         background_bright_value = float(np.median(non_cell_pixels))
         
+        # Compute background values for fluorescent channels (channels 1-5)
+        # Only process channels that actually have signal in image_data_np
+        background_fluorescence = {}
+        if image_data_np.ndim == 3:
+            num_channels = image_data_np.shape[2]
+            for channel_idx in range(1, min(6, num_channels)):  # Skip channel 0 (brightfield)
+                channel_data = image_data_np[:, :, channel_idx]
+                
+                # Only compute background if channel has signal (max > 0)
+                if channel_data.max() > 0:
+                    non_cell_pixels_channel = channel_data[mask == 0]
+                    if non_cell_pixels_channel.size > 0:
+                        background_fluorescence[channel_idx] = float(np.median(non_cell_pixels_channel))
+                    else:
+                        # No non-cell pixels available, use 0 as fallback
+                        background_fluorescence[channel_idx] = 0.0
+                else:
+                    # Channel has no signal, skip background computation
+                    background_fluorescence[channel_idx] = 0.0
+        
         if max_workers is None:
             max_workers = min(len(cell_polygons), os.cpu_count() or 4)
         
         # Step 1: Process cells in parallel using ThreadPoolExecutor
         # Prepare arguments for parallel processing
         process_args = [
-            (poly, idx, image_data_np, mask, brightfield, fixed_channel_order, background_bright_value)
+            (poly, idx, image_data_np, mask, brightfield, fixed_channel_order, background_bright_value, background_fluorescence)
             for idx, poly in enumerate(cell_polygons)
         ]
         
