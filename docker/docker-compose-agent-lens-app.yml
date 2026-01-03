@@ -1,6 +1,6 @@
 services:
   agent-lens:
-    image: ghcr.io/aicell-lab/agent-lens:sha-2bfa3e6
+    image: ghcr.io/aicell-lab/agent-lens:sha-e28d6e9
     container_name: agent-lens
     # Optimize image pulling
     pull_policy: if_not_present
@@ -19,7 +19,7 @@ services:
     volumes:
       - agent-lens-cache:/app/.cache
       # Mount zarr dataset from host to container (same path)
-      - /mnt/shared_documents/offline_stitch_20251215-fullplate_2025-12-16_16-50-51.505093/data.zarr:/mnt/shared_documents/offline_stitch_20251215-fullplate_2025-12-16_16-50-51.505093/data.zarr:ro
+      - /mnt/shared_documents/20251215-illumination-calibrated/data.zarr:/mnt/shared_documents/20251215-illumination-calibrated/data.zarr:ro
     # GPU support: Use runtime for docker-compose, or deploy.resources for docker swarm
     runtime: nvidia
     deploy:
@@ -48,7 +48,7 @@ services:
       - ALL
 
   squid-control:
-    image: ghcr.io/aicell-lab/squid-control:sha-8838f9a
+    image: ghcr.io/aicell-lab/squid-control:sha-7e803d5
     container_name: squid-control
     # Optimize image pulling
     pull_policy: if_not_present
@@ -68,7 +68,7 @@ services:
     volumes:
       - squid-control-cache:/app/.cache
       # Mount zarr dataset from host to container (same path)
-      - /mnt/shared_documents/offline_stitch_20251215-fullplate_2025-12-16_16-50-51.505093/data.zarr:/mnt/shared_documents/offline_stitch_20251215-fullplate_2025-12-16_16-50-51.505093/data.zarr:ro
+      - /mnt/shared_documents/20251215-illumination-calibrated/data.zarr:/mnt/shared_documents/20251215-illumination-calibrated/data.zarr:ro
     healthcheck:
       test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/agent-lens/services/squid-control-simulation/is_service_healthy | jq -e '.status == \"ok\"'"]
       interval: 60s

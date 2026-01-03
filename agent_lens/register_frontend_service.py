@@ -50,7 +50,7 @@ SERVER_URL = "https://hypha.aicell.io"
 WORKSPACE_TOKEN = os.getenv("WORKSPACE_TOKEN")
 
 # OME-Zarr dataset path for streaming
-ZARR_DATASET_PATH = "/mnt/shared_documents/offline_stitch_20251215-fullplate_2025-12-16_16-50-51.505093/data.zarr"
+ZARR_DATASET_PATH = "/mnt/shared_documents/20251215-illumination-calibrated/data.zarr"
 
 async def get_artifact_manager():
     """Get a new connection to the artifact manager."""

@@ -33,3 +33,4 @@ coverage/
 # Jupyter notebooks
 *.ipynb
 docs/*.png
+docs/*.json
