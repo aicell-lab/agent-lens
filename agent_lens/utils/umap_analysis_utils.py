@@ -225,12 +225,17 @@ def make_umap_cluster_figure_interactive(
         n_neighbors: Number of neighbors for UMAP (default: 15)
         min_dist: Minimum distance for UMAP (default: 0.1)
         random_state: Random state for reproducibility. If None, allows parallelism (default: None)
-        n_jobs: Number of parallel jobs. -1 uses all CPU cores (default: None)
+        n_jobs: Number of parallel jobs. -1 uses all CPU cores (default: -1 for maximum parallelism)
         metadata_fields: List of metadata field names for heatmap tabs. If None, uses DEFAULT_METADATA_FIELDS
     
     Returns:
         HTML string of interactive Plotly figure with tab controls, or None if failed
     """
+    import time
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    
+    start_time = time.time()
+    
     # Use default metadata fields if not provided
     if metadata_fields is None:
         metadata_fields = DEFAULT_METADATA_FIELDS
@@ -241,16 +246,28 @@ def make_umap_cluster_figure_interactive(
     if not all_cells:
         return None
     
-    # --- Collect embeddings and metadata ---
-    # Support multiple embedding formats: dino_embedding (preferred for image-image), clip_embedding, or embedding_vector
-    embeddings = []
-    cell_data = []
-    cells_with_embeddings = 0
+    # Default to maximum parallelism
+    if n_jobs is None:
+        n_jobs = -1
     
-    print(f"🔄 Processing {len(all_cells)} cells...")
-    for idx, c in enumerate(all_cells):
+    print(f"🔄 Processing {len(all_cells)} cells with n_jobs={n_jobs}...")
+    
+    # --- Helper function to extract cell embedding and metadata ---
+    def get_field(c, field_name):
+        """Get field value from cell, checking both direct and nested metadata."""
+        if field_name in c and c[field_name] is not None:
+            return c[field_name]
+        metadata = c.get("metadata", {})
+        if metadata and field_name in metadata:
+            return metadata[field_name]
+        return None
+    
+    def process_cell(idx_and_cell):
+        """Process a single cell: extract embedding, resize image, extract metadata."""
+        idx, c = idx_and_cell
+        
+        # Extract embedding
         embedding = None
-        # Prefer DINOv2 for image-image similarity, then CLIP, then generic embedding_vector
         if "dino_embedding" in c and c["dino_embedding"] is not None:
             embedding = c["dino_embedding"]
         elif "clip_embedding" in c and c["clip_embedding"] is not None:
@@ -258,37 +275,25 @@ def make_umap_cluster_figure_interactive(
         elif "embedding_vector" in c and c["embedding_vector"] is not None:
             embedding = c["embedding_vector"]
         
-        if embedding is not None:
-            try:
-                embeddings.append(np.array(embedding, dtype=float))
-                cells_with_embeddings += 1
-            except (ValueError, TypeError) as e:
-                print(f"⚠️ Failed to convert embedding for cell {idx}: {e}")
-                continue
-        else:
-            # Skip cells without embeddings
-            continue
+        if embedding is None:
+            return None  # Skip cells without embeddings
         
-        # Extract all metadata - check both direct fields and nested 'metadata' dict
-        # First try direct access (new format), then try nested 'metadata' dict (old format)
-        def get_field(field_name):
-            """Get field value from cell, checking both direct and nested metadata."""
-            if field_name in c and c[field_name] is not None:
-                return c[field_name]
-            metadata = c.get("metadata", {})
-            if metadata and field_name in metadata:
-                return metadata[field_name]
+        try:
+            embedding_array = np.array(embedding, dtype=float)
+        except (ValueError, TypeError) as e:
+            print(f"⚠️ Failed to convert embedding for cell {idx}: {e}")
             return None
         
-        # Resize image to 50x50 thumbnail if available
-        image_b64_original = c.get("image", None)
+        # Resize image to 50x50 thumbnail if available (parallel)
         image_b64_thumbnail = None
+        image_b64_original = c.get("image", None)
         if image_b64_original:
-            image_b64_thumbnail = resize_image_base64(image_b64_original, size=(50, 50))
-            if image_b64_thumbnail and idx == 0:
-                print(f"✓ Resized images to 50x50 thumbnails (original: {len(image_b64_original)/1024:.1f}KB → thumbnail: {len(image_b64_thumbnail)/1024:.1f}KB)")
+            try:
+                image_b64_thumbnail = resize_image_base64(image_b64_original, size=(50, 50))
+            except Exception as e:
+                print(f"⚠️ Failed to resize image for cell {idx}: {e}")
         
-        # Handle None values explicitly
+        # Extract metadata
         well_row = c.get("well_row")
         well_col = c.get("well_col")
         field_index = c.get("field_index")
@@ -306,7 +311,7 @@ def make_umap_cluster_figure_interactive(
         
         # Extract all metadata fields
         for field in metadata_fields:
-            val = get_field(field)
+            val = get_field(c, field)
             try:
                 cell_info[field] = float(val) if val is not None else 0.0
             except (TypeError, ValueError):
@@ -320,6 +325,7 @@ def make_umap_cluster_figure_interactive(
                     cell_info[key] = float(val) if val is not None else None
                 except (TypeError, ValueError):
                     cell_info[key] = None
+        
         # Also check nested metadata for fluorescence fields
         metadata = c.get("metadata", {})
         if metadata:
@@ -331,41 +337,94 @@ def make_umap_cluster_figure_interactive(
                     except (TypeError, ValueError):
                         cell_info[key] = None
         
-        cell_data.append(cell_info)
+        return (embedding_array, cell_info)
+    
+    # --- Parallel processing of all cells ---
+    embeddings = []
+    cell_data = []
+    cells_with_embeddings = 0
+    
+    # Determine number of workers (use all CPUs for maximum speed)
+    max_workers = None if n_jobs == -1 else (n_jobs if n_jobs > 0 else None)
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all tasks
+        futures = {executor.submit(process_cell, (idx, c)): idx for idx, c in enumerate(all_cells)}
+        
+        # Collect results as they complete
+        results = []
+        for future in as_completed(futures):
+            result = future.result()
+            if result is not None:
+                results.append(result)
+                cells_with_embeddings += 1
+        
+        # Sort results by original index to maintain order
+        results.sort(key=lambda x: x[1]["index"])
+        
+        # Separate embeddings and cell_data
+        for embedding_array, cell_info in results:
+            embeddings.append(embedding_array)
+            cell_data.append(cell_info)
+    
+    processing_time = time.time() - start_time
+    print(f"✓ Processed {cells_with_embeddings}/{len(all_cells)} cells with embeddings in {processing_time:.2f}s")
     
     if len(embeddings) < 5:
         print(f"⚠️ Too few cells with embeddings ({cells_with_embeddings}/{len(all_cells)}) → clustering skipped. Need at least 5 cells with embeddings.")
         return None
     
     E = np.vstack(embeddings)   # (N, D)
+    n_samples = len(E)
     
-    # --- Normalize ---
+    # --- Normalize (vectorized) ---
+    print(f"🔄 Normalizing {n_samples} embeddings...")
     norms = np.linalg.norm(E, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
     E = E / norms
     
-    # --- UMAP embedding ---
-    if n_jobs is None:
-        n_jobs = -1 if random_state is None else 1
+    # --- UMAP embedding with optimized settings ---
+    # Adaptive n_neighbors for large datasets (reduce for speed)
+    adaptive_n_neighbors = min(n_neighbors, max(15, n_samples // 100))
+    if adaptive_n_neighbors < n_neighbors:
+        print(f"ℹ️ Reduced n_neighbors from {n_neighbors} to {adaptive_n_neighbors} for large dataset")
     
-    print(f"🔄 Computing UMAP embedding...")
+    print(f"🔄 Computing UMAP embedding (n_jobs={n_jobs}, n_neighbors={adaptive_n_neighbors})...")
+    umap_start = time.time()
     umap_model = UMAP(
         n_components=2,
-        n_neighbors=min(n_neighbors, len(E) - 1),
+        n_neighbors=min(adaptive_n_neighbors, n_samples - 1),
         min_dist=min_dist,
         metric="cosine",
         random_state=random_state,
         n_jobs=n_jobs,
+        low_memory=False,  # Use more memory for speed
+        verbose=False
     )
     X_2d = umap_model.fit_transform(E)
+    umap_time = time.time() - umap_start
+    print(f"✓ UMAP completed in {umap_time:.2f}s")
     
-    # --- Clustering on 2D UMAP coordinates ---
-    n_samples = len(X_2d)
+    # --- Clustering on 2D UMAP coordinates with optimized settings ---
     n_clusters = max(2, min(10, int(np.sqrt(n_samples / 2))))
     
-    print(f"🔄 Computing {n_clusters} clusters...")
-    kmeans = KMeans(n_clusters=n_clusters, random_state=random_state, n_init=10)
+    # Adaptive n_init for KMeans (reduce for large datasets)
+    adaptive_n_init = 10 if n_samples < 1000 else (5 if n_samples < 5000 else 3)
+    
+    print(f"🔄 Computing {n_clusters} clusters (n_init={adaptive_n_init})...")
+    kmeans_start = time.time()
+    # Note: KMeans in scikit-learn 1.0+ uses OpenMP for automatic parallelization
+    # The n_jobs parameter was removed - parallelization happens automatically
+    kmeans = KMeans(
+        n_clusters=n_clusters,
+        random_state=random_state,
+        n_init=adaptive_n_init,
+        max_iter=300,
+        algorithm='lloyd'  # Lloyd algorithm with OpenMP parallelization
+    )
     cluster_labels = kmeans.fit_predict(X_2d)
+    kmeans_time = time.time() - kmeans_start
+    print(f"✓ KMeans clustering completed in {kmeans_time:.2f}s")
     
     # --- Helper functions ---
     def safe_str(val, default="?"):
@@ -385,9 +444,14 @@ def make_umap_cluster_figure_interactive(
         except (TypeError, ValueError):
             return "N/A"
     
-    # --- Build hover text ---
-    hover_text = []
-    for i, cell in enumerate(cell_data):
+    # --- Build hover text and customdata in parallel ---
+    print(f"🔄 Building hover text and customdata for {len(cell_data)} cells...")
+    hover_start = time.time()
+    
+    def build_hover_and_custom(i_and_cell):
+        """Build hover text and customdata for a single cell."""
+        i, cell = i_and_cell
+        
         well_row_str = safe_str(cell.get('well_row'))
         well_col_str = safe_str(cell.get('well_col'))
         field_index_str = safe_str(cell.get('field_index'))
@@ -431,12 +495,8 @@ def make_umap_cluster_figure_interactive(
             f"<b>UMAP:</b> ({X_2d[i, 0]:.2f}, {X_2d[i, 1]:.2f})"
             f"</span>"
         )
-        hover_text.append(text)
-    
-    # --- Prepare customdata ---
-    customdata = []
-    for cell in cell_data:
-        customdata.append([
+        
+        custom = [
             cell['index'],
             cell['id'],
             cell['image_b64'] if cell['image_b64'] else '',
@@ -444,7 +504,24 @@ def make_umap_cluster_figure_interactive(
             cell['well_col'],
             cell['field_index'],
             cell['cell_index']
-        ])
+        ]
+        
+        return (i, text, custom)
+    
+    # Use parallel processing for hover text generation
+    hover_text = [None] * len(cell_data)
+    customdata = [None] * len(cell_data)
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(build_hover_and_custom, (i, cell)): i for i, cell in enumerate(cell_data)}
+        
+        for future in as_completed(futures):
+            i, text, custom = future.result()
+            hover_text[i] = text
+            customdata[i] = custom
+    
+    hover_time = time.time() - hover_start
+    print(f"✓ Hover text and customdata built in {hover_time:.2f}s")
     
     # --- Generate cluster colors ---
     try:
@@ -455,20 +532,28 @@ def make_umap_cluster_figure_interactive(
     
     cluster_colors = [colors_list[label % len(colors_list)] for label in cluster_labels]
     
-    # --- Pre-compute metadata color arrays for JavaScript ---
+    # --- Pre-compute metadata color arrays for JavaScript (vectorized) ---
     # We'll pass normalized values (0-1) and compute turbo colors in JS
+    print(f"🔄 Computing metadata arrays for {len(metadata_fields)} fields...")
+    metadata_start = time.time()
+    
     metadata_arrays = {}
     metadata_ranges = {}
     
+    # Extract all metadata fields at once (vectorized)
     for field in metadata_fields:
-        values = np.array([cell.get(field, 0.0) for cell in cell_data])
+        # Use list comprehension with numpy array for speed
+        values = np.array([cell.get(field, 0.0) for cell in cell_data], dtype=np.float32)
         vmin, vmax = float(np.min(values)), float(np.max(values))
         if vmax == vmin:
             vmax = vmin + 1e-6  # Avoid division by zero
-        # Normalize to 0-1
+        # Normalize to 0-1 (vectorized operation)
         normalized = ((values - vmin) / (vmax - vmin)).tolist()
         metadata_arrays[field] = normalized
         metadata_ranges[field] = {"min": vmin, "max": vmax}
+    
+    metadata_time = time.time() - metadata_start
+    print(f"✓ Metadata arrays computed in {metadata_time:.2f}s")
     
     # --- Create Plotly figure ---
     fig = go.Figure(data=go.Scattergl(
@@ -861,8 +946,10 @@ def make_umap_cluster_figure_interactive(
     # Insert custom elements before the plot div
     html = html.replace('<div id="umap-plot"', custom_script + '<div id="umap-plot"')
     
+    total_time = time.time() - start_time
     print(f"✓ Generated interactive UMAP with {len(metadata_fields)} metadata color modes")
     print(f"✓ UMAP coordinates range: X=[{X_2d[:, 0].min():.2f}, {X_2d[:, 0].max():.2f}], Y=[{X_2d[:, 1].min():.2f}, {X_2d[:, 1].max():.2f}]")
     print(f"✓ HTML length: {len(html)} characters")
+    print(f"⏱️ Total execution time: {total_time:.2f}s (processing: {processing_time:.2f}s, UMAP: {umap_time:.2f}s, KMeans: {kmeans_time:.2f}s, hover: {hover_time:.2f}s, metadata: {metadata_time:.2f}s)")
     
     return html

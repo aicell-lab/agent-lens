@@ -2182,7 +2182,7 @@ async def setup_service(server, server_id="agent-lens"):
         n_neighbors: int = 15,
         min_dist: float = 0.1,
         random_state: Optional[int] = None,
-        n_jobs: Optional[int] = None,
+        n_jobs: int = -1,
         metadata_fields: Optional[List[str]] = None,
     ) -> dict:
         """
@@ -2200,7 +2200,7 @@ async def setup_service(server, server_id="agent-lens"):
         - Color-coded clusters for easy identification
         
         This method runs UMAP computation in a thread pool to avoid blocking the asyncio event loop.
-        For parallelism, set random_state=None and n_jobs=-1 (uses all CPU cores).
+        Parallelism is enabled by default with n_jobs=-1 (uses all CPU cores).
         
         Args:
             all_cells: List of cell dictionaries, each should have 'dino_embedding', 'clip_embedding', or 'embedding_vector' key
@@ -2208,7 +2208,7 @@ async def setup_service(server, server_id="agent-lens"):
             n_neighbors: Number of neighbors for UMAP (default: 15)
             min_dist: Minimum distance for UMAP (default: 0.1)
             random_state: Random state for reproducibility. If None, allows parallelism (default: None)
-            n_jobs: Number of parallel jobs. -1 uses all CPU cores, None auto-selects based on random_state
+            n_jobs: Number of parallel jobs. -1 uses all CPU cores (default: -1 for maximum parallelism)
             metadata_fields: List of metadata field names for heatmap tabs. If None, uses default fields
             
         Returns:
@@ -2226,6 +2226,8 @@ async def setup_service(server, server_id="agent-lens"):
                 make_umap_cluster_figure_interactive,
                 PLOTLY_AVAILABLE
             )
+            
+            logger.info(f"Starting UMAP visualization for {len(all_cells)} cells with n_jobs={n_jobs}")
             
             # Run in thread pool to avoid blocking
             html = await asyncio.to_thread(
