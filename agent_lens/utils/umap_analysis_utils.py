@@ -296,8 +296,13 @@ def make_umap_cluster_figure_interactive(
         # Extract metadata
         well_row = c.get("well_row")
         well_col = c.get("well_col")
-        field_index = c.get("field_index")
         cell_index = c.get("cell_index") or c.get("field_cell_index")
+        
+        # Extract position information
+        position = c.get("position")
+        position_x = position.get("x") if isinstance(position, dict) else None
+        position_y = position.get("y") if isinstance(position, dict) else None
+        distance_from_center = c.get("distance_from_center")
         
         cell_info = {
             "index": idx,
@@ -305,7 +310,9 @@ def make_umap_cluster_figure_interactive(
             "image_b64": image_b64_thumbnail,
             "well_row": well_row if well_row is not None else "?",
             "well_col": well_col if well_col is not None else "?",
-            "field_index": field_index if field_index is not None else "?",
+            "position_x": position_x,
+            "position_y": position_y,
+            "distance_from_center": distance_from_center,
             "cell_index": cell_index if cell_index is not None else "?",
         }
         
@@ -454,8 +461,20 @@ def make_umap_cluster_figure_interactive(
         
         well_row_str = safe_str(cell.get('well_row'))
         well_col_str = safe_str(cell.get('well_col'))
-        field_index_str = safe_str(cell.get('field_index'))
         cell_index_str = safe_str(cell.get('cell_index'))
+        
+        # Extract position information
+        position_x = cell.get('position_x')
+        position_y = cell.get('position_y')
+        distance_from_center = cell.get('distance_from_center')
+        
+        # Build position string
+        if position_x is not None and position_y is not None:
+            position_str = f"({safe_float(position_x, None, '.2f')}, {safe_float(position_y, None, '.2f')}) mm"
+        else:
+            position_str = "N/A"
+        
+        distance_str = safe_float(distance_from_center, None, '.2f') + " mm" if distance_from_center is not None else "N/A"
         
         # Build fluorescence intensity lines dynamically
         fluo_lines = ""
@@ -469,7 +488,9 @@ def make_umap_cluster_figure_interactive(
         
         text = (
             f"<span style='font-size:9px;'>"
-            f"<b>Well {well_row_str}{well_col_str}, Field {field_index_str}, Cell {cell_index_str}</b><br>"
+            f"<b>Well {well_row_str}{well_col_str}, Cell {cell_index_str}</b><br>"
+            f"<b>Position:</b> {position_str}<br>"
+            f"<b>Distance from center:</b> {distance_str}<br>"
             f"<br>"
             f"<b>Morphology:</b><br>"
             f"  Area: {safe_float(cell.get('area'), 0.0, '.1f')} px²<br>"
@@ -502,7 +523,8 @@ def make_umap_cluster_figure_interactive(
             cell['image_b64'] if cell['image_b64'] else '',
             cell['well_row'],
             cell['well_col'],
-            cell['field_index'],
+            cell['position_x'] if cell['position_x'] is not None else 'N/A',
+            cell['position_y'] if cell['position_y'] is not None else 'N/A',
             cell['cell_index']
         ]
         
@@ -877,17 +899,21 @@ def make_umap_cluster_figure_interactive(
             plot.on('plotly_hover', function(data) {{
                 try {{
                     var point = data.points[0];
-                    if (point.customdata && point.customdata.length >= 7) {{
+                    if (point.customdata && point.customdata.length >= 8) {{
                         var cellIndex = point.customdata[0];
                         var cellId = point.customdata[1];
                         var imageB64 = point.customdata[2];
                         var wellRow = point.customdata[3];
                         var wellCol = point.customdata[4];
-                        var fieldIdx = point.customdata[5];
-                        var cellIdx = point.customdata[6];
+                        var posX = point.customdata[5];
+                        var posY = point.customdata[6];
+                        var cellIdx = point.customdata[7];
                         
-                        // Build info text
-                        var infoText = '<b>' + wellRow + wellCol + '-F' + fieldIdx + '-C' + cellIdx + '</b>';
+                        // Build info text with position
+                        var positionText = (posX !== 'N/A' && posY !== 'N/A') 
+                            ? '<br>Pos: (' + posX + ', ' + posY + ') mm'
+                            : '';
+                        var infoText = '<b>' + wellRow + wellCol + '-C' + cellIdx + '</b>' + positionText;
                         info.innerHTML = infoText;
                         
                         // Show 50x50 thumbnail if available

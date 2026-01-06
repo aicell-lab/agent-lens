@@ -1620,6 +1620,7 @@ async def setup_service(server, server_id="agent-lens"):
         fixed_channel_order: List[str],
         background_bright_value: float,
         background_fluorescence: Dict[int, float],
+        position_info: Optional[Dict[str, Any]] = None,
     ) -> Tuple[int, Optional[Dict[str, Any]], Optional[str]]:
         """
         Process a single cell to extract metadata and generate cell image.
@@ -1634,6 +1635,7 @@ async def setup_service(server, server_id="agent-lens"):
             fixed_channel_order: List of channel names
             background_bright_value: Background value for brightfield channel
             background_fluorescence: Dict mapping channel_idx to background value for fluorescent channels
+            position_info: Optional dict with microscope position info for calculating cell absolute positions
         
         Returns:
             Tuple of (poly_index, metadata_dict, cell_image_base64) or (poly_index, None, None) if failed
@@ -1665,9 +1667,53 @@ async def setup_service(server, server_id="agent-lens"):
             H, W = image_data_np.shape[:2]
             scale = 1.3  # expansion factor for bounding box (consistent for every cell)
 
-            # Center of bbox
+            # Center of bbox (in pixels)
             cy = (min_row + max_row) / 2.0
             cx = (min_col + max_col) / 2.0
+
+            # Calculate absolute position if position_info is available
+            if position_info is not None:
+                # Get image dimensions
+                image_height, image_width = image_data_np.shape[:2]
+                
+                # Calculate image center in pixels
+                image_center_x_px = image_width / 2.0
+                image_center_y_px = image_height / 2.0
+                
+                # Calculate cell offset from image center (in pixels)
+                # X-axis: positive direction is left to right
+                # Y-axis: positive direction is top to bottom
+                offset_x_px = cx - image_center_x_px
+                offset_y_px = cy - image_center_y_px
+                
+                # Convert pixel offset to mm
+                pixel_size = position_info['pixel_size_xy']/1000.0 # um to mm
+                offset_x_mm = offset_x_px * pixel_size
+                offset_y_mm = offset_y_px * pixel_size
+                
+                # Calculate absolute cell position (mm)
+                cell_x_mm = position_info['current_x'] + offset_x_mm
+                cell_y_mm = position_info['current_y'] + offset_y_mm
+                
+                # Calculate cell distance from well center using actual well center coordinates
+                if position_info['well_center_x'] is not None and position_info['well_center_y'] is not None:
+                    # Calculate exact Euclidean distance from cell to well center
+                    dx = cell_x_mm - position_info['well_center_x']
+                    dy = cell_y_mm - position_info['well_center_y']
+                    cell_distance_from_well = np.sqrt(dx**2 + dy**2)
+                else:
+                    cell_distance_from_well = None
+                
+                # Add position metadata
+                metadata['position'] = {
+                    'x': float(cell_x_mm),
+                    'y': float(cell_y_mm)
+                }
+                metadata['distance_from_center'] = float(cell_distance_from_well) if cell_distance_from_well is not None else None
+            else:
+                # No position info available
+                metadata['position'] = None
+                metadata['distance_from_center'] = None
 
             # Original height/width
             bbox_h = max_row - min_row
@@ -2009,7 +2055,7 @@ async def setup_service(server, server_id="agent-lens"):
         cell_polygons: List[Dict[str, Any]], 
         image_data_np: np.ndarray, 
         segmentation_mask: np.ndarray,
-        max_workers: Optional[int] = None
+        microscope_status: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
         """
         Extract morphological and intensity/texture metadata for each cell.
@@ -2021,10 +2067,12 @@ async def setup_service(server, server_id="agent-lens"):
             cell_polygons: List of dicts with "id", "polygons", and "bbox" keys
             image_data_np: Image array of shape (H, W, C) - uses channel 0 (brightfield)
             segmentation_mask: Instance mask array of shape (H, W) with cell IDs
-            max_workers: Maximum number of worker threads (default: None = auto-detect CPU count)
+            microscope_status: Optional dict with microscope position info including 'current_x', 'current_y', 
+                             'pixel_size_xy', and 'current_well_location' for calculating cell positions
         
         Returns:
-            List of metadata dictionaries, one per cell, with 'image', 'clip_embedding', and 'dino_embedding' fields
+            List of metadata dictionaries, one per cell, with 'image', 'clip_embedding', 'dino_embedding', 
+            'position', and 'distance_from_center' fields
         """
         import concurrent.futures
         import os
@@ -2039,6 +2087,24 @@ async def setup_service(server, server_id="agent-lens"):
             mask = np.array(mask_img).astype(np.uint32)
         else:
             mask = segmentation_mask.astype(np.uint32)
+        
+        # Extract position information if microscope_status is provided
+        position_info = None
+        if microscope_status is not None:
+            # Extract well center coordinates from nested structure: current_well_location -> well_center_coordinates
+            current_well_location = microscope_status.get('current_well_location', {})
+            well_center_coords = current_well_location.get('well_center_coordinates', {}) if isinstance(current_well_location, dict) else {}
+            
+            position_info = {
+                'current_x': microscope_status.get('current_x'),  # Image center X (mm)
+                'current_y': microscope_status.get('current_y'),  # Image center Y (mm)
+                'pixel_size_xy': microscope_status.get('pixel_size_xy'),  # Pixel size (um)
+                'well_center_x': well_center_coords.get('x_mm') if isinstance(well_center_coords, dict) else None,  # Well center X (mm)
+                'well_center_y': well_center_coords.get('y_mm') if isinstance(well_center_coords, dict) else None,  # Well center Y (mm)
+            }
+            # Validate that all required fields are present
+            if None in [position_info['current_x'], position_info['current_y'], position_info['pixel_size_xy']]:
+                position_info = None  # Incomplete data, disable position calculation
         
         # Compute a global background bright value from non-cell pixels (mask == 0)
         non_cell_pixels = brightfield[mask == 0]
@@ -2066,13 +2132,13 @@ async def setup_service(server, server_id="agent-lens"):
                     # Channel has no signal, skip background computation
                     background_fluorescence[channel_idx] = 0.0
         
-        if max_workers is None:
-            max_workers = min(len(cell_polygons), os.cpu_count() or 4)
+        # Set max_workers for parallel processing (use all available CPUs)
+        max_workers = min(len(cell_polygons), os.cpu_count() or 4)
         
         # Step 1: Process cells in parallel using ThreadPoolExecutor
         # Prepare arguments for parallel processing
         process_args = [
-            (poly, idx, image_data_np, mask, brightfield, fixed_channel_order, background_bright_value, background_fluorescence)
+            (poly, idx, image_data_np, mask, brightfield, fixed_channel_order, background_bright_value, background_fluorescence, position_info)
             for idx, poly in enumerate(cell_polygons)
         ]
         
