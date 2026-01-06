@@ -135,7 +135,7 @@ async def generate_image_embedding(image_bytes: bytes) -> Dict[str, List[float]]
         "dino_embedding": dino_emb
     }
 
-async def generate_image_embeddings_batch(image_bytes_list: List[bytes]) -> List[Dict[str, List[float]]]:
+async def generate_image_embeddings_batch(image_bytes_list: List[bytes], max_batch_size: int = 300) -> List[Dict[str, List[float]]]:
     """
     Generate both CLIP and DINOv2 embeddings for multiple images in a single batch.
     This is much faster than processing images individually, especially on GPU.
@@ -147,6 +147,7 @@ async def generate_image_embeddings_batch(image_bytes_list: List[bytes]) -> List
     
     Args:
         image_bytes_list: List of image byte data to process
+        max_batch_size: Maximum number of images to process in a single GPU batch (default: 300)
         
     Returns:
         List of dictionaries with 'clip_embedding' and 'dino_embedding' keys (same order as input).
@@ -156,6 +157,16 @@ async def generate_image_embeddings_batch(image_bytes_list: List[bytes]) -> List
     
     if not image_bytes_list:
         return []
+    
+    # If the list is larger than max_batch_size, process in chunks
+    if len(image_bytes_list) > max_batch_size:
+        logger.info(f"Processing {len(image_bytes_list)} images in chunks of {max_batch_size} to avoid GPU OOM")
+        all_results = []
+        for i in range(0, len(image_bytes_list), max_batch_size):
+            chunk = image_bytes_list[i:i + max_batch_size]
+            chunk_results = await generate_image_embeddings_batch(chunk, max_batch_size)
+            all_results.extend(chunk_results)
+        return all_results
     
     # Generate CLIP and DINOv2 embeddings in parallel for maximum efficiency
     async def get_clip_batch():
@@ -219,7 +230,7 @@ async def generate_image_embeddings_batch(image_bytes_list: List[bytes]) -> List
                 torch.cuda.empty_cache()
     
     async def get_dino_batch():
-        return await generate_image_embeddings_batch_dinov2(image_bytes_list)
+        return await generate_image_embeddings_batch_dinov2(image_bytes_list, max_batch_size)
     
     # Run both models in parallel
     clip_embeddings, dino_embeddings = await asyncio.gather(get_clip_batch(), get_dino_batch())
@@ -291,7 +302,7 @@ async def generate_image_embedding_dinov2(image_bytes: bytes) -> List[float]:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-async def generate_image_embeddings_batch_dinov2(image_bytes_list: List[bytes]) -> List[List[float]]:
+async def generate_image_embeddings_batch_dinov2(image_bytes_list: List[bytes], max_batch_size: int = 300) -> List[List[float]]:
     """
     Generate unit-normalized DINOv2 embeddings for multiple images in a single batch.
     This is much faster than processing images individually, especially on GPU.
@@ -300,6 +311,7 @@ async def generate_image_embeddings_batch_dinov2(image_bytes_list: List[bytes]) 
     
     Args:
         image_bytes_list: List of image byte data to process
+        max_batch_size: Maximum number of images to process in a single GPU batch (default: 300)
         
     Returns:
         List of 768-dimensional embedding vectors (same order as input). Returns None for failed images.
@@ -311,6 +323,16 @@ async def generate_image_embeddings_batch_dinov2(image_bytes_list: List[bytes]) 
     
     if not image_bytes_list:
         return []
+    
+    # If the list is larger than max_batch_size, process in chunks
+    if len(image_bytes_list) > max_batch_size:
+        logger.info(f"Processing {len(image_bytes_list)} images in chunks of {max_batch_size}")
+        all_results = []
+        for i in range(0, len(image_bytes_list), max_batch_size):
+            chunk = image_bytes_list[i:i + max_batch_size]
+            chunk_results = await generate_image_embeddings_batch_dinov2(chunk, max_batch_size)
+            all_results.extend(chunk_results)
+        return all_results
     
     model, processor = _load_dinov2_model()
     
