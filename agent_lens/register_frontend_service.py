@@ -1710,10 +1710,12 @@ async def setup_service(server, server_id="agent-lens"):
                     'y': float(cell_y_mm)
                 }
                 metadata['distance_from_center'] = float(cell_distance_from_well) if cell_distance_from_well is not None else None
+                metadata['well_id'] = position_info['well_id']
             else:
                 # No position info available
                 metadata['position'] = None
                 metadata['distance_from_center'] = None
+                metadata['well_id'] = None
 
             # Original height/width
             bbox_h = max_row - min_row
@@ -2095,12 +2097,16 @@ async def setup_service(server, server_id="agent-lens"):
             current_well_location = microscope_status.get('current_well_location', {})
             well_center_coords = current_well_location.get('well_center_coordinates', {}) if isinstance(current_well_location, dict) else {}
             
+            # Extract well_id from current_well_location
+            well_id = current_well_location.get('well_id') if isinstance(current_well_location, dict) else None
+            
             position_info = {
                 'current_x': microscope_status.get('current_x'),  # Image center X (mm)
                 'current_y': microscope_status.get('current_y'),  # Image center Y (mm)
                 'pixel_size_xy': microscope_status.get('pixel_size_xy'),  # Pixel size (um)
                 'well_center_x': well_center_coords.get('x_mm') if isinstance(well_center_coords, dict) else None,  # Well center X (mm)
                 'well_center_y': well_center_coords.get('y_mm') if isinstance(well_center_coords, dict) else None,  # Well center Y (mm)
+                'well_id': well_id,  # Well identifier (e.g., "A1", "B2")
             }
             # Validate that all required fields are present
             if None in [position_info['current_x'], position_info['current_y'], position_info['pixel_size_xy']]:
