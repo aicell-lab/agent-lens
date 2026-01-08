@@ -2079,6 +2079,11 @@ async def setup_service(server, server_id="agent-lens"):
         import concurrent.futures
         import os
         
+        # Early return if no cells to process
+        if len(cell_polygons) == 0:
+            print("No cells found in segmentation - returning empty list")
+            return []
+        
         # Extract brightfield channel
         brightfield = image_data_np[:, :, 0] if image_data_np.ndim == 3 else image_data_np
         
