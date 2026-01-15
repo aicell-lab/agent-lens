@@ -21,7 +21,6 @@ bin/mc*
 bin/minio*
 *.log*
 
-*faiss_data_store/
 
 # test coverage files
 *.coverage*

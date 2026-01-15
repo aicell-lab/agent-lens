@@ -374,7 +374,7 @@ Root files:
 
 ### 5.1. Test Infrastructure (✅ Working)
 - **Framework**: pytest with asyncio support, Playwright for E2E testing
-- **Dependencies**: CLIP, FAISS-CPU, torch for vector similarity tests, Playwright for browser testing
+- **Dependencies**: CLIP, torch for vector similarity tests, Playwright for browser testing
 - **Test Runner**: `python scripts/run_tests.py` with multiple test types
 - **Coverage**: pytest-cov for comprehensive coverage reporting
 - **Frontend Testing**: Playwright integration for FastAPI service UI testing
@@ -389,7 +389,7 @@ python scripts/run_tests.py --type fast
 # Integration tests with service communication
 python scripts/run_tests.py --type integration
 
-# Slow tests with AI models (CLIP/FAISS vector similarity)
+# Slow tests with AI models (CLIP/DINOv2 vector similarity)
 python scripts/run_tests.py --type slow
 
 # Frontend service tests with Playwright

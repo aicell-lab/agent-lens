@@ -126,7 +126,7 @@ agent-lens/
 │   │   ├── similarity_search/  # Vector search UI
 │   │   └── microscope_acquisition/  # Scan config
 │   └── utils/                  # Zarr loader, embeddings
-├── bioengine-app/              # Cellpose deployment
+├── bioengine-app/              # Cellpose & microSAM deployment
 ├── tests/                      # Test suite
 ├── docker/                     # Containerization
 └── scripts/                    # Automation scripts
@@ -188,7 +188,7 @@ image = await microscope.capture_image()
 
 ## BioEngine Services
 
-Deploy microSAM for cell segmentation:
+Deploy microSAM & Cellpose for cell segmentation:
 
 ```bash
 # Start worker
@@ -218,7 +218,7 @@ Interactive OpenLayers map with:
 
 ### 2. Similarity Search
 - Draw annotations to find similar cells across datasets
-- CLIP embeddings + Weaviate vector database
+- CLIP/DINOv2 embeddings
 - Cross-experiment and time-series search
 - Sub-second queries on thousands of annotations
 
@@ -290,7 +290,7 @@ python scripts/run_tests.py --verbose
 Test categories:
 - `--type fast`: Unit tests (< 2s, best for development)
 - `--type integration`: Service communication tests
-- `--type slow`: AI model tests (CLIP, DINOv2, SAM, Cellpose)
+- `--type slow`: AI model tests (CLIP, DINOv2, microSAM, Cellpose)
 - `--frontend-service`: Playwright E2E tests
 - `--coverage`: Generate coverage reports
 
@@ -298,7 +298,7 @@ CI/CD runs automatically on push via GitHub Actions.
 
 ## Technology Stack
 
-**Backend**: FastAPI, Hypha-RPC, PyTorch, CLIP, zarr, scikit-image  
+**Backend**: FastAPI, Hypha-RPC, PyTorch, CLIP, DINOv2, zarr, scikit-image  
 **Frontend**: React 18, Vite, Bootstrap 5, Tailwind CSS, OpenLayers, zarrita  
 **Infrastructure**: Docker, GitHub Actions, MinIO, Weaviate  
 **AI**: DINOv2, CLIP, BioEngine app for microSAM and Cellpose Segmentation
