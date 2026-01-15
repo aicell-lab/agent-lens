@@ -1,331 +1,316 @@
 # Agent-Lens: AI-Powered Smart Microscopy Platform
 
 <p align="center">
-  <strong>An intelligent web application for autonomous microscopy control and advanced image analysis</strong>
+  <strong>Autonomous microscopy control with LLM-based AI agents</strong>
 </p>
 
 <p align="center">
-  <a href="https://hypha.aicell.io/agent-lens/apps/agent-lens/">🔬 Try Agent-Lens</a> |
+  <a href="https://hypha.aicell.io/agent-lens/apps/agent-lens/">🔬 Try Live Demo</a> |
   <a href="#quick-start">⚡ Quick Start</a> |
-  <a href="#features">✨ Features</a> |
-  <a href="#documentation">📖 Documentation</a>
+  <a href="#installation">📦 Installation</a>
 </p>
 
 ---
 
-## Table of Contents
-
-- [Overview](#overview)
-- [Key Features](#key-features)
-- [Technology Stack](#technology-stack)
-- [Quick Start](#quick-start)
-- [Installation](#installation)
-- [Configuration](#configuration)
-- [Project Structure](#project-structure)
-- [Core Components](#core-components)
-- [Development](#development)
-- [Contributing](#contributing)
-- [License](#license)
-
 ## Overview
 
-**Agent-Lens** is an AI-powered smart microscopy web application that provides autonomous control of microscopy hardware with LLM-based AI agents. The platform integrates multiple microscope control, real-time image analysis, advanced data acquisition, and intelligent decision-making capabilities.
-
-Built for research laboratories, Agent-Lens combines modern web technologies with cutting-edge AI to streamline microscopy workflows and enable automated biological imaging.
-
-## Key Features
-
-### 🔬 **Microscopy Control**
-- **Multi-dimensional Control**: X, Y, Z positioning with precision movement
-- **Illumination Management**: Support for multiple channels (BF LED matrix full, Fluorescence 405 nm Ex, Fluorescence 488 nm Ex, Fluorescence 561 nm Ex, Fluorescence 638 nm Ex, Fluorescence 730 nm Ex)
-- **Camera Control**: Adjustable exposure time and intensity settings
-- **Autofocus**: Contrast-based and laser-based autofocus algorithms
-- **Well Plate Navigation**: Support for 96, 48, and 24-well plate formats
-
-### 🤖 **AI-Powered Analysis**
-- **Similarity Search**: Annotation-based vector similarity matching with CLIP embeddings. Draw annotations on the map to find similar cells or regions across datasets and time-lapse experiments.
-- **LLM Integration**: Natural language control and assistance
-- **Real-time Processing**: Live image analysis and feedback
-
-### 🎯 **Advanced Imaging**
-- **Time-lapse Imaging**: Automated multi-timepoint acquisition
-- **Multi-channel Acquisition**: Simultaneous fluorescence and brightfield
-- **Annotation Tools**: Points, polygons, and custom markers
-- **Data Management**: Zarrita-based efficient storage and retrieval with zip endpoints
-- **Interactive Stage Map**: Pan/zoomable stage map with well plate overlay, scan area selection, and multi-well support
-
-### 🏭 **Hardware Integration**
-- **Robotic Automation**: Automated sample handling and transfer
-- **Incubator Control**: Multi-slot sample management
-- **Multi-microscope Support**: Coordinate multiple imaging systems
-- **Safety Systems**: Collision prevention and operation locking
-- **Real-time Streaming**: WebRTC video from microscope feeds
-
-### 📊 **Data & Analytics**
-- **Artifact Management**: S3-compatible storage with metadata
-- **Dataset Organization**: Hierarchical data structure
-- **Export Capabilities**: Multiple format support
-- **Logging System**: Comprehensive operation tracking
-- **Performance Monitoring**: Real-time system metrics
-
-## Technology Stack
-
-### **Backend**
-- **Framework**: FastAPI with Hypha-RPC communication
-- **AI/ML**: Segment Anything Model (SAM), CLIP embeddings, vector similarity search
-- **Data**: OME-Zarr format with zip endpoints, S3-compatible storage (MinIO)
-- **Languages**: Python 3.11+
-- **Key Libraries**: numpy, pillow, scikit-image, zarr, aiohttp, fastapi, torch, clip
-
-### **Frontend** 
-- **Framework**: React 18 with Vite build system
-- **UI**: Bootstrap 5 + Tailwind CSS + CSS modules hybrid approach
-- **Communication**: Hypha-RPC client
-- **Key Libraries**: FontAwesome, WinBox, React Color, OpenLayers, Zarr/Zarrita
-
-### **Infrastructure**
-- **Containerization**: Docker with multi-service compose
-- **CI/CD**: GitHub Actions with automatic Docker publishing
-- **Deployment**: Hypha server platform with token-based authentication
-- **Storage**: MinIO S3-compatible backend with artifact management
-- **Testing**: pytest with asyncio support, Playwright for E2E testing
+Agent-Lens is a web-based platform for intelligent microscopy control, combining:
+- **Hardware Control**: Multi-microscope coordination with robotic sample handling
+- **AI Integration**: LLM agents, SAM segmentation, CLIP/DINOv2 similarity search
+- **Advanced Imaging**: Time-lapse, multi-channel, OME-Zarr data management
+- **Interactive UI**: Real-time stage maps, annotations, and visualization
 
 ## Quick Start
 
-1. **Try Online**: Visit [Agent-Lens Demo](https://hypha.aicell.io/agent-lens/apps/agent-lens-test/)
+### Try Online
+Visit [https://hypha.aicell.io/agent-lens/apps/agent-lens/](https://hypha.aicell.io/agent-lens/apps/agent-lens/)
 
-2. **Local Development**: 
-   ```bash
-   # Setup dependencies
-   bash scripts/setup_dev.sh
-   
-   # Run in connect-server mode (recommended for testing)
-   python -m agent_lens connect-server --workspace_name=agent-lens --server_url=https://hypha.aicell.io
-   ```
+### Local Development
+```bash
+# Setup
+bash scripts/setup_dev.sh
+conda activate squid
 
-3. **Access**: Open `https://hypha.aicell.io/agent-lens/apps/agent-lens-test/`
+# Connect to Hypha server (no local server needed)
+python -m agent_lens connect-server \
+    --workspace_name=agent-lens \
+    --server_url=https://hypha.aicell.io
+
+# Access at: https://hypha.aicell.io/agent-lens/apps/agent-lens-test/
+```
+
+### Docker
+```bash
+docker pull ghcr.io/aicell-lab/agent-lens:main
+docker run -d -p 9527:9527 \
+    -e WORKSPACE_TOKEN=$WORKSPACE_TOKEN \
+    ghcr.io/aicell-lab/agent-lens:main
+```
+
+## Key Features
+
+🔬 **Microscopy**: XYZ positioning, autofocus, multi-channel illumination, well plate navigation  
+🤖 **AI Agents**: Natural language control, code generation, autonomous operation  
+🔍 **Similarity Search**: CLIP-based annotation matching across datasets  
+🧬 **Cell Segmentation**: Fine-tuneable microSAM via BioEngine  
+⏱️ **Time-Lapse**: Automated multi-timepoint, multi-position imaging  
+🤖 **Robotics**: Automated sample transfer with incubator integration  
+💾 **Data**: OME-Zarr format with S3 storage and efficient chunked access  
 
 ## Installation
 
 ### Prerequisites
+- Conda/Miniconda
+- Node.js 20+
+- Python 3.11+
+- Docker (optional)
 
-- **System**: macOS, Linux, or Windows with WSL2
-- **Software**: Docker, Conda, Node.js 16+, Python 3.11+
-
-### Automatic Setup
-
+### Automated Setup
 ```bash
-# Clone repository
-git clone https://github.com/your-org/agent-lens.git
+git clone https://github.com/aicell-lab/agent-lens.git
 cd agent-lens
-
-# Run automated setup
 bash scripts/setup_dev.sh
 ```
 
-### Manual Installation
+This creates a conda environment, installs dependencies, and prompts for Hypha tokens.
 
-<details>
-<summary>Click to expand manual installation steps</summary>
+### Manual Setup
+```bash
+# Create environment
+conda create -n squid python=3.11
+conda activate squid
 
-1. **Environment Setup**
-   ```bash
-   conda create -n agent-lens python=3.11
-   conda activate agent-lens
-   ```
+# Install dependencies
+pip install -e ".[test]"
+npm install --prefix frontend
+playwright install chromium
 
-2. **Python Dependencies**
-   ```bash
-   pip install -e ".[test]"
-   ```
+# Configure tokens
+echo "WORKSPACE_TOKEN=your_token" > .env
+echo "PERSONAL_TOKEN=your_token" >> .env
 
-3. **Frontend Dependencies**
-   ```bash
-   npm install --prefix frontend
-   ```
-
-4. **Environment Variables**
-   Create `.env` file:
-   ```bash
-   WORKSPACE_TOKEN=<your_agent_lens_token>
-   PERSONAL_TOKEN=<your_personal_token>
-   ```
-   *Get tokens from [Hypha](https://hypha.aicell.io)*
-
-5. **Start Services**
-   ```bash
-   # For testing (recommended)
-   python -m agent_lens connect-server --workspace_name=agent-lens --server_url=https://hypha.aicell.io
-   
-   # Or for local development
-   bash scripts/run_dev.sh
-   ```
-
-</details>
+# Get tokens from: https://hypha.aicell.io
+```
 
 ## Configuration
 
-### Service Configuration
-
-The application requires several backend services:
-
-- **Microscope Control**: `agent-lens-squid-simulation`
-- **AI Segmentation**: `interactive-segmentation` 
-- **Similarity Search**: `similarity-search`
-- **Orchestrator**: Task scheduling and workflow management
-
 ### Environment Variables
+```bash
+WORKSPACE_TOKEN=<required>      # Get from https://hypha.aicell.io
+PERSONAL_TOKEN=<optional>       # For private workspaces
+SERVER_URL=https://hypha.aicell.io
+LOG_LEVEL=INFO
+```
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `WORKSPACE_TOKEN` | Agent-Lens workspace token | Yes |
-| `PERSONAL_TOKEN` | Personal workspace token | Yes |
-| `SERVER_URL` | Hypha server URL | No |
-| `LOG_LEVEL` | Logging level (DEBUG/INFO/WARN) | No |
+### Service Architecture
+```
+Hypha Server (hypha.aicell.io)
+├── Frontend Service (ASGI + React)
+├── Microscope Services (squid-1, squid-2, simulation)
+├── Helper Services (Cellpose segmentation, similarity search)
+├── BioEngine (Cellpose as BioEngine app)
+└── Orchestrator (time-lapse scheduling)
+```
 
 ## Project Structure
 
 ```
 agent-lens/
-├── 📁 agent_lens/              # Python backend package
-│   ├── 📁 utils/               # Utility modules (artifact manager, similarity search)
-│   ├── 📄 register_frontend_service.py  # Frontend ASGI service registration
-│   └── 📄 __main__.py          # CLI entry point
-├── 📁 frontend/                # React application
-│   ├── 📁 components/          # UI components
-│   │   ├── 📁 similarity_search/      # Similarity search and annotation system
-│   │   ├── 📁 microscope_acquisition/ # Scan configuration and task management
-│   │   ├── 📁 map_visualization/      # Data viewing and display
-│   │   └── 📄 *.jsx            # Control panels, modals, settings
-│   ├── 📁 utils/               # Frontend utilities (Zarr loader, embeddings)
-│   ├── 📄 main.jsx             # Root React component
-│   └── 📄 package.json         # Frontend dependencies
-├── 📁 tests/                   # Test suite (project root level)
-│   ├── 📁 test-frontend-components/  # Frontend component tests
-│   └── 📄 test_*.py/js         # Python and JavaScript tests
-├── 📁 docker/                  # Containerization configs
-├── 📁 scripts/                 # Development and deployment scripts
-└── 📄 pyproject.toml           # Python project configuration
+├── agent_lens/                 # Python backend
+│   ├── register_frontend_service.py  # ASGI service
+│   └── utils/                  # Artifact manager, embeddings
+├── frontend/                   # React application
+│   ├── components/
+│   │   ├── agent/              # AI agent interface
+│   │   ├── map_visualization/  # Stage map & OME-Zarr
+│   │   ├── similarity_search/  # Vector search UI
+│   │   └── microscope_acquisition/  # Scan config
+│   └── utils/                  # Zarr loader, embeddings
+├── bioengine-app/              # Cellpose deployment
+├── tests/                      # Test suite
+├── docker/                     # Containerization
+└── scripts/                    # Automation scripts
+```
+
+## Development
+
+### Backend
+```bash
+conda activate squid
+python -m agent_lens connect-server --workspace_name=agent-lens
+```
+
+### Frontend
+```bash
+cd frontend
+npm start  # Hot reload at http://localhost:5173
+```
+
+### Testing
+```bash
+# Fast tests (recommended for development)
+python scripts/run_tests.py --type fast
+
+# With coverage
+python scripts/run_tests.py --coverage
+
+# Frontend E2E
+python scripts/run_tests.py --frontend-service
+
+# Component tests
+node tests/test-frontend-components/run_tests.js
+```
+
+### Building
+```bash
+# Frontend only
+cd frontend && npm run build
+
+# Docker image
+docker build -f docker/dockerfile -t agent-lens:latest .
+```
+
+## AI Agent Integration
+
+Built-in LLM agents for autonomous microscopy:
+
+- **AgentPanel**: Interactive notebook interface with code execution
+- **Code Generation**: Generate control code from natural language
+- **Thinking Visualization**: View agent reasoning process
+- **Kernel Support**: Browser-based (Pyodide) or cloud-based Python execution
+
+```python
+# Agents can generate and execute code like:
+await microscope.move_to_well("A1")
+await microscope.set_exposure(100)
+image = await microscope.capture_image()
+```
+
+## BioEngine Services
+
+Deploy microSAM for cell segmentation:
+
+```bash
+# Start worker
+conda activate microsam
+python -m bioengine.worker \
+    --workspace agent-lens \
+    --head_num_gpus 2
+
+# Deploy service (see bioengine-app/README.md)
+python scripts/deploy_cellsegmenter.py
+```
+
+Usage:
+```python
+segmenter = await server.get_service("agent-lens/cell-segmenter")
+result = await segmenter.segment_all(image=image)
 ```
 
 ## Core Components
 
-### **Microscope Control Interface**
-- Real-time hardware control with safety mechanisms
-- Multi-axis positioning and automated movements
-- Channel management and illumination control
+### 1. Microscope Stage Map
+Interactive OpenLayers map with:
+- Real-time FOV indicator and well plate overlay
+- OME-Zarr tile streaming with multi-scale pyramids
+- Annotation tools and similarity search layer
+- Efficient chunked data loading via artifact manager
 
-### **Microscope Stage Map**
-- **Interactive Stage Map**: Visualize the entire microscope stage with pan and zoom controls.
-- **Well Plate Overlay**: See 96, 48, or 24-well plate layouts directly on the map.
-- **Scan Area Selection**: Click and drag to select scan regions within wells, with visual feedback.
-- **Multi-Well Support**: Select multiple wells for batch scanning or time-lapse imaging.
-- **Live Video Integration**: See the current field of view (FOV) and live video position on the map.
-- **Scan Results Overlay**: View stitched scan results with channel selection and layer controls.
-- **Similarity Search Layer**: Draw annotations on the map to search for similar cells or regions using vector embeddings. The similarity search layer can be activated per experiment or dataset, enabling annotation-based similarity matching across time-lapse data.
-- **Experiment Management**: Organize scan data by experiment, with per-well canvases and metadata.
+### 2. Similarity Search
+- Draw annotations to find similar cells across datasets
+- CLIP embeddings + Weaviate vector database
+- Cross-experiment and time-series search
+- Sub-second queries on thousands of annotations
 
-The stage map is integrated into the main control panel, providing a seamless experience for both real and simulated microscopes, supporting advanced workflows like multi-well scanning, experiment-based data management, and similarity search with annotations.
+### 3. Time-Lapse Imaging
+- Multi-position, multi-channel acquisition
+- Task scheduling with orchestrator service
+- Autofocus at each timepoint
+- Hardware coordination (microscope + incubator + robotic arm)
 
-### **AI Segmentation Engine**
-- Multiple model support (SAM, custom models)
-- Interactive and batch processing modes
-- Vector embedding generation and management
+### 4. Sample Automation
+- Robotic sample transfer between incubator and microscopes
+- Collision prevention with operation locking
+- State tracking and error recovery
 
-### **Data Analysis Pipeline**
-- High-performance data processing with Zarrita
-- Multi-format support (uint8, uint16)
-- Real-time data access and processing
+### 5. Data Management
+- OME-Zarr format with S3-compatible storage
+- Chunked compression for efficient access
+- Multi-scale pyramids for visualization
+- Artifact manager for datasets and galleries
 
-### **Hardware Orchestration**
-- Sample handling workflow automation
-- Multi-device coordination and scheduling
-- Error recovery and rollback procedures
+## Deployment
 
-## Development
-
-### Development Workflow
-
-1. **Start Development Server**
-   ```bash
-   # For testing with connect-server (recommended)
-   python -m agent_lens connect-server --workspace_name=agent-lens --server_url=https://hypha.aicell.io
-   
-   # Or for local development
-   bash scripts/run_dev.sh
-   ```
-
-2. **Run Tests**
-   ```bash
-   # Quick development testing
-   python scripts/run_tests.py --type fast
-   
-   # Run with coverage
-   python scripts/run_tests.py --coverage
-   
-   # Run all tests including AI models
-   python scripts/run_tests.py --type slow
-   ```
-
-3. **Build for Production**
-   ```bash
-   docker-compose -f docker/docker-compose.yml build
-   ```
-
-### Testing Infrastructure
-
-Agent-Lens has a comprehensive testing setup with:
-
-- **✅ Multiple test suites** covering core functionality
-- **Vector similarity testing** with CLIP and FAISS
-- **Async microscopy simulation** with mock hardware
-- **Frontend service testing** with Playwright E2E testing
-- **Frontend component testing** with vanilla JavaScript test runners
-- **CI/CD integration** with GitHub Actions
-
-**Test Categories:**
-- `--type fast`: Unit tests (< 2 seconds, recommended for development)
-- `--type integration`: Service integration tests  
-- `--type slow`: AI models and large datasets
-- `--frontend-service`: Frontend service tests with Playwright
-- `--coverage`: Generate coverage reports
-
-**Test Execution:**
+### Docker Compose
 ```bash
-# Quick development testing
-python scripts/run_tests.py --type fast
-
-# Run with coverage
-python scripts/run_tests.py --coverage
-
-# Run all tests including AI models
-python scripts/run_tests.py --type slow
-
-# Frontend service tests
-python scripts/run_tests.py --frontend-service
+docker-compose -f docker/docker-compose-agent-lens-app.yml up -d
 ```
 
-### Code Standards
+### With GPU Support
+```bash
+docker run --gpus all \
+    -e WORKSPACE_TOKEN=$WORKSPACE_TOKEN \
+    ghcr.io/aicell-lab/agent-lens:main
+```
 
-- **Python**: PEP 8, async/await patterns, type hints
-- **JavaScript**: ES6+, functional components, PropTypes
-- **Testing**: pytest for backend, React Testing Library for frontend
-- **AI Testing**: CLIP/FAISS similarity search, vector embeddings
-- **Documentation**: Comprehensive docstrings and comments
+### Security
+- Non-root user (UID 1000)
+- Token-based authentication
+- CORS and security headers configured
 
-## Contributing
+**Circular dependencies**
+```bash
+npm run check:circles --prefix frontend
+```
 
-We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details on:
+**Token errors**
+```bash
+export WORKSPACE_TOKEN=your_token
+```
 
-- Code of conduct
-- Development process
-- Pull request procedures
-- Issue reporting
+**Playwright issues**
+```bash
+playwright install chromium
+```
+
+**GPU not detected**
+```bash
+# Install NVIDIA Container Toolkit
+docker run --gpus all ghcr.io/aicell-lab/agent-lens:main
+```
+
+### Debug Mode
+```bash
+export LOG_LEVEL=DEBUG
+python scripts/run_tests.py --verbose
+```
+
+## Testing
+
+Test categories:
+- `--type fast`: Unit tests (< 2s, best for development)
+- `--type integration`: Service communication tests
+- `--type slow`: AI model tests (CLIP, DINOv2, SAM, Cellpose)
+- `--frontend-service`: Playwright E2E tests
+- `--coverage`: Generate coverage reports
+
+CI/CD runs automatically on push via GitHub Actions.
+
+## Technology Stack
+
+**Backend**: FastAPI, Hypha-RPC, PyTorch, CLIP, zarr, scikit-image  
+**Frontend**: React 18, Vite, Bootstrap 5, Tailwind CSS, OpenLayers, zarrita  
+**Infrastructure**: Docker, GitHub Actions, MinIO, Weaviate  
+**AI**: DINOv2, CLIP, BioEngine app for microSAM and Cellpose Segmentation
+
+## Documentation
+
+- [.cursorrules](.cursorrules) - Comprehensive development guidelines
+- [tests/README.md](tests/README.md) - Testing documentation
+- [bioengine-app/README.md](bioengine-app/README.md) - BioEngine services
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License - Copyright (c) 2024 Agent-Lens Contributors
 
-## Acknowledgments
-
-TBD
+See [LICENSE](LICENSE) for details.

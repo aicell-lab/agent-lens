@@ -1,0 +1,23 @@
+authors:
+- {affiliation: KTH, github_user: cccoolll, name: Songtao Cheng}
+- {affiliation: KTH, github_user: nilsmechtel, name: Nils Mechtel}
+covers: []
+description: Multi-model cell segmentation service supporting microSAM and Cellpose for microscopy image analysis. Provides unified interface for automatic cell segmentation with multiple state-of-the-art models.
+documentation: README.md
+tutorial: ''
+format_version: 0.5.0
+git_repo: https://github.com/cccoolll/ddls2025-microsam-u2os
+id: cell-segmenter
+id_emoji: '🔬'
+license: MIT
+links: []
+maintainers: []
+name: Cell Segmenter
+tags: ["microSAM", "cellpose", "segment anything", "microscopy image segmentation", "foundational model", "cell segmentation"]
+type: ray-serve
+version: 0.0.1
+deployments:
+  - cell-segmenter:CellSegmenter
+authorized_users:
+  - "nils.mech@gmail.com"
+  - "songtao.cheng@scilifelab.se"
