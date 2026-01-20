@@ -476,8 +476,13 @@ export const tryGetService = async (hyphaManager, name, remoteIdWithWorkspace, l
     
     // Show notification for all types of service acquisition errors
     if (showNotification) {
-      if (error.message && error.message.includes('Permission denied for workspace')) {
-        showNotification(error.message, 'error');
+      // Check for permission/authentication related errors
+      const errorMsg = error.message ? error.message.toLowerCase() : '';
+      if (errorMsg.includes('permission denied') || 
+          errorMsg.includes('authentication failed') || 
+          errorMsg.includes('unauthorized') ||
+          errorMsg.includes('forbidden')) {
+        showNotification(`Your account doesn't have permission to access the ${name} service.`, 'error');
       } else {
         // General service unavailability notification
         showNotification(`${name} service is currently unavailable. Please check if the service is running.`, 'error');
