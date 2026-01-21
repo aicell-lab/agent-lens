@@ -1500,34 +1500,7 @@ async def setup_service(server, server_id="agent-lens"):
     async def generate_image_embeddings_batch_rpc(images_base64: List[str]) -> dict:
         """
         Generate both CLIP and DINOv2 image embeddings for multiple images in batch via hypha-rpc.
-        
-        This endpoint uses optimized batch processing with parallel I/O for significantly faster
-        embedding generation, especially when using GPU acceleration.
-        
-        Returns both embeddings for each image:
-        - CLIP (512D) for image-text similarity
-        - DINOv2 (768D) for image-image similarity
-        
-        Args:
-            images_base64: List of base64-encoded image data strings
-            
-        Returns:
-            dict: JSON object with success flag, results array, and count
-                {
-                    "success": True,
-                    "results": [
-                        {
-                            "success": True,
-                            "clip_embedding": [...],
-                            "clip_dimension": 512,
-                            "dino_embedding": [...],
-                            "dino_dimension": 768
-                        },
-                        None,  # if failed
-                        {...}
-                    ],
-                    "count": N
-                }
+        Returns json object with success flag, results array, and count.
         """
         try:
             if not images_base64 or len(images_base64) == 0:
@@ -1625,20 +1598,6 @@ async def setup_service(server, server_id="agent-lens"):
         """
         Process a single cell to extract metadata and generate cell image.
         This function is designed to be run in parallel threads.
-        
-        Args:
-            poly: Cell polygon dict with "id", "polygons", and "bbox" keys
-            poly_index: Original index of this polygon in the input list (for ordering)
-            image_data_np: Image array of shape (H, W, C)
-            mask: Instance mask array of shape (H, W) with cell IDs
-            brightfield: Brightfield channel array of shape (H, W)
-            fixed_channel_order: List of channel names
-            background_bright_value: Background value for brightfield channel
-            background_fluorescence: Dict mapping channel_idx to background value for fluorescent channels
-            position_info: Optional dict with microscope position info for calculating cell absolute positions
-        
-        Returns:
-            Tuple of (poly_index, metadata_dict, cell_image_base64) or (poly_index, None, None) if failed
         """
         cell_id = poly.get("id")
         if cell_id is None:
@@ -2060,22 +2019,10 @@ async def setup_service(server, server_id="agent-lens"):
         microscope_status: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
         """
-        Extract morphological and intensity/texture metadata for each cell.
-        Also extracts single cell images, generates embeddings, and adds them to metadata.
-        
-        This function uses multithreading to process cells in parallel for improved performance.
-        
-        Args:
-            cell_polygons: List of dicts with "id", "polygons", and "bbox" keys
-            image_data_np: Image array of shape (H, W, C) - uses channel 0 (brightfield)
-            segmentation_mask: Instance mask array of shape (H, W) with cell IDs
-            microscope_status: Optional dict with microscope position info including 'current_x', 'current_y', 
-                             'pixel_size_xy', and 'current_well_location' for calculating cell positions
-        
-        Returns:
-            List of metadata dictionaries, one per cell, with 'image', 'clip_embedding', 'dino_embedding', 
-            'position', and 'distance_from_center' fields
+        Extract cell metadata, crops, and embeddings from segmentation results.
+        Returns a list of metadata dictionaries, one per cell.
         """
+
         import concurrent.futures
         import os
         
@@ -2264,30 +2211,6 @@ async def setup_service(server, server_id="agent-lens"):
     ) -> dict:
         """
         Generate interactive UMAP visualization (Plotly HTML) with switchable coloring modes via hypha-rpc.
-        
-        This method performs UMAP dimensionality reduction followed by KMeans clustering.
-        Users can switch between cluster coloring and metadata heatmaps using tab buttons.
-        The number of clusters is automatically determined based on the sample size (between 2 and 10).
-        
-        Features:
-        - Interactive zoom and pan
-        - Hover to see cell details (ID, area, morphology, etc.) with cell image thumbnail
-        - Tab buttons to switch between Cluster view and metadata heatmaps (turbo colormap)
-        - Export as PNG/SVG
-        - Color-coded clusters for easy identification
-        
-        This method runs UMAP computation in a thread pool to avoid blocking the asyncio event loop.
-        Parallelism is enabled by default with n_jobs=-1 (uses all CPU cores).
-        
-        Args:
-            all_cells: List of cell dictionaries, each should have 'dino_embedding', 'clip_embedding', or 'embedding_vector' key
-                (prefers dino_embedding for image-image similarity, then clip_embedding, then embedding_vector)
-            n_neighbors: Number of neighbors for UMAP (default: 15)
-            min_dist: Minimum distance for UMAP (default: 0.1)
-            random_state: Random state for reproducibility. If None, allows parallelism (default: None)
-            n_jobs: Number of parallel jobs. -1 uses all CPU cores (default: -1 for maximum parallelism)
-            metadata_fields: List of metadata field names for heatmap tabs. If None, uses default fields
-            
         Returns:
             dict: JSON object with success flag and HTML string of interactive visualization, or None if failed
         """
