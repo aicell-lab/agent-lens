@@ -33,4 +33,4 @@ coverage/
 *.ipynb
 docs/*.png
 docs/*.json
-docs/figure_exports/*
+docs/figure_exports*/*
