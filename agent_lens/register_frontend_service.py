@@ -1551,6 +1551,16 @@ async def setup_service(server, server_id="agent-lens"):
     # Helper function to process a single cell (runs in parallel threads)
     fixed_channel_order = ['BF_LED_matrix_full', 'Fluorescence_405_nm_Ex', 'Fluorescence_488_nm_Ex', 'Fluorescence_638_nm_Ex', 'Fluorescence_561_nm_Ex', 'Fluorescence_730_nm_Ex']
 
+    # Standard microscopy channel colors (matching frontend CHANNEL_COLORS)
+    CHANNEL_COLOR_MAP = {
+        'BF_LED_matrix_full': (255, 255, 255),      # White
+        'Fluorescence_405_nm_Ex': (0, 0, 255),      # Blue (DAPI)
+        'Fluorescence_488_nm_Ex': (0, 255, 0),      # Green (FITC/GFP)
+        'Fluorescence_561_nm_Ex': (255, 0, 0),      # Red (TRITC/mCherry)
+        'Fluorescence_638_nm_Ex': (255, 0, 255),    # Magenta (Cy5)
+        'Fluorescence_730_nm_Ex': (0, 255, 255),    # Cyan (far-red/NIR)
+    }
+
     def resize_and_pad_to_square_rgb(cell_rgb_u8: np.ndarray, out_size: int, pad_value: int) -> np.ndarray:
         """
         Resize and pad cell image to a square for consistent embedding.
@@ -1583,6 +1593,45 @@ async def setup_service(server, server_id="agent-lens"):
         canvas.paste(pil, ((out_size - new_w)//2, (out_size - new_h)//2))
 
         return np.array(canvas, dtype=np.uint8)
+
+    def _apply_channel_color_and_mask(
+        channel_region: np.ndarray,
+        cell_mask_region: np.ndarray,
+        channel_color: Tuple[int, int, int],
+        bg_value: float = 0.0
+    ) -> np.ndarray:
+        """
+        Apply channel-specific color tinting and cell mask to a single channel.
+        Returns RGB uint8 array with background-subtracted, color-tinted channel data.
+        
+        Args:
+            channel_region: 2D grayscale channel data
+            cell_mask_region: 2D binary mask for the cell
+            channel_color: RGB tuple (0-255) for channel color
+            bg_value: Background value to subtract
+        
+        Returns:
+            RGB uint8 array with color-tinted, masked channel data
+        """
+        # Background subtraction
+        if channel_region.dtype == np.uint16:
+            channel_region = np.maximum(channel_region.astype(np.float32) - bg_value, 0.0)
+            channel_region = (channel_region / 256).astype(np.uint8)
+        else:
+            channel_region = np.maximum(channel_region.astype(np.float32) - bg_value, 0.0)
+            channel_region = channel_region.astype(np.uint8)
+        
+        # Apply color tinting (multiply grayscale by channel RGB color)
+        channel_rgb = np.zeros((*channel_region.shape, 3), dtype=np.float32)
+        channel_rgb[:, :, 0] = channel_region * (channel_color[0] / 255.0)
+        channel_rgb[:, :, 1] = channel_region * (channel_color[1] / 255.0)
+        channel_rgb[:, :, 2] = channel_region * (channel_color[2] / 255.0)
+        
+        # Apply cell mask (set non-cell pixels to black)
+        cell_mask_3d = np.expand_dims(cell_mask_region.astype(bool), axis=2)
+        channel_rgb = np.where(cell_mask_3d, channel_rgb, 0.0)
+        
+        return channel_rgb.astype(np.uint8)
 
     def _process_single_cell(
         poly: Dict[str, Any],
@@ -1690,112 +1739,84 @@ async def setup_service(server, server_id="agent-lens"):
             x_min = int(np.clip(cx - new_w / 2.0, 0, W))
             x_max = int(np.clip(cx + new_w / 2.0, 0, W))
 
-            # Extract only brightfield channel (channel 0) for cell image
-            if image_data_np.ndim == 3:
-                # Extract only channel 0 (brightfield)
-                cell_image_region = image_data_np[y_min:y_max, x_min:x_max, 0].copy()
-            else:
-                # Already 2D, use as is
-                cell_image_region = image_data_np[y_min:y_max, x_min:x_max].copy()
-
-            # Apply percentile normalization (1-99%) to grayscale crop for stable DINO embeddings
-            # This should be done on grayscale before converting to RGB
-            p_low = None
-            p_high = None
-            if cell_image_region.size > 0:
-                p_low = np.percentile(cell_image_region, 1.0)
-                p_high = np.percentile(cell_image_region, 99.0)
-                
-                # Clamp values to percentile range
-                cell_image_region = np.clip(cell_image_region, p_low, p_high)
-                
-                # Scale to 0-255 range if there's any variation
-                if p_high > p_low:
-                    cell_image_region = ((cell_image_region - p_low) / (p_high - p_low) * 255.0)
-                else:
-                    # All pixels have the same value, set to middle gray
-                    cell_image_region = np.full_like(cell_image_region, 128.0)
-                
-                # Convert to uint8 after normalization
-                cell_image_region = cell_image_region.astype(np.uint8)
-            else:
-                cell_image_region = cell_image_region.astype(np.uint8)
-
             # Crop masks to same region
             cell_mask_region = cell_mask[y_min:y_max, x_min:x_max]  # Target cell mask
             mask_region = mask[y_min:y_max, x_min:x_max]  # Full mask with all cell IDs
             
-            # Convert brightfield (grayscale) to RGB uint8 for embedding generation
-            # Stack the single channel 3 times to create RGB (grayscale to RGB)
-            cell_image_rgb = np.stack([cell_image_region] * 3, axis=-1)
-            
-            # Ensure uint8 (and compute matching uint8 background value)
-            if cell_image_rgb.dtype != np.uint8:
-                max_val = float(cell_image_rgb.max()) if cell_image_rgb.size else 0.0
-                if max_val > 255:
-                    scale = 255.0 / max_val
-                    cell_image_rgb = (cell_image_rgb * scale).astype(np.uint8)
-                    bg_u8 = int(np.clip(background_bright_value * scale, 0, 255))
-                else:
-                    cell_image_rgb = cell_image_rgb.astype(np.uint8)
-                    bg_u8 = int(np.clip(background_bright_value, 0, 255))
+            # Extract and merge all available channels with proper colors
+            channels_to_merge = []
+
+            # Process brightfield (channel 0)
+            if image_data_np.ndim == 3:
+                bf_region = image_data_np[y_min:y_max, x_min:x_max, 0].copy()
             else:
-                bg_u8 = int(np.clip(background_bright_value, 0, 255))
-            
-            # Apply cell mask to isolate the cell (fill outside-cell pixels with background bright value)
-            cell_mask_3d = np.expand_dims(cell_mask_region.astype(bool), axis=2)
-            cell_image_rgb = np.where(cell_mask_3d, cell_image_rgb, bg_u8).astype(np.uint8)
-            
-            # Resize and pad to 224x224 square for consistent embedding
-            # This prevents the embedding generator from doing variable cropping
-            cell_image_rgb = resize_and_pad_to_square_rgb(cell_image_rgb, out_size=224, pad_value=bg_u8)
-            
-            # Convert to PIL Image and encode as base64 PNG
-            cell_pil = PILImage.fromarray(cell_image_rgb, mode='RGB')
-            buffer = BytesIO()
-            cell_pil.save(buffer, format='PNG')
-            cell_image_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
-            
-            # Extract fluorescent channel images (channels 1-5)
-            fluorescent_images = {}
+                bf_region = image_data_np[y_min:y_max, x_min:x_max].copy()
+
+            # Apply percentile normalization to brightfield (1-99%)
+            if bf_region.size > 0:
+                p_low = np.percentile(bf_region, 1.0)
+                p_high = np.percentile(bf_region, 99.0)
+                bf_region = np.clip(bf_region, p_low, p_high)
+                if p_high > p_low:
+                    bf_region = ((bf_region - p_low) / (p_high - p_low) * 255.0).astype(np.uint8)
+                else:
+                    bf_region = np.full_like(bf_region, 128, dtype=np.uint8)
+            else:
+                bf_region = bf_region.astype(np.uint8)
+
+            # Get brightfield color and apply mask
+            bf_color = CHANNEL_COLOR_MAP.get('BF_LED_matrix_full', (255, 255, 255))
+            bf_rgb = _apply_channel_color_and_mask(
+                bf_region, 
+                cell_mask_region, 
+                bf_color, 
+                bg_value=background_bright_value
+            )
+            channels_to_merge.append(bf_rgb.astype(np.float32))
+
+            # Process fluorescent channels (1-5) if available
             if image_data_np.ndim == 3 and image_data_np.shape[2] > 1:
                 for channel_idx in range(1, min(6, image_data_np.shape[2])):
                     channel_name = fixed_channel_order[channel_idx] if channel_idx < len(fixed_channel_order) else f"channel_{channel_idx}"
                     
-                    # Extract channel data from the same bounding box region
-                    channel_region = image_data_np[y_min:y_max, x_min:x_max, channel_idx].copy()
+                    # Only process channels with signal
+                    channel_data = image_data_np[:, :, channel_idx]
+                    if channel_data.max() == 0:
+                        continue
                     
-                    # Apply background subtraction before converting to uint8
+                    # Extract channel region
+                    channel_region = channel_data[y_min:y_max, x_min:x_max].copy()
+                    
+                    # Get channel color
+                    channel_color = CHANNEL_COLOR_MAP.get(channel_name, (255, 255, 255))
+                    
+                    # Get background value
                     bg_value = background_fluorescence.get(channel_idx, 0.0)
-                    if channel_region.dtype == np.uint16:
-                        # For uint16, subtract background before scaling
-                        channel_region = np.maximum(channel_region.astype(np.float32) - bg_value, 0.0)
-                        # Scale uint16 to uint8 range
-                        channel_region = (channel_region / 256).astype(np.uint8)
-                    else:
-                        # For other types, subtract background and clip
-                        channel_region = np.maximum(channel_region.astype(np.float32) - bg_value, 0.0)
-                        channel_region = channel_region.astype(np.uint8)
                     
-                    # Convert to RGB (grayscale to RGB - all channels same)
-                    channel_rgb = np.stack([channel_region] * 3, axis=-1)
+                    # Apply color and mask
+                    channel_rgb = _apply_channel_color_and_mask(
+                        channel_region,
+                        cell_mask_region,
+                        channel_color,
+                        bg_value=bg_value
+                    )
                     
-                    # Apply cell mask - fill outside with BLACK (0) instead of background value
-                    cell_mask_3d = np.expand_dims(cell_mask_region.astype(bool), axis=2)
-                    channel_rgb = np.where(cell_mask_3d, channel_rgb, 0).astype(np.uint8)
-                    
-                    # Resize and pad to 224x224 with BLACK padding (0)
-                    channel_rgb = resize_and_pad_to_square_rgb(channel_rgb, out_size=224, pad_value=0)
-                    
-                    # Convert to PIL and encode as base64 PNG
-                    channel_pil = PILImage.fromarray(channel_rgb, mode='RGB')
-                    buffer = BytesIO()
-                    channel_pil.save(buffer, format='PNG')
-                    channel_image_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
-                    
-                    # Store with sanitized field name
-                    field_name = f"image_{channel_name.replace(' ', '_').replace('-', '_')}"
-                    fluorescent_images[field_name] = channel_image_base64
+                    channels_to_merge.append(channel_rgb.astype(np.float32))
+
+            # Merge channels using additive blending
+            if len(channels_to_merge) > 1:
+                merged_rgb = np.clip(np.sum(channels_to_merge, axis=0), 0, 255).astype(np.uint8)
+            else:
+                merged_rgb = channels_to_merge[0].astype(np.uint8)
+
+            # Resize and pad merged image to 224x224 (use black padding for multi-channel)
+            merged_rgb = resize_and_pad_to_square_rgb(merged_rgb, out_size=224, pad_value=0)
+
+            # Convert to PIL Image and encode as base64 PNG
+            cell_pil = PILImage.fromarray(merged_rgb, mode='RGB')
+            buffer = BytesIO()
+            cell_pil.save(buffer, format='PNG')
+            cell_image_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
             
             # Morphological features
             try:
@@ -1996,12 +2017,8 @@ async def setup_service(server, server_id="agent-lens"):
                     # If fluorescence calculation fails, continue without it
                     pass
             
-            # Add image to metadata (will add embedding_vector after batch processing)
+            # Add merged multi-channel image to metadata (will add embeddings after batch processing)
             metadata["image"] = cell_image_base64
-            
-            # Add fluorescent channel images
-            for field_name, image_base64 in fluorescent_images.items():
-                metadata[field_name] = image_base64
             
             return (poly_index, metadata, cell_image_base64)
             
