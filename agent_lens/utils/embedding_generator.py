@@ -1,8 +1,8 @@
 """
-CLIP and DINOv2 embedding generation utilities for Agent-Lens.
+CLIP and Cell-DINO embedding generation utilities for Agent-Lens.
 Provides functions for generating text and image embeddings using:
 - CLIP ViT-B/32 model (512D) for image-text similarity
-- DINOv2 ViT-B/16 model (768D) for image-image similarity
+- Cell-DINO ViT-L/16 model (1024D) for image-image similarity (optimized for microscopy)
 """
 
 import os
@@ -21,9 +21,9 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 _clip_model = None
 _clip_preprocess = None
 
-# DINOv2 model configuration
-_dinov2_model = None
-_dinov2_processor = None
+# Cell-DINO model configuration (replaces DINOv2)
+_celldino_model = None
+_celldino_normalize = None
 
 # Configure CPU threads for PyTorch when using CPU
 if device == "cpu":
@@ -43,17 +43,53 @@ def _load_clip_model():
         logger.info("CLIP model loaded")
     return _clip_model, _clip_preprocess
 
-def _load_dinov2_model():
-    """Load DINOv2 ViT-B/16 model lazily and cache it in memory."""
-    global _dinov2_model, _dinov2_processor
-    if _dinov2_model is None:
-        from transformers import AutoImageProcessor, AutoModel
-        logger.info(f"Loading DINOv2 ViT-B/16 on {device}")
-        model_id = "facebook/dinov2-base"
-        _dinov2_processor = AutoImageProcessor.from_pretrained(model_id)
-        _dinov2_model = AutoModel.from_pretrained(model_id).to(device).eval()
-        logger.info("DINOv2 model loaded")
-    return _dinov2_model, _dinov2_processor
+class CellDinoNormalize:
+    """
+    Cell-DINO normalization following the official implementation.
+    Normalizes each channel independently: (x/255 - mean) / std
+    """
+    def __call__(self, x):
+        # Normalize to [0, 1]
+        x = x / 255.0
+        # Per-channel normalization (mean and std computed per image, per channel)
+        m = x.mean((-2, -1), keepdim=True)
+        s = x.std((-2, -1), unbiased=False, keepdim=True)
+        x = (x - m) / (s + 1e-7)
+        return x
+
+def _load_celldino_model():
+    """Load Cell-DINO ViT-L/16 model lazily and cache it in memory."""
+    global _celldino_model, _celldino_normalize
+    if _celldino_model is None:
+        from dinov2.hub.cell_dino.backbones import cell_dino_hpa_vitl16
+        logger.info(f"Loading Cell-DINO ViT-L/16 (HPA single cell) on {device}")
+        
+        # Load model without pretrained weights initially
+        # User needs to provide pretrained_url or pretrained_path when loading
+        # For now, we'll load without pretrained weights and log a warning
+        pretrained_url = os.getenv("CELL_DINO_PRETRAINED_URL")
+        pretrained_path = os.getenv("CELL_DINO_PRETRAINED_PATH")
+        
+        if pretrained_url or pretrained_path:
+            _celldino_model = cell_dino_hpa_vitl16(
+                pretrained=True,
+                pretrained_url=pretrained_url,
+                pretrained_path=pretrained_path,
+                in_channels=4  # HPA single cell uses 4 channels
+            ).to(device).eval()
+            logger.info(f"Cell-DINO model loaded with pretrained weights from {pretrained_url or pretrained_path}")
+        else:
+            logger.warning("No pretrained weights specified for Cell-DINO. Set CELL_DINO_PRETRAINED_URL or CELL_DINO_PRETRAINED_PATH environment variable.")
+            logger.warning("Loading Cell-DINO model without pretrained weights (for testing only)")
+            _celldino_model = cell_dino_hpa_vitl16(
+                pretrained=False,
+                in_channels=4  # HPA single cell uses 4 channels
+            ).to(device).eval()
+        
+        # Initialize normalization
+        _celldino_normalize = CellDinoNormalize()
+        logger.info("Cell-DINO model loaded")
+    return _celldino_model, _celldino_normalize
 
 def _normalize_features(features: np.ndarray) -> np.ndarray:
     """L2-normalize feature vectors to unit length.
@@ -86,11 +122,11 @@ async def generate_text_embedding(text_description: str) -> List[float]:
 
 async def generate_image_embedding(image_bytes: bytes) -> Dict[str, List[float]]:
     """
-    Generate both CLIP and DINOv2 embeddings for an image.
+    Generate both CLIP and Cell-DINO embeddings for an image.
     
     Returns a dictionary with:
     - clip_embedding: 512D vector for image-text similarity
-    - dino_embedding: 768D vector for image-image similarity
+    - dino_embedding: 1024D vector for image-image similarity (Cell-DINO ViT-L/16)
     
     Args:
         image_bytes: Image data as bytes
@@ -137,13 +173,13 @@ async def generate_image_embedding(image_bytes: bytes) -> Dict[str, List[float]]
 
 async def generate_image_embeddings_batch(image_bytes_list: List[bytes], max_batch_size: int = 300) -> List[Dict[str, List[float]]]:
     """
-    Generate both CLIP and DINOv2 embeddings for multiple images in a single batch.
+    Generate both CLIP and Cell-DINO embeddings for multiple images in a single batch.
     This is much faster than processing images individually, especially on GPU.
     
     The main optimizations are:
     1. Parallel image preprocessing using ThreadPoolExecutor (PIL operations release GIL)
     2. Batching the model inference, which allows the GPU to process multiple images simultaneously
-    3. Running CLIP and DINOv2 inference in parallel
+    3. Running CLIP and Cell-DINO inference in parallel
     
     Args:
         image_bytes_list: List of image byte data to process
@@ -253,48 +289,64 @@ async def generate_image_embeddings_batch(image_bytes_list: List[bytes], max_bat
 
 async def generate_image_embedding_dinov2(image_bytes: bytes) -> List[float]:
     """
-    Generate a unit-normalized DINOv2 embedding for an image.
+    Generate a unit-normalized Cell-DINO embedding for an image.
     
-    DINOv2 embeddings are optimized for image-image similarity search.
-    Returns a 768-dimensional embedding vector.
+    Cell-DINO embeddings are optimized for microscopy image-image similarity search.
+    Returns a 1024-dimensional embedding vector (ViT-L/16).
     
     Args:
         image_bytes: Image data as bytes
         
     Returns:
-        768-dimensional embedding vector (L2-normalized)
+        1024-dimensional embedding vector (L2-normalized)
     """
     from PIL import Image
     import io
     
-    model, processor = _load_dinov2_model()
+    model, normalize = _load_celldino_model()
     
     try:
         with Image.open(io.BytesIO(image_bytes)) as image:
-            image = image.convert("RGB")
-            inputs = processor(images=image, return_tensors="pt").to(device)
+            # Convert to 4-channel format expected by Cell-DINO (RGBX or RGBA)
+            # If image has 3 channels (RGB), add an alpha channel
+            if image.mode == "RGB":
+                # Create RGBA image with full opacity
+                image = image.convert("RGBA")
+            elif image.mode == "L":
+                # Grayscale: replicate to 4 channels
+                image = image.convert("RGBA")
+            elif image.mode == "RGBA":
+                # Already 4 channels
+                pass
+            else:
+                # Convert any other mode to RGBA
+                image = image.convert("RGBA")
+            
+            # Convert PIL image to tensor (C, H, W) with values in [0, 255]
+            import torchvision.transforms as transforms
+            to_tensor = transforms.ToTensor()  # This converts to [0, 1]
+            img_tensor = to_tensor(image) * 255.0  # Scale back to [0, 255]
+            
+            # Add batch dimension: (1, C, H, W)
+            img_tensor = img_tensor.unsqueeze(0).to(device)
+            
+            # Apply Cell-DINO normalization
+            img_tensor = normalize(img_tensor)
         
         # Use mixed precision for GPU efficiency
         with torch.no_grad():
             if device == "cuda":
                 with torch.amp.autocast('cuda', dtype=torch.float16):
-                    outputs = model(**inputs)
+                    # Cell-DINO directly outputs embeddings
+                    embeddings = model(img_tensor)
             else:
-                outputs = model(**inputs)
+                embeddings = model(img_tensor)
         
-        # Extract patch tokens (skip CLS token at index 0)
-        # CLS token would be: last_hidden_state[:, 0, :]
-        # Patch tokens are: last_hidden_state[:, 1:, :]
-        patch_tokens = outputs.last_hidden_state[:, 1:, :]  # drop the first token, which is the [CLS] token
-
-        # Average patch tokens (NOT using CLS token)
-        deno_embeddings = torch.mean(patch_tokens, dim=1)
-
         # L2 normalize for cosine similarity
-        deno_embeddings = torch.nn.functional.normalize(deno_embeddings, dim=-1)
+        embeddings = torch.nn.functional.normalize(embeddings, dim=-1)
         
         # Convert to numpy and return as list
-        embedding = deno_embeddings.squeeze(0).float().cpu().numpy().astype(np.float32)
+        embedding = embeddings.squeeze(0).float().cpu().numpy().astype(np.float32)
         return embedding.tolist()
         
     finally:
@@ -304,22 +356,23 @@ async def generate_image_embedding_dinov2(image_bytes: bytes) -> List[float]:
 
 async def generate_image_embeddings_batch_dinov2(image_bytes_list: List[bytes], max_batch_size: int = 300) -> List[List[float]]:
     """
-    Generate unit-normalized DINOv2 embeddings for multiple images in a single batch.
+    Generate unit-normalized Cell-DINO embeddings for multiple images in a single batch.
     This is much faster than processing images individually, especially on GPU.
     
-    DINOv2 embeddings are optimized for image-image similarity search.
+    Cell-DINO embeddings are optimized for microscopy image-image similarity search.
     
     Args:
         image_bytes_list: List of image byte data to process
         max_batch_size: Maximum number of images to process in a single GPU batch (default: 300)
         
     Returns:
-        List of 768-dimensional embedding vectors (same order as input). Returns None for failed images.
+        List of 1024-dimensional embedding vectors (same order as input). Returns None for failed images.
     """
     from PIL import Image
     import io
     from concurrent.futures import ThreadPoolExecutor
     import asyncio
+    import torchvision.transforms as transforms
     
     if not image_bytes_list:
         return []
@@ -334,19 +387,30 @@ async def generate_image_embeddings_batch_dinov2(image_bytes_list: List[bytes], 
             all_results.extend(chunk_results)
         return all_results
     
-    model, processor = _load_dinov2_model()
+    model, normalize = _load_celldino_model()
     
     # Preprocess images in parallel using ThreadPoolExecutor
-    def preprocess_single_image_dinov2(idx: int, img_bytes: bytes):
-        """Preprocess a single image for DINOv2 (runs in thread pool)."""
+    def preprocess_single_image_celldino(idx: int, img_bytes: bytes):
+        """Preprocess a single image for Cell-DINO (runs in thread pool)."""
         try:
             with Image.open(io.BytesIO(img_bytes)) as image:
-                image = image.convert("RGB")
-                # Process single image and return the pixel_values tensor
-                inputs = processor(images=image, return_tensors="pt")
-                return inputs.pixel_values.squeeze(0), idx, None
+                # Convert to 4-channel format expected by Cell-DINO
+                if image.mode == "RGB":
+                    image = image.convert("RGBA")
+                elif image.mode == "L":
+                    image = image.convert("RGBA")
+                elif image.mode == "RGBA":
+                    pass
+                else:
+                    image = image.convert("RGBA")
+                
+                # Convert PIL image to tensor (C, H, W) with values in [0, 255]
+                to_tensor = transforms.ToTensor()
+                img_tensor = to_tensor(image) * 255.0  # Scale to [0, 255]
+                
+                return img_tensor, idx, None
         except Exception as e:
-            logger.warning(f"Failed to preprocess image at index {idx} for DINOv2: {e}")
+            logger.warning(f"Failed to preprocess image at index {idx} for Cell-DINO: {e}")
             return None, idx, e
     
     try:
@@ -354,7 +418,7 @@ async def generate_image_embeddings_batch_dinov2(image_bytes_list: List[bytes], 
         loop = asyncio.get_running_loop()
         with ThreadPoolExecutor() as executor:
             preprocessing_tasks = [
-                loop.run_in_executor(executor, preprocess_single_image_dinov2, idx, img_bytes)
+                loop.run_in_executor(executor, preprocess_single_image_celldino, idx, img_bytes)
                 for idx, img_bytes in enumerate(image_bytes_list)
             ]
             preprocessing_results = await asyncio.gather(*preprocessing_tasks)
@@ -375,28 +439,23 @@ async def generate_image_embeddings_batch_dinov2(image_bytes_list: List[bytes], 
         # Stack all tensors into a single batch
         batch_tensor = torch.stack(batch_tensors).to(device)
         
+        # Apply Cell-DINO normalization
+        batch_tensor = normalize(batch_tensor)
+        
         # Single batch inference with mixed precision
         with torch.no_grad():
             if device == "cuda":
                 with torch.amp.autocast('cuda', dtype=torch.float16):
-                    outputs = model(pixel_values=batch_tensor)
+                    # Cell-DINO directly outputs embeddings
+                    embeddings = model(batch_tensor)
             else:
-                outputs = model(pixel_values=batch_tensor)
-        
-        # Extract patch tokens (skip CLS token at index 0)
-        # CLS token would be: last_hidden_state[:, 0, :]
-        # Patch tokens are: last_hidden_state[:, 1:, :]
-        patch_tokens = outputs.last_hidden_state[:, 1:, :]  # drop the first token, which is the [CLS] token
-
-        # Average patch tokens (NOT using CLS token)
-        deno_embeddings = torch.mean(patch_tokens, dim=1)
-
+                embeddings = model(batch_tensor)
         
         # L2 normalize for cosine similarity
-        deno_embeddings = torch.nn.functional.normalize(deno_embeddings, dim=-1)
+        embeddings = torch.nn.functional.normalize(embeddings, dim=-1)
         
         # Convert to numpy
-        normalized_features = deno_embeddings.float().cpu().numpy().astype(np.float32)
+        normalized_features = embeddings.float().cpu().numpy().astype(np.float32)
         
         # Map results back to original order
         results = [None] * len(image_bytes_list)
@@ -406,7 +465,7 @@ async def generate_image_embeddings_batch_dinov2(image_bytes_list: List[bytes], 
         return results
         
     except Exception as e:
-        logger.error(f"Error in batch DINOv2 embedding generation: {e}")
+        logger.error(f"Error in batch Cell-DINO embedding generation: {e}")
         return [None] * len(image_bytes_list)
     finally:
         # Cleanup

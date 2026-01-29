@@ -158,11 +158,11 @@ def get_frontend_api():
 
     @app.post("/embedding/image")
     async def generate_image_embedding(image: UploadFile = File(...)):
-        """Generate both CLIP and DINOv2 image embeddings from an uploaded image.
+        """Generate both CLIP and Cell-DINO image embeddings from an uploaded image.
         
         Returns both embeddings:
         - CLIP (512D) for image-text similarity
-        - DINOv2 (768D) for image-image similarity
+        - Cell-DINO (1024D) for image-image similarity (optimized for microscopy)
 
         Returns a JSON object with both embedding arrays.
         """
@@ -189,14 +189,14 @@ def get_frontend_api():
 
     @app.post("/embedding/image-batch")
     async def generate_image_embedding_batch(images: List[UploadFile] = File(...)):
-        """Generate both CLIP and DINOv2 image embeddings from multiple uploaded images in batch.
+        """Generate both CLIP and Cell-DINO image embeddings from multiple uploaded images in batch.
         
         This endpoint uses optimized batch processing with parallel I/O for significantly faster
         embedding generation, especially when using GPU acceleration.
         
         Returns both embeddings for each image:
         - CLIP (512D) for image-text similarity
-        - DINOv2 (768D) for image-image similarity
+        - Cell-DINO (1024D) for image-image similarity (optimized for microscopy)
 
         Args:
             images: List of image files to process
@@ -1424,10 +1424,10 @@ async def preload_embedding_models():
         logger.info("Loading CLIP model...")
         from agent_lens.utils.embedding_generator import _load_clip_model
         _load_clip_model()
-        # Preload DINOv2 model (shared with similarity service)
-        logger.info("Loading DINOv2 model...")
-        from agent_lens.utils.embedding_generator import _load_dinov2_model
-        _load_dinov2_model()
+        # Preload Cell-DINO model (shared with similarity service)
+        logger.info("Loading Cell-DINO model...")
+        from agent_lens.utils.embedding_generator import _load_celldino_model
+        _load_celldino_model()
         logger.info("✓ Embedding models loaded successfully - similarity search will be faster!")
         
     except Exception as e:
@@ -1499,7 +1499,7 @@ async def setup_service(server, server_id="agent-lens"):
     @schema_function()
     async def generate_image_embeddings_batch_rpc(images_base64: List[str]) -> dict:
         """
-        Generate both CLIP and DINOv2 image embeddings for multiple images in batch via hypha-rpc.
+        Generate both CLIP and Cell-DINO image embeddings for multiple images in batch via hypha-rpc.
         Returns json object with success flag, results array, and count.
         """
         try:
@@ -1555,13 +1555,13 @@ async def setup_service(server, server_id="agent-lens"):
         """
         Resize and pad cell image to a square for consistent embedding.
         
-        This ensures all cells have the same input size (224x224 for CLIP or DINOv2),
+        This ensures all cells have the same input size (224x224 for CLIP or Cell-DINO),
         preventing the embedding generator from doing variable cropping that can change
         the embedding based on the original crop's aspect ratio.
         
         Args:
             cell_rgb_u8: (H,W,3) uint8 RGB image
-            out_size: Target square size (e.g., 224 for CLIP or DINOv2)
+            out_size: Target square size (e.g., 224 for CLIP or Cell-DINO)
             pad_value: Padding value 0..255 (typically background brightness)
             
         Returns:
@@ -1580,6 +1580,42 @@ async def setup_service(server, server_id="agent-lens"):
         pil = pil.resize((new_w, new_h), PILImage.Resampling.LANCZOS)
 
         canvas = PILImage.new("RGB", (out_size, out_size), color=(pad_value, pad_value, pad_value))
+        canvas.paste(pil, ((out_size - new_w)//2, (out_size - new_h)//2))
+
+        return np.array(canvas, dtype=np.uint8)
+    
+    def resize_and_pad_to_square_rgba(cell_rgba_u8: np.ndarray, out_size: int, pad_value: np.ndarray) -> np.ndarray:
+        """
+        Resize and pad 4-channel cell image to a square for consistent Cell-DINO embedding.
+        
+        This ensures all cells have the same input size (224x224 for Cell-DINO),
+        preventing the embedding generator from doing variable cropping that can change
+        the embedding based on the original crop's aspect ratio.
+        
+        Args:
+            cell_rgba_u8: (H,W,4) uint8 4-channel image
+            out_size: Target square size (e.g., 224 for Cell-DINO)
+            pad_value: Padding values as (4,) array (typically [bg_bright, 0, 0, 0])
+            
+        Returns:
+            (out_size, out_size, 4) uint8 4-channel image
+        """
+        assert cell_rgba_u8.dtype == np.uint8 and cell_rgba_u8.ndim == 3 and cell_rgba_u8.shape[2] == 4
+        assert pad_value.shape == (4,), f"pad_value must be (4,) array, got shape {pad_value.shape}"
+
+        pil = PILImage.fromarray(cell_rgba_u8, mode="RGBA")
+        w, h = pil.size
+
+        # Scale so the whole crop fits inside out_size
+        scale = out_size / max(w, h)
+        new_w = max(1, int(round(w * scale)))
+        new_h = max(1, int(round(h * scale)))
+
+        pil = pil.resize((new_w, new_h), PILImage.Resampling.LANCZOS)
+
+        # Create canvas with padding values (convert to tuple for PIL)
+        pad_tuple = tuple(pad_value.tolist())
+        canvas = PILImage.new("RGBA", (out_size, out_size), color=pad_tuple)
         canvas.paste(pil, ((out_size - new_w)//2, (out_size - new_h)//2))
 
         return np.array(canvas, dtype=np.uint8)
@@ -1725,47 +1761,22 @@ async def setup_service(server, server_id="agent-lens"):
             cell_mask_region = cell_mask[y_min:y_max, x_min:x_max]  # Target cell mask
             mask_region = mask[y_min:y_max, x_min:x_max]  # Full mask with all cell IDs
             
-            # Convert brightfield (grayscale) to RGB uint8 for embedding generation
-            # Stack the single channel 3 times to create RGB (grayscale to RGB)
-            cell_image_rgb = np.stack([cell_image_region] * 3, axis=-1)
+            # Prepare 4-channel image for Cell-DINO embedding generation
+            # Cell-DINO expects 4 channels (trained on HPA single cell with nucleus, microtubules, ER, protein)
+            # We'll map: brightfield + 3 fluorescence channels
+            channels_for_embedding = []
             
-            # Ensure uint8 (and compute matching uint8 background value)
-            if cell_image_rgb.dtype != np.uint8:
-                max_val = float(cell_image_rgb.max()) if cell_image_rgb.size else 0.0
-                if max_val > 255:
-                    scale = 255.0 / max_val
-                    cell_image_rgb = (cell_image_rgb * scale).astype(np.uint8)
-                    bg_u8 = int(np.clip(background_bright_value * scale, 0, 255))
-                else:
-                    cell_image_rgb = cell_image_rgb.astype(np.uint8)
-                    bg_u8 = int(np.clip(background_bright_value, 0, 255))
-            else:
-                bg_u8 = int(np.clip(background_bright_value, 0, 255))
+            # Channel 0: Brightfield (normalized, uint8)
+            channels_for_embedding.append(cell_image_region)
             
-            # Apply cell mask to isolate the cell (fill outside-cell pixels with background bright value)
-            cell_mask_3d = np.expand_dims(cell_mask_region.astype(bool), axis=2)
-            cell_image_rgb = np.where(cell_mask_3d, cell_image_rgb, bg_u8).astype(np.uint8)
-            
-            # Resize and pad to 224x224 square for consistent embedding
-            # This prevents the embedding generator from doing variable cropping
-            cell_image_rgb = resize_and_pad_to_square_rgb(cell_image_rgb, out_size=224, pad_value=bg_u8)
-            
-            # Convert to PIL Image and encode as base64 PNG
-            cell_pil = PILImage.fromarray(cell_image_rgb, mode='RGB')
-            buffer = BytesIO()
-            cell_pil.save(buffer, format='PNG')
-            cell_image_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
-            
-            # Extract fluorescent channel images (channels 1-5)
-            fluorescent_images = {}
+            # Channels 1-3: Fluorescence channels (if available)
             if image_data_np.ndim == 3 and image_data_np.shape[2] > 1:
-                for channel_idx in range(1, min(6, image_data_np.shape[2])):
-                    channel_name = fixed_channel_order[channel_idx] if channel_idx < len(fixed_channel_order) else f"channel_{channel_idx}"
-                    
+                # Extract fluorescence channels 1-3 (405nm, 488nm, 561nm typically)
+                for channel_idx in range(1, min(4, image_data_np.shape[2])):
                     # Extract channel data from the same bounding box region
                     channel_region = image_data_np[y_min:y_max, x_min:x_max, channel_idx].copy()
                     
-                    # Apply background subtraction before converting to uint8
+                    # Apply background subtraction
                     bg_value = background_fluorescence.get(channel_idx, 0.0)
                     if channel_region.dtype == np.uint16:
                         # For uint16, subtract background before scaling
@@ -1775,27 +1786,80 @@ async def setup_service(server, server_id="agent-lens"):
                     else:
                         # For other types, subtract background and clip
                         channel_region = np.maximum(channel_region.astype(np.float32) - bg_value, 0.0)
-                        channel_region = channel_region.astype(np.uint8)
+                        channel_region = np.clip(channel_region, 0, 255).astype(np.uint8)
                     
-                    # Convert to RGB (grayscale to RGB - all channels same)
-                    channel_rgb = np.stack([channel_region] * 3, axis=-1)
+                    channels_for_embedding.append(channel_region)
+            
+            # Pad with zeros if we have fewer than 4 channels
+            while len(channels_for_embedding) < 4:
+                channels_for_embedding.append(np.zeros_like(cell_image_region, dtype=np.uint8))
+            
+            # Stack channels to create 4-channel image (H, W, 4)
+            cell_image_4ch = np.stack(channels_for_embedding[:4], axis=-1)
+            
+            # Compute padding value (use median background for channel 0, 0 for fluorescence)
+            bg_u8 = int(np.clip(background_bright_value, 0, 255))
+            bg_4ch = np.array([bg_u8, 0, 0, 0], dtype=np.uint8)
+            
+            # Resize and pad to 224x224 square for consistent embedding
+            # No background masking - just use the bounding box crop as-is
+            cell_image_4ch = resize_and_pad_to_square_rgba(cell_image_4ch, out_size=224, pad_value=bg_4ch)
+            
+            # Convert to PIL Image (RGBA format) and encode as base64 PNG for embedding generation
+            cell_pil_4ch = PILImage.fromarray(cell_image_4ch, mode='RGBA')
+            buffer_4ch = BytesIO()
+            cell_pil_4ch.save(buffer_4ch, format='PNG')
+            cell_image_base64 = base64.b64encode(buffer_4ch.getvalue()).decode('utf-8')
+            
+            # Create a merged RGB preview image for display (avoiding RGBA transparency issues)
+            # Merge brightfield + fluorescence channels into a single RGB visualization
+            if image_data_np.ndim == 3 and image_data_np.shape[2] > 1:
+                # Create RGB composite: map fluorescence channels to RGB colors
+                # Channel 1 (405nm/DAPI) -> Blue
+                # Channel 2 (488nm/GFP) -> Green  
+                # Channel 3 (561nm/RFP) -> Red
+                merged_rgb = np.zeros((cell_image_region.shape[0], cell_image_region.shape[1], 3), dtype=np.float32)
+                
+                # Add brightfield to all RGB channels (grayscale base)
+                merged_rgb[:, :, 0] = cell_image_region.astype(np.float32)
+                merged_rgb[:, :, 1] = cell_image_region.astype(np.float32)
+                merged_rgb[:, :, 2] = cell_image_region.astype(np.float32)
+                
+                # Overlay fluorescence channels with color mapping
+                for channel_idx in range(1, min(4, image_data_np.shape[2])):
+                    channel_region = image_data_np[y_min:y_max, x_min:x_max, channel_idx].copy()
                     
-                    # Apply cell mask - fill outside with BLACK (0) instead of background value
-                    cell_mask_3d = np.expand_dims(cell_mask_region.astype(bool), axis=2)
-                    channel_rgb = np.where(cell_mask_3d, channel_rgb, 0).astype(np.uint8)
+                    # Apply background subtraction
+                    bg_value = background_fluorescence.get(channel_idx, 0.0)
+                    if channel_region.dtype == np.uint16:
+                        channel_region = np.maximum(channel_region.astype(np.float32) - bg_value, 0.0)
+                        channel_region = (channel_region / 256).astype(np.float32)
+                    else:
+                        channel_region = np.maximum(channel_region.astype(np.float32) - bg_value, 0.0)
                     
-                    # Resize and pad to 224x224 with BLACK padding (0)
-                    channel_rgb = resize_and_pad_to_square_rgb(channel_rgb, out_size=224, pad_value=0)
-                    
-                    # Convert to PIL and encode as base64 PNG
-                    channel_pil = PILImage.fromarray(channel_rgb, mode='RGB')
-                    buffer = BytesIO()
-                    channel_pil.save(buffer, format='PNG')
-                    channel_image_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
-                    
-                    # Store with sanitized field name
-                    field_name = f"image_{channel_name.replace(' ', '_').replace('-', '_')}"
-                    fluorescent_images[field_name] = channel_image_base64
+                    # Map to RGB (1->Blue, 2->Green, 3->Red)
+                    if channel_idx == 1:  # Blue channel (DAPI)
+                        merged_rgb[:, :, 2] = np.maximum(merged_rgb[:, :, 2], channel_region)
+                    elif channel_idx == 2:  # Green channel (GFP)
+                        merged_rgb[:, :, 1] = np.maximum(merged_rgb[:, :, 1], channel_region)
+                    elif channel_idx == 3:  # Red channel (RFP)
+                        merged_rgb[:, :, 0] = np.maximum(merged_rgb[:, :, 0], channel_region)
+                
+                # Clip and convert to uint8
+                merged_rgb = np.clip(merged_rgb, 0, 255).astype(np.uint8)
+            else:
+                # No fluorescence channels, use brightfield only
+                merged_rgb = np.stack([cell_image_region] * 3, axis=-1)
+            
+            # Resize and pad merged RGB display image to 224x224
+            # No background masking - just use the bounding box crop as-is
+            cell_image_rgb_display = resize_and_pad_to_square_rgb(merged_rgb, out_size=224, pad_value=bg_u8)
+            
+            # Encode RGB display image as base64 PNG
+            cell_pil_rgb = PILImage.fromarray(cell_image_rgb_display, mode='RGB')
+            buffer_rgb = BytesIO()
+            cell_pil_rgb.save(buffer_rgb, format='PNG')
+            cell_image_display_base64 = base64.b64encode(buffer_rgb.getvalue()).decode('utf-8')
             
             # Morphological features
             try:
@@ -1996,13 +2060,11 @@ async def setup_service(server, server_id="agent-lens"):
                     # If fluorescence calculation fails, continue without it
                     pass
             
-            # Add image to metadata (will add embedding_vector after batch processing)
-            metadata["image"] = cell_image_base64
+            # Add merged RGB preview image to metadata (for display/visualization)
+            # This avoids RGBA transparency issues in browser display
+            metadata["image"] = cell_image_display_base64
             
-            # Add fluorescent channel images
-            for field_name, image_base64 in fluorescent_images.items():
-                metadata[field_name] = image_base64
-            
+            # Return 4-channel image for Cell-DINO embedding generation
             return (poly_index, metadata, cell_image_base64)
             
         except Exception as e:
