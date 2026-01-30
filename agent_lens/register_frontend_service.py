@@ -1797,12 +1797,16 @@ async def setup_service(server, server_id="agent-lens"):
             # Stack channels to create 4-channel image (H, W, 4)
             cell_image_4ch = np.stack(channels_for_embedding[:4], axis=-1)
             
-            # Compute padding value (use median background for channel 0, 0 for fluorescence)
+            # Compute background value for padding (use brightfield background for channel 0, 0 for others)
             bg_u8 = int(np.clip(background_bright_value, 0, 255))
-            bg_4ch = np.array([bg_u8, 0, 0, 0], dtype=np.uint8)
+            bg_4ch = np.array([bg_u8, 0, 0, 0], dtype=np.uint8)  # Brightfield bg + black for fluorescence
+            
+            # Apply cell mask to isolate the cell (fill outside-cell pixels with background values)
+            cell_mask_4d = np.expand_dims(cell_mask_region.astype(bool), axis=2)
+            cell_image_4ch = np.where(cell_mask_4d, cell_image_4ch, bg_4ch).astype(np.uint8)
             
             # Resize and pad to 224x224 square for consistent embedding
-            # No background masking - just use the bounding box crop as-is
+            # This prevents the embedding generator from doing variable cropping
             cell_image_4ch = resize_and_pad_to_square_rgba(cell_image_4ch, out_size=224, pad_value=bg_4ch)
             
             # Convert to PIL Image (RGBA format) and encode as base64 PNG for embedding generation
@@ -1815,9 +1819,8 @@ async def setup_service(server, server_id="agent-lens"):
             # Merge brightfield + fluorescence channels into a single RGB visualization
             if image_data_np.ndim == 3 and image_data_np.shape[2] > 1:
                 # Create RGB composite: map fluorescence channels to RGB colors
-                # Channel 1 (405nm/DAPI) -> Blue
-                # Channel 2 (488nm/GFP) -> Green  
-                # Channel 3 (561nm/RFP) -> Red
+                # Channel 2: Fluorescence_488_nm_Ex (GFP) -> Green
+                # Channel 4: Fluorescence_561_nm_Ex (RFP/mCherry) -> Red
                 merged_rgb = np.zeros((cell_image_region.shape[0], cell_image_region.shape[1], 3), dtype=np.float32)
                 
                 # Add brightfield to all RGB channels (grayscale base)
@@ -1825,25 +1828,27 @@ async def setup_service(server, server_id="agent-lens"):
                 merged_rgb[:, :, 1] = cell_image_region.astype(np.float32)
                 merged_rgb[:, :, 2] = cell_image_region.astype(np.float32)
                 
-                # Overlay fluorescence channels with color mapping
-                for channel_idx in range(1, min(4, image_data_np.shape[2])):
-                    channel_region = image_data_np[y_min:y_max, x_min:x_max, channel_idx].copy()
-                    
-                    # Apply background subtraction
-                    bg_value = background_fluorescence.get(channel_idx, 0.0)
+                # Channel 2: 488nm (GFP) -> Green
+                if image_data_np.shape[2] > 2:
+                    channel_region = image_data_np[y_min:y_max, x_min:x_max, 2].copy()
+                    bg_value = background_fluorescence.get(2, 0.0)
                     if channel_region.dtype == np.uint16:
                         channel_region = np.maximum(channel_region.astype(np.float32) - bg_value, 0.0)
                         channel_region = (channel_region / 256).astype(np.float32)
                     else:
                         channel_region = np.maximum(channel_region.astype(np.float32) - bg_value, 0.0)
-                    
-                    # Map to RGB (1->Blue, 2->Green, 3->Red)
-                    if channel_idx == 1:  # Blue channel (DAPI)
-                        merged_rgb[:, :, 2] = np.maximum(merged_rgb[:, :, 2], channel_region)
-                    elif channel_idx == 2:  # Green channel (GFP)
-                        merged_rgb[:, :, 1] = np.maximum(merged_rgb[:, :, 1], channel_region)
-                    elif channel_idx == 3:  # Red channel (RFP)
-                        merged_rgb[:, :, 0] = np.maximum(merged_rgb[:, :, 0], channel_region)
+                    merged_rgb[:, :, 1] = np.maximum(merged_rgb[:, :, 1], channel_region)
+                
+                # Channel 4: 561nm (RFP) -> Red
+                if image_data_np.shape[2] > 4:
+                    channel_region = image_data_np[y_min:y_max, x_min:x_max, 4].copy()
+                    bg_value = background_fluorescence.get(4, 0.0)
+                    if channel_region.dtype == np.uint16:
+                        channel_region = np.maximum(channel_region.astype(np.float32) - bg_value, 0.0)
+                        channel_region = (channel_region / 256).astype(np.float32)
+                    else:
+                        channel_region = np.maximum(channel_region.astype(np.float32) - bg_value, 0.0)
+                    merged_rgb[:, :, 0] = np.maximum(merged_rgb[:, :, 0], channel_region)
                 
                 # Clip and convert to uint8
                 merged_rgb = np.clip(merged_rgb, 0, 255).astype(np.uint8)
@@ -1851,8 +1856,11 @@ async def setup_service(server, server_id="agent-lens"):
                 # No fluorescence channels, use brightfield only
                 merged_rgb = np.stack([cell_image_region] * 3, axis=-1)
             
+            # Apply cell mask to merged RGB display image
+            cell_mask_3d = np.expand_dims(cell_mask_region.astype(bool), axis=2)
+            merged_rgb = np.where(cell_mask_3d, merged_rgb, bg_u8).astype(np.uint8)
+            
             # Resize and pad merged RGB display image to 224x224
-            # No background masking - just use the bounding box crop as-is
             cell_image_rgb_display = resize_and_pad_to_square_rgb(merged_rgb, out_size=224, pad_value=bg_u8)
             
             # Encode RGB display image as base64 PNG
