@@ -1690,16 +1690,17 @@ async def setup_service(server, server_id="agent-lens"):
         Process a single cell to extract metadata and generate cell image.
         This function is designed to be run in parallel threads.
         """
-        cell_id = poly.get("id")
-        if cell_id is None:
+        # Polygon "id" is the mask label value used to index into the segmentation mask
+        mask_label = poly.get("id")
+        if mask_label is None:
             return (poly_index, None, None)
         
         try:
-            # Initialize metadata dict
-            metadata = {"cell_id": cell_id}
+            # Initialize metadata dict (cell identity is given by list order/index)
+            metadata = {}
             
             # Create binary mask for this cell
-            cell_mask = (mask == cell_id).astype(np.uint8)
+            cell_mask = (mask == mask_label).astype(np.uint8)
             
             if np.sum(cell_mask) == 0:
                 # Cell not found in mask, skip
@@ -2068,7 +2069,7 @@ async def setup_service(server, server_id="agent-lens"):
             
         except Exception as e:
             # Skip this cell if processing fails
-            print(f"Error processing cell {cell_id}: {e}")
+            print(f"Error processing cell at index {poly_index}: {e}")
             return (poly_index, None, None)
 
 
