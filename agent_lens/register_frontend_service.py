@@ -1594,6 +1594,48 @@ async def setup_service(server, server_id="agent-lens"):
 
         return np.array(canvas, dtype=np.uint8)
 
+    def _apply_channel_color_and_mask_brightfield(
+        channel_region: np.ndarray,
+        cell_mask_region: np.ndarray,
+        channel_color: Tuple[int, int, int],
+        bg_value: float = 0.0
+    ) -> np.ndarray:
+        """
+        Apply channel-specific color tinting and cell mask for BRIGHTFIELD channel.
+        For brightfield: cells keep original intensity, non-cell areas filled with bg_value.
+        
+        Args:
+            channel_region: 2D grayscale brightfield data
+            cell_mask_region: 2D binary mask for the cell
+            channel_color: RGB tuple (0-255) for channel color
+            bg_value: Background value to fill non-cell areas
+        
+        Returns:
+            RGB uint8 array with color-tinted, masked brightfield data
+        """
+        # Convert to uint8 if needed (no background subtraction for brightfield)
+        if channel_region.dtype == np.uint16:
+            channel_region = (channel_region / 256).astype(np.uint8)
+        else:
+            channel_region = channel_region.astype(np.uint8)
+        
+        # Apply color tinting (multiply grayscale by channel RGB color)
+        channel_rgb = np.zeros((*channel_region.shape, 3), dtype=np.float32)
+        channel_rgb[:, :, 0] = channel_region * (channel_color[0] / 255.0)
+        channel_rgb[:, :, 1] = channel_region * (channel_color[1] / 255.0)
+        channel_rgb[:, :, 2] = channel_region * (channel_color[2] / 255.0)
+        
+        # Create background RGB (fill value for non-cell areas)
+        bg_rgb = np.array([bg_value * (channel_color[0] / 255.0),
+                           bg_value * (channel_color[1] / 255.0),
+                           bg_value * (channel_color[2] / 255.0)], dtype=np.float32)
+        
+        # Apply cell mask: cell pixels keep their value, non-cell pixels get bg_value
+        cell_mask_3d = np.expand_dims(cell_mask_region.astype(bool), axis=2)
+        channel_rgb = np.where(cell_mask_3d, channel_rgb, bg_rgb)
+        
+        return channel_rgb.astype(np.uint8)
+    
     def _apply_channel_color_and_mask(
         channel_region: np.ndarray,
         cell_mask_region: np.ndarray,
@@ -1763,10 +1805,12 @@ async def setup_service(server, server_id="agent-lens"):
                     bf_region = np.full_like(bf_region, 128, dtype=np.uint8)
             else:
                 bf_region = bf_region.astype(np.uint8)
-
+                
             # Get brightfield color and apply mask
+            # NOTE: Brightfield uses special processing - cells keep original intensity,
+            # non-cell areas filled with background_bright_value (not black)
             bf_color = CHANNEL_COLOR_MAP.get('BF_LED_matrix_full', (255, 255, 255))
-            bf_rgb = _apply_channel_color_and_mask(
+            bf_rgb = _apply_channel_color_and_mask_brightfield(
                 bf_region, 
                 cell_mask_region, 
                 bf_color, 
@@ -1810,7 +1854,7 @@ async def setup_service(server, server_id="agent-lens"):
                 merged_rgb = channels_to_merge[0].astype(np.uint8)
 
             # Resize and pad merged image to 224x224 (use black padding for multi-channel)
-            merged_rgb = resize_and_pad_to_square_rgb(merged_rgb, out_size=224, pad_value=0)
+            merged_rgb = resize_and_pad_to_square_rgb(merged_rgb, out_size=224, pad_value=background_bright_value)
 
             # Convert to PIL Image and encode as base64 PNG
             cell_pil = PILImage.fromarray(merged_rgb, mode='RGB')
@@ -2085,7 +2129,7 @@ async def setup_service(server, server_id="agent-lens"):
         non_cell_pixels = brightfield[mask == 0]
         if non_cell_pixels.size == 0:
             raise ValueError("No non-cell pixels found (mask==0). Cannot compute background median.")
-        background_bright_value = float(np.median(non_cell_pixels))
+        background_bright_value = int(np.median(non_cell_pixels))
         
         # Compute background values for fluorescent channels (channels 1-5)
         # Only process channels that actually have signal in image_data_np
