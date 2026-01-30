@@ -2081,7 +2081,35 @@ async def setup_service(server, server_id="agent-lens"):
     ) -> List[Dict[str, Any]]:
         """
         Extract cell metadata, crops, and embeddings from segmentation results.
-        Returns a list of metadata dictionaries, one per cell.
+        Returns a list of metadata dictionaries, one per cell. Here is the metadata fields:
+        - cell_id: unique identifier for the cell
+        - image: base64-encoded PNG image of the cell
+        - area: area of the cell in pixels
+        - perimeter: perimeter of the cell in pixels
+        - equivalent_diameter: equivalent diameter of the cell in pixels
+        - bbox_width: width of the bounding box in pixels
+        - bbox_height: height of the bounding box in pixels
+        - aspect_ratio: aspect ratio of the cell
+        - circularity: circularity of the cell
+        - eccentricity: eccentricity of the cell
+        - solidity: solidity of the cell
+        - convexity: convexity of the cell
+        - brightness: brightness of the cell
+        - contrast: contrast of the cell
+        - homogeneity: homogeneity of the cell
+        - energy: energy of the cell
+        - correlation: correlation of the cell
+
+        - mean_intensity_<channel_name>: mean intensity of the cell for the given channel
+        - top10_mean_intensity_<channel_name>: mean intensity of the top 10% brightest pixels for the given channel
+        - clip_embedding: CLIP embedding of the cell image
+        - dino_embedding: DINO embedding of the cell image
+
+        - current_x: X coordinate of the microscope stage (mm)
+        - current_y: Y coordinate of the microscope stage (mm)
+        - well_id: well identifier (e.g., "A1", "B2")
+        - distance_from_center: distance from the center of the well in mm
+
         """
 
         import concurrent.futures
