@@ -383,14 +383,38 @@ def make_umap_cluster_figure_interactive(
     
     E = np.vstack(embeddings)   # (N, D)
     n_samples = len(E)
+    embedding_dim = E.shape[1]
     
-    # --- Normalize (vectorized) ---
-    print(f"🔄 Normalizing {n_samples} embeddings...")
+    # --- Step 1: L2 Normalize embeddings ---
+    print(f"🔄 L2 normalizing {n_samples} embeddings (dim={embedding_dim})...")
     norms = np.linalg.norm(E, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
     E = E / norms
     
-    # --- UMAP embedding with optimized settings ---
+    # --- Step 2: PCA dimensionality reduction (following Cell-DINO paper approach) ---
+    from sklearn.decomposition import PCA
+    n_pca_components = min(100, n_samples - 1, embedding_dim)  # Reduce to 100 dims or less if needed
+    
+    if n_pca_components < embedding_dim:
+        print(f"🔄 Applying PCA: {embedding_dim}D → {n_pca_components}D...")
+        pca_start = time.time()
+        pca = PCA(n_components=n_pca_components, random_state=random_state)
+        E_pca = pca.fit_transform(E)
+        pca_time = time.time() - pca_start
+        explained_var = np.sum(pca.explained_variance_ratio_) * 100
+        print(f"✓ PCA completed in {pca_time:.2f}s (explained variance: {explained_var:.1f}%)")
+    else:
+        print(f"ℹ️ Skipping PCA (n_samples={n_samples} too small or embedding already compact)")
+        E_pca = E
+    
+    # --- Step 3: Z-score standardization (following Cell-DINO paper approach) ---
+    print(f"🔄 Standardizing features (z-score)...")
+    from sklearn.preprocessing import StandardScaler
+    scaler = StandardScaler()
+    E_scaled = scaler.fit_transform(E_pca)
+    print(f"✓ Features standardized (mean≈0, std≈1)")
+    
+    # --- Step 4: UMAP embedding with optimized settings ---
     # Adaptive n_neighbors for large datasets (reduce for speed)
     adaptive_n_neighbors = min(n_neighbors, max(15, n_samples // 100))
     if adaptive_n_neighbors < n_neighbors:
@@ -408,7 +432,7 @@ def make_umap_cluster_figure_interactive(
         low_memory=False,  # Use more memory for speed
         verbose=False
     )
-    X_2d = umap_model.fit_transform(E)
+    X_2d = umap_model.fit_transform(E_scaled)
     umap_time = time.time() - umap_start
     print(f"✓ UMAP completed in {umap_time:.2f}s")
     
