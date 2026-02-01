@@ -294,9 +294,17 @@ def make_umap_cluster_figure_interactive(
                 print(f"⚠️ Failed to resize image for cell {idx}: {e}")
         
         # Extract metadata
-        well_row = c.get("well_row")
-        well_col = c.get("well_col")
-        cell_index = c.get("cell_index") or c.get("field_cell_index")
+        # Parse well_id (e.g., "B2" -> well_row="B", well_col="2")
+        well_id = c.get("well_id")
+        if well_id and isinstance(well_id, str) and len(well_id) >= 2:
+            well_row = well_id[0]  # First character is row (e.g., "B")
+            well_col = well_id[1:]  # Remaining characters are column (e.g., "2" or "12")
+        else:
+            well_row = c.get("well_row")
+            well_col = c.get("well_col")
+        
+        # Use list index as cell_index if not available
+        cell_index = c.get("cell_index") or c.get("field_cell_index") or idx
         
         # Extract position information
         position = c.get("position")
@@ -306,7 +314,6 @@ def make_umap_cluster_figure_interactive(
         
         cell_info = {
             "index": idx,
-            "id": c.get("id") or c.get("cell_id") or f"cell_{idx}",
             "image_b64": image_b64_thumbnail,
             "well_row": well_row if well_row is not None else "?",
             "well_col": well_col if well_col is not None else "?",
@@ -459,6 +466,9 @@ def make_umap_cluster_figure_interactive(
         """Build hover text and customdata for a single cell."""
         i, cell = i_and_cell
         
+        # Get cluster label for this cell
+        cluster_label = cluster_labels[i]
+        
         well_row_str = safe_str(cell.get('well_row'))
         well_col_str = safe_str(cell.get('well_col'))
         cell_index_str = safe_str(cell.get('cell_index'))
@@ -488,6 +498,7 @@ def make_umap_cluster_figure_interactive(
         
         text = (
             f"<span style='font-size:9px;'>"
+            f"<b>Cluster {cluster_label}</b><br>"
             f"<b>Well {well_row_str}{well_col_str}, Cell {cell_index_str}</b><br>"
             f"<b>Position:</b> {position_str}<br>"
             f"<b>Distance from center:</b> {distance_str}<br>"
@@ -519,7 +530,6 @@ def make_umap_cluster_figure_interactive(
         
         custom = [
             cell['index'],
-            cell['id'],
             cell['image_b64'] if cell['image_b64'] else '',
             cell['well_row'],
             cell['well_col'],
@@ -769,6 +779,35 @@ def make_umap_cluster_figure_interactive(
     .plotly .hoverlayer .hovertext text {{
         font-size: 9px !important;
     }}
+    
+    /* Cluster legend styling - same location as colorbar */
+    #cluster-legend {{
+        display: none;
+        flex-direction: row;
+        flex-wrap: wrap;
+        gap: 12px;
+        padding: 8px 12px;
+        background: #f8f9fa;
+        border-radius: 6px;
+        margin-top: 8px;
+        max-width: 770px;
+        font-family: Arial, sans-serif;
+        font-size: 11px;
+        color: black;
+    }}
+    
+    .cluster-legend-item {{
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }}
+    
+    .cluster-legend-color {{
+        width: 14px;
+        height: 14px;
+        border-radius: 2px;
+        border: 1px solid rgba(0,0,0,0.2);
+    }}
     </style>
     
     <!-- Tab controls -->
@@ -794,6 +833,9 @@ def make_umap_cluster_figure_interactive(
         <img id="cell-image" src="" alt="Cell Image" style="display:none;">
         <div class="cell-info" id="cell-info"></div>
     </div>
+    
+    <!-- Cluster legend -->
+    <div id="cluster-legend"></div>
     
     <script>
     (function() {{
@@ -861,6 +903,43 @@ def make_umap_cluster_figure_interactive(
             document.getElementById('colorbar-max').textContent = range.max.toFixed(2);
         }}
         
+        function updateClusterLegend(show) {{
+            var legend = document.getElementById('cluster-legend');
+            if (!show) {{
+                legend.style.display = 'none';
+                return;
+            }}
+            
+            legend.style.display = 'flex';
+            
+            // Get unique cluster colors and count cells per cluster
+            var uniqueClusters = {{}};
+            clusterColors.forEach(function(color) {{
+                uniqueClusters[color] = (uniqueClusters[color] || 0) + 1;
+            }});
+            
+            // Build legend items
+            legend.innerHTML = '';
+            var clusterIdx = 0;
+            for (var color in uniqueClusters) {{
+                var item = document.createElement('div');
+                item.className = 'cluster-legend-item';
+                
+                var colorBox = document.createElement('div');
+                colorBox.className = 'cluster-legend-color';
+                colorBox.style.backgroundColor = color;
+                
+                var label = document.createElement('span');
+                label.textContent = 'Cluster ' + clusterIdx + ' (' + uniqueClusters[color] + ' cells)';
+                
+                item.appendChild(colorBox);
+                item.appendChild(label);
+                legend.appendChild(item);
+                
+                clusterIdx++;
+            }}
+        }}
+        
         function initTabs() {{
             var plot = document.getElementById('umap-plot');
             var tabs = document.querySelectorAll('.color-tab');
@@ -877,9 +956,11 @@ def make_umap_cluster_figure_interactive(
                     if (mode === 'cluster') {{
                         newColors = clusterColors;
                         updateColorbar(null, false);
+                        updateClusterLegend(true);
                     }} else {{
                         newColors = getMetadataColors(mode);
                         updateColorbar(mode, true);
+                        updateClusterLegend(false);
                     }}
                     
                     // Update plot colors
@@ -899,15 +980,14 @@ def make_umap_cluster_figure_interactive(
             plot.on('plotly_hover', function(data) {{
                 try {{
                     var point = data.points[0];
-                    if (point.customdata && point.customdata.length >= 8) {{
+                    if (point.customdata && point.customdata.length >= 7) {{
                         var cellIndex = point.customdata[0];
-                        var cellId = point.customdata[1];
-                        var imageB64 = point.customdata[2];
-                        var wellRow = point.customdata[3];
-                        var wellCol = point.customdata[4];
-                        var posX = point.customdata[5];
-                        var posY = point.customdata[6];
-                        var cellIdx = point.customdata[7];
+                        var imageB64 = point.customdata[1];
+                        var wellRow = point.customdata[2];
+                        var wellCol = point.customdata[3];
+                        var posX = point.customdata[4];
+                        var posY = point.customdata[5];
+                        var cellIdx = point.customdata[6];
                         
                         // Build info text with position
                         var positionText = (posX !== 'N/A' && posY !== 'N/A') 
@@ -957,12 +1037,14 @@ def make_umap_cluster_figure_interactive(
                 setTimeout(function() {{
                     initTabs();
                     initImagePopup();
+                    updateClusterLegend(true);  // Show cluster legend on initial load
                 }}, 100);
             }});
         }} else {{
             setTimeout(function() {{
                 initTabs();
                 initImagePopup();
+                updateClusterLegend(true);  // Show cluster legend on initial load
             }}, 100);
         }}
     }})();
