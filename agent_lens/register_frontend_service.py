@@ -2004,43 +2004,11 @@ async def setup_service(server, server_id="agent-lens"):
                         # If fluorescence calculation fails, continue without it
                         pass
                     
-                    # GLCM features if enough pixels
-                    if len(cell_pixels) >= 4:
-                        # Ensure uint8
-                        if gray.dtype != np.uint8:
-                            if gray.max() > 0:
-                                gray = ((gray - gray.min()) / (gray.max() - gray.min()) * 255).astype(np.uint8)
-                            else:
-                                gray = gray.astype(np.uint8)
-                        
-                        # Mask background
-                        cell_region = gray.copy()
-                        cell_region[cell_mask == 0] = 0
-                        
-                        angles = [0, np.pi / 4, np.pi / 2, 3 * np.pi / 4]
-                        glcm = graycomatrix(
-                            cell_region,
-                            distances=[1],
-                            angles=angles,
-                            levels=256,
-                            symmetric=True,
-                            normed=True
-                        )
-                        
-                        contrast_vals = graycoprops(glcm, "contrast")[0]
-                        homogeneity_vals = graycoprops(glcm, "homogeneity")[0]
-                        energy_vals = graycoprops(glcm, "energy")[0]
-                        correlation_vals = graycoprops(glcm, "correlation")[0]
-                        
-                        metadata["contrast"] = float(np.mean(contrast_vals))
-                        metadata["homogeneity"] = float(np.mean(homogeneity_vals))
-                        metadata["energy"] = float(np.mean(energy_vals))
-                        metadata["correlation"] = float(np.mean(correlation_vals))
-                    else:
-                        metadata["contrast"] = None
-                        metadata["homogeneity"] = None
-                        metadata["energy"] = None
-                        metadata["correlation"] = None
+                    # GLCM texture features removed for performance (not critical for most analysis)
+                    metadata["contrast"] = None
+                    metadata["homogeneity"] = None
+                    metadata["energy"] = None
+                    metadata["correlation"] = None
             except:
                 metadata["brightness"] = None
                 metadata["contrast"] = None
@@ -2096,10 +2064,10 @@ async def setup_service(server, server_id="agent-lens"):
         - solidity: solidity of the cell
         - convexity: convexity of the cell
         - brightness: brightness of the cell
-        - contrast: contrast of the cell
-        - homogeneity: homogeneity of the cell
-        - energy: energy of the cell
-        - correlation: correlation of the cell
+        - contrast: None (GLCM texture features removed for performance)
+        - homogeneity: None (GLCM texture features removed for performance)
+        - energy: None (GLCM texture features removed for performance)
+        - correlation: None (GLCM texture features removed for performance)
 
         - mean_intensity_<channel_name>: mean intensity of the cell for the given channel
         - top10_mean_intensity_<channel_name>: mean intensity of the top 10% brightest pixels for the given channel
