@@ -900,32 +900,76 @@ def make_umap_cluster_figure_interactive(
             
             legend.style.display = 'flex';
             
-            // Get unique cluster colors and count cells per cluster
-            var uniqueClusters = {{}};
-            clusterColors.forEach(function(color) {{
-                uniqueClusters[color] = (uniqueClusters[color] || 0) + 1;
+            // Build a mapping from color to actual cluster labels
+            var colorToClusterLabels = {{}};
+            clusterColors.forEach(function(color, idx) {{
+                // Get the actual cluster label from hover text
+                // We need to extract it from the customdata or build it from the data
+                if (!colorToClusterLabels[color]) {{
+                    colorToClusterLabels[color] = [];
+                }}
+                colorToClusterLabels[color].push(idx);
             }});
+            
+            // Get unique cluster labels for each color
+            var clusterInfo = [];
+            for (var color in colorToClusterLabels) {{
+                var indices = colorToClusterLabels[color];
+                // Get the cluster label from the first point with this color
+                // We'll extract it from the plot data
+                clusterInfo.push({{
+                    color: color,
+                    count: indices.length,
+                    label: null  // Will be filled from plot data
+                }});
+            }}
+            
+            // Extract cluster labels from plot hover text
+            var plot = document.getElementById('umap-plot');
+            if (plot && plot.data && plot.data[0] && plot.data[0].text) {{
+                var texts = plot.data[0].text;
+                var colorToLabel = {{}};
+                
+                texts.forEach(function(text, idx) {{
+                    var color = clusterColors[idx];
+                    if (colorToLabel[color] === undefined) {{
+                        // Extract cluster number from hover text
+                        var match = text.match(/<b>Cluster (\\d+)<\\/b>/);
+                        if (match) {{
+                            colorToLabel[color] = parseInt(match[1]);
+                        }}
+                    }}
+                }});
+                
+                // Update cluster info with actual labels
+                clusterInfo.forEach(function(info) {{
+                    info.label = colorToLabel[info.color];
+                }});
+                
+                // Sort by cluster label
+                clusterInfo.sort(function(a, b) {{
+                    return a.label - b.label;
+                }});
+            }}
             
             // Build legend items
             legend.innerHTML = '';
-            var clusterIdx = 0;
-            for (var color in uniqueClusters) {{
+            clusterInfo.forEach(function(info) {{
                 var item = document.createElement('div');
                 item.className = 'cluster-legend-item';
                 
                 var colorBox = document.createElement('div');
                 colorBox.className = 'cluster-legend-color';
-                colorBox.style.backgroundColor = color;
+                colorBox.style.backgroundColor = info.color;
                 
                 var label = document.createElement('span');
-                label.textContent = 'Cluster ' + clusterIdx + ' (' + uniqueClusters[color] + ' cells)';
+                var clusterLabel = info.label !== null ? info.label : '?';
+                label.textContent = 'Cluster ' + clusterLabel + ' (' + info.count + ' cells)';
                 
                 item.appendChild(colorBox);
                 item.appendChild(label);
                 legend.appendChild(item);
-                
-                clusterIdx++;
-            }}
+            }});
         }}
         
         function initTabs() {{
