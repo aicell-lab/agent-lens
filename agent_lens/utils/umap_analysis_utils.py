@@ -203,33 +203,21 @@ def make_umap_cluster_figure_interactive(
     random_state: Optional[int] = None,
     n_jobs: Optional[int] = None,
     metadata_fields: Optional[List[str]] = None,
-) -> Optional[str]:
+) -> Optional[Dict]:
     """
     Interactive UMAP visualization using Plotly with switchable coloring modes.
-    Returns HTML string that can be embedded in a webpage.
-    
-    This function performs UMAP dimensionality reduction followed by KMeans clustering.
-    Users can switch between cluster coloring and metadata heatmaps using tab buttons.
-    
-    Features:
-    - Zoom and pan
-    - Hover to see cell details (ID, area, etc.) with cell image thumbnail
-    - Tab buttons to switch between Cluster view and metadata heatmaps
-    - Turbo colormap for metadata heatmaps with colorbar
-    - Export as PNG/SVG
+    Returns dictionary with HTML string and cluster labels.
     
     Args:
-        all_cells: List of cell dictionaries with 'dino_embedding', 'clip_embedding', or 'embedding_vector' key
-            (prefers dino_embedding for image-image similarity, then clip_embedding, then embedding_vector)
-            and optionally 'id', 'area', etc. for metadata visualization
+        all_cells: List of cell dictionaries with embeddings and optional metadata
         n_neighbors: Number of neighbors for UMAP (default: 15)
         min_dist: Minimum distance for UMAP (default: 0.1)
-        random_state: Random state for reproducibility. If None, allows parallelism (default: None)
-        n_jobs: Number of parallel jobs. -1 uses all CPU cores (default: -1 for maximum parallelism)
-        metadata_fields: List of metadata field names for heatmap tabs. If None, uses DEFAULT_METADATA_FIELDS
-    
+        random_state: Random state for reproducibility (default: None)
+        n_jobs: Number of parallel jobs, -1 uses all cores (default: None)
+        metadata_fields: Metadata fields for heatmap tabs (default: None)
     Returns:
-        HTML string of interactive Plotly figure with tab controls, or None if failed
+        Dictionary with 'html' (interactive Plotly figure) and 'cluster_labels' (list of cluster assignments),
+        or None if failed
     """
     import time
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -1060,4 +1048,8 @@ def make_umap_cluster_figure_interactive(
     print(f"✓ HTML length: {len(html)} characters")
     print(f"⏱️ Total execution time: {total_time:.2f}s (processing: {processing_time:.2f}s, UMAP: {umap_time:.2f}s, KMeans: {kmeans_time:.2f}s, hover: {hover_time:.2f}s, metadata: {metadata_time:.2f}s)")
     
-    return html
+    # Return both HTML and cluster labels
+    return {
+        "html": html,
+        "cluster_labels": cluster_labels.tolist()  # Convert numpy array to list for JSON serialization
+    }

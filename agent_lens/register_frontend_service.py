@@ -2269,15 +2269,28 @@ async def setup_service(server, server_id="agent-lens"):
     ) -> dict:
         """
         Generate interactive UMAP visualization (Plotly HTML) with switchable coloring modes via hypha-rpc.
+        Args:
+            all_cells: List of cell dictionaries with embeddings and optional metadata
+            n_neighbors: Number of neighbors for UMAP (default: 15)
+            min_dist: Minimum distance for UMAP (default: 0.1)
         Returns:
-            dict: JSON object with success flag and HTML string of interactive visualization, or None if failed
+            dict: JSON object with success flag, HTML string of interactive visualization, and cluster labels.
+            example return:
+            {
+                "success": True,
+                "html": "<html>...</html>",
+                "cluster_labels": [0, 1, 2, 3, 4],
+                "n_cells": 100,
+                "n_clusters": 5
+            }
         """
         try:
             if not all_cells or len(all_cells) == 0:
                 return {
                     "success": False,
                     "error": "No cells provided",
-                    "html": None
+                    "html": None,
+                    "cluster_labels": None
                 }
             
             from agent_lens.utils.umap_analysis_utils import (
@@ -2288,7 +2301,7 @@ async def setup_service(server, server_id="agent-lens"):
             logger.info(f"Starting UMAP visualization for {len(all_cells)} cells with n_jobs={n_jobs}")
             
             # Run in thread pool to avoid blocking
-            html = await asyncio.to_thread(
+            result = await asyncio.to_thread(
                 make_umap_cluster_figure_interactive,
                 all_cells=all_cells,
                 n_neighbors=n_neighbors,
@@ -2298,7 +2311,7 @@ async def setup_service(server, server_id="agent-lens"):
                 n_jobs=n_jobs,
             )
             
-            if html is None:
+            if result is None:
                 # Provide more specific error message
                 cells_with_embeddings = sum(1 for c in all_cells 
                                            if c.get("dino_embedding") or c.get("clip_embedding") or c.get("embedding_vector"))
@@ -2314,14 +2327,17 @@ async def setup_service(server, server_id="agent-lens"):
                     "success": False,
                     "error": error_msg,
                     "html": None,
+                    "cluster_labels": None,
                     "cells_with_embeddings": cells_with_embeddings,
                     "total_cells": len(all_cells)
                 }
             
             return {
                 "success": True,
-                "html": html,
-                "n_cells": len(all_cells)
+                "html": result["html"],
+                "cluster_labels": result["cluster_labels"],
+                "n_cells": len(all_cells),
+                "n_clusters": len(set(result["cluster_labels"]))
             }
         except Exception as e:
             logger.error(f"Error generating interactive UMAP figure via RPC: {e}")
