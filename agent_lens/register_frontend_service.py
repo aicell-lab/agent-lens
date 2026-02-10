@@ -24,7 +24,7 @@ import traceback
 import asyncio
 import base64
 # Import similarity search utilities
-from agent_lens.utils.weaviate_search import similarity_service, WEAVIATE_COLLECTION_NAME
+from agent_lens.utils.chroma_storage import chroma_storage
 from PIL import Image as PILImage
 from io import BytesIO
 from typing import Dict, Any, Tuple, List
@@ -2066,8 +2066,8 @@ async def setup_service(server, server_id="agent-lens"):
             - Images (base64 PNG) stored in Weaviate, NOT in returned records
             - DINO embeddings stored in Weaviate, NOT in returned records
             
-        Note: This function stores images and embeddings to Weaviate automatically,
-              reducing memory usage by ~250x. Use fetch_cell_images_from_weaviate()
+        Note: This function stores images and embeddings to ChromaDB automatically,
+              reducing memory usage by ~250x. Use fetch_cell_images()
               to retrieve images when needed for visualization.
         """
 
@@ -2263,62 +2263,28 @@ async def setup_service(server, server_id="agent-lens"):
         
 
         try:
-            print(f"Storing {len(results)} cells to Weaviate (application: {application_id})...")
+            print(f"Storing {len(results)} cells to ChromaDB (application: {application_id})...")
             
-            # Prepare objects for batch insertion - pass ALL metadata
-            weaviate_objects = []
+            # Prepare cells for batch insertion
+            cells_to_insert = []
             for idx, cell in enumerate(results):
-                # Generate unique image_id
-                image_id = f"{application_id}_cell_{idx}_{uuid.uuid4().hex[:8]}"
-                
-                # Use DINO embedding only (Weaviate stores ONE vector per object)
-                vector = cell.get("dino_embedding")
-                if not vector:
+                # Check for DINO embedding
+                if not cell.get("dino_embedding"):
                     print(f"Warning: Cell {idx} has no dino_embedding, skipping")
                     continue
                 
-                # Pass ALL metadata fields (matching collection schema)
-                obj = {
-                    "image_id": image_id,
-                    "description": f"Cell {idx}",
-                    "metadata": {},
-                    "dataset_id": application_id,
-                    "file_path": "",
-                    "preview_image": cell.get("image", ""),
-                    "vector": vector,
-                    # Cell morphology (from collection schema)
-                    "area": cell.get("area"),
-                    "perimeter": cell.get("perimeter"),
-                    "equivalent_diameter": cell.get("equivalent_diameter"),
-                    "bbox_width": cell.get("bbox_width"),
-                    "bbox_height": cell.get("bbox_height"),
-                    "aspect_ratio": cell.get("aspect_ratio"),
-                    "circularity": cell.get("circularity"),
-                    "eccentricity": cell.get("eccentricity"),
-                    "solidity": cell.get("solidity"),
-                    "convexity": cell.get("convexity"),
-                }
-                weaviate_objects.append(obj)
+                # Generate unique UUID and image_id
+                cell["uuid"] = str(uuid.uuid4())
+                cell["image_id"] = f"{application_id}_cell_{idx}_{uuid.uuid4().hex[:8]}"
+                cells_to_insert.append(cell)
             
-            # Batch insert using existing method
-            insert_result = await similarity_service.insert_many_images(
-                collection_name=WEAVIATE_COLLECTION_NAME,
+            # Batch insert (single operation!)
+            insert_result = chroma_storage.insert_cells(
                 application_id=application_id,
-                objects=weaviate_objects
+                cells=cells_to_insert
             )
             
-            # Map UUIDs back to results
-            if insert_result.get("uuids"):
-                uuids_dict = insert_result["uuids"]
-                weaviate_idx = 0
-                for cell in results:
-                    if cell.get("dino_embedding"):  # Only cells with embeddings were inserted
-                        if weaviate_idx < len(weaviate_objects):
-                            image_id = weaviate_objects[weaviate_idx]["image_id"]
-                            cell["uuid"] = uuids_dict.get(image_id, f"error_{weaviate_idx}")
-                            weaviate_idx += 1
-            
-            print(f"✅ Stored {insert_result.get('inserted_count', 0)} cells to Weaviate")
+            print(f"✅ Stored {insert_result['inserted_count']} cells to ChromaDB")
             
             # Remove images and embeddings from results to save memory
             for cell in results:
@@ -2327,9 +2293,9 @@ async def setup_service(server, server_id="agent-lens"):
                 cell.pop("dino_embedding", None)
             
         except Exception as e:
-            print(f"Warning: Failed to store cells to Weaviate: {e}")
-            logger.warning(f"Failed to store cells to Weaviate: {e}")
-            # Continue without Weaviate storage - return full records
+            print(f"Warning: Failed to store cells to ChromaDB: {e}")
+            logger.warning(f"Failed to store cells to ChromaDB: {e}")
+            # Continue without ChromaDB storage - return full records
         
         return results
             
@@ -2420,70 +2386,40 @@ async def setup_service(server, server_id="agent-lens"):
             logger.error(traceback.format_exc())
             raise
     
-    # Define hypha-rpc service method for fetching cell images from Weaviate
+    # Define hypha-rpc service method for fetching cell images from ChromaDB
     @schema_function()
-    async def fetch_cell_images_from_weaviate(
+    async def fetch_cell_images(
         uuids: List[str],
         application_id: str,
         include_embeddings: bool = False
     ) -> List[Dict[str, Any]]:
         """
-        Fetch cell images from Weaviate by UUIDs.
+        Fetch cell images from ChromaDB by UUIDs (batch operation).
         
         Args:
-            uuids: List of Weaviate object UUIDs
+            uuids: List of cell UUIDs
             application_id: Application ID
             include_embeddings: Whether to include DINO embedding vector
             
         Returns:
-            List of dicts with 'uuid', 'image' (or 'preview_image'), and optionally 'dino_embedding'
+            List of dicts with 'uuid', 'image', metadata, and optionally 'dino_embedding'
         """
         try:
-            if not await similarity_service.ensure_connected():
-                raise RuntimeError("Failed to connect to Weaviate service")
-            
-            results = []
-            for uuid_val in uuids:
-                try:
-                    obj = await similarity_service.fetch_by_uuid(
-                        collection_name=WEAVIATE_COLLECTION_NAME,
-                        application_id=application_id,
-                        object_uuid=uuid_val,
-                        include_vector=include_embeddings
-                    )
-                    
-                    # Extract properties - handle obj.properties or dict
-                    props = obj.properties if hasattr(obj, 'properties') else obj.get('properties', obj)
-                    
-                    cell_record = {'uuid': uuid_val}
-                    
-                    # Get image
-                    if hasattr(props, 'preview_image'):
-                        cell_record['image'] = props.preview_image
-                    elif isinstance(props, dict):
-                        cell_record['image'] = props.get('preview_image', props.get('image', ''))
-                    
-                    # Get vector if requested
-                    if include_embeddings:
-                        vector = obj.vector if hasattr(obj, 'vector') else obj.get('vector')
-                        if vector:
-                            cell_record['dino_embedding'] = vector
-                    
-                    results.append(cell_record)
-                    
-                except Exception as e:
-                    logger.warning(f"Failed to fetch UUID {uuid_val}: {e}")
-                    results.append({"uuid": uuid_val, "error": str(e)})
-            
+            # Single batch fetch operation!
+            results = chroma_storage.fetch_by_uuids(
+                application_id=application_id,
+                uuids=uuids,
+                include_embeddings=include_embeddings
+            )
             return results
             
         except Exception as e:
-            logger.error(f"Error fetching cell images: {e}")
-            raise
+            logger.error(f"Failed to fetch cells from ChromaDB: {e}")
+            return [{"uuid": uuid, "error": str(e)} for uuid in uuids]
     
     # Define hypha-rpc service method for fetching cell embeddings only
     @schema_function()
-    async def fetch_cell_embeddings_from_weaviate(
+    async def fetch_cell_embeddings(
         uuids: List[str],
         application_id: str
     ) -> List[Dict[str, Any]]:
@@ -2492,50 +2428,35 @@ async def setup_service(server, server_id="agent-lens"):
         No images - bandwidth efficient.
         
         Args:
-            uuids: List of Weaviate object UUIDs
+            uuids: List of cell UUIDs
             application_id: Application ID
             
         Returns:
             List of dicts with 'uuid' and 'dino_embedding'
         """
         try:
-            if not await similarity_service.ensure_connected():
-                raise RuntimeError("Failed to connect to Weaviate service")
+            # Batch fetch with embeddings
+            results = chroma_storage.fetch_by_uuids(
+                application_id=application_id,
+                uuids=uuids,
+                include_embeddings=True
+            )
             
-            results = []
-            for uuid_val in uuids:
-                try:
-                    obj = await similarity_service.fetch_by_uuid(
-                        collection_name=WEAVIATE_COLLECTION_NAME,
-                        application_id=application_id,
-                        object_uuid=uuid_val,
-                        include_vector=True
-                    )
-                    
-                    cell_record = {"uuid": uuid_val}
-                    
-                    # Extract vector (DINO embedding)
-                    vector = obj.vector if hasattr(obj, 'vector') else obj.get('vector')
-                    if vector:
-                        cell_record['dino_embedding'] = vector
-                    
-                    results.append(cell_record)
-                    
-                except Exception as e:
-                    logger.warning(f"Failed to fetch embeddings for UUID {uuid_val}: {e}")
-                    results.append({"uuid": uuid_val, "error": str(e)})
+            # Remove images to save bandwidth
+            for cell in results:
+                cell.pop("image", None)
             
             return results
             
         except Exception as e:
-            logger.error(f"Error fetching embeddings: {e}")
-            raise
+            logger.error(f"Failed to fetch embeddings from ChromaDB: {e}")
+            return [{"uuid": uuid, "error": str(e)} for uuid in uuids]
     
     # Define hypha-rpc service method for resetting application data
     @schema_function()
     async def reset_application(application_id: str) -> dict:
         """
-        Delete all cell annotations for a specific application from Weaviate.
+        Delete all cell annotations for a specific application from ChromaDB.
         Used to clean up before starting a new notebook session.
         
         Args:
@@ -2550,62 +2471,12 @@ async def setup_service(server, server_id="agent-lens"):
             }
         """
         try:
-            # Connect to similarity service
-            if not await similarity_service.ensure_connected():
-                return {
-                    "success": False,
-                    "deleted_count": 0,
-                    "application_id": application_id,
-                    "message": "Failed to connect to Weaviate service"
-                }
-            
-            # Fetch all annotations for this application
-            annotations = await similarity_service.fetch_all_annotations(
-                collection_name=WEAVIATE_COLLECTION_NAME,
-                application_id=application_id,
-                limit=10000,
-                include_vector=False
-            )
-            
-            deleted_count = 0
-            errors = []
-            
-            # Delete each annotation by UUID
-            for annotation in annotations:
-                try:
-                    # Extract UUID from annotation
-                    uuid_val = None
-                    if hasattr(annotation, 'uuid'):
-                        uuid_val = annotation.uuid
-                    elif hasattr(annotation, 'id'):
-                        uuid_val = annotation.id
-                    elif isinstance(annotation, dict):
-                        uuid_val = annotation.get('uuid') or annotation.get('id') or annotation.get('_uuid')
-                    
-                    if uuid_val:
-                        # Delete using Weaviate service
-                        await similarity_service.weaviate_service.data.delete(
-                            collection_name=WEAVIATE_COLLECTION_NAME,
-                            application_id=application_id,
-                            uuid=str(uuid_val)
-                        )
-                        deleted_count += 1
-                except Exception as e:
-                    errors.append(f"Failed to delete annotation: {e}")
-                    logger.warning(f"Error deleting annotation: {e}")
-            
-            logger.info(f"Reset application '{application_id}': deleted {deleted_count} annotations")
-            
-            return {
-                "success": True,
-                "deleted_count": deleted_count,
-                "application_id": application_id,
-                "message": f"Successfully deleted {deleted_count} annotations",
-                "errors": errors if errors else None
-            }
+            result = chroma_storage.reset_application(application_id)
+            logger.info(f"Reset application '{application_id}': {result['message']}")
+            return result
             
         except Exception as e:
-            logger.error(f"Error resetting application '{application_id}': {e}")
+            logger.error(f"Failed to reset application '{application_id}': {e}")
             return {
                 "success": False,
                 "deleted_count": 0,
@@ -2627,10 +2498,13 @@ async def setup_service(server, server_id="agent-lens"):
             "build_cell_records": build_cell_records,
             # Register RPC methods for UMAP clustering
             "make_umap_cluster_figure_interactive": make_umap_cluster_figure_interactive_rpc,
-            # Register RPC methods for Weaviate data management
+            # Register RPC methods for ChromaDB data management
             "reset_application": reset_application,
-            "fetch_cell_images_from_weaviate": fetch_cell_images_from_weaviate,
-            "fetch_cell_embeddings_from_weaviate": fetch_cell_embeddings_from_weaviate,
+            "fetch_cell_images": fetch_cell_images,
+            "fetch_cell_embeddings": fetch_cell_embeddings,
+            # Backward compatibility (deprecated, use new names)
+            "fetch_cell_images_from_weaviate": fetch_cell_images,
+            "fetch_cell_embeddings_from_weaviate": fetch_cell_embeddings,
         }
     )
 
@@ -2671,16 +2545,14 @@ async def setup_service(server, server_id="agent-lens"):
                 health_status["checks"]["artifact_manager"] = f"error: {str(e)}"
                 health_status["status"] = "degraded"
             
-            # Check 2: Weaviate connection (similarity search)
+            # Check 2: ChromaDB connection (cell storage)
             try:
-                # Check if the default collection exists to verify Weaviate connection
-                exists = await similarity_service.collection_exists(WEAVIATE_COLLECTION_NAME)
-                health_status["checks"]["weaviate"] = "ok" if exists is not None else "error"
-                if exists is None:
-                    health_status["status"] = "degraded"
+                # Check if ChromaDB is accessible by listing collections
+                collections = chroma_storage.list_collections()
+                health_status["checks"]["chromadb"] = "ok"
             except Exception as e:
-                logger.warning(f"Weaviate health check failed: {e}")
-                health_status["checks"]["weaviate"] = f"error: {str(e)}"
+                logger.warning(f"ChromaDB health check failed: {e}")
+                health_status["checks"]["chromadb"] = f"error: {str(e)}"
                 health_status["status"] = "degraded"
             
             return health_status
