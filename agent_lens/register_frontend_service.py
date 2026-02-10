@@ -2024,22 +2024,23 @@ async def setup_service(server, server_id="agent-lens"):
     async def build_cell_records(
         image_data_np: np.ndarray, 
         segmentation_mask: np.ndarray,
-        microscope_status: Optional[Dict[str, Any]] = None
+        microscope_status: Optional[Dict[str, Any]] = None,
+        application_id: str = 'hypha-agents-notebook',
     ) -> List[Dict[str, Any]]:
         """
         Extract cell metadata, crops, and embeddings from segmentation results.
-        This function extracts cell regions directly from the segmentation mask,
-        calculates morphological and intensity features, and generates embeddings.
+        Automatically stores images and DINO embeddings to Weaviate for memory efficiency.
         
         Args:
             image_data_np: Multi-channel microscopy image (H, W, C) or single-channel (H, W)
             segmentation_mask: Integer mask where each unique non-zero value represents a cell
             microscope_status: Optional microscope position info for spatial metadata
+            application_id: Application identifier for Weaviate storage (default: 'hypha-agents-notebook')
         
         Returns:
             List of metadata dictionaries, one per cell, with the following fields:
             
-            Geometry & Shape:
+            Geometry & Shape (in memory + Weaviate):
             - area: area of the cell in pixels
             - perimeter: perimeter of the cell in pixels
             - equivalent_diameter: equivalent diameter of the cell in pixels
@@ -2051,19 +2052,23 @@ async def setup_service(server, server_id="agent-lens"):
             - solidity: solidity of the cell
             - convexity: convexity of the cell
             
-            Image & Intensity:
-            - image: base64-encoded PNG image of the cell
+            Intensity Features (in memory only):
             - mean_intensity_<channel_name>: mean intensity of the cell for the given channel
-            - top10_mean_intensity_<channel_name>: mean intensity of the top 10% brightest pixels for the given channel
+            - top10_mean_intensity_<channel_name>: mean intensity of the top 10% brightest pixels
             
-            Embeddings:
-            - clip_embedding: CLIP embedding of the cell image
-            - dino_embedding: DINO embedding of the cell image
-            
-            Spatial Position (if microscope_status provided):
+            Spatial Position (in memory only, if microscope_status provided):
             - position: {"x": float, "y": float} - absolute cell position in mm
             - well_id: well identifier (e.g., "A1", "B2")
             - distance_from_center: distance from the center of the well in mm
+            
+            Weaviate Storage (stored in Weaviate, UUID returned):
+            - uuid: Weaviate object UUID for retrieving images/embeddings later
+            - Images (base64 PNG) stored in Weaviate, NOT in returned records
+            - DINO embeddings stored in Weaviate, NOT in returned records
+            
+        Note: This function stores images and embeddings to Weaviate automatically,
+              reducing memory usage by ~250x. Use fetch_cell_images_from_weaviate()
+              to retrieve images when needed for visualization.
         """
 
         import concurrent.futures
@@ -2256,6 +2261,76 @@ async def setup_service(server, server_id="agent-lens"):
                 result["clip_embedding"] = None
                 result["dino_embedding"] = None
         
+
+        try:
+            print(f"Storing {len(results)} cells to Weaviate (application: {application_id})...")
+            
+            # Prepare objects for batch insertion - pass ALL metadata
+            weaviate_objects = []
+            for idx, cell in enumerate(results):
+                # Generate unique image_id
+                image_id = f"{application_id}_cell_{idx}_{uuid.uuid4().hex[:8]}"
+                
+                # Use DINO embedding only (Weaviate stores ONE vector per object)
+                vector = cell.get("dino_embedding")
+                if not vector:
+                    print(f"Warning: Cell {idx} has no dino_embedding, skipping")
+                    continue
+                
+                # Pass ALL metadata fields (matching collection schema)
+                obj = {
+                    "image_id": image_id,
+                    "description": f"Cell {idx}",
+                    "metadata": {},
+                    "dataset_id": application_id,
+                    "file_path": "",
+                    "preview_image": cell.get("image", ""),
+                    "vector": vector,
+                    # Cell morphology (from collection schema)
+                    "area": cell.get("area"),
+                    "perimeter": cell.get("perimeter"),
+                    "equivalent_diameter": cell.get("equivalent_diameter"),
+                    "bbox_width": cell.get("bbox_width"),
+                    "bbox_height": cell.get("bbox_height"),
+                    "aspect_ratio": cell.get("aspect_ratio"),
+                    "circularity": cell.get("circularity"),
+                    "eccentricity": cell.get("eccentricity"),
+                    "solidity": cell.get("solidity"),
+                    "convexity": cell.get("convexity"),
+                }
+                weaviate_objects.append(obj)
+            
+            # Batch insert using existing method
+            insert_result = await similarity_service.insert_many_images(
+                collection_name=WEAVIATE_COLLECTION_NAME,
+                application_id=application_id,
+                objects=weaviate_objects
+            )
+            
+            # Map UUIDs back to results
+            if insert_result.get("uuids"):
+                uuids_dict = insert_result["uuids"]
+                weaviate_idx = 0
+                for cell in results:
+                    if cell.get("dino_embedding"):  # Only cells with embeddings were inserted
+                        if weaviate_idx < len(weaviate_objects):
+                            image_id = weaviate_objects[weaviate_idx]["image_id"]
+                            cell["uuid"] = uuids_dict.get(image_id, f"error_{weaviate_idx}")
+                            weaviate_idx += 1
+            
+            print(f"✅ Stored {insert_result.get('inserted_count', 0)} cells to Weaviate")
+            
+            # Remove images and embeddings from results to save memory
+            for cell in results:
+                cell.pop("image", None)
+                cell.pop("clip_embedding", None)
+                cell.pop("dino_embedding", None)
+            
+        except Exception as e:
+            print(f"Warning: Failed to store cells to Weaviate: {e}")
+            logger.warning(f"Failed to store cells to Weaviate: {e}")
+            # Continue without Weaviate storage - return full records
+        
         return results
             
     # Define hypha-rpc service method for interactive UMAP (HTML)
@@ -2345,6 +2420,199 @@ async def setup_service(server, server_id="agent-lens"):
             logger.error(traceback.format_exc())
             raise
     
+    # Define hypha-rpc service method for fetching cell images from Weaviate
+    @schema_function()
+    async def fetch_cell_images_from_weaviate(
+        uuids: List[str],
+        application_id: str,
+        include_embeddings: bool = False
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch cell images from Weaviate by UUIDs.
+        
+        Args:
+            uuids: List of Weaviate object UUIDs
+            application_id: Application ID
+            include_embeddings: Whether to include DINO embedding vector
+            
+        Returns:
+            List of dicts with 'uuid', 'image' (or 'preview_image'), and optionally 'dino_embedding'
+        """
+        try:
+            if not await similarity_service.ensure_connected():
+                raise RuntimeError("Failed to connect to Weaviate service")
+            
+            results = []
+            for uuid_val in uuids:
+                try:
+                    obj = await similarity_service.fetch_by_uuid(
+                        collection_name=WEAVIATE_COLLECTION_NAME,
+                        application_id=application_id,
+                        object_uuid=uuid_val,
+                        include_vector=include_embeddings
+                    )
+                    
+                    # Extract properties - handle obj.properties or dict
+                    props = obj.properties if hasattr(obj, 'properties') else obj.get('properties', obj)
+                    
+                    cell_record = {'uuid': uuid_val}
+                    
+                    # Get image
+                    if hasattr(props, 'preview_image'):
+                        cell_record['image'] = props.preview_image
+                    elif isinstance(props, dict):
+                        cell_record['image'] = props.get('preview_image', props.get('image', ''))
+                    
+                    # Get vector if requested
+                    if include_embeddings:
+                        vector = obj.vector if hasattr(obj, 'vector') else obj.get('vector')
+                        if vector:
+                            cell_record['dino_embedding'] = vector
+                    
+                    results.append(cell_record)
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to fetch UUID {uuid_val}: {e}")
+                    results.append({"uuid": uuid_val, "error": str(e)})
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error fetching cell images: {e}")
+            raise
+    
+    # Define hypha-rpc service method for fetching cell embeddings only
+    @schema_function()
+    async def fetch_cell_embeddings_from_weaviate(
+        uuids: List[str],
+        application_id: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch only DINO embeddings for cells (for UMAP clustering).
+        No images - bandwidth efficient.
+        
+        Args:
+            uuids: List of Weaviate object UUIDs
+            application_id: Application ID
+            
+        Returns:
+            List of dicts with 'uuid' and 'dino_embedding'
+        """
+        try:
+            if not await similarity_service.ensure_connected():
+                raise RuntimeError("Failed to connect to Weaviate service")
+            
+            results = []
+            for uuid_val in uuids:
+                try:
+                    obj = await similarity_service.fetch_by_uuid(
+                        collection_name=WEAVIATE_COLLECTION_NAME,
+                        application_id=application_id,
+                        object_uuid=uuid_val,
+                        include_vector=True
+                    )
+                    
+                    cell_record = {"uuid": uuid_val}
+                    
+                    # Extract vector (DINO embedding)
+                    vector = obj.vector if hasattr(obj, 'vector') else obj.get('vector')
+                    if vector:
+                        cell_record['dino_embedding'] = vector
+                    
+                    results.append(cell_record)
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to fetch embeddings for UUID {uuid_val}: {e}")
+                    results.append({"uuid": uuid_val, "error": str(e)})
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error fetching embeddings: {e}")
+            raise
+    
+    # Define hypha-rpc service method for resetting application data
+    @schema_function()
+    async def reset_application(application_id: str) -> dict:
+        """
+        Delete all cell annotations for a specific application from Weaviate.
+        Used to clean up before starting a new notebook session.
+        
+        Args:
+            application_id: Application ID to reset (e.g., "hypha-agents-notebook")
+            
+        Returns:
+            dict: {
+                "success": bool,
+                "deleted_count": int,
+                "application_id": str,
+                "message": str
+            }
+        """
+        try:
+            # Connect to similarity service
+            if not await similarity_service.ensure_connected():
+                return {
+                    "success": False,
+                    "deleted_count": 0,
+                    "application_id": application_id,
+                    "message": "Failed to connect to Weaviate service"
+                }
+            
+            # Fetch all annotations for this application
+            annotations = await similarity_service.fetch_all_annotations(
+                collection_name=WEAVIATE_COLLECTION_NAME,
+                application_id=application_id,
+                limit=10000,
+                include_vector=False
+            )
+            
+            deleted_count = 0
+            errors = []
+            
+            # Delete each annotation by UUID
+            for annotation in annotations:
+                try:
+                    # Extract UUID from annotation
+                    uuid_val = None
+                    if hasattr(annotation, 'uuid'):
+                        uuid_val = annotation.uuid
+                    elif hasattr(annotation, 'id'):
+                        uuid_val = annotation.id
+                    elif isinstance(annotation, dict):
+                        uuid_val = annotation.get('uuid') or annotation.get('id') or annotation.get('_uuid')
+                    
+                    if uuid_val:
+                        # Delete using Weaviate service
+                        await similarity_service.weaviate_service.data.delete(
+                            collection_name=WEAVIATE_COLLECTION_NAME,
+                            application_id=application_id,
+                            uuid=str(uuid_val)
+                        )
+                        deleted_count += 1
+                except Exception as e:
+                    errors.append(f"Failed to delete annotation: {e}")
+                    logger.warning(f"Error deleting annotation: {e}")
+            
+            logger.info(f"Reset application '{application_id}': deleted {deleted_count} annotations")
+            
+            return {
+                "success": True,
+                "deleted_count": deleted_count,
+                "application_id": application_id,
+                "message": f"Successfully deleted {deleted_count} annotations",
+                "errors": errors if errors else None
+            }
+            
+        except Exception as e:
+            logger.error(f"Error resetting application '{application_id}': {e}")
+            return {
+                "success": False,
+                "deleted_count": 0,
+                "application_id": application_id,
+                "message": f"Error: {str(e)}"
+            }
+    
     # Register the service with both ASGI and RPC methods
     await server.register_service(
         {
@@ -2359,6 +2627,10 @@ async def setup_service(server, server_id="agent-lens"):
             "build_cell_records": build_cell_records,
             # Register RPC methods for UMAP clustering
             "make_umap_cluster_figure_interactive": make_umap_cluster_figure_interactive_rpc,
+            # Register RPC methods for Weaviate data management
+            "reset_application": reset_application,
+            "fetch_cell_images_from_weaviate": fetch_cell_images_from_weaviate,
+            "fetch_cell_embeddings_from_weaviate": fetch_cell_embeddings_from_weaviate,
         }
     )
 

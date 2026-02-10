@@ -225,7 +225,7 @@ class WeaviateSimilarityService:
             if vector is None:
                 vector = await generate_text_embedding(obj.get("description", ""))
             
-            # Prepare object with properties and vector
+            # Prepare object with ALL properties from collection schema
             prepared_obj = {
                 "image_id": obj.get("image_id", ""),
                 "description": obj.get("description", ""),
@@ -233,6 +233,18 @@ class WeaviateSimilarityService:
                 "dataset_id": obj.get("dataset_id", ""),
                 "file_path": obj.get("file_path", ""),
                 "preview_image": obj.get("preview_image", ""),
+                "tag": obj.get("tag", ""),
+                # Cell morphology measurements
+                "area": obj.get("area"),
+                "perimeter": obj.get("perimeter"),
+                "equivalent_diameter": obj.get("equivalent_diameter"),
+                "bbox_width": obj.get("bbox_width"),
+                "bbox_height": obj.get("bbox_height"),
+                "aspect_ratio": obj.get("aspect_ratio"),
+                "circularity": obj.get("circularity"),
+                "eccentricity": obj.get("eccentricity"),
+                "solidity": obj.get("solidity"),
+                "convexity": obj.get("convexity"),
                 "vector": vector
             }
             prepared_objects.append(prepared_obj)
