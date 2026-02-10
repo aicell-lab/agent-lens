@@ -98,8 +98,8 @@ jobs:
         cd /tmp/clip
         python setup.py install
         cd -
-        # Install remaining dependencies (CLIP already installed, will be skipped)
-        pip install -e ".[test]"
+        # Install remaining dependencies with no-build-isolation (uses system setuptools)
+        pip install --no-build-isolation -e ".[test]"
         
     - name: Verify package installation
       run: |

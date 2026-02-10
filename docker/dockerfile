@@ -89,13 +89,17 @@ RUN pip install --upgrade pip wheel && \
 # This ensures GPU support is available for CLIP model
 RUN pip install --user torch==2.5.1 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 && \
     pip cache purge
-# Pre-install CLIP dependencies to avoid build isolation issues
+# Pre-install CLIP dependencies
 RUN pip install --user ftfy regex tqdm && \
     pip cache purge
-# Install CLIP separately with no-build-isolation to use system setuptools
-RUN pip install --user --no-build-isolation git+https://github.com/openai/CLIP.git@main && \
+# Clone and install CLIP manually using setup.py to bypass pip's build system
+RUN git clone https://github.com/openai/CLIP.git /tmp/clip && \
+    cd /tmp/clip && \
+    python setup.py install --user && \
+    cd - && \
+    rm -rf /tmp/clip && \
     pip cache purge
-# Install remaining dependencies with no-build-isolation (includes CLIP)
+# Install remaining dependencies with no-build-isolation (uses system setuptools)
 RUN pip install --user --no-build-isolation -e . && \
     pip cache purge
 # Clean up Python bytecode and cache files to reduce image size
