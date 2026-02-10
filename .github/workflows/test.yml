@@ -93,8 +93,8 @@ jobs:
         pip install ftfy regex tqdm
         # Install CLIP separately with no-build-isolation to use system setuptools
         pip install --no-build-isolation git+https://github.com/openai/CLIP.git@main
-        # Install remaining dependencies
-        pip install -e ".[test]"
+        # Install remaining dependencies with no-build-isolation
+        pip install --no-build-isolation -e ".[test]"
         
     - name: Verify package installation
       run: |

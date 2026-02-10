@@ -94,8 +94,8 @@ RUN pip install --user ftfy regex tqdm && \
 # Install CLIP separately with no-build-isolation to use system setuptools
 RUN pip install --user --no-build-isolation git+https://github.com/openai/CLIP.git@main && \
     pip cache purge
-# Install remaining dependencies (CLIP will be skipped as already installed)
-RUN pip install --user -e . && \
+# Install remaining dependencies with no-build-isolation (includes CLIP)
+RUN pip install --user --no-build-isolation -e . && \
     pip cache purge
 # Clean up Python bytecode and cache files to reduce image size
 RUN find /home/agent_lens/.local -type d -name __pycache__ -exec rm -r {} + 2>/dev/null || true && \
