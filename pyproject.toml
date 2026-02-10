@@ -44,7 +44,7 @@ dependencies = [
     
     # AI and machine learning
     "torch==2.5.1",
-    "clip @ git+https://github.com/openai/CLIP.git",
+    "clip @ git+https://github.com/openai/CLIP.git@main",
     "transformers>=4.35.0",
     "scikit-learn>=1.3.0",
     

@@ -89,6 +89,11 @@ jobs:
     - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip setuptools wheel
+        # Pre-install CLIP dependencies to avoid build isolation issues
+        pip install ftfy regex tqdm
+        # Install CLIP separately with no-build-isolation to use system setuptools
+        pip install --no-build-isolation git+https://github.com/openai/CLIP.git@main
+        # Install remaining dependencies
         pip install -e ".[test]"
         
     - name: Verify package installation
