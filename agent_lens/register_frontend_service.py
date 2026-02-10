@@ -1676,7 +1676,7 @@ async def setup_service(server, server_id="agent-lens"):
         return channel_rgb.astype(np.uint8)
 
     def _process_single_cell(
-        poly: Dict[str, Any],
+        prop: Any,  # RegionProperties object from skimage.measure.regionprops
         poly_index: int,
         image_data_np: np.ndarray,
         mask: np.ndarray,
@@ -1689,9 +1689,10 @@ async def setup_service(server, server_id="agent-lens"):
         """
         Process a single cell to extract metadata and generate cell image.
         This function is designed to be run in parallel threads.
+        
         """
-        # Polygon "id" is the mask label value used to index into the segmentation mask
-        mask_label = poly.get("id")
+        # Get mask label from the property object
+        mask_label = prop.label
         if mask_label is None:
             return (poly_index, None, None)
         
@@ -1699,18 +1700,13 @@ async def setup_service(server, server_id="agent-lens"):
             # Initialize metadata dict (cell identity is given by list order/index)
             metadata = {}
             
-            # Create binary mask for this cell
+            # Use prop directly without creating binary mask or calling regionprops again
+            # Create binary mask for this cell (only needed for image cropping)
             cell_mask = (mask == mask_label).astype(np.uint8)
             
-            if np.sum(cell_mask) == 0:
+            if prop.area == 0:
                 # Cell not found in mask, skip
                 return (poly_index, None, None)
-            
-            # Get region properties
-            props = regionprops(cell_mask)
-            if len(props) == 0:
-                return (poly_index, None, None)
-            prop = props[0]
             
             # Extract bounding box and expand it by a fixed factor (e.g., 1.3x) centered on the cell
             min_row, min_col, max_row, max_col = prop.bbox
@@ -1936,12 +1932,6 @@ async def setup_service(server, server_id="agent-lens"):
                 cell_pixels = gray[cell_mask > 0]
                 
                 if len(cell_pixels) == 0:
-                    metadata["brightness"] = None
-                    metadata["contrast"] = None
-                    metadata["homogeneity"] = None
-                    metadata["energy"] = None
-                    metadata["correlation"] = None
-                    
                     # Mean fluorescence intensity for each channel (set to None when no pixels)
                     try:
                         if image_data_np.ndim == 3:
@@ -1956,8 +1946,6 @@ async def setup_service(server, server_id="agent-lens"):
                         # If fluorescence calculation fails, continue without it
                         pass
                 else:
-                    # Mean brightness
-                    metadata["brightness"] = float(np.mean(cell_pixels))
                     
                     # Mean fluorescence intensity for each channel
                     try:
@@ -2004,17 +1992,8 @@ async def setup_service(server, server_id="agent-lens"):
                         # If fluorescence calculation fails, continue without it
                         pass
                     
-                    # GLCM texture features removed for performance (not critical for most analysis)
-                    metadata["contrast"] = None
-                    metadata["homogeneity"] = None
-                    metadata["energy"] = None
-                    metadata["correlation"] = None
+
             except:
-                metadata["brightness"] = None
-                metadata["contrast"] = None
-                metadata["homogeneity"] = None
-                metadata["energy"] = None
-                metadata["correlation"] = None
                 
                 # Mean fluorescence intensity for each channel (set to None on error)
                 try:
@@ -2043,62 +2022,79 @@ async def setup_service(server, server_id="agent-lens"):
 
     # extract cell metadata
     async def build_cell_records(
-        cell_polygons: List[Dict[str, Any]], 
         image_data_np: np.ndarray, 
         segmentation_mask: np.ndarray,
         microscope_status: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
         """
         Extract cell metadata, crops, and embeddings from segmentation results.
-        Returns a list of metadata dictionaries, one per cell. Here is the metadata fields:
-        - cell_id: unique identifier for the cell
-        - image: base64-encoded PNG image of the cell
-        - area: area of the cell in pixels
-        - perimeter: perimeter of the cell in pixels
-        - equivalent_diameter: equivalent diameter of the cell in pixels
-        - bbox_width: width of the bounding box in pixels
-        - bbox_height: height of the bounding box in pixels
-        - aspect_ratio: aspect ratio of the cell
-        - circularity: circularity of the cell
-        - eccentricity: eccentricity of the cell
-        - solidity: solidity of the cell
-        - convexity: convexity of the cell
-        - brightness: brightness of the cell
-        - contrast: None (GLCM texture features removed for performance)
-        - homogeneity: None (GLCM texture features removed for performance)
-        - energy: None (GLCM texture features removed for performance)
-        - correlation: None (GLCM texture features removed for performance)
-
-        - mean_intensity_<channel_name>: mean intensity of the cell for the given channel
-        - top10_mean_intensity_<channel_name>: mean intensity of the top 10% brightest pixels for the given channel
-        - clip_embedding: CLIP embedding of the cell image
-        - dino_embedding: DINO embedding of the cell image
-
-        - current_x: X coordinate of the microscope stage (mm)
-        - current_y: Y coordinate of the microscope stage (mm)
-        - well_id: well identifier (e.g., "A1", "B2")
-        - distance_from_center: distance from the center of the well in mm
-
+        This function extracts cell regions directly from the segmentation mask,
+        calculates morphological and intensity features, and generates embeddings.
+        
+        Args:
+            image_data_np: Multi-channel microscopy image (H, W, C) or single-channel (H, W)
+            segmentation_mask: Integer mask where each unique non-zero value represents a cell
+            microscope_status: Optional microscope position info for spatial metadata
+        
+        Returns:
+            List of metadata dictionaries, one per cell, with the following fields:
+            
+            Geometry & Shape:
+            - area: area of the cell in pixels
+            - perimeter: perimeter of the cell in pixels
+            - equivalent_diameter: equivalent diameter of the cell in pixels
+            - bbox_width: width of the bounding box in pixels
+            - bbox_height: height of the bounding box in pixels
+            - aspect_ratio: aspect ratio of the cell
+            - circularity: circularity of the cell
+            - eccentricity: eccentricity of the cell
+            - solidity: solidity of the cell
+            - convexity: convexity of the cell
+            
+            Image & Intensity:
+            - image: base64-encoded PNG image of the cell
+            - mean_intensity_<channel_name>: mean intensity of the cell for the given channel
+            - top10_mean_intensity_<channel_name>: mean intensity of the top 10% brightest pixels for the given channel
+            
+            Embeddings:
+            - clip_embedding: CLIP embedding of the cell image
+            - dino_embedding: DINO embedding of the cell image
+            
+            Spatial Position (if microscope_status provided):
+            - position: {"x": float, "y": float} - absolute cell position in mm
+            - well_id: well identifier (e.g., "A1", "B2")
+            - distance_from_center: distance from the center of the well in mm
         """
 
         import concurrent.futures
         import os
+        from skimage.measure import label, regionprops, find_contours, approximate_polygon
         
-        # Early return if no cells to process
-        if len(cell_polygons) == 0:
-            print("No cells found in segmentation - returning empty list")
-            return []
-        
-        # Extract brightfield channel
-        brightfield = image_data_np[:, :, 0] if image_data_np.ndim == 3 else image_data_np
-        
-        # Ensure mask is numpy array
+        # Ensure mask is numpy array and convert to labeled format if needed
         if isinstance(segmentation_mask, str):
             mask_bytes = base64.b64decode(segmentation_mask)
             mask_img = PILImage.open(io.BytesIO(mask_bytes))
             mask = np.array(mask_img).astype(np.uint32)
         else:
             mask = segmentation_mask.astype(np.uint32)
+        
+        # Extract region properties once from labeled mask
+        # This directly processes the instance mask where each object has a unique ID
+        props = regionprops(mask)
+        
+        # Early return if no cells to process
+        if len(props) == 0:
+            print("No cells found in segmentation mask - returning empty list")
+            return []
+        
+        # Simple cell list with just IDs (no polygon extraction)
+        # Polygon extraction removed since contours are not used in metadata
+        cell_polygons = [{"id": int(prop.label)} for prop in props]
+        
+        print(f"Extracting metadata for {len(cell_polygons)} cells from segmentation mask...")
+        
+        # Extract brightfield channel
+        brightfield = image_data_np[:, :, 0] if image_data_np.ndim == 3 else image_data_np
         
         # Extract position information if microscope_status is provided
         position_info = None
@@ -2122,8 +2118,11 @@ async def setup_service(server, server_id="agent-lens"):
             if None in [position_info['current_x'], position_info['current_y'], position_info['pixel_size_xy']]:
                 position_info = None  # Incomplete data, disable position calculation
         
-        # Compute a global background bright value from non-cell pixels (mask == 0)
-        non_cell_pixels = brightfield[mask == 0]
+        # Vectorized background computation
+        # Compute background mask once and reuse for all channels
+        background_mask = (mask == 0)
+        non_cell_pixels = brightfield[background_mask]
+        
         if non_cell_pixels.size == 0:
             raise ValueError("No non-cell pixels found (mask==0). Cannot compute background median.")
         background_bright_value = int(np.median(non_cell_pixels))
@@ -2138,7 +2137,8 @@ async def setup_service(server, server_id="agent-lens"):
                 
                 # Only compute background if channel has signal (max > 0)
                 if channel_data.max() > 0:
-                    non_cell_pixels_channel = channel_data[mask == 0]
+                    # Reuse background_mask instead of creating new mask
+                    non_cell_pixels_channel = channel_data[background_mask]
                     if non_cell_pixels_channel.size > 0:
                         background_fluorescence[channel_idx] = float(np.median(non_cell_pixels_channel))
                     else:
@@ -2151,11 +2151,12 @@ async def setup_service(server, server_id="agent-lens"):
         # Set max_workers for parallel processing (use all available CPUs)
         max_workers = min(len(cell_polygons), os.cpu_count() or 4)
         
+        # Pass regionprops directly to avoid recomputation
         # Step 1: Process cells in parallel using ThreadPoolExecutor
         # Prepare arguments for parallel processing
         process_args = [
-            (poly, idx, image_data_np, mask, brightfield, fixed_channel_order, background_bright_value, background_fluorescence, position_info)
-            for idx, poly in enumerate(cell_polygons)
+            (prop, idx, image_data_np, mask, brightfield, fixed_channel_order, background_bright_value, background_fluorescence, position_info)
+            for idx, prop in enumerate(props)
         ]
         
         # Process cells in parallel
