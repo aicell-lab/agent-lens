@@ -83,7 +83,8 @@ RUN npm config set prefix '/home/agent_lens/.npm-global' && \
     rm -rf frontend/node_modules && \
     npm cache clean --force
 
-RUN pip install --upgrade pip setuptools wheel
+RUN pip install --upgrade pip wheel && \
+    pip install "setuptools<70.0.0"
 # Install PyTorch with CUDA support before other dependencies
 # This ensures GPU support is available for CLIP model
 RUN pip install --user torch==2.5.1 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 && \

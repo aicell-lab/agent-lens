@@ -88,7 +88,9 @@ jobs:
     
     - name: Install Python dependencies
       run: |
-        python -m pip install --upgrade pip setuptools wheel
+        # Upgrade pip and wheel, but use setuptools 69.5.1 which still includes pkg_resources
+        python -m pip install --upgrade pip wheel
+        python -m pip install "setuptools<70.0.0"
         # Pre-install CLIP dependencies
         pip install ftfy regex tqdm
         # Clone and install CLIP manually using setup.py to bypass pip's build system
