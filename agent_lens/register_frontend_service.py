@@ -25,6 +25,7 @@ import asyncio
 import base64
 # Import similarity search utilities
 from agent_lens.utils.chroma_storage import chroma_storage
+from agent_lens.utils.weaviate_search import WEAVIATE_COLLECTION_NAME, similarity_service
 from PIL import Image as PILImage
 from io import BytesIO
 from typing import Dict, Any, Tuple, List
