@@ -111,7 +111,8 @@ class ChromaCellStorage:
                     raise ValueError(f"Cell missing dino_embedding: {cell.get('image_id', 'unknown')}")
                 embeddings.append(embedding)
                 
-                # Store morphology metadata (filter out None values)
+                # All metadata: morphology, position, well, intensity (same pattern: dict then drop None)
+                pos = cell.get("position") or {}
                 metadata = {
                     "area": cell.get("area"),
                     "perimeter": cell.get("perimeter"),
@@ -123,8 +124,13 @@ class ChromaCellStorage:
                     "eccentricity": cell.get("eccentricity"),
                     "solidity": cell.get("solidity"),
                     "convexity": cell.get("convexity"),
+                    "position_x": pos.get("x") if isinstance(pos, dict) else None,
+                    "position_y": pos.get("y") if isinstance(pos, dict) else None,
+                    "well_id": cell.get("well_id"),
+                    "distance_from_center": cell.get("distance_from_center"),
+                    **{k: v for k, v in cell.items()
+                       if (k.startswith("mean_intensity_") or k.startswith("top10_mean_intensity_"))},
                 }
-                # ChromaDB doesn't like None values in metadata
                 metadata = {k: v for k, v in metadata.items() if v is not None}
                 metadatas.append(metadata)
                 
