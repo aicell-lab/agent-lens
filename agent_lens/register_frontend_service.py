@@ -1499,7 +1499,8 @@ async def setup_service(server, server_id="agent-lens"):
     # Define simple hypha-rpc service method for batch image embedding generation
     @schema_function()
     async def generate_image_embeddings_batch_rpc(
-        images_base64: List[str],
+        images_base64: Optional[List[str]] = None,
+        images_bytes: Optional[List[bytes]] = None,
         embedding_types: Optional[List[str]] = None,
     ) -> dict:
         """
@@ -1508,6 +1509,8 @@ async def setup_service(server, server_id="agent-lens"):
 
         Args:
             images_base64: List of base64-encoded image strings.
+            images_bytes: Optional list of raw image bytes (PNG/JPEG/etc).
+                          If provided, images_base64 can be omitted.
             embedding_types: Which embeddings to generate: ["clip"], ["dino"], or ["clip", "dino"].
                              Default None means ["dino"] only.
 
@@ -1518,21 +1521,27 @@ async def setup_service(server, server_id="agent-lens"):
         if embedding_types is None:
             embedding_types = ["dino"]
         try:
-            if not images_base64 or len(images_base64) == 0:
+            if (not images_base64 or len(images_base64) == 0) and (not images_bytes or len(images_bytes) == 0):
                 raise ValueError("At least one image is required")
-            
-            # Decode all base64 image data
+
+            # Decode all base64 or numpy image data
             image_bytes_list = []
             valid_indices = []
             
-            for idx, image_base64 in enumerate(images_base64):
-                try:
-                    image_bytes = base64.b64decode(image_base64)
+            if images_bytes and len(images_bytes) > 0:
+                for idx, image_bytes in enumerate(images_bytes):
                     if image_bytes:
                         image_bytes_list.append(image_bytes)
                         valid_indices.append(idx)
-                except Exception as e:
-                    logger.warning(f"Failed to decode image at index {idx}: {e}")
+            else:
+                for idx, image_base64 in enumerate(images_base64 or []):
+                    try:
+                        image_bytes = base64.b64decode(image_base64)
+                        if image_bytes:
+                            image_bytes_list.append(image_bytes)
+                            valid_indices.append(idx)
+                    except Exception as e:
+                        logger.warning(f"Failed to decode image at index {idx}: {e}")
             
             if not image_bytes_list:
                 raise ValueError("No valid images found in request")
@@ -1543,7 +1552,7 @@ async def setup_service(server, server_id="agent-lens"):
             )
             
             # Map results back to original order
-            results = [None] * len(images_base64)
+            results = [None] * (len(images_bytes) if images_bytes and len(images_bytes) > 0 else len(images_base64 or []))
             for valid_idx, embedding_dict in zip(valid_indices, embeddings):
                 if embedding_dict is not None:
                     clip_emb = embedding_dict.get("clip_embedding")
@@ -1876,7 +1885,7 @@ async def setup_service(server, server_id="agent-lens"):
             cell_pil_224 = PILImage.fromarray(merged_rgb, mode='RGB')
             buffer_224 = BytesIO()
             cell_pil_224.save(buffer_224, format='PNG')
-            embedding_image_base64 = base64.b64encode(buffer_224.getvalue()).decode('utf-8')
+            embedding_image_bytes = buffer_224.getvalue()
 
             # 50x50 thumbnail: saved to ChromaDB (much smaller, faster insert)
             merged_rgb_thumbnail = np.array(
@@ -2041,7 +2050,7 @@ async def setup_service(server, server_id="agent-lens"):
             # Add 50x50 thumbnail to metadata (stored in ChromaDB; 224x224 used only for embedding)
             metadata["image"] = thumbnail_base64
 
-            return (poly_index, metadata, embedding_image_base64)
+            return (poly_index, metadata, embedding_image_bytes)
             
         except Exception as e:
             # Skip this cell if processing fails
@@ -2099,7 +2108,7 @@ async def setup_service(server, server_id="agent-lens"):
 
         import concurrent.futures
         import os
-        from skimage.measure import label, regionprops, find_contours, approximate_polygon
+        from skimage.measure import label, regionprops
         
         # Ensure mask is numpy array and convert to labeled format if needed
         if isinstance(segmentation_mask, str):
@@ -2118,11 +2127,8 @@ async def setup_service(server, server_id="agent-lens"):
             print("No cells found in segmentation mask - returning empty list")
             return []
         
-        # Simple cell list with just IDs (no polygon extraction)
-        # Polygon extraction removed since contours are not used in metadata
-        cell_polygons = [{"id": int(prop.label)} for prop in props]
-        
-        print(f"Extracting metadata for {len(cell_polygons)} cells from segmentation mask...")
+        # Polygon extraction is not needed for feature extraction (regionprops is sufficient)
+        print(f"Extracting metadata for {len(props)} cells from segmentation mask...")
         
         # Extract brightfield channel
         brightfield = image_data_np[:, :, 0] if image_data_np.ndim == 3 else image_data_np
@@ -2180,7 +2186,7 @@ async def setup_service(server, server_id="agent-lens"):
                     background_fluorescence[channel_idx] = 0.0
         
         # Set max_workers for parallel processing (use all available CPUs)
-        max_workers = min(len(cell_polygons), os.cpu_count() or 4)
+        max_workers = min(len(props), os.cpu_count() or 4)
         
         # Pass regionprops directly to avoid recomputation
         # Step 1: Process cells in parallel using ThreadPoolExecutor
@@ -2192,7 +2198,7 @@ async def setup_service(server, server_id="agent-lens"):
         
         # Process cells in parallel
         results_with_indices = []
-        cell_images_base64 = []
+        cell_images_bytes = []
         cell_indices = []
         
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -2210,11 +2216,11 @@ async def setup_service(server, server_id="agent-lens"):
             # Collect results as they complete (non-blocking with asyncio)
             for asyncio_future in asyncio.as_completed(async_futures):
                 try:
-                    poly_index, metadata, cell_image_base64 = await asyncio_future
+                    poly_index, metadata, cell_image_bytes = await asyncio_future
                     if metadata is not None:
                         results_with_indices.append((poly_index, metadata))
-                        if cell_image_base64 is not None:
-                            cell_images_base64.append(cell_image_base64)
+                        if cell_image_bytes is not None:
+                            cell_images_bytes.append(cell_image_bytes)
                             cell_indices.append(len(results_with_indices) - 1)
                 except Exception as e:
                     original_index = future_to_index.get(asyncio_future, "unknown")
@@ -2225,11 +2231,11 @@ async def setup_service(server, server_id="agent-lens"):
         results = [metadata for _, metadata in results_with_indices]
         
         # Step 2: Generate embeddings in batch via RPC service
-        if len(cell_images_base64) > 0:
+        if len(cell_images_bytes) > 0:
             try:
-                print(f"Generating embeddings for {len(cell_images_base64)} cell images...")
+                print(f"Generating embeddings for {len(cell_images_bytes)} cell images...")
                 embedding_result = await generate_image_embeddings_batch_rpc(
-                    cell_images_base64
+                    images_bytes=cell_images_bytes
                 )
                 
                 if embedding_result and embedding_result.get("success"):
