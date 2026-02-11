@@ -4,7 +4,7 @@ that serves the frontend application.
 """
 
 import os
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi import UploadFile, File, HTTPException, Form, Request
@@ -2041,7 +2041,8 @@ async def setup_service(server, server_id="agent-lens"):
         Returns:
             List of metadata dictionaries, one per cell, with the following fields:
             
-            Geometry & Shape (in memory + Weaviate):
+            Geometry & Shape (in memory + ChromaDB):
+            - uuid: ChromaDB object UUID for retrieving images/embeddings later
             - area: area of the cell in pixels
             - perimeter: perimeter of the cell in pixels
             - equivalent_diameter: equivalent diameter of the cell in pixels
@@ -2062,14 +2063,10 @@ async def setup_service(server, server_id="agent-lens"):
             - well_id: well identifier (e.g., "A1", "B2")
             - distance_from_center: distance from the center of the well in mm
             
-            Weaviate Storage (stored in Weaviate, UUID returned):
-            - uuid: Weaviate object UUID for retrieving images/embeddings later
-            - Images (base64 PNG) stored in Weaviate, NOT in returned records
-            - DINO embeddings stored in Weaviate, NOT in returned records
-            
+
         Note: This function stores images and embeddings to ChromaDB automatically,
-              reducing memory usage by ~250x. Use fetch_cell_images()
-              to retrieve images when needed for visualization.
+              reducing memory usage by ~250x. Use fetch_cell_data()
+              to retrieve full cell data when needed for visualization.
         """
 
         import concurrent.futures
@@ -2386,83 +2383,165 @@ async def setup_service(server, server_id="agent-lens"):
             logger.error(f"Error generating interactive UMAP figure via RPC: {e}")
             logger.error(traceback.format_exc())
             raise
-    
-    # Define hypha-rpc service method for fetching cell images from ChromaDB
+
+    # Define hypha-rpc service method for fetching complete cell data from ChromaDB
     @schema_function()
-    async def fetch_cell_images(
-        uuids: List[str],
-        application_id: str,
-        include_embeddings: bool = False
-    ) -> List[Dict[str, Any]]:
-        """
-        Fetch cell images from ChromaDB by UUIDs (batch operation).
-        
-        Args:
-            uuids: List of cell UUIDs
-            application_id: Application ID
-            include_embeddings: Whether to include DINO embedding vector
-            
-        Returns:
-            List of dicts with 'uuid', 'image', metadata, and optionally 'dino_embedding'
-        """
-        try:
-            # Single batch fetch operation!
-            results = chroma_storage.fetch_by_uuids(
-                application_id=application_id,
-                uuids=uuids,
-                include_embeddings=include_embeddings
-            )
-            return results
-            
-        except Exception as e:
-            logger.error(f"Failed to fetch cells from ChromaDB: {e}")
-            return [{"uuid": uuid, "error": str(e)} for uuid in uuids]
-    
-    # Define hypha-rpc service method for fetching cell embeddings only
-    @schema_function()
-    async def fetch_cell_embeddings(
+    async def fetch_cell_data(
         uuids: List[str],
         application_id: str
     ) -> List[Dict[str, Any]]:
         """
-        Fetch only DINO embeddings for cells (for UMAP clustering).
-        No images - bandwidth efficient.
-        
+        Fetch complete cell data from ChromaDB by UUIDs (batch operation).
+
         Args:
             uuids: List of cell UUIDs
             application_id: Application ID
-            
+
         Returns:
-            List of dicts with 'uuid' and 'dino_embedding'
+            List of cell data dicts, each with 'uuid', 'image', 'dino_embedding',
+            and all metadata (area, circularity, intensity, position, etc.).
+            On error for a cell, that entry has 'uuid' and 'error'.
         """
         try:
-            # Batch fetch with embeddings
-            results = chroma_storage.fetch_by_uuids(
+            loop = asyncio.get_running_loop()
+            results = await loop.run_in_executor(
+                None,
+                lambda: chroma_storage.fetch_by_uuids(
+                    application_id=application_id,
+                    uuids=uuids,
+                    include_embeddings=True
+                )
+            )
+            return results
+
+        except Exception as e:
+            logger.error(f"Failed to fetch cell data from ChromaDB: {e}")
+            return [{"uuid": uuid, "error": str(e)} for uuid in uuids]
+
+    # Define hypha-rpc service method for similarity search
+    @schema_function()
+    async def similarity_search_cells(
+        query_cell_uuids: List[str],
+        application_id: str = "hypha-agents-notebook",
+        n_results: int = 100,
+        metadata_filters: Optional[Dict[str, Any]] = None,
+        similarity_threshold: Optional[float] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Server-side similarity search using ChromaDB native vector search.
+        
+        Args:
+            query_cell_uuids: List of query cell UUIDs to search for similar cells
+            n_results: Maximum number of results to return per query (default: 100)
+            metadata_filters: ChromaDB where clause for metadata filtering (optional)
+                Examples:
+                - {"area": {"$gt": 200, "$lt": 3000}}
+                - {"$and": [
+                    {"top10_mean_intensity_Fluorescence_488_nm_Ex": {"$gte": 15}},
+                    {"circularity": {"$gte": 0.7}}
+                  ]}
+                - {"$or": [
+                    {"area": {"$gt": 1000}},
+                    {"circularity": {"$gte": 0.9}}
+                  ]}
+            similarity_threshold: Optional cosine similarity threshold (0-1).
+                Only return results with similarity >= threshold.
+        
+        Returns:
+            List of similar cells with metadata, images, and similarity scores.
+            Each cell dict contains:
+            - uuid: Cell UUID
+            - image: Base64 encoded cell image
+            - similarity_score: Cosine similarity (0-1, higher is more similar)
+            - All metadata fields (area, circularity, intensity, etc.)
+        """
+        try:
+            # Fetch query cell embeddings
+            query_cells = chroma_storage.fetch_by_uuids(
                 application_id=application_id,
-                uuids=uuids,
+                uuids=query_cell_uuids,
                 include_embeddings=True
             )
             
-            # Remove images to save bandwidth
-            for cell in results:
-                cell.pop("image", None)
+            if not query_cells:
+                logger.warning(f"No query cells found for UUIDs: {query_cell_uuids}")
+                return []
             
-            return results
+            # Extract embeddings from query cells
+            query_embeddings = []
+            for cell in query_cells:
+                emb = cell.get("dino_embedding")
+                if emb is not None:
+                    query_embeddings.append(emb)
+            
+            if not query_embeddings:
+                logger.warning(f"No embeddings found for query cells: {query_cell_uuids}")
+                return []
+            
+            # Average query embeddings if multiple queries
+            import numpy as np
+            if len(query_embeddings) > 1:
+                query_embedding = np.mean(query_embeddings, axis=0).tolist()
+                logger.info(f"Averaged {len(query_embeddings)} query embeddings")
+            else:
+                query_embedding = query_embeddings[0]
+            
+            # Perform similarity search in ChromaDB
+            search_results = chroma_storage.similarity_search(
+                application_id=application_id,
+                query_embedding=query_embedding,
+                n_results=n_results,
+                where_filter=metadata_filters
+            )
+            
+            # Convert ChromaDB results to cell dictionaries
+            similar_cells = []
+            ids = search_results.get("ids", [[]])[0]
+            distances = search_results.get("distances", [[]])[0]
+            metadatas = search_results.get("metadatas", [[]])[0]
+            documents = search_results.get("documents", [[]])[0]
+            
+            for i, cell_uuid in enumerate(ids):
+                # Convert distance to similarity score (ChromaDB returns L2 distance)
+                # For normalized embeddings, cosine similarity = 1 - (L2_distance^2 / 2)
+                distance = distances[i] if i < len(distances) else 1.0
+                similarity = 1.0 - (distance ** 2 / 2.0)
+                similarity = max(0.0, min(1.0, similarity))  # Clamp to [0, 1]
+                
+                # Apply similarity threshold if specified
+                if similarity_threshold is not None and similarity < similarity_threshold:
+                    continue
+                
+                # Build cell dictionary
+                cell = {
+                    "uuid": cell_uuid,
+                    "image": documents[i] if i < len(documents) else "",
+                    "similarity_score": float(similarity),
+                    "distance": float(distance)
+                }
+                
+                # Add metadata fields
+                if i < len(metadatas):
+                    cell.update(metadatas[i])
+                
+                similar_cells.append(cell)
+            
+            logger.info(
+                f"Similarity search in '{application_id}' returned {len(similar_cells)} cells "
+                f"(threshold: {similarity_threshold}, filters: {metadata_filters is not None})"
+            )
+            
+            return similar_cells
             
         except Exception as e:
-            logger.error(f"Failed to fetch embeddings from ChromaDB: {e}")
-            return [{"uuid": uuid, "error": str(e)} for uuid in uuids]
+            logger.error(f"Similarity search failed: {e}", exc_info=True)
+            return []
     
     # Define hypha-rpc service method for resetting application data
     @schema_function()
-    async def reset_application(application_id: str) -> dict:
+    async def reset_application(application_id: str = "hypha-agents-notebook") -> dict:
         """
-        Delete all cell annotations for a specific application from ChromaDB.
-        Used to clean up before starting a new notebook session.
-        
-        Args:
-            application_id: Application ID to reset (e.g., "hypha-agents-notebook")
-            
+        Delete all cell annotations for an application from ChromaDB (default: "hypha-agents-notebook").
         Returns:
             dict: {
                 "success": bool,
@@ -2501,11 +2580,8 @@ async def setup_service(server, server_id="agent-lens"):
             "make_umap_cluster_figure_interactive": make_umap_cluster_figure_interactive_rpc,
             # Register RPC methods for ChromaDB data management
             "reset_application": reset_application,
-            "fetch_cell_images": fetch_cell_images,
-            "fetch_cell_embeddings": fetch_cell_embeddings,
-            # Backward compatibility (deprecated, use new names)
-            "fetch_cell_images_from_weaviate": fetch_cell_images,
-            "fetch_cell_embeddings_from_weaviate": fetch_cell_embeddings,
+            "fetch_cell_data": fetch_cell_data,
+            "similarity_search_cells": similarity_search_cells
         }
     )
 

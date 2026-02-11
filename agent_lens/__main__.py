@@ -94,8 +94,13 @@ async def connect_server(args):
 
 def start_connect_server(args):
     loop = asyncio.get_event_loop()
-    loop.create_task(connect_server(args))
-    loop.run_forever()
+    try:
+        loop.run_until_complete(connect_server(args))
+        loop.run_forever()
+    except KeyboardInterrupt:
+        print("\nShutting down gracefully...")
+    finally:
+        loop.close()
 
 
 def main():
