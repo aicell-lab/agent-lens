@@ -2551,7 +2551,10 @@ async def setup_service(server, server_id="agent-lens"):
             }
         """
         try:
-            result = chroma_storage.reset_application(application_id)
+            # Run in thread pool so ChromaDB disk I/O doesn't block the event loop
+            result = await asyncio.to_thread(
+                chroma_storage.reset_application, application_id
+            )
             logger.info(f"Reset application '{application_id}': {result['message']}")
             return result
             

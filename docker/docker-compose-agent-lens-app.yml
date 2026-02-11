@@ -48,7 +48,7 @@ services:
       - ALL
 
   squid-control:
-    image: ghcr.io/aicell-lab/squid-control:sha-2af98aa
+    image: ghcr.io/aicell-lab/squid-control:sha-42d256d
     container_name: squid-control
     # Optimize image pulling
     pull_policy: if_not_present

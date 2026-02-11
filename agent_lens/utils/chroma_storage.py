@@ -48,22 +48,18 @@ class ChromaCellStorage:
             }
         """
         try:
-            collection = self.client.get_collection(application_id)
-            count = collection.count()
             self.client.delete_collection(application_id)
-            logger.info(f"Deleted collection '{application_id}' with {count} cells")
+            logger.info(f"Deleted collection '{application_id}'")
             return {
                 "success": True,
-                "deleted_count": count,
                 "application_id": application_id,
-                "message": f"Deleted {count} cells from application '{application_id}'"
+                "message": f"Deleted application '{application_id}'"
             }
         except Exception as e:
             # Collection doesn't exist - this is fine
             logger.info(f"Collection '{application_id}' did not exist (no cleanup needed)")
             return {
                 "success": True,
-                "deleted_count": 0,
                 "application_id": application_id,
                 "message": f"Collection '{application_id}' did not exist"
             }
