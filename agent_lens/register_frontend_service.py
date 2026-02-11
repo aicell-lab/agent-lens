@@ -1498,11 +1498,25 @@ async def setup_service(server, server_id="agent-lens"):
     
     # Define simple hypha-rpc service method for batch image embedding generation
     @schema_function()
-    async def generate_image_embeddings_batch_rpc(images_base64: List[str]) -> dict:
+    async def generate_image_embeddings_batch_rpc(
+        images_base64: List[str],
+        embedding_types: Optional[List[str]] = None,
+    ) -> dict:
         """
-        Generate both CLIP and DINOv2 image embeddings for multiple images in batch via hypha-rpc.
-        Returns json object with success flag, results array, and count.
+        Generate CLIP and/or DINOv2 image embeddings for multiple images in batch via hypha-rpc.
+        By default only DINOv2 embeddings are generated. Pass embedding_types to choose.
+
+        Args:
+            images_base64: List of base64-encoded image strings.
+            embedding_types: Which embeddings to generate: ["clip"], ["dino"], or ["clip", "dino"].
+                             Default None means ["dino"] only.
+
+        Returns:
+            JSON object with success flag, results array (one dict per image with embedding keys
+            and dimension fields), and count.
         """
+        if embedding_types is None:
+            embedding_types = ["dino"]
         try:
             if not images_base64 or len(images_base64) == 0:
                 raise ValueError("At least one image is required")
@@ -1524,18 +1538,22 @@ async def setup_service(server, server_id="agent-lens"):
                 raise ValueError("No valid images found in request")
             
             from agent_lens.utils.embedding_generator import generate_image_embeddings_batch
-            embeddings = await generate_image_embeddings_batch(image_bytes_list)
+            embeddings = await generate_image_embeddings_batch(
+                image_bytes_list, embedding_types=embedding_types
+            )
             
             # Map results back to original order
             results = [None] * len(images_base64)
             for valid_idx, embedding_dict in zip(valid_indices, embeddings):
                 if embedding_dict is not None:
+                    clip_emb = embedding_dict.get("clip_embedding")
+                    dino_emb = embedding_dict.get("dino_embedding")
                     results[valid_idx] = {
                         "success": True,
-                        "clip_embedding": embedding_dict["clip_embedding"],
-                        "clip_dimension": len(embedding_dict["clip_embedding"]) if embedding_dict["clip_embedding"] else 0,
-                        "dino_embedding": embedding_dict["dino_embedding"],
-                        "dino_dimension": len(embedding_dict["dino_embedding"]) if embedding_dict["dino_embedding"] else 0
+                        "clip_embedding": clip_emb,
+                        "clip_dimension": len(clip_emb) if clip_emb else 0,
+                        "dino_embedding": dino_emb,
+                        "dino_dimension": len(dino_emb) if dino_emb else 0,
                     }
             
             return {
@@ -1854,12 +1872,22 @@ async def setup_service(server, server_id="agent-lens"):
             # Resize and pad merged image to 224x224 (use black padding for multi-channel)
             merged_rgb = resize_and_pad_to_square_rgb(merged_rgb, out_size=224, pad_value=background_bright_value)
 
-            # Convert to PIL Image and encode as base64 PNG
-            cell_pil = PILImage.fromarray(merged_rgb, mode='RGB')
-            buffer = BytesIO()
-            cell_pil.save(buffer, format='PNG')
-            cell_image_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
-            
+            # 224x224 image: used only for embedding model input
+            cell_pil_224 = PILImage.fromarray(merged_rgb, mode='RGB')
+            buffer_224 = BytesIO()
+            cell_pil_224.save(buffer_224, format='PNG')
+            embedding_image_base64 = base64.b64encode(buffer_224.getvalue()).decode('utf-8')
+
+            # 50x50 thumbnail: saved to ChromaDB (much smaller, faster insert)
+            merged_rgb_thumbnail = np.array(
+                cell_pil_224.resize((50, 50), PILImage.Resampling.LANCZOS),
+                dtype=np.uint8
+            )
+            thumb_pil = PILImage.fromarray(merged_rgb_thumbnail, mode='RGB')
+            buffer_thumb = BytesIO()
+            thumb_pil.save(buffer_thumb, format='PNG')
+            thumbnail_base64 = base64.b64encode(buffer_thumb.getvalue()).decode('utf-8')
+
             # Morphological features
             try:
                 metadata["area"] = float(prop.area)
@@ -2010,10 +2038,10 @@ async def setup_service(server, server_id="agent-lens"):
                     # If fluorescence calculation fails, continue without it
                     pass
             
-            # Add merged multi-channel image to metadata (will add embeddings after batch processing)
-            metadata["image"] = cell_image_base64
-            
-            return (poly_index, metadata, cell_image_base64)
+            # Add 50x50 thumbnail to metadata (stored in ChromaDB; 224x224 used only for embedding)
+            metadata["image"] = thumbnail_base64
+
+            return (poly_index, metadata, embedding_image_base64)
             
         except Exception as e:
             # Skip this cell if processing fails
@@ -2225,38 +2253,30 @@ async def setup_service(server, server_id="agent-lens"):
                         
                         # Handle None embeddings (failed decoding or processing)
                         if embedding_data is None:
-                            results[result_idx]["clip_embedding"] = None
                             results[result_idx]["dino_embedding"] = None
                             continue
                         
                         # Handle successful embeddings
                         if embedding_data.get("success"):
-                            results[result_idx]["clip_embedding"] = embedding_data.get("clip_embedding", None)
                             results[result_idx]["dino_embedding"] = embedding_data.get("dino_embedding", None)
                         else:
                             # Embedding generation failed for this image
-                            results[result_idx]["clip_embedding"] = None
                             results[result_idx]["dino_embedding"] = None
                 else:
                     print(f"Warning: Embedding generation failed or returned no results")
                     # Set all embeddings to None
                     for result in results:
-                        if "clip_embedding" not in result:
-                            result["clip_embedding"] = None
                         if "dino_embedding" not in result:
                             result["dino_embedding"] = None
             except Exception as e:
                 print(f"Error generating embeddings: {e}")
                 # Set all embeddings to None on error
                 for result in results:
-                    if "clip_embedding" not in result:
-                        result["clip_embedding"] = None
                     if "dino_embedding" not in result:
                         result["dino_embedding"] = None
         else:
             # No images to process
             for result in results:
-                result["clip_embedding"] = None
                 result["dino_embedding"] = None
         
 
@@ -2276,8 +2296,9 @@ async def setup_service(server, server_id="agent-lens"):
                 cell["image_id"] = f"{application_id}_cell_{idx}_{uuid.uuid4().hex[:8]}"
                 cells_to_insert.append(cell)
             
-            # Batch insert (single operation!)
-            insert_result = chroma_storage.insert_cells(
+            # Batch insert in a thread so the event loop is not blocked (ChromaDB + SQLite I/O is slow)
+            insert_result = await asyncio.to_thread(
+                chroma_storage.insert_cells,
                 application_id=application_id,
                 cells=cells_to_insert
             )
@@ -2287,7 +2308,6 @@ async def setup_service(server, server_id="agent-lens"):
             # Remove images and embeddings from results to save memory
             for cell in results:
                 cell.pop("image", None)
-                cell.pop("clip_embedding", None)
                 cell.pop("dino_embedding", None)
             
         except Exception as e:
