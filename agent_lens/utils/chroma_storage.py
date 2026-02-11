@@ -267,6 +267,59 @@ class ChromaCellStorage:
         except Exception as e:
             logger.error(f"Failed to list collections: {e}")
             return []
+    
+    def get_all_cells(self, application_id: str, include_embeddings: bool = False) -> List[Dict[str, Any]]:
+        """
+        Fetch all cells from a collection.
+        
+        Args:
+            application_id: Application ID (collection name)
+            include_embeddings: Whether to include DINO embedding vectors
+            
+        Returns:
+            List of cell dictionaries with uuid, image, metadata, and optionally embeddings
+        """
+        try:
+            collection = self.client.get_collection(application_id)
+            
+            # Get total count
+            total_count = collection.count()
+            if total_count == 0:
+                logger.info(f"Collection '{application_id}' is empty")
+                return []
+            
+            # Specify what to include in results
+            include_list = ["documents", "metadatas"]
+            if include_embeddings:
+                include_list.append("embeddings")
+            
+            # Fetch all cells at once (ChromaDB get() without ids returns all)
+            results = collection.get(include=include_list)
+            
+            # Convert to list of cell dictionaries
+            cells = []
+            for i, uuid_val in enumerate(results["ids"]):
+                cell = {
+                    "uuid": uuid_val,
+                    "image": results["documents"][i] if i < len(results["documents"]) else "",
+                }
+                
+                # Add metadata fields
+                if i < len(results["metadatas"]):
+                    cell.update(results["metadatas"][i])
+                
+                # Add embedding if requested
+                if include_embeddings and "embeddings" in results and i < len(results["embeddings"]):
+                    cell["dino_embedding"] = results["embeddings"][i]
+                
+                cells.append(cell)
+            
+            logger.info(f"Fetched all {len(cells)} cells from collection '{application_id}'")
+            return cells
+            
+        except Exception as e:
+            logger.error(f"Failed to fetch all cells from '{application_id}': {e}")
+            raise
 
 
 # Global instance for use in frontend service

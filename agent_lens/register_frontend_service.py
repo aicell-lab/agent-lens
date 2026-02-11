@@ -2320,7 +2320,7 @@ async def setup_service(server, server_id="agent-lens"):
     # Define hypha-rpc service method for interactive UMAP (HTML)
     @schema_function()
     async def make_umap_cluster_figure_interactive_rpc(
-        all_cells: List[dict],
+        application_id: str = "hypha-agents-notebook",
         n_neighbors: int = 15,
         min_dist: float = 0.1,
         random_state: Optional[int] = None,
@@ -2328,31 +2328,54 @@ async def setup_service(server, server_id="agent-lens"):
         metadata_fields: Optional[List[str]] = None,
     ) -> dict:
         """
-        Generate interactive UMAP visualization (Plotly HTML) with switchable coloring modes via hypha-rpc.
+        Generate interactive UMAP visualization (Plotly HTML) by extracting data from ChromaDB.
+        
+        This function fetches all cells from the specified ChromaDB collection, performs UMAP
+        dimensionality reduction on the embeddings, and generates an interactive visualization
+        with tabs for switching between cluster view and metadata heatmaps.
+        
         Args:
-            all_cells: List of cell dictionaries with embeddings and optional metadata
+            application_id: ChromaDB collection name (default: "hypha-agents-notebook")
             n_neighbors: Number of neighbors for UMAP (default: 15)
             min_dist: Minimum distance for UMAP (default: 0.1)
+            random_state: Random state for reproducibility (default: None)
+            n_jobs: Number of parallel jobs, -1 uses all cores (default: -1)
+            metadata_fields: Metadata fields for heatmap tabs (default: None, uses standard fields)
+            
         Returns:
-            dict: JSON object with success flag, HTML string of interactive visualization, and cluster labels.
-            example return:
+            dict: JSON object with success flag, HTML string, cluster labels, and UUIDs.
+            Example return:
             {
                 "success": True,
                 "html": "<html>...</html>",
-                "cluster_labels": [0, 1, 2, 3, 4],
+                "cluster_labels": [0, 1, 2, 3, 4, ...],
+                "uuids": ["uuid1", "uuid2", "uuid3", ...],
                 "n_cells": 100,
                 "n_clusters": 5
             }
         """
         try:
+            # Step 1: Fetch all cells from ChromaDB
+            logger.info(f"Fetching all cells from ChromaDB collection '{application_id}'...")
+            
+            # Run ChromaDB query in thread pool to avoid blocking
+            all_cells = await asyncio.to_thread(
+                chroma_storage.get_all_cells,
+                application_id=application_id,
+                include_embeddings=True
+            )
+            
             if not all_cells or len(all_cells) == 0:
                 return {
                     "success": False,
-                    "error": "No cells provided",
+                    "error": f"No cells found in ChromaDB collection '{application_id}'",
                     "html": None,
                     "cluster_labels": None
                 }
             
+            logger.info(f"Retrieved {len(all_cells)} cells from ChromaDB")
+            
+            # Step 2: Generate UMAP visualization
             from agent_lens.utils.umap_analysis_utils import (
                 make_umap_cluster_figure_interactive,
                 PLOTLY_AVAILABLE
@@ -2396,6 +2419,7 @@ async def setup_service(server, server_id="agent-lens"):
                 "success": True,
                 "html": result["html"],
                 "cluster_labels": result["cluster_labels"],
+                "uuids": result["uuids"],  # Include UUIDs corresponding to cluster labels
                 "n_cells": len(all_cells),
                 "n_clusters": len(set(result["cluster_labels"]))
             }
