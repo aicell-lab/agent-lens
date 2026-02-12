@@ -1467,6 +1467,194 @@ async def setup_service(server, server_id="agent-lens"):
             logger.warning(f"Warning: Failed to connect AgentLensArtifactManager: {e}")
             logger.warning("Some endpoints may not function correctly.")
     
+    # Connect to Cellpose segmentation service
+    segmentation_service = await api_server.get_service("agent-lens/cell-segmenter")
+    print("Connected to Cellpose segmentation service.")
+
+    # Background queues: segmentation -> build_cell_records
+    segment_queue: asyncio.Queue = asyncio.Queue()
+    build_queue: asyncio.Queue = asyncio.Queue()
+    segment_and_extract_results: List[List[Dict[str, Any]]] = []
+    segment_and_extract_idle = asyncio.Event()
+    segment_and_extract_idle.set()
+    
+    # Background queue for snap (server-side acquisition)
+    snap_queue: asyncio.Queue = asyncio.Queue()
+    microscope_service_cache: Dict[str, Any] = {}
+
+    async def _segment_image_from_bf(
+        image_data: Any,
+        scale: int = 4,
+    ) -> np.ndarray:
+        """Run segmentation service on brightfield channel and return mask at original resolution."""
+        # Extract brightfield
+        if isinstance(image_data, (list, tuple)):
+            brightfield = image_data[0]
+        elif isinstance(image_data, np.ndarray) and image_data.ndim == 3:
+            brightfield = image_data[:, :, 0]
+        else:
+            brightfield = image_data
+        
+        if brightfield is None:
+            raise ValueError("Brightfield channel is None")
+        
+        brightfield = np.ascontiguousarray(brightfield)
+        
+        if brightfield.dtype != np.uint8:
+            if brightfield.max() > 255:
+                brightfield = (brightfield / brightfield.max() * 255).astype(np.uint8)
+            else:
+                brightfield = brightfield.astype(np.uint8)
+        
+        # Downscale
+        if scale > 1:
+            H, W = brightfield.shape
+            new_H, new_W = H // scale, W // scale
+            pil_image = PILImage.fromarray(brightfield, mode='L')
+            pil_image_resized = pil_image.resize((new_W, new_H), PILImage.BILINEAR)
+        else:
+            pil_image_resized = PILImage.fromarray(brightfield, mode='L')
+        
+        buffer = BytesIO()
+        pil_image_resized.save(buffer, format="PNG")
+        resized_base64_str = base64.b64encode(buffer.getvalue()).decode("utf-8")
+        
+        segmentation_result = await segmentation_service.segment_all(resized_base64_str)
+        mask_small = segmentation_result["mask"] if isinstance(segmentation_result, dict) else segmentation_result
+        
+        if scale > 1:
+            mask_small_np = np.array(mask_small, dtype=np.int32)
+            mask_up = np.array(
+                PILImage.fromarray(mask_small_np.astype(np.uint16)).resize(
+                    (brightfield.shape[1], brightfield.shape[0]), 
+                    PILImage.NEAREST
+                )
+            )
+        else:
+            mask_up = np.array(mask_small)
+        
+        return mask_up
+
+    async def _segment_worker():
+        """Background worker to segment images and enqueue for build."""
+        while True:
+            job = await segment_queue.get()
+            segment_and_extract_idle.clear()
+            try:
+                image_data = job["image_data"]
+                microscope_status = job.get("microscope_status")
+                application_id = job.get("application_id", "hypha-agents-notebook")
+                scale = job.get("scale", 4)
+                
+                seg_mask = await _segment_image_from_bf(image_data, scale=scale)
+                await build_queue.put(
+                    {
+                        "image_data": image_data,
+                        "segmentation_mask": seg_mask,
+                        "microscope_status": microscope_status,
+                        "application_id": application_id,
+                    }
+                )
+            except Exception as e:
+                logger.error(f"segment worker failed: {e}", exc_info=True)
+                segment_and_extract_results.append([{"error": str(e)}])
+            finally:
+                segment_queue.task_done()
+                if segment_queue.empty() and build_queue.empty():
+                    segment_and_extract_idle.set()
+
+    async def _build_worker():
+        """Background worker to run build_cell_records."""
+        while True:
+            job = await build_queue.get()
+            segment_and_extract_idle.clear()
+            try:
+                records = await build_cell_records(
+                    image_data_np=job["image_data"],
+                    segmentation_mask=job["segmentation_mask"],
+                    microscope_status=job.get("microscope_status"),
+                    application_id=job.get("application_id", "hypha-agents-notebook"),
+                )
+                segment_and_extract_results.append(records)
+            except Exception as e:
+                logger.error(f"build worker failed: {e}", exc_info=True)
+                segment_and_extract_results.append([{"error": str(e)}])
+            finally:
+                build_queue.task_done()
+                if segment_queue.empty() and build_queue.empty():
+                    segment_and_extract_idle.set()
+
+    # Start background workers
+    asyncio.create_task(_segment_worker())
+    asyncio.create_task(_build_worker())
+    
+    async def _snap_segment_extract_worker():
+        """Background worker to move stage, snap images, then enqueue for segment+extract."""
+        while True:
+            job = await snap_queue.get()
+            try:
+                microscope_id = job["microscope_id"]
+                channel_config = job["channel_config"]
+                application_id = job.get("application_id", "hypha-agents-notebook")
+                scale = job.get("scale", 4)
+                positions = job.get("positions")
+                
+                microscope = microscope_service_cache.get(microscope_id)
+                if microscope is None:
+                    microscope = await api_server.get_service(microscope_id)
+                    microscope_service_cache[microscope_id] = microscope
+                
+                # Default: single snap at current position
+                if not positions:
+                    positions = [None]
+                
+                for pos in positions:
+                    if pos is not None:
+                        await microscope.move_to_position(
+                            x=pos["x"],
+                            y=pos["y"],
+                            z=pos.get("z")
+                        )
+                    # Autofocus
+                    await microscope.reflection_autofocus()
+                    # Snap channels into sparse list
+                    channel_to_idx = {ch: idx for idx, ch in enumerate(fixed_channel_order)}
+                    channels: List[Optional[np.ndarray]] = [None] * len(fixed_channel_order)
+                    
+                    for config in channel_config:
+                        channel_name = config["channel"]
+                        channel_idx = channel_to_idx[channel_name]
+                        exposure_time = config["exposure_time"]
+                        intensity = config["intensity"]
+                        
+                        image_np = await microscope.snap(
+                            channel=channel_name,
+                            exposure_time=exposure_time,
+                            intensity=intensity,
+                            return_array=True
+                        )
+                        channels[channel_idx] = image_np
+                    
+                    status = await microscope.get_status()
+                    # Enqueue for segmentation + extraction
+                    await segment_queue.put(
+                        {
+                            "image_data": channels,
+                            "microscope_status": status,
+                            "application_id": application_id,
+                            "scale": scale,
+                        }
+                    )
+            except Exception as e:
+                logger.error(f"snap_segment_extract worker failed: {e}", exc_info=True)
+                # Preserve error as a result so caller can see it
+                segment_and_extract_results.append([{"error": str(e)}])
+            finally:
+                snap_queue.task_done()
+    
+    # Start snap+segment+extract worker
+    asyncio.create_task(_snap_segment_extract_worker())
+    
     # Define simple hypha-rpc service method for text embedding generation
     @schema_function()
     async def generate_text_embedding_rpc(text: str) -> dict:
@@ -1574,6 +1762,89 @@ async def setup_service(server, server_id="agent-lens"):
             logger.error(f"Error generating batch image embeddings via RPC: {e}")
             logger.error(traceback.format_exc())
             raise
+
+    @schema_function()
+    async def segment_and_extract_put_queue(
+        image_data: Any,
+        microscope_status: Optional[Dict[str, Any]] = None,
+        application_id: str = "hypha-agents-notebook",
+        scale: int = 4,
+    ) -> dict:
+        """
+        Enqueue an image for segmentation + cell extraction.
+        Returns immediately with queue size.
+        """
+        await segment_queue.put(
+            {
+                "image_data": image_data,
+                "microscope_status": microscope_status,
+                "application_id": application_id,
+                "scale": scale,
+            }
+        )
+        return {
+            "success": True,
+            "queued": True,
+            "queue_size": segment_queue.qsize(),
+        }
+
+    @schema_function()
+    async def segment_and_extract_wait_until_done() -> dict:
+        """
+        Wait until the queue is empty and return all accumulated results.
+        """
+        await segment_queue.join()
+        await build_queue.join()
+        results = list(segment_and_extract_results)
+        segment_and_extract_results.clear()
+        return {
+            "success": True,
+            "count": len(results),
+            "results": results,
+        }
+
+    @schema_function()
+    async def snap_segment_extract_put_queue(
+        microscope_id: str,
+        channel_config: List[Dict[str, Any]],
+        application_id: str = "hypha-agents-notebook",
+        scale: int = 4,
+        positions: Optional[List[Dict[str, float]]] = None,
+    ) -> dict:
+        """
+        Enqueue a job to snap image(s), segment, and extract cell records.
+        Returns immediately with queue size.
+        """
+        await snap_queue.put(
+            {
+                "microscope_id": microscope_id,
+                "channel_config": channel_config,
+                "application_id": application_id,
+                "scale": scale,
+                "positions": positions,
+            }
+        )
+        return {
+            "success": True,
+            "queued": True,
+            "queue_size": snap_queue.qsize(),
+        }
+
+    @schema_function()
+    async def snap_segment_extract_wait_until_done() -> dict:
+        """
+        Wait until the snap queue and segment+extract queue are empty and return all accumulated results.
+        """
+        await snap_queue.join()
+        await segment_queue.join()
+        await build_queue.join()
+        results = list(segment_and_extract_results)
+        segment_and_extract_results.clear()
+        return {
+            "success": True,
+            "count": len(results),
+            "results": results,
+        }
     
         
     # Helper function to process a single cell (runs in parallel threads)
@@ -2060,8 +2331,8 @@ async def setup_service(server, server_id="agent-lens"):
 
     # extract cell metadata
     async def build_cell_records(
-        image_data_np: np.ndarray, 
-        segmentation_mask: np.ndarray,
+        image_data_np: Any, 
+        segmentation_mask: Any,
         microscope_status: Optional[Dict[str, Any]] = None,
         application_id: str = 'hypha-agents-notebook',
     ) -> List[Dict[str, Any]]:
@@ -2070,7 +2341,8 @@ async def setup_service(server, server_id="agent-lens"):
         Automatically stores images and DINO embeddings to Weaviate for memory efficiency.
         
         Args:
-            image_data_np: Multi-channel microscopy image (H, W, C) or single-channel (H, W)
+            image_data_np: Multi-channel microscopy image (H, W, C) or single-channel (H, W).
+                           Also accepts a list/tuple of per-channel arrays where missing channels are None.
             segmentation_mask: Integer mask where each unique non-zero value represents a cell
             microscope_status: Optional microscope position info for spatial metadata
             application_id: Application identifier for Weaviate storage (default: 'hypha-agents-notebook')
@@ -2110,6 +2382,27 @@ async def setup_service(server, server_id="agent-lens"):
         import os
         from skimage.measure import label, regionprops
         
+        # Accept sparse channel list: [np.ndarray | None, ...]
+        if isinstance(image_data_np, (list, tuple)):
+            channels = list(image_data_np)
+            first = next((ch for ch in channels if ch is not None), None)
+            if first is None:
+                raise ValueError("image_data_np list has no valid channels")
+            if not isinstance(first, np.ndarray):
+                first = np.array(first)
+            H, W = first.shape[:2]
+            dtype = first.dtype
+            dense = np.zeros((H, W, len(channels)), dtype=dtype)
+            for idx, ch in enumerate(channels):
+                if ch is None:
+                    continue
+                if not isinstance(ch, np.ndarray):
+                    ch = np.array(ch)
+                if ch.ndim == 3:
+                    ch = ch[:, :, 0]
+                dense[:, :, idx] = ch
+            image_data_np = dense
+
         # Ensure mask is numpy array and convert to labeled format if needed
         if isinstance(segmentation_mask, str):
             mask_bytes = base64.b64decode(segmentation_mask)
@@ -2629,6 +2922,10 @@ async def setup_service(server, server_id="agent-lens"):
             "generate_text_embedding": generate_text_embedding_rpc,
             "generate_image_embeddings_batch": generate_image_embeddings_batch_rpc,
             "build_cell_records": build_cell_records,
+            "segment_and_extract_put_queue": segment_and_extract_put_queue,
+            "segment_and_extract_wait_until_done": segment_and_extract_wait_until_done,
+            "snap_segment_extract_put_queue": snap_segment_extract_put_queue,
+            "snap_segment_extract_wait_until_done": snap_segment_extract_wait_until_done,
             # Register RPC methods for UMAP clustering
             "make_umap_cluster_figure_interactive": make_umap_cluster_figure_interactive_rpc,
             # Register RPC methods for ChromaDB data management
@@ -2683,6 +2980,16 @@ async def setup_service(server, server_id="agent-lens"):
             except Exception as e:
                 logger.warning(f"ChromaDB health check failed: {e}")
                 health_status["checks"]["chromadb"] = f"error: {str(e)}"
+                health_status["status"] = "degraded"
+            
+
+            # Check 3: Segmentation service connection
+            try:
+                await segmentation_service.ping() # check if response is 'pong'
+                health_status["checks"]["segmentation_service"] = "ok"
+            except Exception as e:
+                logger.warning(f"Segmentation service health check failed: {e}")
+                health_status["checks"]["segmentation_service"] = f"error: {str(e)}"
                 health_status["status"] = "degraded"
             
             return health_status
