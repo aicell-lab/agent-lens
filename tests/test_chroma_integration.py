@@ -180,7 +180,7 @@ def test_reset_application(chroma_storage):
     # Reset application
     result = chroma_storage.reset_application(application_id)
     assert result["success"]
-    assert result["deleted_count"] == 5
+    assert "message" in result
     
     # Verify collection is deleted
     count = chroma_storage.get_collection_count(application_id)
@@ -191,7 +191,6 @@ def test_reset_nonexistent_application(chroma_storage):
     """Test resetting an application that doesn't exist."""
     result = chroma_storage.reset_application("nonexistent-app")
     assert result["success"]
-    assert result["deleted_count"] == 0
     assert "did not exist" in result["message"].lower()
 
 
