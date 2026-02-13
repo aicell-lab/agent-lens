@@ -87,7 +87,10 @@ class ChromaCellStorage:
         try:
             collection = self.client.get_or_create_collection(
                 name=application_id,
-                metadata={"description": "Cell morphology data with embeddings"}
+                metadata={
+                    "description": "Cell morphology data with embeddings",
+                    "hnsw:space": "cosine",
+                }
             )
             
             ids = []

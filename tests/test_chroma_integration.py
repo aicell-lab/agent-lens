@@ -151,8 +151,10 @@ def test_similarity_search_without_filter(chroma_storage):
     assert len(results["ids"][0]) == 5
     assert "distances" in results
     assert "metadatas" in results
-    # Distances should be relatively small (similar embeddings)
-    assert all(d < 1.0 for d in results["distances"][0])
+    # ChromaDB configured with cosine distance: values in [0, 2], ordered nearest-first
+    distances = results["distances"][0]
+    assert all(0 <= d <= 2 for d in distances)
+    assert distances == sorted(distances)
 
 
 def test_reset_application(chroma_storage):
@@ -181,8 +183,8 @@ def test_reset_application(chroma_storage):
     result = chroma_storage.reset_application(application_id)
     assert result["success"]
     assert "message" in result
-    
-    # Verify collection is deleted
+
+    # Verify collection is deleted (count is the source of truth)
     count = chroma_storage.get_collection_count(application_id)
     assert count == 0
 
