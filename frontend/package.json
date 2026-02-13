@@ -15,7 +15,7 @@
     "@vitejs/plugin-react": "^4.3.3",
     "bootstrap": "^5.3.3",
     "html2canvas": "^1.4.1",
-    "hypha-rpc": "^0.20.93",
+    "hypha-rpc": "^0.21.11",
     "node-fetch": "^3.3.2",
     "ol": "^10.2.1",
     "openai": "^4.0.0",
