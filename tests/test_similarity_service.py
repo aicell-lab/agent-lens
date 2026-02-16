@@ -1160,6 +1160,136 @@ class TestWeaviateSimilarityService:
             except Exception as e:
                 print(f"Warning: Error cleaning up: {e}")
 
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    @pytest.mark.timeout(600)
+    async def test_metadata_filtering(self, weaviate_service):
+        """Test similarity search with metadata filtering using remote Weaviate service."""
+        from weaviate.classes.query import Filter
+        
+        collection_name = self._generate_test_collection_name()
+        application_id = "test-metadata-filter"
+        
+        try:
+            # Create collection
+            print(f"Creating test collection: {collection_name}")
+            try:
+                await weaviate_service.create_collection(
+                    collection_name=collection_name,
+                    description="Test collection for metadata filtering"
+                )
+                print(f"✅ Collection {collection_name} created")
+            except Exception as e:
+                if "already exists" in str(e).lower():
+                    print(f"Collection {collection_name} already exists")
+                else:
+                    raise
+            
+            await weaviate_service.create_application(
+                collection_name=collection_name,
+                application_id=application_id,
+                description="Test metadata filtering"
+            )
+            
+            # Insert test cells with varying metadata
+            print("Inserting test cells with varying metadata...")
+            test_cells = []
+            base_desc = "microscopy cell image"
+            areas = [100.0, 200.0, 300.0, 400.0, 500.0]
+            
+            for i, area in enumerate(areas):
+                clip_vector = self._generate_clip_vector(f"{base_desc} {i}")
+                preview_image = self._generate_test_preview_image()
+                
+                result = await weaviate_service.insert_image(
+                    collection_name=collection_name,
+                    application_id=application_id,
+                    image_id=f"cell_{i}",
+                    description=f"{base_desc} {i}",
+                    metadata={"index": i},
+                    vector=clip_vector,
+                    preview_image=preview_image,
+                    area=area,
+                    circularity=0.8 + i * 0.02
+                )
+                
+                # Extract UUID
+                cell_uuid = None
+                if hasattr(result, 'uuid'):
+                    cell_uuid = str(result.uuid)
+                elif hasattr(result, 'id'):
+                    cell_uuid = str(result.id)
+                elif isinstance(result, dict):
+                    cell_uuid = str(result.get('uuid') or result.get('id'))
+                
+                test_cells.append({"uuid": cell_uuid, "area": area})
+            
+            print(f"✅ Inserted {len(test_cells)} cells with areas: {areas}")
+            
+            # Test 1: Search with area > 250 filter (should return cells with 300, 400, 500)
+            print("\nTest 1: Filter by area > 250")
+            area_filter = Filter.by_property("area").greater_than(250)
+            
+            try:
+                results = await weaviate_service.search_similar_images(
+                    collection_name=collection_name,
+                    application_id=application_id,
+                    query_vector=self._generate_clip_vector(base_desc),
+                    limit=10,
+                    filters=area_filter,
+                    certainty=None  # No certainty threshold
+                )
+                print(f"  Results: {len(results)} cells")
+                for r in results:
+                    if hasattr(r, 'properties'):
+                        props = r.properties
+                        area = props.area if hasattr(props, 'area') else props.get('area')
+                        print(f"    Cell area: {area}")
+                        assert area > 250, f"Cell area {area} should be > 250"
+                print("✅ Area > 250 filter works!")
+            except Exception as e:
+                print(f"❌ Area > 250 filter failed: {e}")
+                raise
+            
+            # Test 2: Search with area range 200-400 (compound filter)
+            print("\nTest 2: Filter by area range (200-400)")
+            range_filter = Filter.by_property("area").greater_or_equal(200) & Filter.by_property("area").less_or_equal(400)
+            
+            try:
+                results = await weaviate_service.search_similar_images(
+                    collection_name=collection_name,
+                    application_id=application_id,
+                    query_vector=self._generate_clip_vector(base_desc),
+                    limit=10,
+                    filters=range_filter,
+                    certainty=None
+                )
+                print(f"  Results: {len(results)} cells")
+                for r in results:
+                    if hasattr(r, 'properties'):
+                        props = r.properties
+                        area = props.area if hasattr(props, 'area') else props.get('area')
+                        print(f"    Cell area: {area}")
+                        assert 200 <= area <= 400, f"Cell area {area} should be 200-400"
+                print("✅ Area range filter works!")
+            except Exception as e:
+                print(f"❌ Area range filter failed: {e}")
+                raise
+            
+            print("\n✅ All metadata filtering tests passed!")
+            
+        finally:
+            # Cleanup
+            try:
+                await weaviate_service.delete_application(
+                    collection_name=collection_name,
+                    application_id=application_id
+                )
+                await weaviate_service.delete_collection(collection_name)
+                print(f"✅ Cleaned up test collection: {collection_name}")
+            except Exception as e:
+                print(f"Warning: Cleanup error: {e}")
+
     @pytest.mark.unit
     def test_fastapi_imports(self):
         """Test that FastAPI imports work correctly."""
