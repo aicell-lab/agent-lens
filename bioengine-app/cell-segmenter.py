@@ -673,11 +673,15 @@ class CellSegmenter:
             raise ValueError(f"Failed to encode segmentation to PNG: {str(e)}")
     
     @schema_method
+    async def ping(self) -> str:
+        return "pong"
+        
+    @schema_method
     async def segment_all(
         self,
         image_or_embedding: Any = Field(
             ...,
-            description="Base64-encoded PNG string (required for images). Numpy arrays are NOT accepted for images.",
+            description="Base64-encoded PNG string or numpy array (C, H, W) when embedding=False. 1D array when embedding=True.",
         ),
         embedding: bool = Field(
             False,
@@ -704,9 +708,6 @@ class CellSegmenter:
             description="Minimum cell size in pixels (area) to filter out small objects. Passed as 'min_size' to the segmenter's generate method. Default is 100.",
         ),
     ) -> Any:
-        # Import skimage for polygon extraction (used by both methods)
-        from skimage.measure import find_contours, regionprops, approximate_polygon
-        
         # Validate method parameter
         if method not in ["microsam", "cellpose"]:
             raise ValueError(f"Invalid method: {method}. Must be 'microsam' or 'cellpose'")
@@ -719,26 +720,22 @@ class CellSegmenter:
             if len(image_or_embedding.shape) != 1:
                 raise ValueError(f"Expected 1D embedding array, got shape {image_or_embedding.shape}")
         else:
-            # STRICT: For images, ONLY accept base64-encoded PNG string
-            # NO numpy arrays, NO fallback, NO exceptions
-            if not isinstance(image_or_embedding, str):
-                raise ValueError(
-                    f"ONLY base64-encoded PNG strings are accepted for images. "
-                    f"Received {type(image_or_embedding).__name__}. "
-                    f"Numpy arrays and other formats are NOT supported. "
-                    f"Please encode your image as PNG and encode as base64 string."
-                )
+            # For images, accept base64-encoded PNG string or numpy array
+            if isinstance(image_or_embedding, str):
+                # Additional check: ensure it's not an empty string
+                if len(image_or_embedding.strip()) == 0:
+                    raise ValueError("Empty string provided. Must be a valid base64-encoded PNG string.")
+                
+                # Decode PNG image from base64
+                image_array = self._decode_image(image_or_embedding)
+            else:
+                if not isinstance(image_or_embedding, np.ndarray):
+                    image_or_embedding = np.array(image_or_embedding)
+                image_array = image_or_embedding
             
-            # Additional check: ensure it's not an empty string
-            if len(image_or_embedding.strip()) == 0:
-                raise ValueError("Empty string provided. Must be a valid base64-encoded PNG string.")
-            
-            # Decode PNG image from base64
-            image_array = self._decode_image(image_or_embedding)
-            
-            # Validate decoded image format
+            # Validate image format
             if not self._validate_image_format(image_array):
-                raise ValueError(f"Invalid decoded image format. Expected (C, H, W) where C in [1, 3], got {image_array.shape}")
+                raise ValueError(f"Invalid image format. Expected (C, H, W) where C in [1, 3], got {image_array.shape}")
         
         # Set default tile_shape and halo if tiling is enabled (only for microSAM)
         if tiling and method == "microsam":
@@ -833,60 +830,9 @@ class CellSegmenter:
                 else:
                     instances = np.array(instances)
             
-            # Extract polygons for each instance object using regionprops
-            # This directly processes the instance mask where each object has a unique ID
-            props = regionprops(instances)
-            
-            # Create list to store polygons for each object
-            polygons_list = []
-            
-            # Extract polygon contours for each instance object
-            for prop in props:
-                instance_id = prop.label
-                
-                # Get the mask for this specific instance only
-                instance_mask = (instances == instance_id).astype(np.uint8)
-                
-
-                # Find contours for this instance with high connectivity for detailed boundaries
-                # fully_connected='high' ensures we capture all boundary pixels
-                contours = find_contours(instance_mask, level=0.5, fully_connected='high')
-                
-                # Convert contours to polygon format with minimal simplification
-                # Each contour is a list of (row, col) coordinates
-                instance_polygons = []
-                for contour in contours:
-                    # Use very low tolerance (0.3 pixels) to preserve fine details
-                    # This removes only truly redundant points while keeping shape accuracy
-                    simplified_contour = approximate_polygon(contour, tolerance=0.3)
-                    
-                    # Ensure we have enough points for a valid polygon
-                    if len(simplified_contour) < 3:
-                        # If simplification removed too many points, use original contour
-                        simplified_contour = contour
-                    
-                    # Convert from (row, col) to (x, y) format
-                    # contour shape: (N, 2) where each row is (row, col)
-                    # Convert to (x, y) by swapping: (col, row) -> (x, y)
-                    polygon = [[float(point[1]), float(point[0])] for point in simplified_contour]
-                    instance_polygons.append(polygon)
-                
-                # Get bounding box from regionprops
-                bbox = prop.bbox  # (min_row, min_col, max_row, max_col)
-                
-                # Store polygon data for this instance
-                polygons_list.append({
-                    "id": int(instance_id),
-                    "polygons": instance_polygons,  # List of polygons (outer contour + holes if any)
-                    "bbox": [int(bbox[1]), int(bbox[0]), int(bbox[3]), int(bbox[2])]  # [x_min, y_min, x_max, y_max]
-                })
-            
-            # Return both mask and polygons
-            # Mask is returned as numpy array to preserve exact uint32 instance IDs (critical for medical/industrial use)
-            return {
-                "polygons": polygons_list,
-                "mask": instances  # Numpy array with exact instance segmentation mask (preserves uint32 dtype and all instance IDs)
-            }
+            # Return only the segmentation mask (features)
+            # Mask is returned as numpy array to preserve exact instance IDs
+            return instances
 
 if __name__ == "__main__":
     import asyncio
@@ -898,4 +844,3 @@ if __name__ == "__main__":
         print(response)
 
     asyncio.run(test())
-

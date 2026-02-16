@@ -1,6 +1,6 @@
 services:
   agent-lens:
-    image: ghcr.io/aicell-lab/agent-lens:sha-02e45c5
+    image: ghcr.io/aicell-lab/agent-lens:sha-be27a27
     container_name: agent-lens
     # Optimize image pulling
     pull_policy: if_not_present
@@ -46,7 +46,7 @@ services:
       - ALL
 
   squid-control:
-    image: ghcr.io/aicell-lab/squid-control:sha-e2fb7c3
+    image: ghcr.io/aicell-lab/squid-control:sha-4943ddb
     container_name: squid-control
     # Optimize image pulling
     pull_policy: if_not_present
@@ -57,7 +57,7 @@ services:
       - SQUID_WORKSPACE_TOKEN=${SQUID_WORKSPACE_TOKEN}
       - WORKSPACE_TOKEN_CHATBOT=${WORKSPACE_TOKEN_CHATBOT}
       - REEF_WORKSPACE_TOKEN=${REEF_WORKSPACE_TOKEN}
-      - MICROSCOPE_SERVICE_ID=${MICROSCOPE_SERVICE_ID}
+      - MICROSCOPE_SERVICE_ID=${MICROSCOPE_SERVICE_ID} # will be squid-control-simulation or squid-control-simulation-63x
       - WORKSPACE_TOKEN=${WORKSPACE_TOKEN}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - AGENT_LENS_WORKSPACE_TOKEN=${AGENT_LENS_WORKSPACE_TOKEN}
@@ -68,6 +68,48 @@ services:
     healthcheck:
       test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/agent-lens/services/squid-control-simulation/is_service_healthy | jq -e '.status == \"ok\"'"]
       interval: 600s
+      timeout: 30s
+      retries: 1
+      start_period: 120s
+    restart: on-failure
+    stop_grace_period: 30s
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 20s
+        max_attempts: 3
+        window: 120s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  squid-control-63x:
+    image: ghcr.io/aicell-lab/squid-control:sha-4943ddb
+    container_name: squid-control-63x
+    # Optimize image pulling
+    pull_policy: if_not_present
+    network_mode: "host"
+    ports:
+      - "10100-10150:10100-10150/udp"
+    environment:
+      - SQUID_WORKSPACE_TOKEN=${SQUID_WORKSPACE_TOKEN}
+      - WORKSPACE_TOKEN_CHATBOT=${WORKSPACE_TOKEN_CHATBOT}
+      - REEF_WORKSPACE_TOKEN=${REEF_WORKSPACE_TOKEN}
+      - MICROSCOPE_SERVICE_ID=${MICROSCOPE_SERVICE_ID} # will be squid-control-simulation or squid-control-simulation-63x
+      - WORKSPACE_TOKEN=${WORKSPACE_TOKEN}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - AGENT_LENS_WORKSPACE_TOKEN=${AGENT_LENS_WORKSPACE_TOKEN}
+    labels:
+      - "autoheal.enable=true"
+    volumes:
+      - squid-control-63x-cache:/app/.cache
+      # Mount 63x zarr dataset (Opera import)
+      - /mnt/shared_documents/opera_import/data.zarr:/mnt/shared_documents/opera_import/data.zarr:ro
+    command: ["python", "-m", "squid_control", "microscope", "--simulation", "--config", "HCS_v2_63x"]
+    healthcheck:
+      test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/agent-lens/services/squid-control-simulation-63x/is_service_healthy | jq -e '.status == \"ok\"'"]
+      interval: 60s
       timeout: 30s
       retries: 1
       start_period: 120s
@@ -101,3 +143,4 @@ services:
 volumes:
   agent-lens-cache:
   squid-control-cache:
+  squid-control-63x-cache:
