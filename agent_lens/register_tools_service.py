@@ -11,7 +11,7 @@ import traceback
 import asyncio
 import base64
 import uuid
-from agent_lens.utils.chroma_storage import chroma_storage
+from agent_lens.utils.weaviate_search import WeaviateSimilarityService
 from hypha_rpc.utils.schema import schema_function
 from PIL import Image as PILImage
 from io import BytesIO
@@ -23,6 +23,9 @@ from .log import setup_logging
 logger = setup_logging("agent_lens_tools_service.log")
 
 SERVER_URL = "https://hypha.aicell.io"
+
+# Weaviate configuration
+WEAVIATE_COLLECTION_NAME = "Agentlens"  # Always use the existing 'Agentlens' collection
 
 async def preload_embedding_models():
     """
@@ -76,6 +79,41 @@ async def setup_service(server, server_id="agent-lens-tools"):
     # Connect to Cellpose segmentation service
     segmentation_service = await api_server.get_service("agent-lens/cell-segmenter")
     logger.info("Connected to Cellpose segmentation service.")
+    
+    # Initialize Weaviate service for cell storage
+    weaviate_service = WeaviateSimilarityService()
+    weaviate_connected = await weaviate_service.connect()
+    if weaviate_connected:
+        logger.info("✓ Connected to Weaviate service for cell storage")
+        
+        # Ensure the collection exists at startup (create if needed)
+        try:
+            logger.info(f"Checking if collection '{WEAVIATE_COLLECTION_NAME}' exists...")
+            collection_exists = await weaviate_service.collection_exists(WEAVIATE_COLLECTION_NAME)
+            
+            if not collection_exists:
+                logger.info(f"Collection '{WEAVIATE_COLLECTION_NAME}' not found - creating it now...")
+                try:
+                    await weaviate_service.create_collection(
+                        collection_name=WEAVIATE_COLLECTION_NAME,
+                        description="Agent-Lens microscopy cell data collection"
+                    )
+                    logger.info(f"✅ Created collection '{WEAVIATE_COLLECTION_NAME}' successfully")
+                except Exception as create_error:
+                    # Check if it's a "already exists" error (race condition)
+                    if "already exists" in str(create_error).lower() or "class already exists" in str(create_error).lower():
+                        logger.info(f"✓ Collection '{WEAVIATE_COLLECTION_NAME}' already exists (created by another process)")
+                    else:
+                        logger.error(f"Failed to create collection: {create_error}")
+                        logger.warning("⚠ Cell storage may not work properly")
+            else:
+                logger.info(f"✓ Collection '{WEAVIATE_COLLECTION_NAME}' already exists")
+        except Exception as collection_error:
+            logger.warning(f"⚠ Failed to verify/create collection: {collection_error}")
+            logger.warning("  Cell storage may not work properly - will attempt to create collection on first use")
+    else:
+        logger.warning("⚠ Weaviate service not available - cell storage will not work")
+        logger.warning("  Set HYPHA_AGENTS_TOKEN environment variable to enable Weaviate")
 
     # Background queues: segmentation -> build_cell_records
     segment_queue: asyncio.Queue = asyncio.Queue()
@@ -689,7 +727,7 @@ async def setup_service(server, server_id="agent-lens-tools"):
             cell_pil_224.save(buffer_224, format='PNG')
             embedding_image_bytes = buffer_224.getvalue()
 
-            # 50x50 thumbnail: saved to ChromaDB (much smaller, faster insert)
+            # 50x50 thumbnail: saved to Database (much smaller, faster insert)
             merged_rgb_thumbnail = np.array(
                 cell_pil_224.resize((50, 50), PILImage.Resampling.LANCZOS),
                 dtype=np.uint8
@@ -849,7 +887,7 @@ async def setup_service(server, server_id="agent-lens-tools"):
                     # If fluorescence calculation fails, continue without it
                     pass
             
-            # Add 50x50 thumbnail to metadata (stored in ChromaDB; 224x224 used only for embedding)
+            # Add 50x50 thumbnail to metadata (stored in Database; 224x224 used only for embedding)
             metadata["image"] = thumbnail_base64
 
             return (poly_index, metadata, embedding_image_bytes)
@@ -1074,8 +1112,8 @@ async def setup_service(server, server_id="agent-lens-tools"):
         Returns:
             List of metadata dictionaries, one per cell, with the following fields:
             
-            Geometry & Shape (in memory + ChromaDB):
-            - uuid: ChromaDB object UUID for retrieving images/embeddings later
+            Geometry & Shape (in memory + Database):
+            - uuid: Database object UUID for retrieving images/embeddings later
             - area: area of the cell in pixels
             - perimeter: perimeter of the cell in pixels
             - equivalent_diameter: equivalent diameter of the cell in pixels
@@ -1097,7 +1135,7 @@ async def setup_service(server, server_id="agent-lens-tools"):
             - distance_from_center: distance from the center of the well in mm
             
 
-        Note: This function stores images and embeddings to ChromaDB automatically,
+        Note: This function stores images and embeddings to Database automatically,
               reducing memory usage by ~250x. Use fetch_cell_data()
               to retrieve full cell data when needed for visualization.
         """
@@ -1304,29 +1342,159 @@ async def setup_service(server, server_id="agent-lens-tools"):
         
 
         try:
-            print(f"Storing {len(results)} cells to ChromaDB (application: {application_id})...")
+            print(f"Storing {len(results)} cells to Weaviate (application: {application_id})...")
             
             # Prepare cells for batch insertion
-            cells_to_insert = []
+            objects_to_insert = []
+            skipped_count = 0
             for idx, cell in enumerate(results):
                 # Check for DINO embedding
-                if not cell.get("dino_embedding"):
-                    print(f"Warning: Cell {idx} has no dino_embedding, skipping")
+                dino_embedding = cell.get("dino_embedding")
+                if not dino_embedding:
+                    skipped_count += 1
+                    if skipped_count <= 5:  # Only print first 5 warnings
+                        print(f"Warning: Cell {idx} has no dino_embedding, skipping")
                     continue
                 
-                # Generate unique UUID and image_id
-                cell["uuid"] = str(uuid.uuid4())
-                cell["image_id"] = f"{application_id}_cell_{idx}_{uuid.uuid4().hex[:8]}"
-                cells_to_insert.append(cell)
+                # Generate unique image_id (UUID will be assigned by Weaviate)
+                image_id = f"{application_id}_cell_{idx}_{uuid.uuid4().hex[:8]}"
+                
+                # Prepare Weaviate object with all cell properties
+                weaviate_obj = {
+                    "image_id": image_id,
+                    "description": f"Cell from {application_id}",
+                    "metadata": {
+                        "application_id": application_id,
+                        "cell_index": idx
+                    },
+                    "dataset_id": application_id,  # Use application_id as dataset_id
+                    "file_path": "",
+                    "vector": dino_embedding,  # DINOv2 embedding for similarity search
+                    "preview_image": cell.get("image", ""),  # Base64 encoded 50x50 thumbnail
+                    "tag": "",
+                    # Cell morphology measurements
+                    "area": cell.get("area"),
+                    "perimeter": cell.get("perimeter"),
+                    "equivalent_diameter": cell.get("equivalent_diameter"),
+                    "bbox_width": cell.get("bbox_width"),
+                    "bbox_height": cell.get("bbox_height"),
+                    "aspect_ratio": cell.get("aspect_ratio"),
+                    "circularity": cell.get("circularity"),
+                    "eccentricity": cell.get("eccentricity"),
+                    "solidity": cell.get("solidity"),
+                    "convexity": cell.get("convexity"),
+                    # Intensity features for fluorescent channels
+                    "brightness": cell.get("mean_intensity_BF_LED_matrix_full"),
+                    "contrast": None,  # GLCM features not computed yet
+                    "homogeneity": None,
+                    "energy": None,
+                    "correlation": None,
+                }
+                
+                # Add mean intensity fields for fluorescent channels
+                # Store fluorescence intensities in metadata for now
+                if "metadata" not in weaviate_obj or weaviate_obj["metadata"] is None:
+                    weaviate_obj["metadata"] = {}
+                
+                for key, value in cell.items():
+                    if key.startswith("mean_intensity_") or key.startswith("top10_mean_intensity_"):
+                        weaviate_obj["metadata"][key] = value
+                
+                # Track image_id in cell record (UUID will be assigned after insertion)
+                cell["image_id"] = image_id
+                
+                objects_to_insert.append(weaviate_obj)
             
-            # Batch insert in a thread so the event loop is not blocked (ChromaDB + SQLite I/O is slow)
-            insert_result = await asyncio.to_thread(
-                chroma_storage.insert_cells,
+            # Log preparation summary
+            if skipped_count > 0:
+                print(f"⚠ Skipped {skipped_count} cells without embeddings")
+            print(f"📦 Prepared {len(objects_to_insert)} cells for batch insertion")
+            
+            if len(objects_to_insert) == 0:
+                print("⚠ No cells to insert - all cells missing embeddings")
+                return {"status": "success", "stored_count": 0, "message": "No cells with embeddings to store"}
+            
+            # Check if Weaviate is connected
+            if not weaviate_service.connected:
+                logger.warning("Weaviate not connected - attempting to reconnect...")
+                weaviate_connected = await weaviate_service.connect()
+                if not weaviate_connected:
+                    raise RuntimeError("Failed to connect to Weaviate service")
+            
+            # Ensure collection exists (should have been created at startup, but check anyway)
+            collection_exists = await weaviate_service.collection_exists(WEAVIATE_COLLECTION_NAME)
+            if not collection_exists:
+                logger.info(f"Collection '{WEAVIATE_COLLECTION_NAME}' not found - creating it now...")
+                try:
+                    await weaviate_service.create_collection(
+                        collection_name=WEAVIATE_COLLECTION_NAME,
+                        description="Agent-Lens microscopy cell data collection"
+                    )
+                    logger.info(f"✅ Created collection '{WEAVIATE_COLLECTION_NAME}'")
+                except Exception as create_error:
+                    if "already exists" in str(create_error).lower() or "class already exists" in str(create_error).lower():
+                        logger.info(f"✓ Collection already exists (created by another process)")
+                    else:
+                        logger.error(f"Failed to create collection: {create_error}")
+                        raise
+            
+            # Ensure application exists in collection
+            app_exists = await weaviate_service.application_exists(WEAVIATE_COLLECTION_NAME, application_id)
+            if not app_exists:
+                # Create application if it doesn't exist
+                logger.info(f"Creating application '{application_id}' in collection '{WEAVIATE_COLLECTION_NAME}'")
+                await weaviate_service.create_application(
+                    collection_name=WEAVIATE_COLLECTION_NAME,
+                    application_id=application_id,
+                    description=f"Cell data for {application_id}"
+                )
+            
+            # Batch insert cells to Weaviate
+            insert_result = await weaviate_service.insert_many_images(
+                collection_name=WEAVIATE_COLLECTION_NAME,
                 application_id=application_id,
-                cells=cells_to_insert
+                objects=objects_to_insert
             )
             
-            print(f"✅ Stored {insert_result['inserted_count']} cells to ChromaDB")
+            # Extract results from ObjectProxy
+            inserted_count = insert_result.get("inserted_count", 0) if hasattr(insert_result, 'get') else getattr(insert_result, 'inserted_count', 0)
+            failed_count = insert_result.get("failed_count", 0) if hasattr(insert_result, 'get') else getattr(insert_result, 'failed_count', 0)
+            returned_uuids = insert_result.get("uuids", {}) if hasattr(insert_result, 'get') else getattr(insert_result, 'uuids', {})
+            
+            # Convert ObjectProxy to dict if needed
+            if hasattr(returned_uuids, '__dict__'):
+                returned_uuids = dict(returned_uuids)
+            elif hasattr(returned_uuids, 'items'):
+                returned_uuids = dict(returned_uuids)
+            
+            logger.info(f"Returned UUIDs type: {type(returned_uuids)}, count: {len(returned_uuids) if returned_uuids else 0}")
+            
+            # Update cell records with actual Weaviate UUIDs
+            # Note: returned_uuids is indexed by array position (e.g., '0', '1', '2'), not image_id
+            if returned_uuids:
+                uuid_update_count = 0
+                inserted_idx = 0
+                for idx, cell in enumerate(results):
+                    # Only cells that had embeddings were inserted
+                    if "image_id" in cell:
+                        # Use the insertion index (string) to look up the UUID
+                        str_idx = str(inserted_idx)
+                        if str_idx in returned_uuids:
+                            actual_uuid = returned_uuids[str_idx]
+                            cell["uuid"] = str(actual_uuid)  # Update with actual Weaviate UUID
+                            uuid_update_count += 1
+                            logger.debug(f"Updated cell {idx} (insertion idx {inserted_idx}, image_id {cell['image_id']}) with UUID {actual_uuid}")
+                        inserted_idx += 1
+                logger.info(f"Updated {uuid_update_count} cell records with Weaviate UUIDs")
+                print(f"📝 Updated {uuid_update_count} cell records with Weaviate UUIDs")
+            else:
+                logger.warning("No UUIDs returned from insert_many - cells will not have UUIDs")
+            
+            if failed_count > 0:
+                logger.warning(f"Inserted {inserted_count} cells, {failed_count} failed")
+                print(f"⚠ Stored {inserted_count} cells to Weaviate ({failed_count} failed)")
+            else:
+                print(f"✅ Stored {inserted_count} cells to Weaviate")
             
             # Remove images and embeddings from results to save memory
             for cell in results:
@@ -1334,9 +1502,10 @@ async def setup_service(server, server_id="agent-lens-tools"):
                 cell.pop("dino_embedding", None)
             
         except Exception as e:
-            print(f"Warning: Failed to store cells to ChromaDB: {e}")
-            logger.warning(f"Failed to store cells to ChromaDB: {e}")
-            # Continue without ChromaDB storage - return full records
+            print(f"Warning: Failed to store cells to Weaviate: {e}")
+            logger.warning(f"Failed to store cells to Weaviate: {e}")
+            logger.warning(traceback.format_exc())
+            # Continue without Weaviate storage - return full records
         
         return results
     @schema_function()
@@ -1349,10 +1518,10 @@ async def setup_service(server, server_id="agent-lens-tools"):
         metadata_fields: Optional[List[str]] = None,
     ) -> dict:
         """
-        Generate interactive UMAP visualization (Plotly HTML) by extracting data from ChromaDB.
+        Generate interactive UMAP visualization (Plotly HTML) by extracting data from Weaviate.
         
         Args:
-            application_id: ChromaDB collection name
+            application_id: Application ID in Weaviate
             n_neighbors: Number of neighbors for UMAP
             min_dist: Minimum distance for UMAP
             random_state: Random state for reproducibility
@@ -1363,24 +1532,73 @@ async def setup_service(server, server_id="agent-lens-tools"):
             dict with success flag, HTML string, cluster labels, and UUIDs
         """
         try:
-            # Fetch all cells from ChromaDB
-            logger.info(f"Fetching all cells from ChromaDB collection '{application_id}'...")
+            # Fetch all cells from Weaviate
+            logger.info(f"Fetching all cells from Weaviate collection '{WEAVIATE_COLLECTION_NAME}' for application '{application_id}'...")
             
-            all_cells = await asyncio.to_thread(
-                chroma_storage.get_all_cells,
+            # Fetch all annotations for this application
+            weaviate_objects = await weaviate_service.fetch_all_annotations(
+                collection_name=WEAVIATE_COLLECTION_NAME,
                 application_id=application_id,
-                include_embeddings=True
+                limit=100000,  # Large limit to get all cells
+                include_vector=True
             )
             
-            if not all_cells or len(all_cells) == 0:
+            if not weaviate_objects or len(weaviate_objects) == 0:
                 return {
                     "success": False,
-                    "error": f"No cells found in ChromaDB collection '{application_id}'",
+                    "error": f"No cells found in Weaviate for application '{application_id}'",
                     "html": None,
                     "cluster_labels": None
                 }
             
-            logger.info(f"Retrieved {len(all_cells)} cells from ChromaDB")
+            # Convert Weaviate objects to cell format expected by UMAP function
+            all_cells = []
+            for obj in weaviate_objects:
+                # Extract properties from Weaviate object
+                if hasattr(obj, 'properties'):
+                    props = obj.properties
+                elif isinstance(obj, dict):
+                    props = obj
+                else:
+                    props = obj.__dict__
+                
+                # Extract vector (embedding)
+                vector = None
+                if hasattr(obj, 'vector'):
+                    vector = obj.vector
+                elif isinstance(obj, dict) and 'vector' in obj:
+                    vector = obj['vector']
+                
+                # Extract UUID
+                obj_uuid = None
+                if hasattr(obj, 'uuid'):
+                    obj_uuid = str(obj.uuid)
+                elif isinstance(obj, dict) and 'uuid' in obj:
+                    obj_uuid = str(obj['uuid'])
+                
+                # Build cell dict
+                cell = {
+                    "uuid": obj_uuid,
+                    "dino_embedding": vector,
+                    "image": props.get("preview_image", "") if isinstance(props, dict) else getattr(props, "preview_image", ""),
+                }
+                
+                # Add all numeric metadata fields
+                numeric_fields = [
+                    "area", "perimeter", "equivalent_diameter", "bbox_width", "bbox_height",
+                    "aspect_ratio", "circularity", "eccentricity", "solidity", "convexity",
+                    "brightness", "contrast", "homogeneity", "energy", "correlation"
+                ]
+                
+                for field in numeric_fields:
+                    if isinstance(props, dict):
+                        cell[field] = props.get(field)
+                    else:
+                        cell[field] = getattr(props, field, None)
+                
+                all_cells.append(cell)
+            
+            logger.info(f"Retrieved {len(all_cells)} cells from Weaviate")
             
             # Generate UMAP visualization
             from agent_lens.utils.umap_analysis_utils import (
@@ -1439,7 +1657,7 @@ async def setup_service(server, server_id="agent-lens-tools"):
         application_id: str
     ) -> List[Dict[str, Any]]:
         """
-        Fetch complete cell data from ChromaDB by UUIDs (batch operation).
+        Fetch complete cell data from Weaviate by UUIDs (batch operation).
 
         Args:
             uuids: List of cell UUIDs
@@ -1449,20 +1667,65 @@ async def setup_service(server, server_id="agent-lens-tools"):
             List of cell data dicts with uuid, image, dino_embedding, and metadata
         """
         try:
-            loop = asyncio.get_running_loop()
-            results = await loop.run_in_executor(
-                None,
-                lambda: chroma_storage.fetch_by_uuids(
-                    application_id=application_id,
-                    uuids=uuids,
-                    include_embeddings=True
-                )
-            )
+            results = []
+            
+            # Fetch each UUID from Weaviate
+            for cell_uuid in uuids:
+                try:
+                    obj = await weaviate_service.fetch_by_uuid(
+                        collection_name=WEAVIATE_COLLECTION_NAME,
+                        application_id=application_id,
+                        object_uuid=cell_uuid,
+                        include_vector=True
+                    )
+                    
+                    # Extract properties from Weaviate object
+                    if hasattr(obj, 'properties'):
+                        props = obj.properties
+                    elif isinstance(obj, dict):
+                        props = obj
+                    else:
+                        props = obj.__dict__
+                    
+                    # Extract vector (embedding)
+                    vector = None
+                    if hasattr(obj, 'vector'):
+                        vector = obj.vector
+                    elif isinstance(obj, dict) and 'vector' in obj:
+                        vector = obj['vector']
+                    
+                    # Build cell dict
+                    cell = {
+                        "uuid": cell_uuid,
+                        "dino_embedding": vector,
+                        "image": props.get("preview_image", "") if isinstance(props, dict) else getattr(props, "preview_image", ""),
+                    }
+                    
+                    # Add all metadata fields
+                    metadata_fields = [
+                        "area", "perimeter", "equivalent_diameter", "bbox_width", "bbox_height",
+                        "aspect_ratio", "circularity", "eccentricity", "solidity", "convexity",
+                        "brightness", "contrast", "homogeneity", "energy", "correlation",
+                        "image_id", "description", "metadata", "dataset_id", "file_path", "tag"
+                    ]
+                    
+                    for field in metadata_fields:
+                        if isinstance(props, dict):
+                            cell[field] = props.get(field)
+                        else:
+                            cell[field] = getattr(props, field, None)
+                    
+                    results.append(cell)
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to fetch cell with UUID {cell_uuid}: {e}")
+                    results.append({"uuid": cell_uuid, "error": str(e)})
+            
             return results
 
         except Exception as e:
-            logger.error(f"Failed to fetch cell data from ChromaDB: {e}")
-            return [{"uuid": uuid, "error": str(e)} for uuid in uuids]
+            logger.error(f"Failed to fetch cell data from Weaviate: {e}")
+            return [{"uuid": uuid_val, "error": str(e)} for uuid_val in uuids]
 
     @schema_function()
     async def similarity_search_cells(
@@ -1473,36 +1736,52 @@ async def setup_service(server, server_id="agent-lens-tools"):
         similarity_threshold: Optional[float] = None
     ) -> List[Dict[str, Any]]:
         """
-        Server-side similarity search using ChromaDB native vector search.
+        Server-side similarity search using Weaviate native vector search with metadata filtering.
         
         Args:
             query_cell_uuids: List of query cell UUIDs
             application_id: Application ID
             n_results: Maximum number of results per query
-            metadata_filters: ChromaDB where clause for filtering
-            similarity_threshold: Optional cosine similarity threshold
+            metadata_filters: Optional dictionary specifying filter conditions (serializable via RPC).
+                             Format: {"property_name": {"min": value, "max": value, "gt": value, "lt": value, "eq": value, "ne": value}}
+                             - min: Greater than or equal (>=)
+                             - max: Less than or equal (<=)
+                             - gt: Greater than (>)
+                             - lt: Less than (<)
+                             - eq: Equal (=)
+                             - ne: Not equal (!=)
+                             Example: {"area": {"min": 100, "max": 500}, "circularity": {"min": 0.8}}
+            similarity_threshold: Optional cosine similarity threshold (0.0-1.0)
         
         Returns:
             List of similar cells with metadata, images, and similarity scores
         """
         try:
-            # Fetch query cell embeddings
-            query_cells = chroma_storage.fetch_by_uuids(
-                application_id=application_id,
-                uuids=query_cell_uuids,
-                include_embeddings=True
-            )
-            
-            if not query_cells:
-                logger.warning(f"No query cells found for UUIDs: {query_cell_uuids}")
-                return []
-            
-            # Extract embeddings
+            # Fetch query cell embeddings from Weaviate
             query_embeddings = []
-            for cell in query_cells:
-                emb = cell.get("dino_embedding")
-                if emb is not None:
-                    query_embeddings.append(emb)
+            for cell_uuid in query_cell_uuids:
+                try:
+                    obj = await weaviate_service.fetch_by_uuid(
+                        collection_name=WEAVIATE_COLLECTION_NAME,
+                        application_id=application_id,
+                        object_uuid=cell_uuid,
+                        include_vector=True
+                    )
+                    
+                    # Extract vector
+                    vector = None
+                    if hasattr(obj, 'vector'):
+                        vector = obj.vector
+                    elif isinstance(obj, dict) and 'vector' in obj:
+                        vector = obj['vector']
+                    
+                    if vector:
+                        query_embeddings.append(vector)
+                    else:
+                        logger.warning(f"No vector found for cell UUID {cell_uuid}")
+                        
+                except Exception as e:
+                    logger.warning(f"Failed to fetch query cell {cell_uuid}: {e}")
             
             if not query_embeddings:
                 logger.warning(f"No embeddings found for query cells: {query_cell_uuids}")
@@ -1515,42 +1794,87 @@ async def setup_service(server, server_id="agent-lens-tools"):
             else:
                 query_embedding = query_embeddings[0]
             
-            # Perform similarity search
-            search_results = chroma_storage.similarity_search(
+            # Convert similarity_threshold to certainty (Weaviate uses certainty, not threshold)
+            certainty = None
+            if similarity_threshold is not None:
+                # Weaviate certainty is 0.5 + (similarity / 2) for cosine similarity
+                # similarity_threshold of 0.9 -> certainty of 0.95
+                certainty = 0.5 + (similarity_threshold / 2.0)
+            
+            # Pass dictionary-based filters directly to search_similar_images
+            # The conversion to Weaviate Filter objects will happen on the Weaviate service side
+            # This ensures filters are serializable via Hypha-RPC as plain dicts
+            if metadata_filters:
+                logger.info(f"Passing metadata filters to Weaviate search: {metadata_filters}")
+            
+            # Perform similarity search with Weaviate
+            search_results = await weaviate_service.search_similar_images(
+                collection_name=WEAVIATE_COLLECTION_NAME,
                 application_id=application_id,
-                query_embedding=query_embedding,
-                n_results=n_results,
-                where_filter=metadata_filters
+                query_vector=query_embedding,
+                limit=n_results,
+                include_vector=False,
+                certainty=certainty,
+                filters=metadata_filters  # Pass dictionary filters directly (will be converted on the other side)
             )
             
-            # Convert results to cell dictionaries
+            # Convert Weaviate results to cell dictionaries
             similar_cells = []
-            ids = search_results.get("ids", [[]])[0]
-            distances = search_results.get("distances", [[]])[0]
-            metadatas = search_results.get("metadatas", [[]])[0]
-            documents = search_results.get("documents", [[]])[0]
-            
-            for i, cell_uuid in enumerate(ids):
-                # Convert distance to similarity score
-                distance = distances[i] if i < len(distances) else 1.0
-                similarity = 1.0 - (distance ** 2 / 2.0)
-                similarity = max(0.0, min(1.0, similarity))
+            for obj in search_results:
+                # Extract properties from Weaviate object
+                if hasattr(obj, 'properties'):
+                    props = obj.properties
+                elif isinstance(obj, dict):
+                    props = obj
+                else:
+                    props = obj.__dict__
                 
-                # Apply similarity threshold
-                if similarity_threshold is not None and similarity < similarity_threshold:
-                    continue
+                # Extract UUID
+                obj_uuid = None
+                if hasattr(obj, 'uuid'):
+                    obj_uuid = str(obj.uuid)
+                elif isinstance(obj, dict) and 'uuid' in obj:
+                    obj_uuid = str(obj['uuid'])
+                
+                # Extract distance/score from metadata
+                distance = None
+                similarity_score = None
+                if hasattr(obj, 'metadata'):
+                    metadata = obj.metadata
+                    if hasattr(metadata, 'distance'):
+                        distance = metadata.distance
+                    if hasattr(metadata, 'certainty'):
+                        # Convert certainty back to similarity score
+                        similarity_score = (metadata.certainty - 0.5) * 2.0
+                elif isinstance(obj, dict) and 'metadata' in obj:
+                    metadata = obj['metadata']
+                    if isinstance(metadata, dict):
+                        distance = metadata.get('distance')
+                        certainty = metadata.get('certainty')
+                        if certainty is not None:
+                            similarity_score = (certainty - 0.5) * 2.0
                 
                 # Build cell dictionary
                 cell = {
-                    "uuid": cell_uuid,
-                    "image": documents[i] if i < len(documents) else "",
-                    "similarity_score": float(similarity),
-                    "distance": float(distance)
+                    "uuid": obj_uuid,
+                    "image": props.get("preview_image", "") if isinstance(props, dict) else getattr(props, "preview_image", ""),
+                    "similarity_score": float(similarity_score) if similarity_score is not None else None,
+                    "distance": float(distance) if distance is not None else None
                 }
                 
-                # Add metadata
-                if i < len(metadatas):
-                    cell.update(metadatas[i])
+                # Add all metadata fields
+                metadata_fields = [
+                    "area", "perimeter", "equivalent_diameter", "bbox_width", "bbox_height",
+                    "aspect_ratio", "circularity", "eccentricity", "solidity", "convexity",
+                    "brightness", "contrast", "homogeneity", "energy", "correlation",
+                    "image_id", "description", "dataset_id", "file_path", "tag"
+                ]
+                
+                for field in metadata_fields:
+                    if isinstance(props, dict):
+                        cell[field] = props.get(field)
+                    else:
+                        cell[field] = getattr(props, field, None)
                 
                 similar_cells.append(cell)
             
@@ -1560,25 +1884,59 @@ async def setup_service(server, server_id="agent-lens-tools"):
             
         except Exception as e:
             logger.error(f"Similarity search failed: {e}", exc_info=True)
+            logger.error(traceback.format_exc())
             return []
     
     @schema_function()
     async def reset_application(application_id: str = "hypha-agents-notebook") -> dict:
         """
-        Delete all cell annotations for an application from ChromaDB.
+        Delete all cell annotations for an application from Weaviate.
+        
+        Args:
+            application_id: Application ID to reset
         
         Returns:
             dict with success flag, deleted_count, application_id, and message
         """
         try:
-            result = await asyncio.to_thread(
-                chroma_storage.reset_application, application_id
-            )
-            logger.info(f"Reset application '{application_id}': {result['message']}")
-            return result
+            # Check if application exists
+            app_exists = await weaviate_service.application_exists(WEAVIATE_COLLECTION_NAME, application_id)
+            
+            if not app_exists:
+                logger.info(f"Application '{application_id}' does not exist (no cleanup needed)")
+                return {
+                    "success": True,
+                    "deleted_count": 0,
+                    "application_id": application_id,
+                    "message": f"Application '{application_id}' does not exist"
+                }
+            
+            # Delete the application (this deletes all its data)
+            try:
+                await weaviate_service.weaviate_service.applications.delete(
+                    collection_name=WEAVIATE_COLLECTION_NAME,
+                    application_id=application_id
+                )
+                
+                logger.info(f"Deleted application '{application_id}' from Weaviate")
+                
+                return {
+                    "success": True,
+                    "application_id": application_id,
+                    "message": f"Deleted application '{application_id}'"
+                }
+            except Exception as delete_error:
+                logger.error(f"Failed to delete application '{application_id}': {delete_error}")
+                return {
+                    "success": False,
+                    "deleted_count": 0,
+                    "application_id": application_id,
+                    "message": f"Error deleting application: {str(delete_error)}"
+                }
             
         except Exception as e:
             logger.error(f"Failed to reset application '{application_id}': {e}")
+            logger.error(traceback.format_exc())
             return {
                 "success": False,
                 "deleted_count": 0,
@@ -1624,7 +1982,7 @@ async def register_tools_health_probes(server, server_id, segmentation_service, 
         """
         Check if tools service is alive.
         Checks:
-        1. ChromaDB connection (cell storage)
+        1. Weaviate connection (cell storage)
         2. Background workers are running
         3. Segmentation service connection
         """
@@ -1634,13 +1992,18 @@ async def register_tools_health_probes(server, server_id, segmentation_service, 
             "checks": {}
         }
         
-        # Check ChromaDB
+        # Check Weaviate
         try:
-            collections = chroma_storage.list_collections()
-            health_status["checks"]["chromadb"] = "ok"
+            if weaviate_service.connected:
+                # Try to list collections to verify connection is working
+                collections = await weaviate_service.list_collections()
+                health_status["checks"]["weaviate"] = "ok"
+            else:
+                health_status["checks"]["weaviate"] = "not connected"
+                health_status["status"] = "degraded"
         except Exception as e:
-            logger.warning(f"ChromaDB health check failed: {e}")
-            health_status["checks"]["chromadb"] = f"error: {str(e)}"
+            logger.warning(f"Weaviate health check failed: {e}")
+            health_status["checks"]["weaviate"] = f"error: {str(e)}"
             health_status["status"] = "degraded"
         
         # Check segmentation service

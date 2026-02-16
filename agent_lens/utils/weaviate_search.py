@@ -24,6 +24,94 @@ WEAVIATE_SERVICE_NAME = "hypha-agents/weaviate"
 # Collection name - always use the existing 'Agentlens' collection (never create new collections)
 WEAVIATE_COLLECTION_NAME = "Agentlens"
 
+
+def dict_to_weaviate_filter(filter_dict: Dict[str, Any]):
+    """
+    Convert a dictionary-based filter specification to Weaviate Filter object.
+    
+    This allows filters to be serialized via Hypha-RPC as plain dictionaries,
+    then converted to Weaviate Filter objects on the server side.
+    
+    Supported dictionary format:
+    {
+        "property_name": {
+            "min": value,      # Greater than or equal (optional)
+            "max": value,      # Less than or equal (optional)
+            "gt": value,       # Greater than (optional)
+            "lt": value,       # Less than (optional)
+            "eq": value,       # Equal (optional)
+            "ne": value        # Not equal (optional)
+        }
+    }
+    
+    Multiple properties are combined with AND logic.
+    
+    Example:
+        {
+            "area": {"min": 100, "max": 500},
+            "circularity": {"min": 0.8}
+        }
+        -> Filter for cells with area 100-500 AND circularity >= 0.8
+    
+    Args:
+        filter_dict: Dictionary specifying filter conditions
+        
+    Returns:
+        Weaviate Filter object or None if no valid filters
+    """
+    try:
+        from weaviate.classes.query import Filter
+    except ImportError:
+        logger.error("weaviate.classes.query.Filter not available")
+        return None
+    
+    if not filter_dict:
+        return None
+    
+    filter_conditions = []
+    
+    for property_name, conditions in filter_dict.items():
+        if not isinstance(conditions, dict):
+            # Direct equality: {"property": value} -> equal(value)
+            filter_conditions.append(Filter.by_property(property_name).equal(conditions))
+            continue
+        
+        # Range-based conditions
+        if "min" in conditions:
+            # min means greater_or_equal
+            filter_conditions.append(Filter.by_property(property_name).greater_or_equal(conditions["min"]))
+        
+        if "max" in conditions:
+            # max means less_or_equal
+            filter_conditions.append(Filter.by_property(property_name).less_or_equal(conditions["max"]))
+        
+        if "gt" in conditions:
+            # Strictly greater than
+            filter_conditions.append(Filter.by_property(property_name).greater_than(conditions["gt"]))
+        
+        if "lt" in conditions:
+            # Strictly less than
+            filter_conditions.append(Filter.by_property(property_name).less_than(conditions["lt"]))
+        
+        if "eq" in conditions:
+            # Equal to
+            filter_conditions.append(Filter.by_property(property_name).equal(conditions["eq"]))
+        
+        if "ne" in conditions:
+            # Not equal to
+            filter_conditions.append(Filter.by_property(property_name).not_equal(conditions["ne"]))
+    
+    # Combine all filters with AND logic
+    if len(filter_conditions) == 0:
+        return None
+    elif len(filter_conditions) == 1:
+        return filter_conditions[0]
+    else:
+        combined = filter_conditions[0]
+        for condition in filter_conditions[1:]:
+            combined = combined & condition
+        return combined
+
 class WeaviateSimilarityService:
     """Service for managing similarity search operations with Weaviate."""
     
@@ -33,7 +121,7 @@ class WeaviateSimilarityService:
         self.connected = False
     
     async def connect(self) -> bool:
-        """Connect to Weaviate service."""
+        """Connect to Weaviate service with codec registration."""
         try:
             token = os.getenv("HYPHA_AGENTS_TOKEN")
             if not token:
@@ -45,6 +133,15 @@ class WeaviateSimilarityService:
                 "workspace": WEAVIATE_WORKSPACE,
                 "token": token
             })
+            
+            # Register Weaviate codecs for proper serialization (CRITICAL for UUID and Object handling)
+            try:
+                from agent_lens.utils.service_codecs import register_weaviate_codecs
+                register_weaviate_codecs(self.server)
+                logger.info("✓ Registered Weaviate codecs for RPC serialization")
+            except Exception as codec_error:
+                logger.warning(f"Failed to register Weaviate codecs: {codec_error}")
+                # Continue anyway - codecs are optional but recommended
             
             try:
                 self.weaviate_service = await self.server.get_service(WEAVIATE_SERVICE_NAME, mode="first")
@@ -225,7 +322,7 @@ class WeaviateSimilarityService:
             if vector is None:
                 vector = await generate_text_embedding(obj.get("description", ""))
             
-            # Prepare object with properties and vector
+            # Prepare object with all properties and vector
             prepared_obj = {
                 "image_id": obj.get("image_id", ""),
                 "description": obj.get("description", ""),
@@ -233,17 +330,47 @@ class WeaviateSimilarityService:
                 "dataset_id": obj.get("dataset_id", ""),
                 "file_path": obj.get("file_path", ""),
                 "preview_image": obj.get("preview_image", ""),
+                "tag": obj.get("tag", ""),
+                # Cell morphology measurements
+                "area": obj.get("area"),
+                "perimeter": obj.get("perimeter"),
+                "equivalent_diameter": obj.get("equivalent_diameter"),
+                "bbox_width": obj.get("bbox_width"),
+                "bbox_height": obj.get("bbox_height"),
+                "aspect_ratio": obj.get("aspect_ratio"),
+                "circularity": obj.get("circularity"),
+                "eccentricity": obj.get("eccentricity"),
+                "solidity": obj.get("solidity"),
+                "convexity": obj.get("convexity"),
+                # Texture features
+                "brightness": obj.get("brightness"),
+                "contrast": obj.get("contrast"),
+                "homogeneity": obj.get("homogeneity"),
+                "energy": obj.get("energy"),
+                "correlation": obj.get("correlation"),
                 "vector": vector
             }
             prepared_objects.append(prepared_obj)
         
         # Insert all objects at once using insert_many
         try:
+            logger.info(f"Calling insert_many with {len(prepared_objects)} objects")
             result = await self.weaviate_service.data.insert_many(
                 collection_name=collection_name,
                 application_id=application_id,
                 objects=prepared_objects
             )
+            logger.info(f"insert_many returned: type={type(result)}")
+            
+            # Handle ObjectProxy by converting to dict
+            if hasattr(result, '__dict__') and not isinstance(result, dict):
+                logger.info("Result is ObjectProxy, extracting attributes")
+                result_dict = {}
+                for attr in ['uuids', 'inserted_count', 'failed_count', 'errors', 'has_errors', 'elapsed_seconds']:
+                    if hasattr(result, attr):
+                        result_dict[attr] = getattr(result, attr)
+                result = result_dict
+                logger.info(f"Converted to dict with keys: {list(result.keys())}")
             
             # Process results to extract UUIDs
             inserted_count = 0
@@ -251,7 +378,42 @@ class WeaviateSimilarityService:
             errors = []
             uuids = {}
             
-            # Handle different result formats
+            # Handle different result formats from insert_many
+            results_list = []
+            
+            # Check for 'uuids' key directly in result (common format)
+            if isinstance(result, dict) and 'uuids' in result:
+                # Direct UUID mapping: {"uuids": {"image_id": "uuid", ...}}
+                uuids_dict = result['uuids']
+                logger.info(f"Found 'uuids' in result, type: {type(uuids_dict)}, content: {list(uuids_dict.keys())[:3] if hasattr(uuids_dict, 'keys') else 'not a dict'}")
+                if isinstance(uuids_dict, dict):
+                    uuids = {k: str(v) for k, v in uuids_dict.items()}
+                    inserted_count = len(uuids)
+                    logger.info(f"Inserted {inserted_count} images using insert_many (direct UUID mapping)")
+                    logger.info(f"Sample UUID mapping: {list(uuids.items())[:2]}")
+                    return {
+                        "inserted_count": inserted_count,
+                        "failed_count": 0,
+                        "errors": None,
+                        "uuids": uuids,
+                        "has_errors": False
+                    }
+                elif isinstance(uuids_dict, list):
+                    # List of UUIDs
+                    for i, uuid_val in enumerate(uuids_dict):
+                        image_id = objects[i].get("image_id", f"object_{i}")
+                        uuids[image_id] = str(uuid_val)
+                    inserted_count = len(uuids)
+                    logger.info(f"Inserted {inserted_count} images using insert_many (UUID list)")
+                    return {
+                        "inserted_count": inserted_count,
+                        "failed_count": 0,
+                        "errors": None,
+                        "uuids": uuids,
+                        "has_errors": False
+                    }
+            
+            # Fallback: Try to extract from results list
             if isinstance(result, list):
                 results_list = result
             elif hasattr(result, 'results'):
@@ -263,6 +425,9 @@ class WeaviateSimilarityService:
             
             # Extract UUIDs from results
             for i, res in enumerate(results_list):
+                if i >= len(objects):
+                    break
+                    
                 image_id = objects[i].get("image_id", f"object_{i}")
                 
                 # Extract UUID from result
@@ -274,7 +439,11 @@ class WeaviateSimilarityService:
                 elif isinstance(res, dict):
                     uuid_val = res.get('uuid') or res.get('id')
                 else:
-                    uuid_val = str(res) if res else None
+                    # Try to convert result directly to string (might be UUID object)
+                    try:
+                        uuid_val = str(res) if res else None
+                    except:
+                        uuid_val = None
                 
                 if uuid_val:
                     uuids[image_id] = str(uuid_val)
@@ -283,7 +452,7 @@ class WeaviateSimilarityService:
                     failed_count += 1
                     error_msg = f"Failed to extract UUID for object {image_id}"
                     errors.append(error_msg)
-                    logger.warning(error_msg)
+                    logger.warning(f"{error_msg}. Result type: {type(res)}, Result: {res}")
             
             logger.info(f"Inserted {inserted_count} images using insert_many (failed: {failed_count})")
             
@@ -309,8 +478,9 @@ class WeaviateSimilarityService:
     
     async def search_similar_images(self, collection_name: str, application_id: str,
                                   query_vector: List[float], limit: int = 10,
-                                  include_vector: bool = False, certainty: Optional[float] = 0.95) -> List[Dict[str, Any]]:
-        """Search for similar images using vector similarity.
+                                  include_vector: bool = False, certainty: Optional[float] = 0.95,
+                                  filters = None) -> List[Dict[str, Any]]:
+        """Search for similar images using vector similarity with optional metadata filtering.
         
         Args:
             collection_name: Name of the collection
@@ -320,6 +490,11 @@ class WeaviateSimilarityService:
             include_vector: Whether to include vectors in results
             certainty: Certainty threshold (0.0-1.0). If None, no certainty filter is applied.
                       Default is 0.95 for UUID and image-image searches.
+            filters: Optional filters for metadata filtering. Can be either:
+                    - Dictionary with range-based filters (RPC-serializable):
+                      {"area": {"min": 100, "max": 500}, "circularity": {"min": 0.8}}
+                    - Weaviate Filter object (for local use):
+                      Filter.by_property("area").greater_than(100)
         """
         if not await self.ensure_connected():
             raise RuntimeError("Not connected to Weaviate service")
@@ -352,19 +527,35 @@ class WeaviateSimilarityService:
             "correlation"
         ]
         
-        # Build query parameters - only include certainty if it's not None
+        # Build query parameters
         query_params = {
             "collection_name": collection_name,
             "application_id": application_id,
             "near_vector": query_vector,
             "include_vector": include_vector,
             "limit": limit,
-            "return_properties": return_properties
+            "return_properties": return_properties,
+            "return_metadata": {"distance": True, "certainty": True}  # Request metadata for scoring
         }
         
         # Only add certainty if it's not None
         if certainty is not None:
             query_params["certainty"] = certainty
+        
+        # Handle filters: convert dictionary to Filter object if needed
+        if filters is not None:
+            if isinstance(filters, dict):
+                logger.info(f"Converting dictionary filters to Filter object: {filters}")
+                weaviate_filter = dict_to_weaviate_filter(filters)
+                if weaviate_filter is not None:
+                    query_params["filters"] = weaviate_filter
+                    logger.info(f"Applying converted Filter object (type: {type(weaviate_filter).__name__})")
+                else:
+                    logger.warning("Failed to convert dictionary filters")
+            else:
+                # Already a Filter object
+                query_params["filters"] = filters
+                logger.info(f"Applying Filter object (type: {type(filters).__name__})")
         
         results = await self.weaviate_service.query.near_vector(**query_params)
         
@@ -372,6 +563,8 @@ class WeaviateSimilarityService:
         if hasattr(results, 'objects') and results.objects:
             # If results has an 'objects' property, extract it
             actual_results = results.objects
+        elif isinstance(results, dict) and 'objects' in results:
+            actual_results = results['objects']
         elif isinstance(results, (list, tuple)):
             # If results is already a list/tuple, use it directly
             actual_results = results
@@ -809,7 +1002,13 @@ class WeaviateSimilarityService:
         if not await self.ensure_connected():
             raise RuntimeError("Not connected to Weaviate service")
         
-        return await self.weaviate_service.collections.exists(collection_name)
+        try:
+            exists = await self.weaviate_service.collections.exists(collection_name)
+            return exists
+        except Exception as e:
+            # If collections.exists() throws an error, catch it and return False
+            logger.warning(f"Error checking if collection '{collection_name}' exists: {e}")
+            return False
     
     async def delete_collection(self, collection_name: str) -> Dict[str, Any]:
         """Delete a collection."""

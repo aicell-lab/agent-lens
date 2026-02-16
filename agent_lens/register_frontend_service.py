@@ -1454,7 +1454,7 @@ async def setup_service(server, server_id="agent-lens"):
             This checks:
             1. Artifact manager connection (for microscope galleries and datasets)
             
-            Note: ChromaDB and segmentation service checks are now in agent-lens-tools service.
+            Note: Database and segmentation service checks are now in agent-lens-tools service.
             """
             health_status = {
                 "status": "ok",

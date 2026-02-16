@@ -42,9 +42,6 @@ dependencies = [
     "scikit-image==0.25.2",
     "zarr==2.15.0",
     
-    # Vector database for cell storage
-    "chromadb>=0.4.22",
-    
     # AI and machine learning
     "torch==2.5.1",
     "clip @ git+https://github.com/openai/CLIP.git@main",

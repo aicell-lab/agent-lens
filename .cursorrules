@@ -172,9 +172,9 @@ async def setup_service(server, server_id="agent-lens-tools"):
 
 **Data Analysis & Visualization:**
 - `make_umap_cluster_figure_interactive()` - UMAP clustering visualization with Plotly
-- `fetch_cell_data()` - Retrieve cell data from ChromaDB by UUIDs
+- `fetch_cell_data()` - Retrieve cell data from Weaviate by UUIDs
 - `similarity_search_cells()` - Vector similarity search with metadata filtering
-- `reset_application()` - Reset ChromaDB collections
+- `reset_application()` - Reset Weaviate collections
 
 #### Background Processing Architecture
 
@@ -208,7 +208,7 @@ Separate health probes monitor AI/ML service health:
 - Readiness: {SERVER_URL}/{workspace}/services/agent-lens-tools/probes/readiness
 
 # Checks performed:
-- ChromaDB connection (cell storage)
+- Weaviate connection (cell storage)
 - Segmentation service connection
 - Background queue status
 ```
@@ -254,7 +254,6 @@ agent_lens/                 # Main Python package
 ├── register_tools_service.py     # AI/ML tools service registration (~1500 lines)
 └── utils/                # Utility modules
     ├── artifact_manager.py    # Data storage and Zarr tile management
-    ├── chroma_storage.py      # ChromaDB cell storage utilities
     ├── embedding_generator.py # CLIP/DINOv2 embedding generation
     ├── umap_analysis_utils.py # UMAP clustering and visualization
     └── weaviate_search.py     # Similarity search utilities
