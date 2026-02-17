@@ -6,7 +6,7 @@ Provides functions for generating text and image embeddings using:
 """
 
 import os
-from typing import List, Dict
+from typing import List, Dict, Optional
 import numpy as np
 import clip
 import torch
@@ -135,40 +135,55 @@ async def generate_image_embedding(image_bytes: bytes) -> Dict[str, List[float]]
         "dino_embedding": dino_emb
     }
 
-async def generate_image_embeddings_batch(image_bytes_list: List[bytes], max_batch_size: int = 300) -> List[Dict[str, List[float]]]:
+async def generate_image_embeddings_batch(
+    image_bytes_list: List[bytes],
+    max_batch_size: int = 300,
+    embedding_types: Optional[List[str]] = None,
+) -> List[Dict[str, Optional[List[float]]]]:
     """
-    Generate both CLIP and DINOv2 embeddings for multiple images in a single batch.
+    Generate CLIP and/or DINOv2 embeddings for multiple images in a single batch.
     This is much faster than processing images individually, especially on GPU.
-    
+
+    By default only DINOv2 is generated. Pass embedding_types=["clip", "dino"] for both.
+
     The main optimizations are:
     1. Parallel image preprocessing using ThreadPoolExecutor (PIL operations release GIL)
     2. Batching the model inference, which allows the GPU to process multiple images simultaneously
-    3. Running CLIP and DINOv2 inference in parallel
-    
+    3. When both are requested, running CLIP and DINOv2 inference in parallel
+
     Args:
         image_bytes_list: List of image byte data to process
         max_batch_size: Maximum number of images to process in a single GPU batch (default: 300)
-        
+        embedding_types: Which embeddings to generate: ["clip"], ["dino"], or ["clip", "dino"].
+                         Default None means ["dino"] only.
+
     Returns:
-        List of dictionaries with 'clip_embedding' and 'dino_embedding' keys (same order as input).
-        Returns None for failed images.
+        List of dictionaries with 'clip_embedding' and/or 'dino_embedding' keys (same order as input).
+        Keys not requested are set to None. Returns None for failed images.
     """
     import asyncio
-    
+
+    if embedding_types is None:
+        embedding_types = ["dino"]
+    want_clip = "clip" in embedding_types
+    want_dino = "dino" in embedding_types
+    if not want_clip and not want_dino:
+        raise ValueError("embedding_types must contain at least one of 'clip' or 'dino'")
+
     if not image_bytes_list:
         return []
-    
+
     # If the list is larger than max_batch_size, process in chunks
     if len(image_bytes_list) > max_batch_size:
         logger.info(f"Processing {len(image_bytes_list)} images in chunks of {max_batch_size} to avoid GPU OOM")
         all_results = []
         for i in range(0, len(image_bytes_list), max_batch_size):
             chunk = image_bytes_list[i:i + max_batch_size]
-            chunk_results = await generate_image_embeddings_batch(chunk, max_batch_size)
+            chunk_results = await generate_image_embeddings_batch(chunk, max_batch_size, embedding_types)
             all_results.extend(chunk_results)
         return all_results
-    
-    # Generate CLIP and DINOv2 embeddings in parallel for maximum efficiency
+
+    # Generate CLIP and/or DINOv2 embeddings (in parallel when both requested)
     async def get_clip_batch():
         from PIL import Image
         import io
@@ -231,24 +246,29 @@ async def generate_image_embeddings_batch(image_bytes_list: List[bytes], max_bat
     
     async def get_dino_batch():
         return await generate_image_embeddings_batch_dinov2(image_bytes_list, max_batch_size)
-    
-    # Run both models in parallel
-    clip_embeddings, dino_embeddings = await asyncio.gather(get_clip_batch(), get_dino_batch())
-    
+
+    if want_clip and want_dino:
+        clip_embeddings, dino_embeddings = await asyncio.gather(get_clip_batch(), get_dino_batch())
+    elif want_clip:
+        clip_embeddings = await get_clip_batch()
+        dino_embeddings = [None] * len(image_bytes_list)
+    else:
+        clip_embeddings = [None] * len(image_bytes_list)
+        dino_embeddings = await get_dino_batch()
+
     # Combine results into dictionaries
     results = []
     for i in range(len(image_bytes_list)):
         clip_emb = clip_embeddings[i] if i < len(clip_embeddings) else None
         dino_emb = dino_embeddings[i] if i < len(dino_embeddings) else None
-        
+
         if clip_emb is None and dino_emb is None:
             results.append(None)
         else:
             results.append({
-                "clip_embedding": clip_emb,
-                "dino_embedding": dino_emb
+                "clip_embedding": clip_emb if want_clip else None,
+                "dino_embedding": dino_emb if want_dino else None,
             })
-    
     return results
 
 async def generate_image_embedding_dinov2(image_bytes: bytes) -> List[float]:

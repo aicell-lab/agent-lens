@@ -10,7 +10,8 @@ Agent-Lens is an AI-powered smart microscopy web application that provides auton
 #### Backend (Python)
 - **Framework**: FastAPI with Hypha-RPC for service communication
 - **Core Services**: 
-  - Frontend service (`register_frontend_service.py`)
+  - Frontend service (`register_frontend_service.py`) - ASGI web server and REST APIs
+  - Tools service (`register_tools_service.py`) - AI/ML operations, embeddings, segmentation, cell analysis
   - Similarity search service (`register_similarity_search_service.py`)
 - **Key Libraries**: numpy, pillow, scikit-image, zarr, aiohttp, fastapi
 
@@ -130,7 +131,97 @@ const chunkUrl = `${baseUrl}${channel}/scale${scale}/${y}.zip?path=${x}`;
 - **Chunk Organization**: Data organized by channel, scale level, and spatial coordinates in zip files
 - **Progressive Loading**: Real-time chunk loading with progress callbacks for responsive UI
 
-### 2.4. Data Storage & Image Processing
+### 2.4. Tools Service Architecture (AI/ML Operations)
+
+The `register_tools_service.py` module provides AI/ML processing capabilities separate from the frontend service for better code organization and maintainability.
+
+#### Tools Service Registration Pattern
+```python
+async def setup_service(server, server_id="agent-lens-tools"):
+    # Register generic RPC service with Hypha-RPC
+    await server.register_service({
+        "id": server_id,
+        "name": "Agent Lens Tools",
+        "type": "generic",  # Pure RPC service (not ASGI)
+        "config": {"visibility": "public"},
+        # Register all RPC methods
+        "generate_text_embedding": generate_text_embedding_rpc,
+        "generate_image_embeddings_batch": generate_image_embeddings_batch_rpc,
+        "build_cell_records": build_cell_records,
+        # ... other RPC methods
+    })
+```
+
+#### Tools Service Capabilities
+
+**Embedding Generation:**
+- `generate_text_embedding()` - CLIP text embeddings for similarity search
+- `generate_image_embeddings_batch()` - Batch CLIP/DINOv2 image embeddings
+- Model preloading for faster startup
+
+**Cell Segmentation & Analysis:**
+- `segment_and_extract_put_queue()` - Queue-based image segmentation
+- `segment_and_extract_wait_until_done()` - Wait for segmentation completion
+- `build_cell_records()` - Extract cell metadata, crops, and embeddings
+- Background worker queues for async processing
+
+**Microscope Integration:**
+- `snap_segment_extract_put_queue()` - Server-side image acquisition + segmentation
+- `snap_segment_extract_wait_until_done()` - Wait for snap+segment completion
+- Microscope service caching for efficient connections
+
+**Data Analysis & Visualization:**
+- `make_umap_cluster_figure_interactive()` - UMAP clustering visualization with Plotly
+- `fetch_cell_data()` - Retrieve cell data from ChromaDB by UUIDs
+- `similarity_search_cells()` - Vector similarity search with metadata filtering
+- `reset_application()` - Reset ChromaDB collections
+
+#### Background Processing Architecture
+
+The tools service uses async queues for non-blocking image processing:
+
+```python
+# Queue infrastructure
+segment_queue = asyncio.Queue()  # Segmentation jobs
+build_queue = asyncio.Queue()    # Cell record building
+snap_queue = asyncio.Queue()     # Microscope snap jobs
+
+# Background workers
+asyncio.create_task(_segment_worker())  # Processes segmentation
+asyncio.create_task(_build_worker())    # Builds cell records
+asyncio.create_task(_snap_segment_extract_worker())  # Snap + segment
+```
+
+**Worker Flow:**
+1. Client enqueues job via RPC method
+2. Background worker processes job asynchronously
+3. Results accumulated in shared list
+4. Client waits for completion and retrieves results
+
+#### Health Checks for Tools Service
+
+Separate health probes monitor AI/ML service health:
+
+```python
+# Health check endpoints
+- Liveness: {SERVER_URL}/{workspace}/services/agent-lens-tools/probes/liveness
+- Readiness: {SERVER_URL}/{workspace}/services/agent-lens-tools/probes/readiness
+
+# Checks performed:
+- ChromaDB connection (cell storage)
+- Segmentation service connection
+- Background queue status
+```
+
+#### Service Separation Benefits
+
+1. **Separation of Concerns**: Frontend serving vs AI/ML processing
+2. **Independent Scaling**: Can scale tools service separately if needed
+3. **Better Maintainability**: Smaller, focused files (~1500 lines each)
+4. **Independent Health Monitoring**: Monitor frontend and tools separately
+5. **Same Process Deployment**: Both services run in same container for simplicity
+
+### 2.5. Data Storage & Image Processing
 
 #### Data Storage
 - **Data Management**: 
@@ -159,9 +250,13 @@ agent_lens/                 # Main Python package
 ├── __init__.py           # Package initialization
 ├── __main__.py           # Entry point with CLI argument parsing
 ├── log.py                # Logging configuration
-├── register_frontend_service.py  # Frontend ASGI service registration
+├── register_frontend_service.py  # Frontend ASGI service registration (~1500 lines)
+├── register_tools_service.py     # AI/ML tools service registration (~1500 lines)
 └── utils/                # Utility modules
     ├── artifact_manager.py    # Data storage and Zarr tile management
+    ├── chroma_storage.py      # ChromaDB cell storage utilities
+    ├── embedding_generator.py # CLIP/DINOv2 embedding generation
+    ├── umap_analysis_utils.py # UMAP clustering and visualization
     └── weaviate_search.py     # Similarity search utilities
 
 tests/                     # Test suite (project root level)

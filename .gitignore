@@ -21,6 +21,9 @@ bin/mc*
 bin/minio*
 *.log*
 
+# ChromaDB local storage
+chroma_cell_data/
+*.chroma
 
 # test coverage files
 *.coverage*

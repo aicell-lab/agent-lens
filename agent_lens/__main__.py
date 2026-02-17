@@ -14,6 +14,7 @@ from hypha_rpc import connect_to_server
 import uuid
 from agent_lens import (
     register_frontend_service,
+    register_tools_service,
     # register_sam_service,
     # register_similarity_search_service,
 )
@@ -26,7 +27,9 @@ async def start_services(server):
     Args:
         server (Server): The server instance.
     """
+    # Register both services in the same process
     await register_frontend_service.setup_service(server)
+    await register_tools_service.setup_service(server)
     # await register_sam_service.setup_service(server)
     # await register_similarity_search_service.setup_service(server)
 
@@ -94,8 +97,13 @@ async def connect_server(args):
 
 def start_connect_server(args):
     loop = asyncio.get_event_loop()
-    loop.create_task(connect_server(args))
-    loop.run_forever()
+    try:
+        loop.run_until_complete(connect_server(args))
+        loop.run_forever()
+    except KeyboardInterrupt:
+        print("\nShutting down gracefully...")
+    finally:
+        loop.close()
 
 
 def main():

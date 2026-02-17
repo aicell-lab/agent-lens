@@ -251,7 +251,7 @@ def make_umap_cluster_figure_interactive(
         return None
     
     def process_cell(idx_and_cell):
-        """Process a single cell: extract embedding, resize image, extract metadata."""
+        """Process a single cell: extract embedding and metadata."""
         idx, c = idx_and_cell
         
         # Extract embedding
@@ -271,15 +271,6 @@ def make_umap_cluster_figure_interactive(
         except (ValueError, TypeError) as e:
             print(f"⚠️ Failed to convert embedding for cell {idx}: {e}")
             return None
-        
-        # Resize image to 50x50 thumbnail if available (parallel)
-        image_b64_thumbnail = None
-        image_b64_original = c.get("image", None)
-        if image_b64_original:
-            try:
-                image_b64_thumbnail = resize_image_base64(image_b64_original, size=(50, 50))
-            except Exception as e:
-                print(f"⚠️ Failed to resize image for cell {idx}: {e}")
         
         # Extract metadata
         # Parse well_id (e.g., "B2" -> well_row="B", well_col="2")
@@ -302,7 +293,7 @@ def make_umap_cluster_figure_interactive(
         
         cell_info = {
             "index": idx,
-            "image_b64": image_b64_thumbnail,
+            "uuid": c.get("uuid", None),  # Extract UUID from cell
             "well_row": well_row if well_row is not None else "?",
             "well_col": well_col if well_col is not None else "?",
             "position_x": position_x,
@@ -484,41 +475,27 @@ def make_umap_cluster_figure_interactive(
                     channel_name = channel_name.replace('Fluorescence ', '').replace(' nm Ex', 'nm')
                 fluo_lines += f"  {channel_name}: {safe_float(cell.get(key), None, '.1f')}<br>"
         
+        # Simplified hover text - only essential information
         text = (
-            f"<span style='font-size:9px;'>"
+            f"<span style='font-size:10px;'>"
             f"<b>Cluster {cluster_label}</b><br>"
             f"<b>Well {well_row_str}{well_col_str}, Cell {cell_index_str}</b><br>"
-            f"<b>Position:</b> {position_str}<br>"
-            f"<b>Distance from center:</b> {distance_str}<br>"
+            f"Position: {position_str}<br>"
             f"<br>"
-            f"<b>Morphology:</b><br>"
-            f"  Area: {safe_float(cell.get('area'), 0.0, '.1f')} px²<br>"
-            f"  Perimeter: {safe_float(cell.get('perimeter'), 0.0, '.1f')} px<br>"
-            f"  Diameter: {safe_float(cell.get('equivalent_diameter'), 0.0, '.1f')} px<br>"
-            f"  BBox: {safe_float(cell.get('bbox_width'), 0.0, '.0f')}×{safe_float(cell.get('bbox_height'), 0.0, '.0f')} px<br>"
-            f"  Aspect: {safe_float(cell.get('aspect_ratio'), 0.0, '.2f')}<br>"
-            f"  Circ: {safe_float(cell.get('circularity'), 0.0, '.3f')}, Ecc: {safe_float(cell.get('eccentricity'), 0.0, '.3f')}<br>"
-            f"  Solid: {safe_float(cell.get('solidity'), 0.0, '.3f')}, Conv: {safe_float(cell.get('convexity'), 0.0, '.3f')}<br>"
-            f"<br>"
-            f"<b>Texture:</b><br>"
-            f"  Bright: {safe_float(cell.get('brightness'), None, '.1f')}, Contr: {safe_float(cell.get('contrast'), None, '.1f')}<br>"
-            f"  Homog: {safe_float(cell.get('homogeneity'), None, '.3f')}, Energy: {safe_float(cell.get('energy'), None, '.3f')}<br>"
-            f"  Corr: {safe_float(cell.get('correlation'), None, '.3f')}<br>"
+            f"Area: {safe_float(cell.get('area'), 0.0, '.1f')} px²<br>"
+            f"Circularity: {safe_float(cell.get('circularity'), 0.0, '.3f')}<br>"
+            f"Aspect Ratio: {safe_float(cell.get('aspect_ratio'), 0.0, '.2f')}<br>"
         )
         
-        # Add fluorescence section if available
+        # Add fluorescence section if available (simplified)
         if fluo_lines:
             text += f"<br><b>Fluorescence:</b><br>{fluo_lines}"
         
-        text += (
-            f"<br>"
-            f"<b>UMAP:</b> ({X_2d[i, 0]:.2f}, {X_2d[i, 1]:.2f})"
-            f"</span>"
-        )
+        text += f"</span>"
         
+        # No image data needed in customdata anymore
         custom = [
             cell['index'],
-            cell['image_b64'] if cell['image_b64'] else '',
             cell['well_row'],
             cell['well_col'],
             cell['position_x'] if cell['position_x'] is not None else 'N/A',
@@ -613,11 +590,10 @@ def make_umap_cluster_figure_interactive(
         )
     )
     
-    # --- Generate HTML ---
-    # Use full_html=True to ensure proper HTML structure with DOCTYPE, head, and body tags
+    # --- Generate HTML with tabs and legend (NO image popup) ---
     html = fig.to_html(include_plotlyjs='cdn', div_id='umap-plot', full_html=True)
     
-    # --- Inject custom CSS, JavaScript, and tab controls ---
+    # --- Inject custom CSS and JavaScript for tabs/legend ONLY (no image popup) ---
     import json
     
     # Convert data to JSON for JavaScript
@@ -629,14 +605,12 @@ def make_umap_cluster_figure_interactive(
     # Generate tab buttons dynamically from metadata_fields
     def get_display_name(field_name: str) -> str:
         """Convert field_name to a human-readable display name."""
-        # Special cases for common fields
         special_names = {
             'equivalent_diameter': 'Diameter',
             'aspect_ratio': 'Aspect Ratio',
         }
         if field_name in special_names:
             return special_names[field_name]
-        # Default: capitalize and replace underscores
         return field_name.replace('_', ' ').title()
     
     # Build tab buttons HTML
@@ -681,7 +655,7 @@ def make_umap_cluster_figure_interactive(
         border-color: #0d6efd;
     }}
     
-    /* Colorbar styling - inline display to prevent clipping */
+    /* Colorbar styling */
     #colorbar-container {{
         display: none;
         flex-direction: row;
@@ -726,49 +700,7 @@ def make_umap_cluster_figure_interactive(
         flex-direction: column;
     }}
     
-    /* Cell image popup with thumbnail */
-    #cell-image-popup {{
-        position: fixed;
-        display: none;
-        z-index: 10000;
-        background: white;
-        border: 2px solid #333;
-        border-radius: 6px;
-        padding: 6px;
-        box-shadow: 0 4px 8px rgba(0,0,0,0.3);
-        pointer-events: none;
-    }}
-    
-    #cell-image-popup img {{
-        width: 50px;
-        height: 50px;
-        display: block;
-        border-radius: 3px;
-        image-rendering: pixelated;
-        border: 1px solid #ddd;
-    }}
-    
-    #cell-image-popup .cell-info {{
-        margin-top: 4px;
-        font-size: 9px;
-        font-family: Arial, sans-serif;
-        color: #333;
-        max-width: 80px;
-        text-align: center;
-    }}
-    
-    .umap-container {{
-        display: flex;
-        flex-direction: column;
-        max-width: 770px;
-    }}
-    
-    /* Smaller hover tooltip font */
-    .plotly .hoverlayer .hovertext text {{
-        font-size: 9px !important;
-    }}
-    
-    /* Cluster legend styling - same location as colorbar */
+    /* Cluster legend styling */
     #cluster-legend {{
         display: none;
         flex-direction: row;
@@ -803,7 +735,7 @@ def make_umap_cluster_figure_interactive(
         {tab_buttons_html}
     </div>
     
-    <!-- Colorbar for heatmap modes - horizontal inline layout -->
+    <!-- Colorbar for heatmap modes -->
     <div id="colorbar-container">
         <div id="colorbar-title">Value</div>
         <div id="colorbar-inner">
@@ -814,12 +746,6 @@ def make_umap_cluster_figure_interactive(
                 <span id="colorbar-max">1.0</span>
             </div>
         </div>
-    </div>
-    
-    <!-- Cell image popup -->
-    <div id="cell-image-popup">
-        <img id="cell-image" src="" alt="Cell Image" style="display:none;">
-        <div class="cell-info" id="cell-info"></div>
     </div>
     
     <!-- Cluster legend -->
@@ -835,18 +761,11 @@ def make_umap_cluster_figure_interactive(
         
         // Turbo colormap (approximate, 8 key colors)
         var turboColors = [
-            [48, 18, 59],    // Dark blue
-            [70, 98, 215],   // Blue
-            [53, 170, 195],  // Cyan
-            [108, 206, 90],  // Green
-            [250, 186, 57],  // Yellow
-            [246, 107, 25],  // Orange
-            [217, 56, 6],    // Red-orange
-            [122, 4, 3]      // Dark red
+            [48, 18, 59], [70, 98, 215], [53, 170, 195], [108, 206, 90],
+            [250, 186, 57], [246, 107, 25], [217, 56, 6], [122, 4, 3]
         ];
         
         function interpolateTurbo(t) {{
-            // t is 0-1, interpolate through turbo colormap
             t = Math.max(0, Math.min(1, t));
             var idx = t * (turboColors.length - 1);
             var lower = Math.floor(idx);
@@ -867,10 +786,7 @@ def make_umap_cluster_figure_interactive(
         function getMetadataColors(fieldName) {{
             var normalized = metadataArrays[fieldName];
             if (!normalized) return clusterColors;
-            
-            return normalized.map(function(val) {{
-                return interpolateTurbo(val);
-            }});
+            return normalized.map(function(val) {{ return interpolateTurbo(val); }});
         }}
         
         function updateColorbar(fieldName, show) {{
@@ -882,8 +798,6 @@ def make_umap_cluster_figure_interactive(
             
             container.style.display = 'flex';
             var range = metadataRanges[fieldName];
-            
-            // Format field name for display
             var displayName = fieldName.replace(/_/g, ' ').replace(/\\b\\w/g, function(l) {{ return l.toUpperCase(); }});
             document.getElementById('colorbar-title').textContent = displayName + ':';
             document.getElementById('colorbar-min').textContent = range.min.toFixed(2);
@@ -900,31 +814,24 @@ def make_umap_cluster_figure_interactive(
             
             legend.style.display = 'flex';
             
-            // Build a mapping from color to actual cluster labels
             var colorToClusterLabels = {{}};
             clusterColors.forEach(function(color, idx) {{
-                // Get the actual cluster label from hover text
-                // We need to extract it from the customdata or build it from the data
                 if (!colorToClusterLabels[color]) {{
                     colorToClusterLabels[color] = [];
                 }}
                 colorToClusterLabels[color].push(idx);
             }});
             
-            // Get unique cluster labels for each color
             var clusterInfo = [];
             for (var color in colorToClusterLabels) {{
                 var indices = colorToClusterLabels[color];
-                // Get the cluster label from the first point with this color
-                // We'll extract it from the plot data
                 clusterInfo.push({{
                     color: color,
                     count: indices.length,
-                    label: null  // Will be filled from plot data
+                    label: null
                 }});
             }}
             
-            // Extract cluster labels from plot hover text
             var plot = document.getElementById('umap-plot');
             if (plot && plot.data && plot.data[0] && plot.data[0].text) {{
                 var texts = plot.data[0].text;
@@ -933,7 +840,6 @@ def make_umap_cluster_figure_interactive(
                 texts.forEach(function(text, idx) {{
                     var color = clusterColors[idx];
                     if (colorToLabel[color] === undefined) {{
-                        // Extract cluster number from hover text
                         var match = text.match(/<b>Cluster (\\d+)<\\/b>/);
                         if (match) {{
                             colorToLabel[color] = parseInt(match[1]);
@@ -941,18 +847,15 @@ def make_umap_cluster_figure_interactive(
                     }}
                 }});
                 
-                // Update cluster info with actual labels
                 clusterInfo.forEach(function(info) {{
                     info.label = colorToLabel[info.color];
                 }});
                 
-                // Sort by cluster label
                 clusterInfo.sort(function(a, b) {{
                     return a.label - b.label;
                 }});
             }}
             
-            // Build legend items
             legend.innerHTML = '';
             clusterInfo.forEach(function(info) {{
                 var item = document.createElement('div');
@@ -978,7 +881,6 @@ def make_umap_cluster_figure_interactive(
             
             tabs.forEach(function(tab) {{
                 tab.addEventListener('click', function() {{
-                    // Update active state
                     tabs.forEach(function(t) {{ t.classList.remove('active'); }});
                     tab.classList.add('active');
                     
@@ -995,71 +897,8 @@ def make_umap_cluster_figure_interactive(
                         updateClusterLegend(false);
                     }}
                     
-                    // Update plot colors
                     Plotly.restyle(plot, {{'marker.color': [newColors]}});
                 }});
-            }});
-        }}
-        
-        function initImagePopup() {{
-            var plot = document.getElementById('umap-plot');
-            var popup = document.getElementById('cell-image-popup');
-            var img = document.getElementById('cell-image');
-            var info = document.getElementById('cell-info');
-            
-            if (!plot || !popup) return;
-            
-            plot.on('plotly_hover', function(data) {{
-                try {{
-                    var point = data.points[0];
-                    if (point.customdata && point.customdata.length >= 7) {{
-                        var cellIndex = point.customdata[0];
-                        var imageB64 = point.customdata[1];
-                        var wellRow = point.customdata[2];
-                        var wellCol = point.customdata[3];
-                        var posX = point.customdata[4];
-                        var posY = point.customdata[5];
-                        var cellIdx = point.customdata[6];
-                        
-                        // Build info text with position
-                        var positionText = (posX !== 'N/A' && posY !== 'N/A') 
-                            ? '<br>Pos: (' + posX + ', ' + posY + ') mm'
-                            : '';
-                        var infoText = '<b>' + wellRow + wellCol + '-C' + cellIdx + '</b>' + positionText;
-                        info.innerHTML = infoText;
-                        
-                        // Show 50x50 thumbnail if available
-                        if (imageB64 && imageB64.length > 0) {{
-                            img.src = 'data:image/png;base64,' + imageB64;
-                            img.style.display = 'block';
-                            img.title = 'Cell ' + cellIdx + ' (50×50 thumbnail)';
-                        }} else {{
-                            img.style.display = 'none';
-                        }}
-                        
-                        popup.style.display = 'block';
-                        
-                        // Position thumbnail on LEFT side of cursor to avoid covering metadata tooltip
-                        var popupWidth = 80;  // approximate popup width
-                        var x = data.event.pageX - popupWidth - 15;  // Left of cursor
-                        var y = data.event.pageY - 30;  // Slightly above cursor
-                        
-                        // Keep popup on screen - if too far left, move to right side
-                        if (x < 10) x = data.event.pageX + 15;
-                        if (y < 10) y = 10;
-                        if (y + 100 > window.innerHeight) y = window.innerHeight - 110;
-                        
-                        popup.style.left = x + 'px';
-                        popup.style.top = y + 'px';
-                    }}
-                }} catch (e) {{
-                    console.error('Hover error:', e);
-                }}
-            }});
-            
-            plot.on('plotly_unhover', function() {{
-                popup.style.display = 'none';
-                img.style.display = 'none';
             }});
         }}
         
@@ -1068,15 +907,13 @@ def make_umap_cluster_figure_interactive(
             document.addEventListener('DOMContentLoaded', function() {{
                 setTimeout(function() {{
                     initTabs();
-                    initImagePopup();
-                    updateClusterLegend(true);  // Show cluster legend on initial load
+                    updateClusterLegend(true);
                 }}, 100);
             }});
         }} else {{
             setTimeout(function() {{
                 initTabs();
-                initImagePopup();
-                updateClusterLegend(true);  // Show cluster legend on initial load
+                updateClusterLegend(true);
             }}, 100);
         }}
     }})();
@@ -1092,8 +929,12 @@ def make_umap_cluster_figure_interactive(
     print(f"✓ HTML length: {len(html)} characters")
     print(f"⏱️ Total execution time: {total_time:.2f}s (processing: {processing_time:.2f}s, UMAP: {umap_time:.2f}s, KMeans: {kmeans_time:.2f}s, hover: {hover_time:.2f}s, metadata: {metadata_time:.2f}s)")
     
-    # Return both HTML and cluster labels
+    # Extract UUIDs from cell_data (in same order as cluster_labels)
+    uuids = [cell.get("uuid") for cell in cell_data]
+    
+    # Return HTML, cluster labels, and UUIDs
     return {
         "html": html,
-        "cluster_labels": cluster_labels.tolist()  # Convert numpy array to list for JSON serialization
+        "cluster_labels": cluster_labels.tolist(),  # Convert numpy array to list for JSON serialization
+        "uuids": uuids  # List of UUIDs corresponding to each cluster label
     }
