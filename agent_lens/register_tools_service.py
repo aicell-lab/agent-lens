@@ -89,6 +89,60 @@ async def setup_service(server, server_id="agent-lens-tools"):
     microscope_service_cache: Dict[str, Any] = {}
 
     # Helper function for segmentation
+    async def _segment_image_from_channel(channel_data: np.ndarray, scale: int = 4) -> np.ndarray:
+        """
+        Segment from a single channel (generic function for any channel).
+        
+        Args:
+            channel_data: 2D numpy array (H, W) of the channel to segment
+            scale: Downscaling factor for segmentation
+            
+        Returns:
+            Segmentation mask with same dimensions as input
+        """
+        if channel_data is None:
+            raise ValueError("Channel data is None")
+        
+        channel_data = np.ascontiguousarray(channel_data)
+        
+        # Convert to uint8
+        if channel_data.dtype != np.uint8:
+            if channel_data.max() > 255:
+                channel_u8 = (channel_data / channel_data.max() * 255).astype(np.uint8)
+            else:
+                channel_u8 = channel_data.astype(np.uint8)
+        else:
+            channel_u8 = channel_data
+        
+        # Downscale
+        if scale > 1:
+            H, W = channel_u8.shape
+            new_H, new_W = H // scale, W // scale
+            pil_image = PILImage.fromarray(channel_u8, mode='L')
+            pil_image_resized = pil_image.resize((new_W, new_H), PILImage.BILINEAR)
+        else:
+            pil_image_resized = PILImage.fromarray(channel_u8, mode='L')
+        
+        buffer = BytesIO()
+        pil_image_resized.save(buffer, format="PNG")
+        resized_base64_str = base64.b64encode(buffer.getvalue()).decode("utf-8")
+        
+        segmentation_result = await segmentation_service.segment_all(resized_base64_str)
+        mask_small = segmentation_result["mask"] if isinstance(segmentation_result, dict) else segmentation_result
+        
+        if scale > 1:
+            mask_small_np = np.array(mask_small, dtype=np.int32)
+            mask_up = np.array(
+                PILImage.fromarray(mask_small_np.astype(np.uint16)).resize(
+                    (channel_u8.shape[1], channel_u8.shape[0]), 
+                    PILImage.NEAREST
+                )
+            )
+        else:
+            mask_up = np.array(mask_small)
+        
+        return mask_up
+
     async def _segment_image_from_bf(
         image_data: Any,
         scale: int = 4,
@@ -105,42 +159,8 @@ async def setup_service(server, server_id="agent-lens-tools"):
         if brightfield is None:
             raise ValueError("Brightfield channel is None")
         
-        brightfield = np.ascontiguousarray(brightfield)
-        
-        if brightfield.dtype != np.uint8:
-            if brightfield.max() > 255:
-                brightfield = (brightfield / brightfield.max() * 255).astype(np.uint8)
-            else:
-                brightfield = brightfield.astype(np.uint8)
-        
-        # Downscale
-        if scale > 1:
-            H, W = brightfield.shape
-            new_H, new_W = H // scale, W // scale
-            pil_image = PILImage.fromarray(brightfield, mode='L')
-            pil_image_resized = pil_image.resize((new_W, new_H), PILImage.BILINEAR)
-        else:
-            pil_image_resized = PILImage.fromarray(brightfield, mode='L')
-        
-        buffer = BytesIO()
-        pil_image_resized.save(buffer, format="PNG")
-        resized_base64_str = base64.b64encode(buffer.getvalue()).decode("utf-8")
-        
-        segmentation_result = await segmentation_service.segment_all(resized_base64_str)
-        mask_small = segmentation_result["mask"] if isinstance(segmentation_result, dict) else segmentation_result
-        
-        if scale > 1:
-            mask_small_np = np.array(mask_small, dtype=np.int32)
-            mask_up = np.array(
-                PILImage.fromarray(mask_small_np.astype(np.uint16)).resize(
-                    (brightfield.shape[1], brightfield.shape[0]), 
-                    PILImage.NEAREST
-                )
-            )
-        else:
-            mask_up = np.array(mask_small)
-        
-        return mask_up
+        # Delegate to generic channel segmentation function
+        return await _segment_image_from_channel(brightfield, scale=scale)
 
     # Background worker functions
     async def _segment_worker():
@@ -153,12 +173,38 @@ async def setup_service(server, server_id="agent-lens-tools"):
                 microscope_status = job.get("microscope_status")
                 application_id = job.get("application_id", "hypha-agents-notebook")
                 scale = job.get("scale", 4)
+                nucleus_channel_idx = job.get("nucleus_channel_idx")
                 
-                seg_mask = await _segment_image_from_bf(image_data, scale=scale)
+                # Always segment cells from BF (channel 0)
+                cell_mask = await _segment_image_from_bf(image_data, scale=scale)
+                
+                # Optionally segment nuclei from specified channel
+                if nucleus_channel_idx is not None:
+                    # Extract nucleus channel
+                    if isinstance(image_data, (list, tuple)):
+                        nucleus_channel = image_data[nucleus_channel_idx] if nucleus_channel_idx < len(image_data) else None
+                    elif isinstance(image_data, np.ndarray) and image_data.ndim == 3:
+                        nucleus_channel = image_data[:, :, nucleus_channel_idx] if nucleus_channel_idx < image_data.shape[2] else None
+                    else:
+                        nucleus_channel = None
+                    
+                    if nucleus_channel is not None and nucleus_channel.max() > 0:
+                        # Segment nucleus channel
+                        nucleus_mask = await _segment_image_from_channel(nucleus_channel, scale=scale)
+                        # Pass as list: [cell_mask, nucleus_mask]
+                        segmentation_mask = [cell_mask, nucleus_mask]
+                    else:
+                        # Nucleus channel empty or invalid, fall back to cell mask only
+                        print(f"Warning: Nucleus channel {nucleus_channel_idx} is empty or invalid, using cell mask only")
+                        segmentation_mask = cell_mask
+                else:
+                    # No nucleus segmentation requested
+                    segmentation_mask = cell_mask
+                
                 await build_queue.put(
                     {
                         "image_data": image_data,
-                        "segmentation_mask": seg_mask,
+                        "segmentation_mask": segmentation_mask,
                         "microscope_status": microscope_status,
                         "application_id": application_id,
                     }
@@ -219,6 +265,7 @@ async def setup_service(server, server_id="agent-lens-tools"):
                 application_id = job.get("application_id", "hypha-agents-notebook")
                 scale = job.get("scale", 4)
                 positions = job.get("positions")
+                nucleus_channel_idx = job.get("nucleus_channel_idx")
                 
                 microscope = microscope_service_cache.get(microscope_id)
                 if microscope is None:
@@ -264,6 +311,7 @@ async def setup_service(server, server_id="agent-lens-tools"):
                             "microscope_status": status,
                             "application_id": application_id,
                             "scale": scale,
+                            "nucleus_channel_idx": nucleus_channel_idx,
                         }
                     )
             except Exception as e:
@@ -1104,10 +1152,26 @@ async def setup_service(server, server_id="agent-lens-tools"):
         application_id: str = "hypha-agents-notebook",
         scale: int = 4,
         positions: Optional[List[Dict[str, float]]] = None,
+        nucleus_channel_idx: Optional[int] = None,
     ) -> dict:
         """
         Enqueue a job to snap image(s), segment, and extract cell records.
-        Returns immediately with queue size.
+        
+        Args:
+            microscope_id: Microscope service ID
+            channel_config: List of channel configurations for imaging
+            application_id: Application identifier for Vector Database storage
+            scale: Downscaling factor for segmentation (default: 4)
+            positions: Optional list of stage positions to visit
+            nucleus_channel_idx: Optional channel index for nucleus segmentation.
+                                If None, only segments cells from BF (channel 0).
+                                If specified (e.g., 1 for 405nm DAPI), segments both:
+                                - Cell mask from channel 0 (BF)
+                                - Nucleus mask from specified channel
+                                This enables region-wise intensity analysis (cell, nucleus, cytosol).
+        
+        Returns:
+            dict with success flag and queue size
         """
         await snap_queue.put(
             {
@@ -1116,6 +1180,7 @@ async def setup_service(server, server_id="agent-lens-tools"):
                 "application_id": application_id,
                 "scale": scale,
                 "positions": positions,
+                "nucleus_channel_idx": nucleus_channel_idx,
             }
         )
         return {
