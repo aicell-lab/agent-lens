@@ -1,17 +1,15 @@
 services:
   agent-lens:
-    image: ghcr.io/aicell-lab/agent-lens:sha-be27a27
+    image: ghcr.io/aicell-lab/agent-lens:sha-152cb35
     container_name: agent-lens
     # Optimize image pulling
     pull_policy: if_not_present
     environment:
       - WORKSPACE_TOKEN=${WORKSPACE_TOKEN}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - CLIP_CACHE=/app/.cache  # BiomedCLIP models are cached here for faster startup (kept for backward compatibility)
       - JWT_SECRET=${JWT_SECRET}
       - REEF_WORKSPACE_TOKEN=${REEF_WORKSPACE_TOKEN}
       - HYPHA_AGENTS_TOKEN=${HYPHA_AGENTS_TOKEN}
-      # BiomedCLIP models are automatically preloaded in Docker mode for faster similarity search
       - NVIDIA_VISIBLE_DEVICES=all  # Make GPU visible to container
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility  # Enable GPU compute capabilities
     labels:
@@ -65,6 +63,7 @@ services:
       - "autoheal.enable=true"
     volumes:
       - squid-control-cache:/app/.cache
+      - /mnt/shared_documents/20251215-illumination-calibrated/data.zarr:/mnt/shared_documents/20251215-illumination-calibrated/data.zarr:ro
     healthcheck:
       test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/agent-lens/services/squid-control-simulation/is_service_healthy | jq -e '.status == \"ok\"'"]
       interval: 600s
