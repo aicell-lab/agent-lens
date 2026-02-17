@@ -505,11 +505,31 @@ async def setup_service(server, server_id="agent-lens-tools"):
         
         return channel_rgb.astype(np.uint8)
 
+    def _convert_mask_to_array(mask_input: Any) -> Optional[np.ndarray]:
+        """
+        Convert mask input (base64 string or array) to numpy array.
+        
+        Args:
+            mask_input: Mask as base64 string, numpy array, or None
+            
+        Returns:
+            Numpy array with dtype uint32, or None if input is None
+        """
+        if mask_input is None:
+            return None
+        if isinstance(mask_input, str):
+            mask_bytes = base64.b64decode(mask_input)
+            mask_img = PILImage.open(io.BytesIO(mask_bytes))
+            return np.array(mask_img).astype(np.uint32)
+        else:
+            return mask_input.astype(np.uint32)
+
     def _process_single_cell(
         prop: Any,  # RegionProperties object from skimage.measure.regionprops
         poly_index: int,
         image_data_np: np.ndarray,
         mask: np.ndarray,
+        nucleus_mask: Optional[np.ndarray],  # NEW: Optional nucleus mask
         brightfield: np.ndarray,
         fixed_channel_order: List[str],
         background_bright_value: float,
@@ -533,6 +553,15 @@ async def setup_service(server, server_id="agent-lens-tools"):
             # Use prop directly without creating binary mask or calling regionprops again
             # Create binary mask for this cell (only needed for image cropping)
             cell_mask = (mask == mask_label).astype(np.uint8)
+            
+            # Extract nucleus and cytosol masks if nucleus_mask is provided
+            if nucleus_mask is not None:
+                nucleus_region = (nucleus_mask == mask_label).astype(np.uint8)
+                # Cytosol = cell - nucleus
+                cytosol_region = np.maximum(cell_mask - nucleus_region, 0).astype(np.uint8)
+            else:
+                nucleus_region = None
+                cytosol_region = None
             
             if prop.area == 0:
                 # Cell not found in mask, skip
@@ -799,79 +828,113 @@ async def setup_service(server, server_id="agent-lens-tools"):
                 cell_pixels = gray[cell_mask > 0]
                 
                 if len(cell_pixels) == 0:
-                    # Mean fluorescence intensity for each channel (set to None when no pixels)
+                    # No cell pixels - set all intensity features to None
                     try:
                         if image_data_np.ndim == 3:
                             for channel_idx in range(1, min(6, image_data_np.shape[2])):  # Channels 1-5 (skip brightfield)
                                 channel_name = fixed_channel_order[channel_idx] if channel_idx < len(fixed_channel_order) else f"channel_{channel_idx}"
-                                field_name = f"mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
-                                metadata[field_name] = None
-                                # Also set top20_mean to None
-                                top10_field_name = f"top10_mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
-                                metadata[top10_field_name] = None
+                                sanitized_name = channel_name.replace(' ', '_').replace('-', '_')
+                                
+                                # Set all region-wise intensities to None
+                                metadata[f"mean_intensity_{sanitized_name}_cell"] = None
+                                metadata[f"top10_mean_intensity_{sanitized_name}"] = None
+                                
+                                if nucleus_region is not None:
+                                    metadata[f"mean_intensity_{sanitized_name}_nucleus"] = None
+                                if cytosol_region is not None:
+                                    metadata[f"mean_intensity_{sanitized_name}_cytosol"] = None
+                                if nucleus_region is not None and cytosol_region is not None:
+                                    metadata[f"ratio_{sanitized_name}_nuc_cyto"] = None
                     except Exception as e:
                         # If fluorescence calculation fails, continue without it
                         pass
                 else:
-                    
-                    # Mean fluorescence intensity for each channel
+                    # Compute region-wise intensities for each channel
                     try:
                         if image_data_np.ndim == 3:
                             for channel_idx in range(1, min(6, image_data_np.shape[2])):  # Channels 1-5 (skip brightfield)
                                 channel_name = fixed_channel_order[channel_idx] if channel_idx < len(fixed_channel_order) else f"channel_{channel_idx}"
+                                sanitized_name = channel_name.replace(' ', '_').replace('-', '_')
                                 channel_data = image_data_np[:, :, channel_idx]
-                                channel_pixels = channel_data[cell_mask > 0]
                                 
-                                if len(channel_pixels) > 0 and channel_data.max() > 0:
-                                    # Get background value for this channel
-                                    bg_value = background_fluorescence.get(channel_idx, 0.0)
+                                # Skip channels with no signal
+                                if channel_data.max() == 0:
+                                    metadata[f"mean_intensity_{sanitized_name}_cell"] = None
+                                    metadata[f"top10_mean_intensity_{sanitized_name}"] = None
+                                    if nucleus_region is not None:
+                                        metadata[f"mean_intensity_{sanitized_name}_nucleus"] = None
+                                    if cytosol_region is not None:
+                                        metadata[f"mean_intensity_{sanitized_name}_cytosol"] = None
+                                    if nucleus_region is not None and cytosol_region is not None:
+                                        metadata[f"ratio_{sanitized_name}_nuc_cyto"] = None
+                                    continue
+                                
+                                bg_value = background_fluorescence.get(channel_idx, 0.0)
+                                
+                                # Cell intensity
+                                cell_pixels = channel_data[cell_mask > 0]
+                                if len(cell_pixels) > 0:
+                                    cell_pixels_corrected = np.maximum(cell_pixels - bg_value, 0.0)
+                                    metadata[f"mean_intensity_{sanitized_name}_cell"] = float(np.mean(cell_pixels_corrected))
                                     
-                                    # Subtract background and clip to zero
-                                    channel_pixels_corrected = np.maximum(channel_pixels - bg_value, 0.0)
-                                    
-                                    # Create sanitized field name (remove spaces, special chars)
-                                    field_name = f"mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
-                                    metadata[field_name] = float(np.mean(channel_pixels_corrected))
-                                    
-                                    # Top 10% brightest pixels mean (approximates nuclear intensity)
-                                    # Apply background subtraction before sorting
-                                    if len(channel_pixels_corrected) > 0:
-                                        # Calculate how many pixels represent top 10%
-                                        top_10_percent_count = max(1, int(np.ceil(len(channel_pixels_corrected) * 0.1)))
-                                        # Sort and take top 10% brightest pixels
-                                        sorted_pixels = np.sort(channel_pixels_corrected)
-                                        top_10_pixels = sorted_pixels[-top_10_percent_count:]
-                                        top10_mean = float(np.mean(top_10_pixels))
-                                        
-                                        # Store as top10_mean_intensity_{channel_name}
-                                        top10_field_name = f"top10_mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
-                                        metadata[top10_field_name] = top10_mean
-                                    else:
-                                        top10_field_name = f"top10_mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
-                                        metadata[top10_field_name] = None
+                                    # Top 10% brightest pixels mean (kept for backward compatibility)
+                                    top_10_percent_count = max(1, int(np.ceil(len(cell_pixels_corrected) * 0.1)))
+                                    sorted_pixels = np.sort(cell_pixels_corrected)
+                                    top_10_pixels = sorted_pixels[-top_10_percent_count:]
+                                    metadata[f"top10_mean_intensity_{sanitized_name}"] = float(np.mean(top_10_pixels))
                                 else:
-                                    field_name = f"mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
-                                    metadata[field_name] = None
-                                    # Also set top10_mean to None
-                                    top10_field_name = f"top10_mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
-                                    metadata[top10_field_name] = None
+                                    metadata[f"mean_intensity_{sanitized_name}_cell"] = None
+                                    metadata[f"top10_mean_intensity_{sanitized_name}"] = None
+                                
+                                # Nucleus intensity (if available)
+                                if nucleus_region is not None:
+                                    nucleus_pixels = channel_data[nucleus_region > 0]
+                                    if len(nucleus_pixels) > 0:
+                                        nucleus_pixels_corrected = np.maximum(nucleus_pixels - bg_value, 0.0)
+                                        metadata[f"mean_intensity_{sanitized_name}_nucleus"] = float(np.mean(nucleus_pixels_corrected))
+                                    else:
+                                        metadata[f"mean_intensity_{sanitized_name}_nucleus"] = None
+                                
+                                # Cytosol intensity (if available)
+                                if cytosol_region is not None:
+                                    cytosol_pixels = channel_data[cytosol_region > 0]
+                                    if len(cytosol_pixels) > 0:
+                                        cytosol_pixels_corrected = np.maximum(cytosol_pixels - bg_value, 0.0)
+                                        metadata[f"mean_intensity_{sanitized_name}_cytosol"] = float(np.mean(cytosol_pixels_corrected))
+                                    else:
+                                        metadata[f"mean_intensity_{sanitized_name}_cytosol"] = None
+                                
+                                # Compute nucleus-to-cytosol ratio
+                                if nucleus_region is not None and cytosol_region is not None:
+                                    nuc_intensity = metadata.get(f"mean_intensity_{sanitized_name}_nucleus")
+                                    cyto_intensity = metadata.get(f"mean_intensity_{sanitized_name}_cytosol")
+                                    
+                                    if nuc_intensity is not None and cyto_intensity is not None and cyto_intensity > 0:
+                                        metadata[f"ratio_{sanitized_name}_nuc_cyto"] = float(nuc_intensity / cyto_intensity)
+                                    else:
+                                        metadata[f"ratio_{sanitized_name}_nuc_cyto"] = None
                     except Exception as e:
                         # If fluorescence calculation fails, continue without it
                         pass
                     
 
             except:
-                
-                # Mean fluorescence intensity for each channel (set to None on error)
+                # Set all intensity features to None on error
                 try:
                     if image_data_np.ndim == 3:
                         for channel_idx in range(1, min(6, image_data_np.shape[2])):  # Channels 1-5 (skip brightfield)
                             channel_name = fixed_channel_order[channel_idx] if channel_idx < len(fixed_channel_order) else f"channel_{channel_idx}"
-                            field_name = f"mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
-                            metadata[field_name] = None
-                            # Also set top10_mean to None on error
-                            top10_field_name = f"top10_mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
-                            metadata[top10_field_name] = None
+                            sanitized_name = channel_name.replace(' ', '_').replace('-', '_')
+                            
+                            metadata[f"mean_intensity_{sanitized_name}_cell"] = None
+                            metadata[f"top10_mean_intensity_{sanitized_name}"] = None
+                            
+                            if nucleus_region is not None:
+                                metadata[f"mean_intensity_{sanitized_name}_nucleus"] = None
+                            if cytosol_region is not None:
+                                metadata[f"mean_intensity_{sanitized_name}_cytosol"] = None
+                            if nucleus_region is not None and cytosol_region is not None:
+                                metadata[f"ratio_{sanitized_name}_nuc_cyto"] = None
                 except Exception as e:
                     # If fluorescence calculation fails, continue without it
                     pass
@@ -1077,9 +1140,6 @@ async def setup_service(server, server_id="agent-lens-tools"):
             "results": results,
         }
     
-    # Now I need to continue with build_cell_records and other RPC methods
-    # This file is getting long, so I'll continue in the next part
-    
     @schema_function()
     async def build_cell_records(
         image_data_np: Any, 
@@ -1095,7 +1155,7 @@ async def setup_service(server, server_id="agent-lens-tools"):
         Args:
             image_data_np: Multi-channel microscopy image (H, W, C) or single-channel (H, W).
                            Also accepts a list/tuple of per-channel arrays where missing channels are None.
-            segmentation_mask: Integer mask where each unique non-zero value represents a cell
+            segmentation_mask: Integer mask where each unique non-zero value represents a cell. Can be a single mask (np.ndarray) or a list of masks [cell_mask, nucleus_mask].
             microscope_status: Optional microscope position info for spatial metadata
             application_id: Application identifier for Vector Database storage (default: 'hypha-agents-notebook')
             color_map: Optional custom color map indexed by channel number as string (0=BF, 1-5=fluorescence).
@@ -1118,8 +1178,16 @@ async def setup_service(server, server_id="agent-lens-tools"):
             - convexity: convexity of the cell
             
             Intensity Features (in memory only):
-            - mean_intensity_<channel_name>: mean intensity of the cell for the given channel
+            When single mask is provided:
+            - mean_intensity_<channel_name>_cell: mean intensity of the whole cell
             - top10_mean_intensity_<channel_name>: mean intensity of the top 10% brightest pixels
+            
+            When nucleus mask is provided (multi-mask mode):
+            - mean_intensity_<channel_name>_cell: mean intensity of the whole cell
+            - mean_intensity_<channel_name>_nucleus: mean intensity of the nucleus region
+            - mean_intensity_<channel_name>_cytosol: mean intensity of the cytosol region (cell - nucleus)
+            - ratio_<channel_name>_nuc_cyto: nucleus-to-cytosol intensity ratio
+            - top10_mean_intensity_<channel_name>: mean intensity of the top 10% brightest pixels (whole cell)
             
             Spatial Position (in memory only, if microscope_status provided):
             - position: {"x": float, "y": float} - absolute cell position in mm
@@ -1152,13 +1220,19 @@ async def setup_service(server, server_id="agent-lens-tools"):
                 dense[:, :, idx] = ch
             image_data_np = dense
 
-        # Ensure mask is numpy array and convert to labeled format if needed
-        if isinstance(segmentation_mask, str):
-            mask_bytes = base64.b64decode(segmentation_mask)
-            mask_img = PILImage.open(io.BytesIO(mask_bytes))
-            mask = np.array(mask_img).astype(np.uint32)
+        # Parse segmentation_mask input - can be single mask or list of masks
+        if isinstance(segmentation_mask, (list, tuple)):
+            if len(segmentation_mask) < 1:
+                raise ValueError("segmentation_mask list must contain at least one mask")
+            cell_mask_input = segmentation_mask[0]
+            nucleus_mask_input = segmentation_mask[1] if len(segmentation_mask) > 1 else None
         else:
-            mask = segmentation_mask.astype(np.uint32)
+            cell_mask_input = segmentation_mask
+            nucleus_mask_input = None
+        
+        # Convert masks to numpy arrays (handles base64 strings and arrays)
+        mask = _convert_mask_to_array(cell_mask_input)
+        nucleus_mask = _convert_mask_to_array(nucleus_mask_input) if nucleus_mask_input is not None else None
         
         # Extract region properties once from labeled mask
         # This directly processes the instance mask where each object has a unique ID
@@ -1258,7 +1332,7 @@ async def setup_service(server, server_id="agent-lens-tools"):
         # Step 1: Process cells in parallel using ThreadPoolExecutor
         # Prepare arguments for parallel processing
         process_args = [
-            (prop, idx, image_data_np, mask, brightfield, fixed_channel_order, background_bright_value, background_fluorescence, position_info, color_map_255)
+            (prop, idx, image_data_np, mask, nucleus_mask, brightfield, fixed_channel_order, background_bright_value, background_fluorescence, position_info, color_map_255)
             for idx, prop in enumerate(props)
         ]
         
