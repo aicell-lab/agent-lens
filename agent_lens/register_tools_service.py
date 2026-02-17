@@ -1090,14 +1090,14 @@ async def setup_service(server, server_id="agent-lens-tools"):
     ) -> List[Dict[str, Any]]:
         """
         Extract cell metadata, crops, and embeddings from segmentation results.
-        Automatically stores images and DINO embeddings to Weaviate for memory efficiency.
+        Automatically stores images and DINO embeddings to Vector Database for memory efficiency.
         
         Args:
             image_data_np: Multi-channel microscopy image (H, W, C) or single-channel (H, W).
                            Also accepts a list/tuple of per-channel arrays where missing channels are None.
             segmentation_mask: Integer mask where each unique non-zero value represents a cell
             microscope_status: Optional microscope position info for spatial metadata
-            application_id: Application identifier for Weaviate storage (default: 'hypha-agents-notebook')
+            application_id: Application identifier for Vector Database storage (default: 'hypha-agents-notebook')
             color_map: Optional custom color map indexed by channel number as string (0=BF, 1-5=fluorescence).
                       Format: {channel_idx_str: (R, G, B)} where RGB values are in 0.0-1.0 range. If not provided, uses default.
 
