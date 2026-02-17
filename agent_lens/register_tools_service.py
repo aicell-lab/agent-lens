@@ -515,11 +515,11 @@ async def setup_service(server, server_id="agent-lens-tools"):
         background_bright_value: float,
         background_fluorescence: Dict[int, float],
         position_info: Optional[Dict[str, Any]] = None,
+        color_map: Optional[Dict[int, Tuple[int, int, int]]] = None,
     ) -> Tuple[int, Optional[Dict[str, Any]], Optional[str]]:
         """
         Process a single cell to extract metadata and generate cell image.
         This function is designed to be run in parallel threads.
-        
         """
         # Get mask label from the property object
         mask_label = prop.label
@@ -645,7 +645,13 @@ async def setup_service(server, server_id="agent-lens-tools"):
                 # Get brightfield color and apply mask
                 # NOTE: Brightfield uses special processing - cells keep original intensity,
                 # non-cell areas filled with background_bright_value (not black)
-                bf_color = CHANNEL_COLOR_MAP.get('BF_LED_matrix_full', (255, 255, 255))
+                if color_map is not None and 0 in color_map:
+                    # Use custom color map for channel 0 (brightfield)
+                    bf_color = color_map[0]
+                else:
+                    # Use default color map
+                    bf_color = CHANNEL_COLOR_MAP.get('BF_LED_matrix_full', (255, 255, 255))
+                
                 bf_rgb = _apply_channel_color_and_mask_brightfield(
                     bf_region, 
                     cell_mask_region, 
@@ -667,8 +673,13 @@ async def setup_service(server, server_id="agent-lens-tools"):
                     # Extract channel region
                     channel_region = channel_data[y_min:y_max, x_min:x_max].copy()
                     
-                    # Get channel color
-                    channel_color = CHANNEL_COLOR_MAP.get(channel_name, (255, 255, 255))
+                    # Get channel color (use custom color_map if provided, otherwise use default)
+                    if color_map is not None and channel_idx in color_map:
+                        # Use custom color map for this channel
+                        channel_color = color_map[channel_idx]
+                    else:
+                        # Use default color map based on channel name
+                        channel_color = CHANNEL_COLOR_MAP.get(channel_name, (255, 255, 255))
                     
                     # Get background value
                     bg_value = background_fluorescence.get(channel_idx, 0.0)
@@ -1075,6 +1086,7 @@ async def setup_service(server, server_id="agent-lens-tools"):
         segmentation_mask: Any,
         microscope_status: Optional[Dict[str, Any]] = None,
         application_id: str = 'hypha-agents-notebook',
+        color_map: Optional[Dict[str, tuple]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Extract cell metadata, crops, and embeddings from segmentation results.
@@ -1086,12 +1098,14 @@ async def setup_service(server, server_id="agent-lens-tools"):
             segmentation_mask: Integer mask where each unique non-zero value represents a cell
             microscope_status: Optional microscope position info for spatial metadata
             application_id: Application identifier for Weaviate storage (default: 'hypha-agents-notebook')
-        
+            color_map: Optional custom color map indexed by channel number as string (0=BF, 1-5=fluorescence).
+                      Format: {channel_idx_str: (R, G, B)} where RGB values are in 0.0-1.0 range. If not provided, uses default.
+
         Returns:
             List of metadata dictionaries, one per cell, with the following fields:
             
-            Geometry & Shape (in memory + ChromaDB):
-            - uuid: ChromaDB object UUID for retrieving images/embeddings later
+            Geometry & Shape (in memory + Vector Database):
+            - uuid: Vector Database object UUID for retrieving images/embeddings later
             - area: area of the cell in pixels
             - perimeter: perimeter of the cell in pixels
             - equivalent_diameter: equivalent diameter of the cell in pixels
@@ -1111,11 +1125,6 @@ async def setup_service(server, server_id="agent-lens-tools"):
             - position: {"x": float, "y": float} - absolute cell position in mm
             - well_id: well identifier (e.g., "A1", "B2")
             - distance_from_center: distance from the center of the well in mm
-            
-
-        Note: This function stores images and embeddings to ChromaDB automatically,
-              reducing memory usage by ~250x. Use fetch_cell_data()
-              to retrieve full cell data when needed for visualization.
         """
 
         import concurrent.futures
@@ -1227,6 +1236,21 @@ async def setup_service(server, server_id="agent-lens-tools"):
                     # Channel has no signal, skip background computation
                     background_fluorescence[channel_idx] = 0.0
         
+        # Convert custom color_map from 0-1 range to 0-255 range if provided
+        # Also convert string keys to integers (msgpack requires string keys for serialization)
+        color_map_255 = None
+        if color_map is not None:
+            color_map_255 = {}
+            for channel_idx_str, rgb_tuple in color_map.items():
+                # Convert string key to integer (e.g., "0" -> 0, "1" -> 1)
+                channel_idx = int(channel_idx_str)
+                # Convert from 0-1 range to 0-255 range
+                color_map_255[channel_idx] = (
+                    int(rgb_tuple[0] * 255),
+                    int(rgb_tuple[1] * 255),
+                    int(rgb_tuple[2] * 255)
+                )
+        
         # Set max_workers for parallel processing (use all available CPUs)
         max_workers = min(len(props), os.cpu_count() or 4)
         
@@ -1234,7 +1258,7 @@ async def setup_service(server, server_id="agent-lens-tools"):
         # Step 1: Process cells in parallel using ThreadPoolExecutor
         # Prepare arguments for parallel processing
         process_args = [
-            (prop, idx, image_data_np, mask, brightfield, fixed_channel_order, background_bright_value, background_fluorescence, position_info)
+            (prop, idx, image_data_np, mask, brightfield, fixed_channel_order, background_bright_value, background_fluorescence, position_info, color_map_255)
             for idx, prop in enumerate(props)
         ]
         
