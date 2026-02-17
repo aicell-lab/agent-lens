@@ -615,35 +615,44 @@ async def setup_service(server, server_id="agent-lens-tools"):
             # Extract and merge all available channels with proper colors
             channels_to_merge = []
 
-            # Process brightfield (channel 0)
+            # Process brightfield (channel 0) - only if it has signal
             if image_data_np.ndim == 3:
-                bf_region = image_data_np[y_min:y_max, x_min:x_max, 0].copy()
+                bf_channel = image_data_np[:, :, 0]
             else:
-                bf_region = image_data_np[y_min:y_max, x_min:x_max].copy()
-
-            # Apply percentile normalization to brightfield (1-99%)
-            if bf_region.size > 0:
-                p_low = np.percentile(bf_region, 1.0)
-                p_high = np.percentile(bf_region, 99.0)
-                bf_region = np.clip(bf_region, p_low, p_high)
-                if p_high > p_low:
-                    bf_region = ((bf_region - p_low) / (p_high - p_low) * 255.0).astype(np.uint8)
+                bf_channel = image_data_np
+            
+            # Check if brightfield channel has signal (not None and not all zeros)
+            has_brightfield = bf_channel is not None and np.any(bf_channel > 0)
+            
+            if has_brightfield:
+                if image_data_np.ndim == 3:
+                    bf_region = image_data_np[y_min:y_max, x_min:x_max, 0].copy()
                 else:
-                    bf_region = np.full_like(bf_region, 128, dtype=np.uint8)
-            else:
-                bf_region = bf_region.astype(np.uint8)
-                
-            # Get brightfield color and apply mask
-            # NOTE: Brightfield uses special processing - cells keep original intensity,
-            # non-cell areas filled with background_bright_value (not black)
-            bf_color = CHANNEL_COLOR_MAP.get('BF_LED_matrix_full', (255, 255, 255))
-            bf_rgb = _apply_channel_color_and_mask_brightfield(
-                bf_region, 
-                cell_mask_region, 
-                bf_color, 
-                bg_value=background_bright_value
-            )
-            channels_to_merge.append(bf_rgb.astype(np.float32))
+                    bf_region = image_data_np[y_min:y_max, x_min:x_max].copy()
+
+                # Apply percentile normalization to brightfield (1-99%)
+                if bf_region.size > 0:
+                    p_low = np.percentile(bf_region, 1.0)
+                    p_high = np.percentile(bf_region, 99.0)
+                    bf_region = np.clip(bf_region, p_low, p_high)
+                    if p_high > p_low:
+                        bf_region = ((bf_region - p_low) / (p_high - p_low) * 255.0).astype(np.uint8)
+                    else:
+                        bf_region = np.full_like(bf_region, 128, dtype=np.uint8)
+                else:
+                    bf_region = bf_region.astype(np.uint8)
+                    
+                # Get brightfield color and apply mask
+                # NOTE: Brightfield uses special processing - cells keep original intensity,
+                # non-cell areas filled with background_bright_value (not black)
+                bf_color = CHANNEL_COLOR_MAP.get('BF_LED_matrix_full', (255, 255, 255))
+                bf_rgb = _apply_channel_color_and_mask_brightfield(
+                    bf_region, 
+                    cell_mask_region, 
+                    bf_color, 
+                    bg_value=background_bright_value
+                )
+                channels_to_merge.append(bf_rgb.astype(np.float32))
 
             # Process fluorescent channels (1-5) if available
             if image_data_np.ndim == 3 and image_data_np.shape[2] > 1:
@@ -674,13 +683,20 @@ async def setup_service(server, server_id="agent-lens-tools"):
                     
                     channels_to_merge.append(channel_rgb.astype(np.float32))
 
+            # Check if we have any channels to merge
+            if len(channels_to_merge) == 0:
+                # No channels available (neither brightfield nor fluorescence), skip this cell
+                print(f"Warning: Cell at index {poly_index} has no valid channels, skipping")
+                return (poly_index, None, None)
+            
             # Merge channels using additive blending
             if len(channels_to_merge) > 1:
                 merged_rgb = np.clip(np.sum(channels_to_merge, axis=0), 0, 255).astype(np.uint8)
             else:
                 merged_rgb = channels_to_merge[0].astype(np.uint8)
 
-            # Resize and pad merged image to 224x224 (use black padding for multi-channel)
+            # Resize and pad merged image to 224x224 (use appropriate padding)
+            # Use background_bright_value for padding (will be 0 if no brightfield)
             merged_rgb = resize_and_pad_to_square_rgb(merged_rgb, out_size=224, pad_value=background_bright_value)
 
             # 224x224 image: used only for embedding model input
@@ -1147,8 +1163,11 @@ async def setup_service(server, server_id="agent-lens-tools"):
         # Polygon extraction is not needed for feature extraction (regionprops is sufficient)
         print(f"Extracting metadata for {len(props)} cells from segmentation mask...")
         
-        # Extract brightfield channel
+        # Extract brightfield channel (if available)
         brightfield = image_data_np[:, :, 0] if image_data_np.ndim == 3 else image_data_np
+        
+        # Check if brightfield has signal
+        has_brightfield = brightfield is not None and np.any(brightfield > 0)
         
         # Extract position information if microscope_status is provided
         position_info = None
@@ -1175,11 +1194,17 @@ async def setup_service(server, server_id="agent-lens-tools"):
         # Vectorized background computation
         # Compute background mask once and reuse for all channels
         background_mask = (mask == 0)
-        non_cell_pixels = brightfield[background_mask]
         
-        if non_cell_pixels.size == 0:
-            raise ValueError("No non-cell pixels found (mask==0). Cannot compute background median.")
-        background_bright_value = int(np.median(non_cell_pixels))
+        # Compute brightfield background only if brightfield has signal
+        if has_brightfield:
+            non_cell_pixels = brightfield[background_mask]
+            
+            if non_cell_pixels.size == 0:
+                raise ValueError("No non-cell pixels found (mask==0). Cannot compute background median.")
+            background_bright_value = int(np.median(non_cell_pixels))
+        else:
+            # No brightfield signal, use black (0) as background
+            background_bright_value = 0
         
         # Compute background values for fluorescent channels (channels 1-5)
         # Only process channels that actually have signal in image_data_np
