@@ -148,10 +148,10 @@ async def setup_service(server, server_id="agent-lens-tools"):
     # Helper function for segmentation
     async def _segment_image_from_channel(channel_data: np.ndarray, scale: int = 4) -> np.ndarray:
         """
-        Segment from a single channel (generic function for any channel).
+        Segment from a single channel or RGB composite.
         
         Args:
-            channel_data: 2D numpy array (H, W) of the channel to segment
+            channel_data: 2D numpy array (H, W) for grayscale or 3D array (H, W, 3) for RGB
             scale: Downscaling factor for segmentation
             
         Returns:
@@ -162,6 +162,9 @@ async def setup_service(server, server_id="agent-lens-tools"):
         
         channel_data = np.ascontiguousarray(channel_data)
         
+        # Determine if grayscale or RGB
+        is_rgb = channel_data.ndim == 3 and channel_data.shape[2] == 3
+        
         # Convert to uint8
         if channel_data.dtype != np.uint8:
             if channel_data.max() > 255:
@@ -171,14 +174,23 @@ async def setup_service(server, server_id="agent-lens-tools"):
         else:
             channel_u8 = channel_data
         
-        # Downscale
+        # Downscale with appropriate mode
         if scale > 1:
-            H, W = channel_u8.shape
-            new_H, new_W = H // scale, W // scale
-            pil_image = PILImage.fromarray(channel_u8, mode='L')
-            pil_image_resized = pil_image.resize((new_W, new_H), PILImage.BILINEAR)
+            if is_rgb:
+                H, W, C = channel_u8.shape
+                new_H, new_W = H // scale, W // scale
+                pil_image = PILImage.fromarray(channel_u8, mode='RGB')
+                pil_image_resized = pil_image.resize((new_W, new_H), PILImage.BILINEAR)
+            else:
+                H, W = channel_u8.shape
+                new_H, new_W = H // scale, W // scale
+                pil_image = PILImage.fromarray(channel_u8, mode='L')
+                pil_image_resized = pil_image.resize((new_W, new_H), PILImage.BILINEAR)
         else:
-            pil_image_resized = PILImage.fromarray(channel_u8, mode='L')
+            if is_rgb:
+                pil_image_resized = PILImage.fromarray(channel_u8, mode='RGB')
+            else:
+                pil_image_resized = PILImage.fromarray(channel_u8, mode='L')
         
         buffer = BytesIO()
         pil_image_resized.save(buffer, format="PNG")
@@ -187,11 +199,16 @@ async def setup_service(server, server_id="agent-lens-tools"):
         segmentation_result = await segmentation_service.segment_all(resized_base64_str)
         mask_small = segmentation_result["mask"] if isinstance(segmentation_result, dict) else segmentation_result
         
+        # Upscale mask back to original size
         if scale > 1:
             mask_small_np = np.array(mask_small, dtype=np.int32)
+            if is_rgb:
+                original_H, original_W = channel_u8.shape[0], channel_u8.shape[1]
+            else:
+                original_H, original_W = channel_u8.shape[0], channel_u8.shape[1]
             mask_up = np.array(
                 PILImage.fromarray(mask_small_np.astype(np.uint16)).resize(
-                    (channel_u8.shape[1], channel_u8.shape[0]), 
+                    (original_W, original_H), 
                     PILImage.NEAREST
                 )
             )
@@ -225,20 +242,22 @@ async def setup_service(server, server_id="agent-lens-tools"):
         # Try to use brightfield (channel 0) if valid
         bf = chans[0] if len(chans) > 0 else None
         if bf is not None and np.nanstd(bf) > 1e-6:
-            # Brightfield is valid, use it
+            # Brightfield is valid, use it as grayscale
             gray_u8 = bf
             if gray_u8.dtype != np.uint8:
                 g = gray_u8.astype(np.float32)
                 g = (g - np.nanmin(g)) / (np.nanmax(g) - np.nanmin(g) + 1e-12) * 255.0
                 gray_u8 = np.clip(g, 0, 255).astype(np.uint8)
+            segment_input = gray_u8
         else:
-            # Brightfield is None or has no variation, use overlay composite
-            logger.info("Brightfield channel unavailable or has no variation, using overlay composite for segmentation")
-            rgb = overlay(chans, color_map=color_map)  # (H,W,3) uint8
-            gray_u8 = rgb.max(axis=2).astype(np.uint8)  # simple bright composite -> grayscale
+            # Brightfield is None or has no variation, use RGB overlay composite
+            # RGB is better for Cellpose with fluorescence data (preserves multi-channel info)
+            logger.info("Brightfield channel unavailable or has no variation, using RGB overlay composite for segmentation")
+            rgb_composite = overlay(chans, color_map=color_map)  # (H,W,3) uint8
+            segment_input = rgb_composite  # Send RGB directly to Cellpose
         
         # Delegate to generic channel segmentation function
-        return await _segment_image_from_channel(gray_u8, scale=scale)
+        return await _segment_image_from_channel(segment_input, scale=scale)
 
     # Background worker functions
     async def _segment_worker():
@@ -291,7 +310,6 @@ async def setup_service(server, server_id="agent-lens-tools"):
                 )
             except Exception as e:
                 logger.error(f"segment worker failed: {e}", exc_info=True)
-                segment_and_extract_results.append([{"error": str(e)}])
             finally:
                 segment_queue.task_done()
                 if segment_queue.empty() and build_queue.empty():
@@ -310,10 +328,9 @@ async def setup_service(server, server_id="agent-lens-tools"):
                     application_id=job.get("application_id", "hypha-agents-notebook"),
                     color_map=job.get("color_map"),
                 )
-                segment_and_extract_results.append(records)
+                segment_and_extract_results.extend(records)
             except Exception as e:
                 logger.error(f"build worker failed: {e}", exc_info=True)
-                segment_and_extract_results.append([{"error": str(e)}])
             finally:
                 build_queue.task_done()
                 if segment_queue.empty() and build_queue.empty():
@@ -476,8 +493,6 @@ async def setup_service(server, server_id="agent-lens-tools"):
                         )
             except Exception as e:
                 logger.error(f"snap_segment_extract worker failed: {e}", exc_info=True)
-                # Preserve error as a result so caller can see it
-                segment_and_extract_results.append([{"error": str(e)}])
             finally:
                 snap_queue.task_done()
     
@@ -1335,20 +1350,19 @@ async def setup_service(server, server_id="agent-lens-tools"):
         }
 
     @schema_function()
-    async def snap_segment_extract_wait_until_done() -> dict:
+    async def snap_segment_extract_wait_until_done() -> List[Dict[str, Any]]:
         """
-        Wait until the snap queue and segment+extract queue are empty and return all accumulated results.
+        Wait until the snap queue and segment+extract queue are empty and return all cell records.
+        
+        Returns:
+            List of cell record dictionaries from all processed fields of view.
         """
         await snap_queue.join()
         await segment_queue.join()
         await build_queue.join()
         results = list(segment_and_extract_results)
         segment_and_extract_results.clear()
-        return {
-            "success": True,
-            "count": len(results),
-            "results": results,
-        }
+        return results
     
     @schema_function()
     async def build_cell_records(
