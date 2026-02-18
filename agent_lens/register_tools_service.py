@@ -24,6 +24,63 @@ logger = setup_logging("agent_lens_tools_service.log")
 
 SERVER_URL = "https://hypha.aicell.io"
 
+# Color map for multi-channel fluorescence composite visualization
+COLOR_MAP = {
+    "0": (1.0, 1.0, 1.0),  # BF: gray
+    "1": (0.0, 0.0, 1.0),  # 405nm: blue
+    "2": (0.0, 1.0, 0.0),  # 488nm: green
+    "3": (1.0, 0.0, 0.0),  # 638nm: red
+    "4": (1.0, 1.0, 0.0),  # 561nm: yellow
+}
+
+def overlay(
+    image_channels: List[Optional[np.ndarray]], 
+    color_map: Optional[Dict[str, Tuple[float, float, float]]] = None
+) -> np.ndarray:
+    """
+    Create RGB composite from sparse channel list using additive color blending.
+    
+    Args:
+        image_channels: List of channel arrays (can include None for missing channels)
+        color_map: Optional custom color map indexed by channel number as string.
+                  Format: {channel_idx_str: (R, G, B)} where RGB values are in 0.0-1.0 range.
+                  If not provided, uses default COLOR_MAP.
+    
+    Returns:
+        RGB composite image as uint8 array (H, W, 3)
+    """
+    first = next((ch for ch in image_channels if ch is not None), None)
+    if first is None:
+        return np.zeros((1, 1, 3), dtype=np.uint8)
+    
+    H, W = first.shape[:2]
+    
+    rgb_composite = np.zeros((H, W, 3), dtype=np.float64)
+    
+    # Use custom color_map if provided, otherwise use default COLOR_MAP
+    active_color_map = color_map if color_map is not None else COLOR_MAP
+    
+    for channel_idx_str, (r, g, b) in active_color_map.items():
+        channel_idx = int(channel_idx_str)
+        ch = image_channels[channel_idx] if channel_idx < len(image_channels) else None
+        if ch is None:
+            continue
+        channel_data = ch.astype(np.float64)
+        max_val = channel_data.max()
+        if max_val > 0:
+            channel_data = channel_data / max_val
+        
+        rgb_composite[:, :, 0] += channel_data * r
+        rgb_composite[:, :, 1] += channel_data * g
+        rgb_composite[:, :, 2] += channel_data * b
+    
+    if rgb_composite.max() > 0:
+        rgb_composite = (rgb_composite / rgb_composite.max() * 255).astype(np.uint8)
+    else:
+        rgb_composite = rgb_composite.astype(np.uint8)
+    
+    return rgb_composite
+
 async def preload_embedding_models():
     """
     Preload CLIP and DINOv2 models for faster startup.
@@ -146,21 +203,42 @@ async def setup_service(server, server_id="agent-lens-tools"):
     async def _segment_image_from_bf(
         image_data: Any,
         scale: int = 4,
+        color_map: Optional[Dict[str, Tuple[float, float, float]]] = None,
     ) -> np.ndarray:
-        """Run segmentation service on brightfield channel and return mask at original resolution."""
-        # Extract brightfield
+        """
+        Segment cells from image: BF (channel 0) if present and valid; otherwise use overlay composite.
+        Accepts:
+          - image_data as np.ndarray (H,W,C) or (H,W)
+          - or list/tuple of channels (can include None)
+          - color_map: Optional custom color map for overlay composite
+        """
+        # Convert to channel list (preserve indices including None)
         if isinstance(image_data, (list, tuple)):
-            brightfield = image_data[0]
-        elif isinstance(image_data, np.ndarray) and image_data.ndim == 3:
-            brightfield = image_data[:, :, 0]
+            chans = list(image_data)
         else:
-            brightfield = image_data
+            arr = np.asarray(image_data)
+            if arr.ndim == 2:
+                chans = [arr]
+            else:
+                chans = [arr[:, :, i] for i in range(arr.shape[2])]
         
-        if brightfield is None:
-            raise ValueError("Brightfield channel is None")
+        # Try to use brightfield (channel 0) if valid
+        bf = chans[0] if len(chans) > 0 else None
+        if bf is not None and np.nanstd(bf) > 1e-6:
+            # Brightfield is valid, use it
+            gray_u8 = bf
+            if gray_u8.dtype != np.uint8:
+                g = gray_u8.astype(np.float32)
+                g = (g - np.nanmin(g)) / (np.nanmax(g) - np.nanmin(g) + 1e-12) * 255.0
+                gray_u8 = np.clip(g, 0, 255).astype(np.uint8)
+        else:
+            # Brightfield is None or has no variation, use overlay composite
+            logger.info("Brightfield channel unavailable or has no variation, using overlay composite for segmentation")
+            rgb = overlay(chans, color_map=color_map)  # (H,W,3) uint8
+            gray_u8 = rgb.max(axis=2).astype(np.uint8)  # simple bright composite -> grayscale
         
         # Delegate to generic channel segmentation function
-        return await _segment_image_from_channel(brightfield, scale=scale)
+        return await _segment_image_from_channel(gray_u8, scale=scale)
 
     # Background worker functions
     async def _segment_worker():
@@ -174,9 +252,10 @@ async def setup_service(server, server_id="agent-lens-tools"):
                 application_id = job.get("application_id", "hypha-agents-notebook")
                 scale = job.get("scale", 4)
                 nucleus_channel_idx = job.get("nucleus_channel_idx")
+                color_map = job.get("color_map")
                 
                 # Always segment cells from BF (channel 0)
-                cell_mask = await _segment_image_from_bf(image_data, scale=scale)
+                cell_mask = await _segment_image_from_bf(image_data, scale=scale, color_map=color_map)
                 
                 # Optionally segment nuclei from specified channel
                 if nucleus_channel_idx is not None:
@@ -207,6 +286,7 @@ async def setup_service(server, server_id="agent-lens-tools"):
                         "segmentation_mask": segmentation_mask,
                         "microscope_status": microscope_status,
                         "application_id": application_id,
+                        "color_map": color_map,
                     }
                 )
             except Exception as e:
@@ -228,6 +308,7 @@ async def setup_service(server, server_id="agent-lens-tools"):
                     segmentation_mask=job["segmentation_mask"],
                     microscope_status=job.get("microscope_status"),
                     application_id=job.get("application_id", "hypha-agents-notebook"),
+                    color_map=job.get("color_map"),
                 )
                 segment_and_extract_results.append(records)
             except Exception as e:
@@ -265,55 +346,134 @@ async def setup_service(server, server_id="agent-lens-tools"):
                 application_id = job.get("application_id", "hypha-agents-notebook")
                 scale = job.get("scale", 4)
                 positions = job.get("positions")
+                wells = job.get("wells")
+                well_offset = job.get("well_offset")
+                well_plate_type = job.get("well_plate_type", "96")
                 nucleus_channel_idx = job.get("nucleus_channel_idx")
+                color_map = job.get("color_map")
                 
                 microscope = microscope_service_cache.get(microscope_id)
                 if microscope is None:
                     microscope = await api_server.get_service(microscope_id)
                     microscope_service_cache[microscope_id] = microscope
                 
-                # Default: single snap at current position
-                if not positions:
-                    positions = [None]
-                
-                for pos in positions:
-                    if pos is not None:
-                        await microscope.move_to_position(
-                            x=pos["x"],
-                            y=pos["y"],
-                            z=pos.get("z")
-                        )
-                    # Autofocus
-                    await microscope.reflection_autofocus()
-                    # Snap channels into sparse list
-                    channel_to_idx = {ch: idx for idx, ch in enumerate(fixed_channel_order)}
-                    channels: List[Optional[np.ndarray]] = [None] * len(fixed_channel_order)
-                    
-                    for config in channel_config:
-                        channel_name = config["channel"]
-                        channel_idx = channel_to_idx[channel_name]
-                        exposure_time = config["exposure_time"]
-                        intensity = config["intensity"]
+                # Determine which mode to use
+                if wells is not None:
+                    # NEW MODE: Well grid scanning
+                    # Parse well IDs and navigate to each well, then apply offsets
+                    for well_id in wells:
+                        # Parse well_id (e.g., "A1" -> row="A", col=1)
+                        row = well_id[0]  # First character is the row letter
+                        col = int(well_id[1:])  # Remaining characters are the column number
                         
-                        image_np = await microscope.snap(
-                            channel=channel_name,
-                            exposure_time=exposure_time,
-                            intensity=intensity,
-                            return_array=True
+                        # Navigate to the well center
+                        await microscope.navigate_to_well(
+                            row=row, 
+                            col=col, 
+                            well_plate_type=well_plate_type
                         )
-                        channels[channel_idx] = image_np
+                        
+                        # Autofocus at well center
+                        await microscope.reflection_autofocus()
+                        
+                        # Get base position for this well
+                        status = await microscope.get_status()
+                        base_x = status["current_x"]
+                        base_y = status["current_y"]
+                        base_z = status["current_z"]
+                        
+                        # Scan grid positions within this well
+                        for offset in well_offset:
+                            dx = offset.get("dx", 0)
+                            dy = offset.get("dy", 0)
+                            target_x = base_x + dx
+                            target_y = base_y + dy
+                            
+                            # Move to grid position (only if offset is non-zero)
+                            if dx != 0 or dy != 0:
+                                await microscope.move_to_position(
+                                    x=target_x,
+                                    y=target_y,
+                                    z=base_z
+                                )
+                            
+                            # Snap channels into sparse list
+                            channel_to_idx = {ch: idx for idx, ch in enumerate(fixed_channel_order)}
+                            channels: List[Optional[np.ndarray]] = [None] * len(fixed_channel_order)
+                            
+                            for config in channel_config:
+                                channel_name = config["channel"]
+                                channel_idx = channel_to_idx[channel_name]
+                                exposure_time = config["exposure_time"]
+                                intensity = config["intensity"]
+                                
+                                image_np = await microscope.snap(
+                                    channel=channel_name,
+                                    exposure_time=exposure_time,
+                                    intensity=intensity,
+                                    return_array=True
+                                )
+                                channels[channel_idx] = image_np
+                            
+                            # Get current status for metadata
+                            status = await microscope.get_status()
+                            
+                            # Enqueue for segmentation + extraction
+                            await segment_queue.put(
+                                {
+                                    "image_data": channels,
+                                    "microscope_status": status,
+                                    "application_id": application_id,
+                                    "scale": scale,
+                                    "nucleus_channel_idx": nucleus_channel_idx,
+                                    "color_map": color_map,
+                                }
+                            )
+                else:
+                    # LEGACY MODE: Absolute position list
+                    # Default: single snap at current position
+                    if not positions:
+                        positions = [None]
                     
-                    status = await microscope.get_status()
-                    # Enqueue for segmentation + extraction
-                    await segment_queue.put(
-                        {
-                            "image_data": channels,
-                            "microscope_status": status,
-                            "application_id": application_id,
-                            "scale": scale,
-                            "nucleus_channel_idx": nucleus_channel_idx,
-                        }
-                    )
+                    for pos in positions:
+                        if pos is not None:
+                            await microscope.move_to_position(
+                                x=pos["x"],
+                                y=pos["y"],
+                                z=pos.get("z")
+                            )
+                        # Autofocus
+                        await microscope.reflection_autofocus()
+                        # Snap channels into sparse list
+                        channel_to_idx = {ch: idx for idx, ch in enumerate(fixed_channel_order)}
+                        channels: List[Optional[np.ndarray]] = [None] * len(fixed_channel_order)
+                        
+                        for config in channel_config:
+                            channel_name = config["channel"]
+                            channel_idx = channel_to_idx[channel_name]
+                            exposure_time = config["exposure_time"]
+                            intensity = config["intensity"]
+                            
+                            image_np = await microscope.snap(
+                                channel=channel_name,
+                                exposure_time=exposure_time,
+                                intensity=intensity,
+                                return_array=True
+                            )
+                            channels[channel_idx] = image_np
+                        
+                        status = await microscope.get_status()
+                        # Enqueue for segmentation + extraction
+                        await segment_queue.put(
+                            {
+                                "image_data": channels,
+                                "microscope_status": status,
+                                "application_id": application_id,
+                                "scale": scale,
+                                "nucleus_channel_idx": nucleus_channel_idx,
+                                "color_map": color_map,
+                            }
+                        )
             except Exception as e:
                 logger.error(f"snap_segment_extract worker failed: {e}", exc_info=True)
                 # Preserve error as a result so caller can see it
@@ -1105,54 +1265,19 @@ async def setup_service(server, server_id="agent-lens-tools"):
             logger.error(traceback.format_exc())
             raise
 
-    @schema_function()
-    async def segment_and_extract_put_queue(
-        image_data: Any,
-        microscope_status: Optional[Dict[str, Any]] = None,
-        application_id: str = "hypha-agents-notebook",
-        scale: int = 4,
-    ) -> dict:
-        """
-        Enqueue an image for segmentation + cell extraction.
-        Returns immediately with queue size.
-        """
-        await segment_queue.put(
-            {
-                "image_data": image_data,
-                "microscope_status": microscope_status,
-                "application_id": application_id,
-                "scale": scale,
-            }
-        )
-        return {
-            "success": True,
-            "queued": True,
-            "queue_size": segment_queue.qsize(),
-        }
-
-    @schema_function()
-    async def segment_and_extract_wait_until_done() -> dict:
-        """
-        Wait until the queue is empty and return all accumulated results.
-        """
-        await segment_queue.join()
-        await build_queue.join()
-        results = list(segment_and_extract_results)
-        segment_and_extract_results.clear()
-        return {
-            "success": True,
-            "count": len(results),
-            "results": results,
-        }
 
     @schema_function()
     async def snap_segment_extract_put_queue(
         microscope_id: str,
         channel_config: List[Dict[str, Any]],
         application_id: str = "hypha-agents-notebook",
-        scale: int = 4,
+        scale: int = 6,
         positions: Optional[List[Dict[str, float]]] = None,
+        wells: Optional[List[str]] = None,
+        well_offset: Optional[List[Dict[str, float]]] = None,
+        well_plate_type: str = "96",
         nucleus_channel_idx: Optional[int] = None,
+        color_map: Optional[Dict[str, tuple]] = None,
     ) -> dict:
         """
         Enqueue a job to snap image(s), segment, and extract cell records.
@@ -1162,17 +1287,33 @@ async def setup_service(server, server_id="agent-lens-tools"):
             channel_config: List of channel configurations for imaging
             application_id: Application identifier for Vector Database storage
             scale: Downscaling factor for segmentation (default: 4)
-            positions: Optional list of stage positions to visit
+            positions: (Position mode) Optional list of absolute stage positions to visit.
+                      Each position is a dict with keys: x, y, and optionally z.
+            wells: (Well grid mode) List of well IDs to scan (e.g., ["A1", "B2", "C3"]).
+                  Must be provided together with `well_offset`.
+            well_offset: (Well grid mode) List of relative (dx, dy) offsets in mm to create 
+                        a grid scan pattern within each well. For example:
+                        [{"dx": 0, "dy": 0}, {"dx": 0.5, "dy": 0}, {"dx": 0, "dy": 0.5}]
+                        will scan 3 positions per well.
+            well_plate_type: Well plate format, e.g., "96", "48", "24" (default: "96")
             nucleus_channel_idx: Optional channel index for nucleus segmentation.
                                 If None, only segments cells from BF (channel 0).
                                 If specified (e.g., 1 for 405nm DAPI), segments both:
                                 - Cell mask from channel 0 (BF)
                                 - Nucleus mask from specified channel
                                 This enables region-wise intensity analysis (cell, nucleus, cytosol).
+            color_map: Optional custom color map indexed by channel number as string (0=BF, 1-5=fluorescence).
         
         Returns:
             dict with success flag and queue size
         """
+        # Validate mutually exclusive modes
+        if wells is not None and positions is not None:
+            raise ValueError("Cannot use both 'wells' and 'positions' modes simultaneously. Choose one.")
+        
+        if wells is not None and well_offset is None:
+            raise ValueError("When using 'wells' mode, 'well_offset' must be provided.")
+        
         await snap_queue.put(
             {
                 "microscope_id": microscope_id,
@@ -1180,7 +1321,11 @@ async def setup_service(server, server_id="agent-lens-tools"):
                 "application_id": application_id,
                 "scale": scale,
                 "positions": positions,
+                "wells": wells,
+                "well_offset": well_offset,
+                "well_plate_type": well_plate_type,
                 "nucleus_channel_idx": nucleus_channel_idx,
+                "color_map": color_map,
             }
         )
         return {
@@ -1781,11 +1926,8 @@ async def setup_service(server, server_id="agent-lens-tools"):
         "type": "generic",
         "config": {"visibility": "public"},
         # Register all RPC methods
-        "generate_text_embedding": generate_text_embedding_rpc,
         "generate_image_embeddings_batch": generate_image_embeddings_batch_rpc,
         "build_cell_records": build_cell_records,
-        "segment_and_extract_put_queue": segment_and_extract_put_queue,
-        "segment_and_extract_wait_until_done": segment_and_extract_wait_until_done,
         "snap_segment_extract_put_queue": snap_segment_extract_put_queue,
         "snap_segment_extract_wait_until_done": snap_segment_extract_wait_until_done,
         "make_umap_cluster_figure_interactive": make_umap_cluster_figure_interactive_rpc,
