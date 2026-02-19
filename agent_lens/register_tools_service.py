@@ -1291,7 +1291,7 @@ async def setup_service(server, server_id="agent-lens-tools"):
         wells: Optional[List[str]] = None,
         well_offset: Optional[List[Dict[str, float]]] = None,
         well_plate_type: str = "96",
-        nucleus_channel_idx: Optional[int] = None,
+        nucleus_channel_name: Optional[str] = None,
         color_map: Optional[Dict[str, tuple]] = None,
     ) -> dict:
         """
@@ -1311,12 +1311,11 @@ async def setup_service(server, server_id="agent-lens-tools"):
                         [{"dx": 0, "dy": 0}, {"dx": 0.5, "dy": 0}, {"dx": 0, "dy": 0.5}]
                         will scan 3 positions per well.
             well_plate_type: Well plate format, e.g., "96", "48", "24" (default: "96")
-            nucleus_channel_idx: Optional channel index for nucleus segmentation.
-                                If None, only segments cells from BF (channel 0).
-                                If specified (e.g., 1 for 405nm DAPI), segments both:
-                                - Cell mask from channel 0 (BF)
-                                - Nucleus mask from specified channel
-                                This enables region-wise intensity analysis (cell, nucleus, cytosol).
+            nucleus_channel_name: Optional channel name for nucleus segmentation (e.g., "Fluorescence_405_nm_Ex" for DAPI).
+                                 If None, only segments cells from BF or fluorescence composite.
+                                 If specified, segments both:
+                                 - Cell mask from BF (if available) or fluorescence composite
+                                 - Nucleus mask from the specified channel
             color_map: Optional custom color map indexed by channel number as string (0=BF, 1-5=fluorescence).
         
         Returns:
@@ -1328,6 +1327,17 @@ async def setup_service(server, server_id="agent-lens-tools"):
         
         if wells is not None and well_offset is None:
             raise ValueError("When using 'wells' mode, 'well_offset' must be provided.")
+        
+        # Convert nucleus channel name to index
+        nucleus_channel_idx = None
+        if nucleus_channel_name is not None:
+            try:
+                nucleus_channel_idx = fixed_channel_order.index(nucleus_channel_name)
+            except ValueError:
+                raise ValueError(
+                    f"Invalid nucleus_channel_name '{nucleus_channel_name}'. "
+                    f"Must be one of: {fixed_channel_order}"
+                )
         
         await snap_queue.put(
             {
