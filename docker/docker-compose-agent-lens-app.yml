@@ -28,12 +28,10 @@ services:
       restart_policy:
         condition: on-failure
         delay: 20s
-        max_attempts: 3
-        window: 120s
     healthcheck:
       test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/agent-lens/services/probes/liveness | jq -e '.status == \"ok\"'"]
-      interval: 600s
-      timeout: 120s
+      interval: 120s
+      timeout: 50s
       retries: 3
       start_period: 300s
     restart: on-failure
@@ -66,7 +64,7 @@ services:
       - /mnt/shared_documents/20251215-illumination-calibrated/data.zarr:/mnt/shared_documents/20251215-illumination-calibrated/data.zarr:ro
     healthcheck:
       test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/agent-lens/services/squid-control-simulation/is_service_healthy | jq -e '.status == \"ok\"'"]
-      interval: 600s
+      interval: 120s
       timeout: 30s
       retries: 1
       start_period: 120s
@@ -76,8 +74,6 @@ services:
       restart_policy:
         condition: on-failure
         delay: 20s
-        max_attempts: 3
-        window: 120s
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -108,7 +104,7 @@ services:
     command: ["python", "-m", "squid_control", "microscope", "--simulation", "--config", "HCS_v2_63x"]
     healthcheck:
       test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/agent-lens/services/squid-control-simulation-63x/is_service_healthy | jq -e '.status == \"ok\"'"]
-      interval: 60s
+      interval: 120s
       timeout: 30s
       retries: 1
       start_period: 120s
@@ -118,8 +114,6 @@ services:
       restart_policy:
         condition: on-failure
         delay: 20s
-        max_attempts: 3
-        window: 120s
     security_opt:
       - no-new-privileges:true
     cap_drop:
