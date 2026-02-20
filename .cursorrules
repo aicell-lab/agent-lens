@@ -160,14 +160,12 @@ async def setup_service(server, server_id="agent-lens-tools"):
 - Model preloading for faster startup
 
 **Cell Segmentation & Analysis:**
-- `segment_and_extract_put_queue()` - Queue-based image segmentation
-- `segment_and_extract_wait_until_done()` - Wait for segmentation completion
 - `build_cell_records()` - Extract cell metadata, crops, and embeddings
 - Background worker queues for async processing
 
 **Microscope Integration:**
 - `snap_segment_extract_put_queue()` - Server-side image acquisition + segmentation
-- `snap_segment_extract_wait_until_done()` - Wait for snap+segment completion
+- `poll_snap_segment_extract_status()` - Poll status for snap+segment 
 - Microscope service caching for efficient connections
 
 **Data Analysis & Visualization:**

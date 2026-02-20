@@ -24,6 +24,63 @@ logger = setup_logging("agent_lens_tools_service.log")
 
 SERVER_URL = "https://hypha.aicell.io"
 
+# Color map for multi-channel fluorescence composite visualization
+COLOR_MAP = {
+    "0": (1.0, 1.0, 1.0),  # BF: gray
+    "1": (0.0, 0.0, 1.0),  # 405nm: blue
+    "2": (0.0, 1.0, 0.0),  # 488nm: green
+    "3": (1.0, 0.0, 0.0),  # 638nm: red
+    "4": (1.0, 1.0, 0.0),  # 561nm: yellow
+}
+
+def overlay(
+    image_channels: List[Optional[np.ndarray]], 
+    color_map: Optional[Dict[str, Tuple[float, float, float]]] = None
+) -> np.ndarray:
+    """
+    Create RGB composite from sparse channel list using additive color blending.
+    
+    Args:
+        image_channels: List of channel arrays (can include None for missing channels)
+        color_map: Optional custom color map indexed by channel number as string.
+                  Format: {channel_idx_str: (R, G, B)} where RGB values are in 0.0-1.0 range.
+                  If not provided, uses default COLOR_MAP.
+    
+    Returns:
+        RGB composite image as uint8 array (H, W, 3)
+    """
+    first = next((ch for ch in image_channels if ch is not None), None)
+    if first is None:
+        return np.zeros((1, 1, 3), dtype=np.uint8)
+    
+    H, W = first.shape[:2]
+    
+    rgb_composite = np.zeros((H, W, 3), dtype=np.float64)
+    
+    # Use custom color_map if provided, otherwise use default COLOR_MAP
+    active_color_map = color_map if color_map is not None else COLOR_MAP
+    
+    for channel_idx_str, (r, g, b) in active_color_map.items():
+        channel_idx = int(channel_idx_str)
+        ch = image_channels[channel_idx] if channel_idx < len(image_channels) else None
+        if ch is None:
+            continue
+        channel_data = ch.astype(np.float64)
+        max_val = channel_data.max()
+        if max_val > 0:
+            channel_data = channel_data / max_val
+        
+        rgb_composite[:, :, 0] += channel_data * r
+        rgb_composite[:, :, 1] += channel_data * g
+        rgb_composite[:, :, 2] += channel_data * b
+    
+    if rgb_composite.max() > 0:
+        rgb_composite = (rgb_composite / rgb_composite.max() * 255).astype(np.uint8)
+    else:
+        rgb_composite = rgb_composite.astype(np.uint8)
+    
+    return rgb_composite
+
 async def preload_embedding_models():
     """
     Preload CLIP and DINOv2 models for faster startup.
@@ -86,61 +143,104 @@ async def setup_service(server, server_id="agent-lens-tools"):
     
     # Background queue for snap (server-side acquisition)
     snap_queue: asyncio.Queue = asyncio.Queue()
+    snap_worker_busy = asyncio.Event()
+    snap_worker_busy.clear()  # Initially not busy
     microscope_service_cache: Dict[str, Any] = {}
 
     # Helper function for segmentation
+    async def _segment_image_from_channel(channel_data: np.ndarray, scale: int = 8) -> np.ndarray:
+        """
+        Segment from a single channel or RGB composite.
+        
+        Args:
+            channel_data: 2D numpy array (H, W) for grayscale or 3D array (H, W, 3) for RGB
+            scale: Downscaling factor for segmentation
+            
+        Returns:
+            Segmentation mask with same dimensions as input
+        """
+        if channel_data is None:
+            raise ValueError("Channel data is None")
+        
+        # Ensure contiguous array
+        channel_data = np.ascontiguousarray(channel_data)
+        original_shape = channel_data.shape[:2]  # Store (H, W) for later upscaling
+        
+        # Convert to uint8 if needed
+        if channel_data.dtype != np.uint8:
+            max_val = channel_data.max()
+            if max_val > 255:
+                channel_data = (channel_data / max_val * 255).astype(np.uint8)
+            else:
+                channel_data = channel_data.astype(np.uint8)
+        
+        # Create PIL image (automatically detects grayscale vs RGB from array shape)
+        pil_image = PILImage.fromarray(channel_data)
+        
+        # Downscale if needed
+        if scale > 1:
+            new_size = (original_shape[1] // scale, original_shape[0] // scale)  # PIL uses (W, H)
+            pil_image = pil_image.resize(new_size, PILImage.BILINEAR)
+        
+        # Convert to PNG base64 for segmentation service
+        buffer = BytesIO()
+        pil_image.save(buffer, format="PNG")
+        image_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
+        
+        # Run segmentation
+        segmentation_result = await segmentation_service.segment_all(image_base64)
+        mask = segmentation_result["mask"] if isinstance(segmentation_result, dict) else segmentation_result
+        
+        # Upscale mask back to original size if needed
+        if scale > 1:
+            mask_np = np.array(mask, dtype=np.uint16)
+            mask_pil = PILImage.fromarray(mask_np)
+            mask_upscaled = mask_pil.resize((original_shape[1], original_shape[0]), PILImage.NEAREST)
+            return np.array(mask_upscaled)
+        
+        return np.array(mask)
+
     async def _segment_image_from_bf(
         image_data: Any,
-        scale: int = 4,
+        scale: int = 8,
+        color_map: Optional[Dict[str, Tuple[float, float, float]]] = None,
     ) -> np.ndarray:
-        """Run segmentation service on brightfield channel and return mask at original resolution."""
-        # Extract brightfield
+        """
+        Segment cells from image: BF (channel 0) if present and valid; otherwise use overlay composite.
+        Accepts:
+          - image_data as np.ndarray (H,W,C) or (H,W)
+          - or list/tuple of channels (can include None)
+          - color_map: Optional custom color map for overlay composite
+        """
+        # Convert to channel list (preserve indices including None)
         if isinstance(image_data, (list, tuple)):
-            brightfield = image_data[0]
-        elif isinstance(image_data, np.ndarray) and image_data.ndim == 3:
-            brightfield = image_data[:, :, 0]
+            chans = list(image_data)
         else:
-            brightfield = image_data
-        
-        if brightfield is None:
-            raise ValueError("Brightfield channel is None")
-        
-        brightfield = np.ascontiguousarray(brightfield)
-        
-        if brightfield.dtype != np.uint8:
-            if brightfield.max() > 255:
-                brightfield = (brightfield / brightfield.max() * 255).astype(np.uint8)
+            arr = np.asarray(image_data)
+            if arr.ndim == 2:
+                chans = [arr]
             else:
-                brightfield = brightfield.astype(np.uint8)
+                chans = [arr[:, :, i] for i in range(arr.shape[2])]
         
-        # Downscale
-        if scale > 1:
-            H, W = brightfield.shape
-            new_H, new_W = H // scale, W // scale
-            pil_image = PILImage.fromarray(brightfield, mode='L')
-            pil_image_resized = pil_image.resize((new_W, new_H), PILImage.BILINEAR)
+        # Try to use brightfield (channel 0) if valid
+        bf = chans[0] if len(chans) > 0 else None
+        if bf is not None and np.nanstd(bf) > 1e-6:
+            # Brightfield is valid, use it as grayscale
+            gray_u8 = bf
+            if gray_u8.dtype != np.uint8:
+                g = gray_u8.astype(np.float32)
+                g = (g - np.nanmin(g)) / (np.nanmax(g) - np.nanmin(g) + 1e-12) * 255.0
+                gray_u8 = np.clip(g, 0, 255).astype(np.uint8)
+            segment_input = gray_u8
         else:
-            pil_image_resized = PILImage.fromarray(brightfield, mode='L')
+            # Brightfield is None or has no variation, use RGB overlay composite
+            # RGB is better for Cellpose with fluorescence data (preserves multi-channel info)
+            logger.info("Brightfield channel unavailable or has no variation, using RGB overlay composite for segmentation")
+            rgb_composite = overlay(chans, color_map=color_map)  # (H,W,3) uint8
+            segment_input = rgb_composite  # Send RGB directly to Cellpose
         
-        buffer = BytesIO()
-        pil_image_resized.save(buffer, format="PNG")
-        resized_base64_str = base64.b64encode(buffer.getvalue()).decode("utf-8")
-        
-        segmentation_result = await segmentation_service.segment_all(resized_base64_str)
-        mask_small = segmentation_result["mask"] if isinstance(segmentation_result, dict) else segmentation_result
-        
-        if scale > 1:
-            mask_small_np = np.array(mask_small, dtype=np.int32)
-            mask_up = np.array(
-                PILImage.fromarray(mask_small_np.astype(np.uint16)).resize(
-                    (brightfield.shape[1], brightfield.shape[0]), 
-                    PILImage.NEAREST
-                )
-            )
-        else:
-            mask_up = np.array(mask_small)
-        
-        return mask_up
+        # Delegate to generic channel segmentation function
+        return await _segment_image_from_channel(segment_input, scale=scale)
 
     # Background worker functions
     async def _segment_worker():
@@ -152,20 +252,47 @@ async def setup_service(server, server_id="agent-lens-tools"):
                 image_data = job["image_data"]
                 microscope_status = job.get("microscope_status")
                 application_id = job.get("application_id", "hypha-agents-notebook")
-                scale = job.get("scale", 4)
+                scale = job.get("scale", 8)
+                nucleus_channel_idx = job.get("nucleus_channel_idx")
+                color_map = job.get("color_map")
                 
-                seg_mask = await _segment_image_from_bf(image_data, scale=scale)
+                # Always segment cells from BF (channel 0)
+                cell_mask = await _segment_image_from_bf(image_data, scale=scale, color_map=color_map)
+                
+                # Optionally segment nuclei from specified channel
+                if nucleus_channel_idx is not None:
+                    # Extract nucleus channel
+                    if isinstance(image_data, (list, tuple)):
+                        nucleus_channel = image_data[nucleus_channel_idx] if nucleus_channel_idx < len(image_data) else None
+                    elif isinstance(image_data, np.ndarray) and image_data.ndim == 3:
+                        nucleus_channel = image_data[:, :, nucleus_channel_idx] if nucleus_channel_idx < image_data.shape[2] else None
+                    else:
+                        nucleus_channel = None
+                    
+                    if nucleus_channel is not None and nucleus_channel.max() > 0:
+                        # Segment nucleus channel
+                        nucleus_mask = await _segment_image_from_channel(nucleus_channel, scale=scale)
+                        # Pass as list: [cell_mask, nucleus_mask]
+                        segmentation_mask = [cell_mask, nucleus_mask]
+                    else:
+                        # Nucleus channel empty or invalid, fall back to cell mask only
+                        print(f"Warning: Nucleus channel {nucleus_channel_idx} is empty or invalid, using cell mask only")
+                        segmentation_mask = cell_mask
+                else:
+                    # No nucleus segmentation requested
+                    segmentation_mask = cell_mask
+                
                 await build_queue.put(
                     {
                         "image_data": image_data,
-                        "segmentation_mask": seg_mask,
+                        "segmentation_mask": segmentation_mask,
                         "microscope_status": microscope_status,
                         "application_id": application_id,
+                        "color_map": color_map,
                     }
                 )
             except Exception as e:
                 logger.error(f"segment worker failed: {e}", exc_info=True)
-                segment_and_extract_results.append([{"error": str(e)}])
             finally:
                 segment_queue.task_done()
                 if segment_queue.empty() and build_queue.empty():
@@ -182,11 +309,11 @@ async def setup_service(server, server_id="agent-lens-tools"):
                     segmentation_mask=job["segmentation_mask"],
                     microscope_status=job.get("microscope_status"),
                     application_id=job.get("application_id", "hypha-agents-notebook"),
+                    color_map=job.get("color_map"),
                 )
-                segment_and_extract_results.append(records)
+                segment_and_extract_results.extend(records)
             except Exception as e:
                 logger.error(f"build worker failed: {e}", exc_info=True)
-                segment_and_extract_results.append([{"error": str(e)}])
             finally:
                 build_queue.task_done()
                 if segment_queue.empty() and build_queue.empty():
@@ -213,65 +340,146 @@ async def setup_service(server, server_id="agent-lens-tools"):
         """Background worker to move stage, snap images, then enqueue for segment+extract."""
         while True:
             job = await snap_queue.get()
+            snap_worker_busy.set()  # Mark as busy
             try:
                 microscope_id = job["microscope_id"]
                 channel_config = job["channel_config"]
                 application_id = job.get("application_id", "hypha-agents-notebook")
-                scale = job.get("scale", 4)
+                scale = job.get("scale", 8)
                 positions = job.get("positions")
+                wells = job.get("wells")
+                well_offset = job.get("well_offset")
+                well_plate_type = job.get("well_plate_type", "96")
+                nucleus_channel_idx = job.get("nucleus_channel_idx")
+                color_map = job.get("color_map")
                 
                 microscope = microscope_service_cache.get(microscope_id)
                 if microscope is None:
                     microscope = await api_server.get_service(microscope_id)
                     microscope_service_cache[microscope_id] = microscope
                 
-                # Default: single snap at current position
-                if not positions:
-                    positions = [None]
-                
-                for pos in positions:
-                    if pos is not None:
-                        await microscope.move_to_position(
-                            x=pos["x"],
-                            y=pos["y"],
-                            z=pos.get("z")
-                        )
-                    # Autofocus
-                    await microscope.reflection_autofocus()
-                    # Snap channels into sparse list
-                    channel_to_idx = {ch: idx for idx, ch in enumerate(fixed_channel_order)}
-                    channels: List[Optional[np.ndarray]] = [None] * len(fixed_channel_order)
-                    
-                    for config in channel_config:
-                        channel_name = config["channel"]
-                        channel_idx = channel_to_idx[channel_name]
-                        exposure_time = config["exposure_time"]
-                        intensity = config["intensity"]
+                # Determine which mode to use
+                if wells is not None:
+                    # NEW MODE: Well grid scanning
+                    # Parse well IDs and navigate to each well, then apply offsets
+                    for well_id in wells:
+                        # Parse well_id (e.g., "A1" -> row="A", col=1)
+                        row = well_id[0]  # First character is the row letter
+                        col = int(well_id[1:])  # Remaining characters are the column number
                         
-                        image_np = await microscope.snap(
-                            channel=channel_name,
-                            exposure_time=exposure_time,
-                            intensity=intensity,
-                            return_array=True
+                        # Navigate to the well center
+                        await microscope.navigate_to_well(
+                            row=row, 
+                            col=col, 
+                            well_plate_type=well_plate_type
                         )
-                        channels[channel_idx] = image_np
+                        
+                        # Autofocus at well center
+                        await microscope.reflection_autofocus()
+                        
+                        # Get base position for this well
+                        status = await microscope.get_status()
+                        base_x = status["current_x"]
+                        base_y = status["current_y"]
+                        base_z = status["current_z"]
+                        
+                        # Scan grid positions within this well
+                        for offset in well_offset:
+                            dx = offset.get("dx", 0)
+                            dy = offset.get("dy", 0)
+                            target_x = base_x + dx
+                            target_y = base_y + dy
+                            
+                            # Move to grid position (only if offset is non-zero)
+                            if dx != 0 or dy != 0:
+                                await microscope.move_to_position(
+                                    x=target_x,
+                                    y=target_y,
+                                    z=base_z
+                                )
+                            
+                            # Snap channels into sparse list
+                            channel_to_idx = {ch: idx for idx, ch in enumerate(fixed_channel_order)}
+                            channels: List[Optional[np.ndarray]] = [None] * len(fixed_channel_order)
+                            
+                            for config in channel_config:
+                                channel_name = config["channel"]
+                                channel_idx = channel_to_idx[channel_name]
+                                exposure_time = config["exposure_time"]
+                                intensity = config["intensity"]
+                                
+                                image_np = await microscope.snap(
+                                    channel=channel_name,
+                                    exposure_time=exposure_time,
+                                    intensity=intensity,
+                                    return_array=True
+                                )
+                                channels[channel_idx] = image_np
+                            
+                            # Get current status for metadata
+                            status = await microscope.get_status()
+                            
+                            # Enqueue for segmentation + extraction
+                            await segment_queue.put(
+                                {
+                                    "image_data": channels,
+                                    "microscope_status": status,
+                                    "application_id": application_id,
+                                    "scale": scale,
+                                    "nucleus_channel_idx": nucleus_channel_idx,
+                                    "color_map": color_map,
+                                }
+                            )
+                else:
+                    # LEGACY MODE: Absolute position list
+                    # Default: single snap at current position
+                    if not positions:
+                        positions = [None]
                     
-                    status = await microscope.get_status()
-                    # Enqueue for segmentation + extraction
-                    await segment_queue.put(
-                        {
-                            "image_data": channels,
-                            "microscope_status": status,
-                            "application_id": application_id,
-                            "scale": scale,
-                        }
-                    )
+                    for pos in positions:
+                        if pos is not None:
+                            await microscope.move_to_position(
+                                x=pos["x"],
+                                y=pos["y"],
+                                z=pos.get("z")
+                            )
+                        # Autofocus
+                        await microscope.reflection_autofocus()
+                        # Snap channels into sparse list
+                        channel_to_idx = {ch: idx for idx, ch in enumerate(fixed_channel_order)}
+                        channels: List[Optional[np.ndarray]] = [None] * len(fixed_channel_order)
+                        
+                        for config in channel_config:
+                            channel_name = config["channel"]
+                            channel_idx = channel_to_idx[channel_name]
+                            exposure_time = config["exposure_time"]
+                            intensity = config["intensity"]
+                            
+                            image_np = await microscope.snap(
+                                channel=channel_name,
+                                exposure_time=exposure_time,
+                                intensity=intensity,
+                                return_array=True
+                            )
+                            channels[channel_idx] = image_np
+                        
+                        status = await microscope.get_status()
+                        # Enqueue for segmentation + extraction
+                        await segment_queue.put(
+                            {
+                                "image_data": channels,
+                                "microscope_status": status,
+                                "application_id": application_id,
+                                "scale": scale,
+                                "nucleus_channel_idx": nucleus_channel_idx,
+                                "color_map": color_map,
+                            }
+                        )
             except Exception as e:
                 logger.error(f"snap_segment_extract worker failed: {e}", exc_info=True)
-                # Preserve error as a result so caller can see it
-                segment_and_extract_results.append([{"error": str(e)}])
             finally:
                 snap_queue.task_done()
+                snap_worker_busy.clear()  # Mark as not busy
     
     # Start snap+segment+extract worker
     asyncio.create_task(_snap_segment_extract_worker())
@@ -505,11 +713,31 @@ async def setup_service(server, server_id="agent-lens-tools"):
         
         return channel_rgb.astype(np.uint8)
 
+    def _convert_mask_to_array(mask_input: Any) -> Optional[np.ndarray]:
+        """
+        Convert mask input (base64 string or array) to numpy array.
+        
+        Args:
+            mask_input: Mask as base64 string, numpy array, or None
+            
+        Returns:
+            Numpy array with dtype uint32, or None if input is None
+        """
+        if mask_input is None:
+            return None
+        if isinstance(mask_input, str):
+            mask_bytes = base64.b64decode(mask_input)
+            mask_img = PILImage.open(io.BytesIO(mask_bytes))
+            return np.array(mask_img).astype(np.uint32)
+        else:
+            return mask_input.astype(np.uint32)
+
     def _process_single_cell(
         prop: Any,  # RegionProperties object from skimage.measure.regionprops
         poly_index: int,
         image_data_np: np.ndarray,
         mask: np.ndarray,
+        nucleus_mask: Optional[np.ndarray],  # NEW: Optional nucleus mask
         brightfield: np.ndarray,
         fixed_channel_order: List[str],
         background_bright_value: float,
@@ -533,6 +761,15 @@ async def setup_service(server, server_id="agent-lens-tools"):
             # Use prop directly without creating binary mask or calling regionprops again
             # Create binary mask for this cell (only needed for image cropping)
             cell_mask = (mask == mask_label).astype(np.uint8)
+            
+            # Extract nucleus and cytosol masks if nucleus_mask is provided
+            if nucleus_mask is not None:
+                nucleus_region = (nucleus_mask == mask_label).astype(np.uint8)
+                # Cytosol = cell - nucleus
+                cytosol_region = np.maximum(cell_mask - nucleus_region, 0).astype(np.uint8)
+            else:
+                nucleus_region = None
+                cytosol_region = None
             
             if prop.area == 0:
                 # Cell not found in mask, skip
@@ -799,79 +1036,113 @@ async def setup_service(server, server_id="agent-lens-tools"):
                 cell_pixels = gray[cell_mask > 0]
                 
                 if len(cell_pixels) == 0:
-                    # Mean fluorescence intensity for each channel (set to None when no pixels)
+                    # No cell pixels - set all intensity features to None
                     try:
                         if image_data_np.ndim == 3:
                             for channel_idx in range(1, min(6, image_data_np.shape[2])):  # Channels 1-5 (skip brightfield)
                                 channel_name = fixed_channel_order[channel_idx] if channel_idx < len(fixed_channel_order) else f"channel_{channel_idx}"
-                                field_name = f"mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
-                                metadata[field_name] = None
-                                # Also set top20_mean to None
-                                top10_field_name = f"top10_mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
-                                metadata[top10_field_name] = None
+                                sanitized_name = channel_name.replace(' ', '_').replace('-', '_')
+                                
+                                # Set all region-wise intensities to None
+                                metadata[f"mean_intensity_{sanitized_name}_cell"] = None
+                                metadata[f"top10_mean_intensity_{sanitized_name}"] = None
+                                
+                                if nucleus_region is not None:
+                                    metadata[f"mean_intensity_{sanitized_name}_nucleus"] = None
+                                if cytosol_region is not None:
+                                    metadata[f"mean_intensity_{sanitized_name}_cytosol"] = None
+                                if nucleus_region is not None and cytosol_region is not None:
+                                    metadata[f"ratio_{sanitized_name}_nuc_cyto"] = None
                     except Exception as e:
                         # If fluorescence calculation fails, continue without it
                         pass
                 else:
-                    
-                    # Mean fluorescence intensity for each channel
+                    # Compute region-wise intensities for each channel
                     try:
                         if image_data_np.ndim == 3:
                             for channel_idx in range(1, min(6, image_data_np.shape[2])):  # Channels 1-5 (skip brightfield)
                                 channel_name = fixed_channel_order[channel_idx] if channel_idx < len(fixed_channel_order) else f"channel_{channel_idx}"
+                                sanitized_name = channel_name.replace(' ', '_').replace('-', '_')
                                 channel_data = image_data_np[:, :, channel_idx]
-                                channel_pixels = channel_data[cell_mask > 0]
                                 
-                                if len(channel_pixels) > 0 and channel_data.max() > 0:
-                                    # Get background value for this channel
-                                    bg_value = background_fluorescence.get(channel_idx, 0.0)
+                                # Skip channels with no signal
+                                if channel_data.max() == 0:
+                                    metadata[f"mean_intensity_{sanitized_name}_cell"] = None
+                                    metadata[f"top10_mean_intensity_{sanitized_name}"] = None
+                                    if nucleus_region is not None:
+                                        metadata[f"mean_intensity_{sanitized_name}_nucleus"] = None
+                                    if cytosol_region is not None:
+                                        metadata[f"mean_intensity_{sanitized_name}_cytosol"] = None
+                                    if nucleus_region is not None and cytosol_region is not None:
+                                        metadata[f"ratio_{sanitized_name}_nuc_cyto"] = None
+                                    continue
+                                
+                                bg_value = background_fluorescence.get(channel_idx, 0.0)
+                                
+                                # Cell intensity
+                                cell_pixels = channel_data[cell_mask > 0]
+                                if len(cell_pixels) > 0:
+                                    cell_pixels_corrected = np.maximum(cell_pixels - bg_value, 0.0)
+                                    metadata[f"mean_intensity_{sanitized_name}_cell"] = float(np.mean(cell_pixels_corrected))
                                     
-                                    # Subtract background and clip to zero
-                                    channel_pixels_corrected = np.maximum(channel_pixels - bg_value, 0.0)
-                                    
-                                    # Create sanitized field name (remove spaces, special chars)
-                                    field_name = f"mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
-                                    metadata[field_name] = float(np.mean(channel_pixels_corrected))
-                                    
-                                    # Top 10% brightest pixels mean (approximates nuclear intensity)
-                                    # Apply background subtraction before sorting
-                                    if len(channel_pixels_corrected) > 0:
-                                        # Calculate how many pixels represent top 10%
-                                        top_10_percent_count = max(1, int(np.ceil(len(channel_pixels_corrected) * 0.1)))
-                                        # Sort and take top 10% brightest pixels
-                                        sorted_pixels = np.sort(channel_pixels_corrected)
-                                        top_10_pixels = sorted_pixels[-top_10_percent_count:]
-                                        top10_mean = float(np.mean(top_10_pixels))
-                                        
-                                        # Store as top10_mean_intensity_{channel_name}
-                                        top10_field_name = f"top10_mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
-                                        metadata[top10_field_name] = top10_mean
-                                    else:
-                                        top10_field_name = f"top10_mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
-                                        metadata[top10_field_name] = None
+                                    # Top 10% brightest pixels mean (kept for backward compatibility)
+                                    top_10_percent_count = max(1, int(np.ceil(len(cell_pixels_corrected) * 0.1)))
+                                    sorted_pixels = np.sort(cell_pixels_corrected)
+                                    top_10_pixels = sorted_pixels[-top_10_percent_count:]
+                                    metadata[f"top10_mean_intensity_{sanitized_name}"] = float(np.mean(top_10_pixels))
                                 else:
-                                    field_name = f"mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
-                                    metadata[field_name] = None
-                                    # Also set top10_mean to None
-                                    top10_field_name = f"top10_mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
-                                    metadata[top10_field_name] = None
+                                    metadata[f"mean_intensity_{sanitized_name}_cell"] = None
+                                    metadata[f"top10_mean_intensity_{sanitized_name}"] = None
+                                
+                                # Nucleus intensity (if available)
+                                if nucleus_region is not None:
+                                    nucleus_pixels = channel_data[nucleus_region > 0]
+                                    if len(nucleus_pixels) > 0:
+                                        nucleus_pixels_corrected = np.maximum(nucleus_pixels - bg_value, 0.0)
+                                        metadata[f"mean_intensity_{sanitized_name}_nucleus"] = float(np.mean(nucleus_pixels_corrected))
+                                    else:
+                                        metadata[f"mean_intensity_{sanitized_name}_nucleus"] = None
+                                
+                                # Cytosol intensity (if available)
+                                if cytosol_region is not None:
+                                    cytosol_pixels = channel_data[cytosol_region > 0]
+                                    if len(cytosol_pixels) > 0:
+                                        cytosol_pixels_corrected = np.maximum(cytosol_pixels - bg_value, 0.0)
+                                        metadata[f"mean_intensity_{sanitized_name}_cytosol"] = float(np.mean(cytosol_pixels_corrected))
+                                    else:
+                                        metadata[f"mean_intensity_{sanitized_name}_cytosol"] = None
+                                
+                                # Compute nucleus-to-cytosol ratio
+                                if nucleus_region is not None and cytosol_region is not None:
+                                    nuc_intensity = metadata.get(f"mean_intensity_{sanitized_name}_nucleus")
+                                    cyto_intensity = metadata.get(f"mean_intensity_{sanitized_name}_cytosol")
+                                    
+                                    if nuc_intensity is not None and cyto_intensity is not None and cyto_intensity > 0:
+                                        metadata[f"ratio_{sanitized_name}_nuc_cyto"] = float(nuc_intensity / cyto_intensity)
+                                    else:
+                                        metadata[f"ratio_{sanitized_name}_nuc_cyto"] = None
                     except Exception as e:
                         # If fluorescence calculation fails, continue without it
                         pass
                     
 
             except:
-                
-                # Mean fluorescence intensity for each channel (set to None on error)
+                # Set all intensity features to None on error
                 try:
                     if image_data_np.ndim == 3:
                         for channel_idx in range(1, min(6, image_data_np.shape[2])):  # Channels 1-5 (skip brightfield)
                             channel_name = fixed_channel_order[channel_idx] if channel_idx < len(fixed_channel_order) else f"channel_{channel_idx}"
-                            field_name = f"mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
-                            metadata[field_name] = None
-                            # Also set top10_mean to None on error
-                            top10_field_name = f"top10_mean_intensity_{channel_name.replace(' ', '_').replace('-', '_')}"
-                            metadata[top10_field_name] = None
+                            sanitized_name = channel_name.replace(' ', '_').replace('-', '_')
+                            
+                            metadata[f"mean_intensity_{sanitized_name}_cell"] = None
+                            metadata[f"top10_mean_intensity_{sanitized_name}"] = None
+                            
+                            if nucleus_region is not None:
+                                metadata[f"mean_intensity_{sanitized_name}_nucleus"] = None
+                            if cytosol_region is not None:
+                                metadata[f"mean_intensity_{sanitized_name}_cytosol"] = None
+                            if nucleus_region is not None and cytosol_region is not None:
+                                metadata[f"ratio_{sanitized_name}_nuc_cyto"] = None
                 except Exception as e:
                     # If fluorescence calculation fails, continue without it
                     pass
@@ -994,58 +1265,65 @@ async def setup_service(server, server_id="agent-lens-tools"):
             logger.error(traceback.format_exc())
             raise
 
-    @schema_function()
-    async def segment_and_extract_put_queue(
-        image_data: Any,
-        microscope_status: Optional[Dict[str, Any]] = None,
-        application_id: str = "hypha-agents-notebook",
-        scale: int = 4,
-    ) -> dict:
-        """
-        Enqueue an image for segmentation + cell extraction.
-        Returns immediately with queue size.
-        """
-        await segment_queue.put(
-            {
-                "image_data": image_data,
-                "microscope_status": microscope_status,
-                "application_id": application_id,
-                "scale": scale,
-            }
-        )
-        return {
-            "success": True,
-            "queued": True,
-            "queue_size": segment_queue.qsize(),
-        }
-
-    @schema_function()
-    async def segment_and_extract_wait_until_done() -> dict:
-        """
-        Wait until the queue is empty and return all accumulated results.
-        """
-        await segment_queue.join()
-        await build_queue.join()
-        results = list(segment_and_extract_results)
-        segment_and_extract_results.clear()
-        return {
-            "success": True,
-            "count": len(results),
-            "results": results,
-        }
 
     @schema_function()
     async def snap_segment_extract_put_queue(
         microscope_id: str,
         channel_config: List[Dict[str, Any]],
         application_id: str = "hypha-agents-notebook",
-        scale: int = 4,
+        scale: int = 8,
         positions: Optional[List[Dict[str, float]]] = None,
+        wells: Optional[List[str]] = None,
+        well_offset: Optional[List[Dict[str, float]]] = None,
+        well_plate_type: str = "96",
+        nucleus_channel_name: Optional[str] = None,
+        color_map: Optional[Dict[str, tuple]] = None,
     ) -> dict:
         """
         Enqueue a job to snap image(s), segment, and extract cell records.
-        Returns immediately with queue size.
+        
+        Args:
+            microscope_id: Microscope service ID
+            channel_config: List of channel configurations for imaging
+            application_id: Application identifier for Vector Database storage
+            scale: Downscaling factor for segmentation (default: 8)
+            positions: (Position mode) Optional list of absolute stage positions to visit.
+                      Each position is a dict with keys: x, y, and optionally z.
+            wells: (Well grid mode) List of well IDs to scan (e.g., ["A1", "B2", "C3"]).
+                  Must be provided together with `well_offset`.
+            well_offset: (Well grid mode) List of relative (dx, dy) offsets in mm to create 
+                        a grid scan pattern within each well. For example:
+                        [{"dx": 0, "dy": 0}, {"dx": 0.5, "dy": 0}, {"dx": 0, "dy": 0.5}]
+                        will scan 3 positions per well.
+            well_plate_type: Well plate format, e.g., "96", "48", "24" (default: "96")
+            nucleus_channel_name: Optional channel name for nucleus segmentation (e.g., "Fluorescence_405_nm_Ex" for DAPI).
+                                 If None, only segments cells from BF or fluorescence composite.
+                                 If specified, segments both:
+                                 - Cell mask from BF (if available) or fluorescence composite
+                                 - Nucleus mask from the specified channel
+            color_map: Optional custom color map indexed by channel number as string (0=BF, 1-5=fluorescence).
+        
+        Returns:
+            dict with success flag and queue size
         """
+        # Validate mutually exclusive modes
+        if wells is not None and positions is not None:
+            raise ValueError("Cannot use both 'wells' and 'positions' modes simultaneously. Choose one.")
+        
+        if wells is not None and well_offset is None:
+            raise ValueError("When using 'wells' mode, 'well_offset' must be provided.")
+        
+        # Convert nucleus channel name to index
+        nucleus_channel_idx = None
+        if nucleus_channel_name is not None:
+            try:
+                nucleus_channel_idx = fixed_channel_order.index(nucleus_channel_name)
+            except ValueError:
+                raise ValueError(
+                    f"Invalid nucleus_channel_name '{nucleus_channel_name}'. "
+                    f"Must be one of: {fixed_channel_order}"
+                )
+        
         await snap_queue.put(
             {
                 "microscope_id": microscope_id,
@@ -1053,6 +1331,11 @@ async def setup_service(server, server_id="agent-lens-tools"):
                 "application_id": application_id,
                 "scale": scale,
                 "positions": positions,
+                "wells": wells,
+                "well_offset": well_offset,
+                "well_plate_type": well_plate_type,
+                "nucleus_channel_idx": nucleus_channel_idx,
+                "color_map": color_map,
             }
         )
         return {
@@ -1062,23 +1345,64 @@ async def setup_service(server, server_id="agent-lens-tools"):
         }
 
     @schema_function()
-    async def snap_segment_extract_wait_until_done() -> dict:
+    async def poll_snap_segment_extract_status() -> Dict[str, Any]:
         """
-        Wait until the snap queue and segment+extract queue are empty and return all accumulated results.
+        Poll the status of snap, segment, and extract queues without blocking.
+        
+        Returns:
+            Dictionary with status information:
+            - If not started: {'status': 'idle'}
+            - If running: {'status': 'running', 'queue_sizes': {...}, 'results_count': int}
+            - If error: {'status': 'error', 'error': str} (currently errors are logged but not tracked)
+            - If succeed: {'status': 'succeed', 'result': [...]}
         """
-        await snap_queue.join()
-        await segment_queue.join()
-        await build_queue.join()
-        results = list(segment_and_extract_results)
-        segment_and_extract_results.clear()
-        return {
-            "success": True,
-            "count": len(results),
-            "results": results,
-        }
-    
-    # Now I need to continue with build_cell_records and other RPC methods
-    # This file is getting long, so I'll continue in the next part
+        # Check if queues are empty
+        snap_empty = snap_queue.empty()
+        segment_empty = segment_queue.empty()
+        build_empty = build_queue.empty()
+        
+        # Check if we have any results
+        has_results = len(segment_and_extract_results) > 0
+        
+        # Check if workers are busy
+        snap_busy = snap_worker_busy.is_set()
+        segment_build_idle = segment_and_extract_idle.is_set()
+        
+        # Determine status
+        # We're running if ANY queue has items OR any worker is busy
+        all_queues_empty = snap_empty and segment_empty and build_empty
+        all_workers_idle = not snap_busy and segment_build_idle
+        
+        if not all_queues_empty or not all_workers_idle:
+            # Processing in progress
+            return {
+                "status": "running",
+                "queue_sizes": {
+                    "snap_queue": snap_queue.qsize(),
+                    "segment_queue": segment_queue.qsize(),
+                    "build_queue": build_queue.qsize()
+                },
+                "workers_busy": {
+                    "snap_worker": snap_busy,
+                    "segment_build_workers": not segment_build_idle
+                },
+                "results_count": len(segment_and_extract_results)
+            }
+        
+        # All queues are empty AND all workers are idle
+        if has_results:
+            # Processing complete with results
+            results = list(segment_and_extract_results)
+            segment_and_extract_results.clear()
+            return {
+                "status": "succeed",
+                "result": results
+            }
+        else:
+            # No work has been queued or all results have been retrieved
+            return {
+                "status": "idle"
+            }
     
     @schema_function()
     async def build_cell_records(
@@ -1095,7 +1419,7 @@ async def setup_service(server, server_id="agent-lens-tools"):
         Args:
             image_data_np: Multi-channel microscopy image (H, W, C) or single-channel (H, W).
                            Also accepts a list/tuple of per-channel arrays where missing channels are None.
-            segmentation_mask: Integer mask where each unique non-zero value represents a cell
+            segmentation_mask: Integer mask where each unique non-zero value represents a cell. Can be a single mask (np.ndarray) or a list of masks [cell_mask, nucleus_mask].
             microscope_status: Optional microscope position info for spatial metadata
             application_id: Application identifier for Vector Database storage (default: 'hypha-agents-notebook')
             color_map: Optional custom color map indexed by channel number as string (0=BF, 1-5=fluorescence).
@@ -1118,8 +1442,16 @@ async def setup_service(server, server_id="agent-lens-tools"):
             - convexity: convexity of the cell
             
             Intensity Features (in memory only):
-            - mean_intensity_<channel_name>: mean intensity of the cell for the given channel
+            When single mask is provided:
+            - mean_intensity_<channel_name>_cell: mean intensity of the whole cell
             - top10_mean_intensity_<channel_name>: mean intensity of the top 10% brightest pixels
+            
+            When nucleus mask is provided (multi-mask mode):
+            - mean_intensity_<channel_name>_cell: mean intensity of the whole cell
+            - mean_intensity_<channel_name>_nucleus: mean intensity of the nucleus region
+            - mean_intensity_<channel_name>_cytosol: mean intensity of the cytosol region (cell - nucleus)
+            - ratio_<channel_name>_nuc_cyto: nucleus-to-cytosol intensity ratio
+            - top10_mean_intensity_<channel_name>: mean intensity of the top 10% brightest pixels (whole cell)
             
             Spatial Position (in memory only, if microscope_status provided):
             - position: {"x": float, "y": float} - absolute cell position in mm
@@ -1152,13 +1484,19 @@ async def setup_service(server, server_id="agent-lens-tools"):
                 dense[:, :, idx] = ch
             image_data_np = dense
 
-        # Ensure mask is numpy array and convert to labeled format if needed
-        if isinstance(segmentation_mask, str):
-            mask_bytes = base64.b64decode(segmentation_mask)
-            mask_img = PILImage.open(io.BytesIO(mask_bytes))
-            mask = np.array(mask_img).astype(np.uint32)
+        # Parse segmentation_mask input - can be single mask or list of masks
+        if isinstance(segmentation_mask, (list, tuple)):
+            if len(segmentation_mask) < 1:
+                raise ValueError("segmentation_mask list must contain at least one mask")
+            cell_mask_input = segmentation_mask[0]
+            nucleus_mask_input = segmentation_mask[1] if len(segmentation_mask) > 1 else None
         else:
-            mask = segmentation_mask.astype(np.uint32)
+            cell_mask_input = segmentation_mask
+            nucleus_mask_input = None
+        
+        # Convert masks to numpy arrays (handles base64 strings and arrays)
+        mask = _convert_mask_to_array(cell_mask_input)
+        nucleus_mask = _convert_mask_to_array(nucleus_mask_input) if nucleus_mask_input is not None else None
         
         # Extract region properties once from labeled mask
         # This directly processes the instance mask where each object has a unique ID
@@ -1258,7 +1596,7 @@ async def setup_service(server, server_id="agent-lens-tools"):
         # Step 1: Process cells in parallel using ThreadPoolExecutor
         # Prepare arguments for parallel processing
         process_args = [
-            (prop, idx, image_data_np, mask, brightfield, fixed_channel_order, background_bright_value, background_fluorescence, position_info, color_map_255)
+            (prop, idx, image_data_np, mask, nucleus_mask, brightfield, fixed_channel_order, background_bright_value, background_fluorescence, position_info, color_map_255)
             for idx, prop in enumerate(props)
         ]
         
@@ -1642,13 +1980,10 @@ async def setup_service(server, server_id="agent-lens-tools"):
         "type": "generic",
         "config": {"visibility": "public"},
         # Register all RPC methods
-        "generate_text_embedding": generate_text_embedding_rpc,
         "generate_image_embeddings_batch": generate_image_embeddings_batch_rpc,
         "build_cell_records": build_cell_records,
-        "segment_and_extract_put_queue": segment_and_extract_put_queue,
-        "segment_and_extract_wait_until_done": segment_and_extract_wait_until_done,
         "snap_segment_extract_put_queue": snap_segment_extract_put_queue,
-        "snap_segment_extract_wait_until_done": snap_segment_extract_wait_until_done,
+        "poll_snap_segment_extract_status": poll_snap_segment_extract_status,
         "make_umap_cluster_figure_interactive": make_umap_cluster_figure_interactive_rpc,
         "reset_application": reset_application,
         "fetch_cell_data": fetch_cell_data,
