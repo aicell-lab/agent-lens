@@ -8,7 +8,7 @@ from typing import List, Optional, Dict, Any
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi import UploadFile, File, HTTPException, Form, Request
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from agent_lens.utils.artifact_manager import AgentLensArtifactManager
 from hypha_rpc import connect_to_server
@@ -35,8 +35,11 @@ current_application_id = None
 SERVER_URL = "https://hypha.aicell.io"
 WORKSPACE_TOKEN = os.getenv("WORKSPACE_TOKEN")
 
-# OME-Zarr dataset path for streaming
-ZARR_DATASET_PATH = "/mnt/shared_documents/20251215-illumination-calibrated/data.zarr"
+# OME-Zarr dataset path for streaming (override via ZARR_DATASET_PATH env var)
+ZARR_DATASET_PATH = os.environ.get(
+    "ZARR_DATASET_PATH",
+    "/mnt/shared_documents/20251215-illumination-calibrated/data.zarr",
+)
 WEAVIATE_COLLECTION_NAME = "Agentlens"
 
 async def get_artifact_manager():
@@ -556,7 +559,28 @@ def get_frontend_api():
             
             # Check if file exists
             if not resolved_path.exists():
-                raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
+                # Fallback: Some OME-Zarr stores have .zattrs but omit .zgroup.
+                # Return minimal zarr v2 root metadata so clients can proceed.
+                if file_path == ".zgroup":
+                    zarr_base = Path(ZARR_DATASET_PATH).resolve()
+                    zattrs_path = zarr_base / ".zattrs"
+                    if zarr_base.exists() and zattrs_path.exists():
+                        logger.info(
+                            "Serving synthetic .zgroup (store has .zattrs but no .zgroup)"
+                        )
+                        return JSONResponse(
+                            content={"zarr_format": 2},
+                            headers={
+                                "Access-Control-Allow-Origin": "*",
+                                "Access-Control-Allow-Methods": "GET, OPTIONS",
+                                "Access-Control-Allow-Headers": "Range",
+                                "Access-Control-Expose-Headers": "Content-Length, Content-Range",
+                            },
+                        )
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"File not found: {file_path} (resolved: {resolved_path})",
+                )
             
             # Determine content type based on file extension
             content_type = "application/octet-stream"  # Default for chunk files
