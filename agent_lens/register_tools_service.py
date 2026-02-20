@@ -143,6 +143,8 @@ async def setup_service(server, server_id="agent-lens-tools"):
     
     # Background queue for snap (server-side acquisition)
     snap_queue: asyncio.Queue = asyncio.Queue()
+    snap_worker_busy = asyncio.Event()
+    snap_worker_busy.clear()  # Initially not busy
     microscope_service_cache: Dict[str, Any] = {}
 
     # Helper function for segmentation
@@ -338,6 +340,7 @@ async def setup_service(server, server_id="agent-lens-tools"):
         """Background worker to move stage, snap images, then enqueue for segment+extract."""
         while True:
             job = await snap_queue.get()
+            snap_worker_busy.set()  # Mark as busy
             try:
                 microscope_id = job["microscope_id"]
                 channel_config = job["channel_config"]
@@ -476,6 +479,7 @@ async def setup_service(server, server_id="agent-lens-tools"):
                 logger.error(f"snap_segment_extract worker failed: {e}", exc_info=True)
             finally:
                 snap_queue.task_done()
+                snap_worker_busy.clear()  # Mark as not busy
     
     # Start snap+segment+extract worker
     asyncio.create_task(_snap_segment_extract_worker())
@@ -1341,19 +1345,64 @@ async def setup_service(server, server_id="agent-lens-tools"):
         }
 
     @schema_function()
-    async def snap_segment_extract_wait_until_done() -> List[Dict[str, Any]]:
+    async def poll_snap_segment_extract_status() -> Dict[str, Any]:
         """
-        Wait until the snap queue and segment+extract queue are empty and return all cell records.
+        Poll the status of snap, segment, and extract queues without blocking.
         
         Returns:
-            List of cell record dictionaries from all processed fields of view.
+            Dictionary with status information:
+            - If not started: {'status': 'idle'}
+            - If running: {'status': 'running', 'queue_sizes': {...}, 'results_count': int}
+            - If error: {'status': 'error', 'error': str} (currently errors are logged but not tracked)
+            - If succeed: {'status': 'succeed', 'result': [...]}
         """
-        await snap_queue.join()
-        await segment_queue.join()
-        await build_queue.join()
-        results = list(segment_and_extract_results)
-        segment_and_extract_results.clear()
-        return results
+        # Check if queues are empty
+        snap_empty = snap_queue.empty()
+        segment_empty = segment_queue.empty()
+        build_empty = build_queue.empty()
+        
+        # Check if we have any results
+        has_results = len(segment_and_extract_results) > 0
+        
+        # Check if workers are busy
+        snap_busy = snap_worker_busy.is_set()
+        segment_build_idle = segment_and_extract_idle.is_set()
+        
+        # Determine status
+        # We're running if ANY queue has items OR any worker is busy
+        all_queues_empty = snap_empty and segment_empty and build_empty
+        all_workers_idle = not snap_busy and segment_build_idle
+        
+        if not all_queues_empty or not all_workers_idle:
+            # Processing in progress
+            return {
+                "status": "running",
+                "queue_sizes": {
+                    "snap_queue": snap_queue.qsize(),
+                    "segment_queue": segment_queue.qsize(),
+                    "build_queue": build_queue.qsize()
+                },
+                "workers_busy": {
+                    "snap_worker": snap_busy,
+                    "segment_build_workers": not segment_build_idle
+                },
+                "results_count": len(segment_and_extract_results)
+            }
+        
+        # All queues are empty AND all workers are idle
+        if has_results:
+            # Processing complete with results
+            results = list(segment_and_extract_results)
+            segment_and_extract_results.clear()
+            return {
+                "status": "succeed",
+                "result": results
+            }
+        else:
+            # No work has been queued or all results have been retrieved
+            return {
+                "status": "idle"
+            }
     
     @schema_function()
     async def build_cell_records(
@@ -1934,7 +1983,7 @@ async def setup_service(server, server_id="agent-lens-tools"):
         "generate_image_embeddings_batch": generate_image_embeddings_batch_rpc,
         "build_cell_records": build_cell_records,
         "snap_segment_extract_put_queue": snap_segment_extract_put_queue,
-        "snap_segment_extract_wait_until_done": snap_segment_extract_wait_until_done,
+        "poll_snap_segment_extract_status": poll_snap_segment_extract_status,
         "make_umap_cluster_figure_interactive": make_umap_cluster_figure_interactive_rpc,
         "reset_application": reset_application,
         "fetch_cell_data": fetch_cell_data,
