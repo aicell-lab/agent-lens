@@ -146,7 +146,7 @@ async def setup_service(server, server_id="agent-lens-tools"):
     microscope_service_cache: Dict[str, Any] = {}
 
     # Helper function for segmentation
-    async def _segment_image_from_channel(channel_data: np.ndarray, scale: int = 4) -> np.ndarray:
+    async def _segment_image_from_channel(channel_data: np.ndarray, scale: int = 8) -> np.ndarray:
         """
         Segment from a single channel or RGB composite.
         
@@ -160,66 +160,47 @@ async def setup_service(server, server_id="agent-lens-tools"):
         if channel_data is None:
             raise ValueError("Channel data is None")
         
+        # Ensure contiguous array
         channel_data = np.ascontiguousarray(channel_data)
+        original_shape = channel_data.shape[:2]  # Store (H, W) for later upscaling
         
-        # Determine if grayscale or RGB
-        is_rgb = channel_data.ndim == 3 and channel_data.shape[2] == 3
-        
-        # Convert to uint8
+        # Convert to uint8 if needed
         if channel_data.dtype != np.uint8:
-            if channel_data.max() > 255:
-                channel_u8 = (channel_data / channel_data.max() * 255).astype(np.uint8)
+            max_val = channel_data.max()
+            if max_val > 255:
+                channel_data = (channel_data / max_val * 255).astype(np.uint8)
             else:
-                channel_u8 = channel_data.astype(np.uint8)
-        else:
-            channel_u8 = channel_data
+                channel_data = channel_data.astype(np.uint8)
         
-        # Downscale with appropriate mode
+        # Create PIL image (automatically detects grayscale vs RGB from array shape)
+        pil_image = PILImage.fromarray(channel_data)
+        
+        # Downscale if needed
         if scale > 1:
-            if is_rgb:
-                H, W, C = channel_u8.shape
-                new_H, new_W = H // scale, W // scale
-                pil_image = PILImage.fromarray(channel_u8, mode='RGB')
-                pil_image_resized = pil_image.resize((new_W, new_H), PILImage.BILINEAR)
-            else:
-                H, W = channel_u8.shape
-                new_H, new_W = H // scale, W // scale
-                pil_image = PILImage.fromarray(channel_u8, mode='L')
-                pil_image_resized = pil_image.resize((new_W, new_H), PILImage.BILINEAR)
-        else:
-            if is_rgb:
-                pil_image_resized = PILImage.fromarray(channel_u8, mode='RGB')
-            else:
-                pil_image_resized = PILImage.fromarray(channel_u8, mode='L')
+            new_size = (original_shape[1] // scale, original_shape[0] // scale)  # PIL uses (W, H)
+            pil_image = pil_image.resize(new_size, PILImage.BILINEAR)
         
+        # Convert to PNG base64 for segmentation service
         buffer = BytesIO()
-        pil_image_resized.save(buffer, format="PNG")
-        resized_base64_str = base64.b64encode(buffer.getvalue()).decode("utf-8")
+        pil_image.save(buffer, format="PNG")
+        image_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
         
-        segmentation_result = await segmentation_service.segment_all(resized_base64_str)
-        mask_small = segmentation_result["mask"] if isinstance(segmentation_result, dict) else segmentation_result
+        # Run segmentation
+        segmentation_result = await segmentation_service.segment_all(image_base64)
+        mask = segmentation_result["mask"] if isinstance(segmentation_result, dict) else segmentation_result
         
-        # Upscale mask back to original size
+        # Upscale mask back to original size if needed
         if scale > 1:
-            mask_small_np = np.array(mask_small, dtype=np.int32)
-            if is_rgb:
-                original_H, original_W = channel_u8.shape[0], channel_u8.shape[1]
-            else:
-                original_H, original_W = channel_u8.shape[0], channel_u8.shape[1]
-            mask_up = np.array(
-                PILImage.fromarray(mask_small_np.astype(np.uint16)).resize(
-                    (original_W, original_H), 
-                    PILImage.NEAREST
-                )
-            )
-        else:
-            mask_up = np.array(mask_small)
+            mask_np = np.array(mask, dtype=np.uint16)
+            mask_pil = PILImage.fromarray(mask_np)
+            mask_upscaled = mask_pil.resize((original_shape[1], original_shape[0]), PILImage.NEAREST)
+            return np.array(mask_upscaled)
         
-        return mask_up
+        return np.array(mask)
 
     async def _segment_image_from_bf(
         image_data: Any,
-        scale: int = 4,
+        scale: int = 8,
         color_map: Optional[Dict[str, Tuple[float, float, float]]] = None,
     ) -> np.ndarray:
         """
@@ -269,7 +250,7 @@ async def setup_service(server, server_id="agent-lens-tools"):
                 image_data = job["image_data"]
                 microscope_status = job.get("microscope_status")
                 application_id = job.get("application_id", "hypha-agents-notebook")
-                scale = job.get("scale", 4)
+                scale = job.get("scale", 8)
                 nucleus_channel_idx = job.get("nucleus_channel_idx")
                 color_map = job.get("color_map")
                 
@@ -361,7 +342,7 @@ async def setup_service(server, server_id="agent-lens-tools"):
                 microscope_id = job["microscope_id"]
                 channel_config = job["channel_config"]
                 application_id = job.get("application_id", "hypha-agents-notebook")
-                scale = job.get("scale", 4)
+                scale = job.get("scale", 8)
                 positions = job.get("positions")
                 wells = job.get("wells")
                 well_offset = job.get("well_offset")
@@ -1286,7 +1267,7 @@ async def setup_service(server, server_id="agent-lens-tools"):
         microscope_id: str,
         channel_config: List[Dict[str, Any]],
         application_id: str = "hypha-agents-notebook",
-        scale: int = 6,
+        scale: int = 8,
         positions: Optional[List[Dict[str, float]]] = None,
         wells: Optional[List[str]] = None,
         well_offset: Optional[List[Dict[str, float]]] = None,
@@ -1301,7 +1282,7 @@ async def setup_service(server, server_id="agent-lens-tools"):
             microscope_id: Microscope service ID
             channel_config: List of channel configurations for imaging
             application_id: Application identifier for Vector Database storage
-            scale: Downscaling factor for segmentation (default: 4)
+            scale: Downscaling factor for segmentation (default: 8)
             positions: (Position mode) Optional list of absolute stage positions to visit.
                       Each position is a dict with keys: x, y, and optionally z.
             wells: (Well grid mode) List of well IDs to scan (e.g., ["A1", "B2", "C3"]).
