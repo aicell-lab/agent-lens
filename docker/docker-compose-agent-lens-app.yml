@@ -2,7 +2,6 @@ services:
   agent-lens:
     image: ghcr.io/aicell-lab/agent-lens:sha-5943342
     container_name: agent-lens
-    # Optimize image pulling
     pull_policy: if_not_present
     environment:
       - WORKSPACE_TOKEN=${WORKSPACE_TOKEN}
@@ -17,9 +16,7 @@ services:
       - "autoheal.enable=true"
     volumes:
       - agent-lens-cache:/app/.cache
-      # Mount zarr dataset for example-image-data.zarr endpoint
       - /mnt/shared_documents/20251215-illumination-calibrated/data.zarr:/mnt/shared_documents/20251215-illumination-calibrated/data.zarr:ro
-    # GPU support: Use runtime for docker-compose, or deploy.resources for docker swarm
     runtime: nvidia
     deploy:
       resources:
@@ -45,9 +42,8 @@ services:
       - ALL
 
   squid-control:
-    image: ghcr.io/aicell-lab/squid-control:sha-dd34eab
+    image: ghcr.io/aicell-lab/squid-control:sha-9128bea
     container_name: squid-control
-    # Optimize image pulling
     pull_policy: if_not_present
     network_mode: "host"
     ports:
@@ -56,7 +52,7 @@ services:
       - SQUID_WORKSPACE_TOKEN=${SQUID_WORKSPACE_TOKEN}
       - WORKSPACE_TOKEN_CHATBOT=${WORKSPACE_TOKEN_CHATBOT}
       - REEF_WORKSPACE_TOKEN=${REEF_WORKSPACE_TOKEN}
-      - MICROSCOPE_SERVICE_ID=${MICROSCOPE_SERVICE_ID} # will be squid-control-simulation or squid-control-simulation-63x
+      - MICROSCOPE_SERVICE_ID=${MICROSCOPE_SERVICE_ID}
       - WORKSPACE_TOKEN=${WORKSPACE_TOKEN}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - AGENT_LENS_WORKSPACE_TOKEN=${AGENT_LENS_WORKSPACE_TOKEN}
@@ -64,49 +60,14 @@ services:
       - "autoheal.enable=true"
     volumes:
       - squid-control-cache:/app/.cache
+      # Default simulation sample: U2OS FUCCI cell line (20x, HCS_v2 config)
       - /mnt/shared_documents/20251215-illumination-calibrated/data.zarr:/mnt/shared_documents/20251215-illumination-calibrated/data.zarr:ro
+      # Alternative simulation sample: Human Protein Atlas / Opera Phoenix (63x, HCS_v2_63x config)
+      - /mnt/shared_documents/opera_import/data.zarr:/mnt/shared_documents/opera_import/data.zarr:ro
+    # Default: HCS_v2 config (U2OS FUCCI). Use switch_sample API to switch to HPA (63x) at runtime.
+    command: ["python", "-m", "squid_control", "microscope", "--simulation"]
     healthcheck:
       test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/agent-lens/services/squid-control-simulation/is_service_healthy | jq -e '.status == \"ok\"'"]
-      interval: 120s
-      timeout: 30s
-      retries: 1
-      start_period: 120s
-    restart: on-failure
-    stop_grace_period: 30s
-    deploy:
-      restart_policy:
-        condition: on-failure
-        delay: 20s
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-
-  squid-control-63x:
-    image: ghcr.io/aicell-lab/squid-control:sha-4943ddb
-    container_name: squid-control-63x
-    # Optimize image pulling
-    pull_policy: if_not_present
-    network_mode: "host"
-    ports:
-      - "10100-10150:10100-10150/udp"
-    environment:
-      - SQUID_WORKSPACE_TOKEN=${SQUID_WORKSPACE_TOKEN}
-      - WORKSPACE_TOKEN_CHATBOT=${WORKSPACE_TOKEN_CHATBOT}
-      - REEF_WORKSPACE_TOKEN=${REEF_WORKSPACE_TOKEN}
-      - MICROSCOPE_SERVICE_ID=${MICROSCOPE_SERVICE_ID} # will be squid-control-simulation or squid-control-simulation-63x
-      - WORKSPACE_TOKEN=${WORKSPACE_TOKEN}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - AGENT_LENS_WORKSPACE_TOKEN=${AGENT_LENS_WORKSPACE_TOKEN}
-    labels:
-      - "autoheal.enable=true"
-    volumes:
-      - squid-control-63x-cache:/app/.cache
-      # Mount 63x zarr dataset (Opera import)
-      - /mnt/shared_documents/opera_import/data.zarr:/mnt/shared_documents/opera_import/data.zarr:ro
-    command: ["python", "-m", "squid_control", "microscope", "--simulation", "--config", "HCS_v2_63x"]
-    healthcheck:
-      test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/agent-lens/services/squid-control-simulation-63x/is_service_healthy | jq -e '.status == \"ok\"'"]
       interval: 120s
       timeout: 30s
       retries: 1
@@ -125,7 +86,6 @@ services:
   autoheal:
     image: willfarrell/autoheal
     container_name: autoheal
-    # Optimize image pulling
     pull_policy: if_not_present
     restart: always
     environment:
@@ -139,4 +99,3 @@ services:
 volumes:
   agent-lens-cache:
   squid-control-cache:
-  squid-control-63x-cache:
