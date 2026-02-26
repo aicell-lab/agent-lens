@@ -129,6 +129,8 @@ class ChromaCellStorage:
                     "distance_from_center": cell.get("distance_from_center"),
                     **{k: v for k, v in cell.items()
                        if (k.startswith("mean_intensity_") or k.startswith("top10_mean_intensity_"))},
+                    **{k: v for k, v in cell.items()
+                       if k.startswith("channel_") and k.endswith("_image")},
                 }
                 metadata = {k: v for k, v in metadata.items() if v is not None}
                 metadatas.append(metadata)

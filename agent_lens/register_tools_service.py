@@ -326,6 +326,19 @@ async def setup_service(server, server_id="agent-lens-tools"):
     # Fixed channel order for microscopy
     fixed_channel_order = ['BF_LED_matrix_full', 'Fluorescence_405_nm_Ex', 'Fluorescence_488_nm_Ex', 'Fluorescence_638_nm_Ex', 'Fluorescence_561_nm_Ex', 'Fluorescence_730_nm_Ex']
 
+    def _channel_name_to_key(channel_name: str) -> str:
+        """Convert a full channel name to a short metadata key.
+
+        Examples:
+            'BF_LED_matrix_full'     -> 'BF'
+            'Fluorescence_405_nm_Ex' -> '405'
+        """
+        if channel_name == 'BF_LED_matrix_full':
+            return 'BF'
+        if channel_name.startswith('Fluorescence_') and '_nm_Ex' in channel_name:
+            return channel_name.split('_')[1]  # e.g. '405'
+        return channel_name.replace(' ', '_').replace('-', '_')
+
     # Standard microscopy channel colors (matching frontend CHANNEL_COLORS)
     CHANNEL_COLOR_MAP = {
         'BF_LED_matrix_full': (255, 255, 255),      # White
@@ -851,6 +864,7 @@ async def setup_service(server, server_id="agent-lens-tools"):
             
             # Extract and merge all available channels with proper colors
             channels_to_merge = []
+            channel_images = {}  # channel_idx -> uint8 RGB array for per-channel thumbnail storage
 
             # Process brightfield (channel 0) - only if it has signal
             if image_data_np.ndim == 3:
@@ -896,6 +910,7 @@ async def setup_service(server, server_id="agent-lens-tools"):
                     bg_value=background_bright_value
                 )
                 channels_to_merge.append(bf_rgb.astype(np.float32))
+                channel_images[0] = bf_rgb
 
             # Process fluorescent channels (1-5) if available
             if image_data_np.ndim == 3 and image_data_np.shape[2] > 1:
@@ -930,6 +945,7 @@ async def setup_service(server, server_id="agent-lens-tools"):
                     )
                     
                     channels_to_merge.append(channel_rgb.astype(np.float32))
+                    channel_images[channel_idx] = channel_rgb
 
             # Check if we have any channels to merge
             if len(channels_to_merge) == 0:
@@ -962,6 +978,18 @@ async def setup_service(server, server_id="agent-lens-tools"):
             buffer_thumb = BytesIO()
             thumb_pil.save(buffer_thumb, format='PNG')
             thumbnail_base64 = base64.b64encode(buffer_thumb.getvalue()).decode('utf-8')
+
+            # Generate per-channel 50x50 thumbnail images for individual channel storage
+            channel_thumbnail_base64 = {}  # channel short name -> base64 string
+            for ch_idx, ch_rgb in channel_images.items():
+                ch_name = fixed_channel_order[ch_idx] if ch_idx < len(fixed_channel_order) else f"channel_{ch_idx}"
+                ch_key = _channel_name_to_key(ch_name)
+                ch_pad_value = background_bright_value if ch_idx == 0 else 0
+                ch_resized = resize_and_pad_to_square_rgb(ch_rgb.astype(np.uint8), out_size=50, pad_value=ch_pad_value)
+                ch_pil = PILImage.fromarray(ch_resized, mode='RGB')
+                ch_buffer = BytesIO()
+                ch_pil.save(ch_buffer, format='PNG')
+                channel_thumbnail_base64[ch_key] = base64.b64encode(ch_buffer.getvalue()).decode('utf-8')
 
             # Morphological features
             try:
@@ -1149,6 +1177,10 @@ async def setup_service(server, server_id="agent-lens-tools"):
             
             # Add 50x50 thumbnail to metadata (stored in ChromaDB; 224x224 used only for embedding)
             metadata["image"] = thumbnail_base64
+
+            # Add per-channel 50x50 thumbnails to metadata (keyed by short channel name)
+            for ch_key, ch_b64 in channel_thumbnail_base64.items():
+                metadata[f"channel_{ch_key}_image"] = ch_b64
 
             return (poly_index, metadata, embedding_image_bytes)
             
@@ -1430,6 +1462,9 @@ async def setup_service(server, server_id="agent-lens-tools"):
             
             Geometry & Shape (in memory + Vector Database):
             - uuid: Vector Database object UUID for retrieving images/embeddings later
+            - image: Base64-encoded 50x50 PNG of the merged (composite) cell image
+            - channel_BF_image: Base64-encoded 50x50 PNG of the brightfield channel (if available)
+            - channel_405_image, channel_488_image, channel_561_image, channel_638_image: Base64-encoded 50x50 PNG per fluorescence channel (only channels with signal)
             - area: area of the cell in pixels
             - perimeter: perimeter of the cell in pixels
             - equivalent_diameter: equivalent diameter of the cell in pixels
