@@ -42,7 +42,7 @@ services:
       - ALL
 
   squid-control:
-    image: ghcr.io/aicell-lab/squid-control:sha-9128bea
+    image: ghcr.io/aicell-lab/squid-control:sha-c5aef54
     container_name: squid-control
     pull_policy: if_not_present
     network_mode: "host"
@@ -60,11 +60,15 @@ services:
       - "autoheal.enable=true"
     volumes:
       - squid-control-cache:/app/.cache
-      # Default simulation sample: U2OS FUCCI cell line (20x, HCS_v2 config)
+      # Sample 1: U2OS FUCCI (20x, HCS_v2) — default
       - /mnt/shared_documents/20251215-illumination-calibrated/data.zarr:/mnt/shared_documents/20251215-illumination-calibrated/data.zarr:ro
-      # Alternative simulation sample: Human Protein Atlas / Opera Phoenix (63x, HCS_v2_63x config)
-      - /mnt/shared_documents/opera_import/data.zarr:/mnt/shared_documents/opera_import/data.zarr:ro
-    # Default: HCS_v2 config (U2OS FUCCI). Use switch_sample API to switch to HPA (63x) at runtime.
+      # Samples 2-6: Human Protein Atlas plates 1-5 (63x, HCS_v2_63x)
+      - /mnt/shared_documents/hpa_plate1/data.zarr:/mnt/shared_documents/hpa_plate1/data.zarr:ro
+      - /mnt/shared_documents/hpa_plate2/data.zarr:/mnt/shared_documents/hpa_plate2/data.zarr:ro
+      - /mnt/shared_documents/hpa_plate3/data.zarr:/mnt/shared_documents/hpa_plate3/data.zarr:ro
+      - /mnt/shared_documents/hpa_plate4/data.zarr:/mnt/shared_documents/hpa_plate4/data.zarr:ro
+      - /mnt/shared_documents/hpa_plate5/data.zarr:/mnt/shared_documents/hpa_plate5/data.zarr:ro
+    # Default: HCS_v2 (U2OS_FUCCI). Use switch_sample API to switch to HPA_PLATE1..5 at runtime.
     command: ["python", "-m", "squid_control", "microscope", "--simulation"]
     healthcheck:
       test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/agent-lens/services/squid-control-simulation/is_service_healthy | jq -e '.status == \"ok\"'"]
