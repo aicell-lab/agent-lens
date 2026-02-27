@@ -969,9 +969,9 @@ async def setup_service(server, server_id="agent-lens-tools"):
             cell_pil_224.save(buffer_224, format='PNG')
             embedding_image_bytes = buffer_224.getvalue()
 
-            # 50x50 thumbnail: saved to ChromaDB (much smaller, faster insert)
+            # 100x100 thumbnail: saved to ChromaDB (much smaller, faster insert)
             merged_rgb_thumbnail = np.array(
-                cell_pil_224.resize((50, 50), PILImage.Resampling.LANCZOS),
+                cell_pil_224.resize((100, 100), PILImage.Resampling.LANCZOS),
                 dtype=np.uint8
             )
             thumb_pil = PILImage.fromarray(merged_rgb_thumbnail, mode='RGB')
@@ -979,13 +979,13 @@ async def setup_service(server, server_id="agent-lens-tools"):
             thumb_pil.save(buffer_thumb, format='PNG')
             thumbnail_base64 = base64.b64encode(buffer_thumb.getvalue()).decode('utf-8')
 
-            # Generate per-channel 50x50 thumbnail images for individual channel storage
+            # Generate per-channel 100x100 thumbnail images for individual channel storage
             channel_thumbnail_base64 = {}  # channel short name -> base64 string
             for ch_idx, ch_rgb in channel_images.items():
                 ch_name = fixed_channel_order[ch_idx] if ch_idx < len(fixed_channel_order) else f"channel_{ch_idx}"
                 ch_key = _channel_name_to_key(ch_name)
                 ch_pad_value = background_bright_value if ch_idx == 0 else 0
-                ch_resized = resize_and_pad_to_square_rgb(ch_rgb.astype(np.uint8), out_size=50, pad_value=ch_pad_value)
+                ch_resized = resize_and_pad_to_square_rgb(ch_rgb.astype(np.uint8), out_size=100, pad_value=ch_pad_value)
                 ch_pil = PILImage.fromarray(ch_resized, mode='RGB')
                 ch_buffer = BytesIO()
                 ch_pil.save(ch_buffer, format='PNG')
