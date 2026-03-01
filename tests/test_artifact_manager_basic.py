@@ -126,7 +126,6 @@ async def artifact_manager():
         "server_url": TEST_SERVER_URL,
         "token": token,
         "workspace": TEST_WORKSPACE,
-        "ping_interval": None
     }) as server:
         print("✅ Connected to server")
         artifact_manager = await server.get_service("public/artifact-manager")

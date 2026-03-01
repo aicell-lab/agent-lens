@@ -109,8 +109,6 @@ async def hypha_server():
             "server_url": "https://hypha.aicell.io",
             "token": token,
             "workspace": "agent-lens",
-            "ping_interval": None,  # Disable ping to avoid background tasks
-            "ping_timeout": None,   # Disable ping timeout
         }
         
         server = await connect_to_server(connection_config)

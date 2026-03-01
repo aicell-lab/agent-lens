@@ -1,6 +1,6 @@
 services:
   agent-lens:
-    image: ghcr.io/aicell-lab/agent-lens:sha-b1f3dbd
+    image: ghcr.io/aicell-lab/agent-lens:sha-6f9f6af
     container_name: agent-lens
     pull_policy: if_not_present
     environment:
