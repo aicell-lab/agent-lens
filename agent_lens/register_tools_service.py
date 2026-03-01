@@ -398,8 +398,13 @@ async def setup_service(server, server_id="agent-lens-tools"):
                         
                         # Scan grid positions within this well
                         for offset in well_offset:
-                            dx = offset.get("dx", 0)
-                            dy = offset.get("dy", 0)
+                            if isinstance(offset, dict):
+                                dx = offset.get("dx", 0)
+                                dy = offset.get("dy", 0)
+                            else:
+                                # Hypha-RPC may deserialize Dict[str, float] as a list [dx, dy]
+                                dx = offset[0] if len(offset) > 0 else 0
+                                dy = offset[1] if len(offset) > 1 else 0
                             target_x = base_x + dx
                             target_y = base_y + dy
                             
