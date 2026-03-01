@@ -229,7 +229,11 @@ async def setup_service(server, server_id="agent-lens-tools"):
             gray_u8 = bf
             if gray_u8.dtype != np.uint8:
                 g = gray_u8.astype(np.float32)
-                g = (g - np.nanmin(g)) / (np.nanmax(g) - np.nanmin(g) + 1e-12) * 255.0
+                p_low = np.percentile(g, 1.0)
+                p_high = np.percentile(g, 99.0)
+                g = np.clip(g, p_low, p_high)
+                if p_high > p_low:
+                    g = (g - p_low) / (p_high - p_low) * 255.0
                 gray_u8 = np.clip(g, 0, 255).astype(np.uint8)
             segment_input = gray_u8
         else:
