@@ -29,8 +29,8 @@ COLOR_MAP = {
     "0": (1.0, 1.0, 1.0),  # BF: gray
     "1": (0.0, 0.0, 1.0),  # 405nm: blue
     "2": (0.0, 1.0, 0.0),  # 488nm: green
-    "3": (1.0, 0.0, 0.0),  # 638nm: red
-    "4": (1.0, 1.0, 0.0),  # 561nm: yellow
+    "3": (1.0, 1.0, 0.0),  # 638nm: yellow
+    "4": (1.0, 0.0, 0.0),  # 561nm: red
 }
 
 def overlay(
@@ -147,58 +147,65 @@ async def setup_service(server, server_id="agent-lens-tools"):
     snap_worker_busy.clear()  # Initially not busy
     microscope_service_cache: Dict[str, Any] = {}
 
-    # Helper function for segmentation
+    async def _run_segmentation(input_rgb: np.ndarray, scale: int = 8) -> np.ndarray:
+        """
+        Encode an (H,W,3) uint8 RGB array, run segmentation, and return the upscaled mask.
+        Mirrors the notebook segment_image encode/decode pipeline exactly.
+        """
+        H, W = input_rgb.shape[:2]
+
+        # Downscale with safe min-size guard
+        if scale and scale > 1:
+            pil_img = PILImage.fromarray(input_rgb, "RGB").resize(
+                (max(1, W // scale), max(1, H // scale)), PILImage.BILINEAR
+            )
+        else:
+            pil_img = PILImage.fromarray(input_rgb, "RGB")
+
+        buf = BytesIO()
+        pil_img.save(buf, format="PNG")
+        b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+        res = await segmentation_service.segment_all(b64)
+        mask_small = res["mask"] if isinstance(res, dict) else res
+
+        # Upscale mask back to original size
+        if scale and scale > 1:
+            mask = np.array(
+                PILImage.fromarray(np.array(mask_small, dtype=np.uint16)).resize((W, H), PILImage.NEAREST)
+            )
+        else:
+            mask = np.array(mask_small)
+
+        return mask
+
     async def _segment_image_from_channel(channel_data: np.ndarray, scale: int = 8) -> np.ndarray:
         """
-        Segment from a single channel or RGB composite.
-        
-        Args:
-            channel_data: 2D numpy array (H, W) for grayscale or 3D array (H, W, 3) for RGB
-            scale: Downscaling factor for segmentation
-            
-        Returns:
-            Segmentation mask with same dimensions as input
+        Segment a single fluorescence channel (e.g. nucleus).
+        Normalises with 1-99th percentile, promotes to 3-channel RGB, then runs segmentation.
         """
         if channel_data is None:
             raise ValueError("Channel data is None")
-        
-        # Ensure contiguous array
+
         channel_data = np.ascontiguousarray(channel_data)
-        original_shape = channel_data.shape[:2]  # Store (H, W) for later upscaling
-        
-        # Convert to uint8 if needed
+
+        # Percentile normalise to uint8
         if channel_data.dtype != np.uint8:
-            max_val = channel_data.max()
-            if max_val > 255:
-                channel_data = (channel_data / max_val * 255).astype(np.uint8)
-            else:
-                channel_data = channel_data.astype(np.uint8)
-        
-        # Create PIL image (automatically detects grayscale vs RGB from array shape)
-        pil_image = PILImage.fromarray(channel_data)
-        
-        # Downscale if needed
-        if scale > 1:
-            new_size = (original_shape[1] // scale, original_shape[0] // scale)  # PIL uses (W, H)
-            pil_image = pil_image.resize(new_size, PILImage.BILINEAR)
-        
-        # Convert to PNG base64 for segmentation service
-        buffer = BytesIO()
-        pil_image.save(buffer, format="PNG")
-        image_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
-        
-        # Run segmentation
-        segmentation_result = await segmentation_service.segment_all(image_base64)
-        mask = segmentation_result["mask"] if isinstance(segmentation_result, dict) else segmentation_result
-        
-        # Upscale mask back to original size if needed
-        if scale > 1:
-            mask_np = np.array(mask, dtype=np.uint16)
-            mask_pil = PILImage.fromarray(mask_np)
-            mask_upscaled = mask_pil.resize((original_shape[1], original_shape[0]), PILImage.NEAREST)
-            return np.array(mask_upscaled)
-        
-        return np.array(mask)
+            g = channel_data.astype(np.float32)
+            p_low = np.percentile(g, 1.0)
+            p_high = np.percentile(g, 99.0)
+            g = np.clip(g, p_low, p_high)
+            if p_high > p_low:
+                g = (g - p_low) / (p_high - p_low) * 255.0
+            channel_data = np.clip(g, 0, 255).astype(np.uint8)
+
+        # Promote grayscale to 3-channel RGB
+        if channel_data.ndim == 2:
+            input_rgb = np.stack([channel_data] * 3, axis=-1)
+        else:
+            input_rgb = channel_data  # already RGB
+
+        return await _run_segmentation(input_rgb, scale=scale)
 
     async def _segment_image_from_bf(
         image_data: Any,
@@ -221,30 +228,26 @@ async def setup_service(server, server_id="agent-lens-tools"):
                 chans = [arr]
             else:
                 chans = [arr[:, :, i] for i in range(arr.shape[2])]
-        
-        # Try to use brightfield (channel 0) if valid
+
+        # Pick segmentation input (always RGB, matching notebook pattern)
         bf = chans[0] if len(chans) > 0 else None
         if bf is not None and np.nanstd(bf) > 1e-6:
-            # Brightfield is valid, use it as grayscale
-            gray_u8 = bf
-            if gray_u8.dtype != np.uint8:
-                g = gray_u8.astype(np.float32)
+            if bf.dtype != np.uint8:
+                g = bf.astype(np.float32)
                 p_low = np.percentile(g, 1.0)
                 p_high = np.percentile(g, 99.0)
                 g = np.clip(g, p_low, p_high)
                 if p_high > p_low:
                     g = (g - p_low) / (p_high - p_low) * 255.0
                 gray_u8 = np.clip(g, 0, 255).astype(np.uint8)
-            segment_input = gray_u8
+            else:
+                gray_u8 = bf
+            input_rgb = np.stack([gray_u8] * 3, axis=-1)
         else:
-            # Brightfield is None or has no variation, use RGB overlay composite
-            # RGB is better for Cellpose with fluorescence data (preserves multi-channel info)
             logger.info("Brightfield channel unavailable or has no variation, using RGB overlay composite for segmentation")
-            rgb_composite = overlay(chans, color_map=color_map)  # (H,W,3) uint8
-            segment_input = rgb_composite  # Send RGB directly to Cellpose
-        
-        # Delegate to generic channel segmentation function
-        return await _segment_image_from_channel(segment_input, scale=scale)
+            input_rgb = overlay(chans, color_map=color_map)  # (H,W,3) uint8
+
+        return await _run_segmentation(input_rgb, scale=scale)
 
     # Background worker functions
     async def _segment_worker():
@@ -256,7 +259,7 @@ async def setup_service(server, server_id="agent-lens-tools"):
                 image_data = job["image_data"]
                 microscope_status = job.get("microscope_status")
                 application_id = job.get("application_id", "hypha-agents-notebook")
-                scale = job.get("scale", 8)
+                scale = job.get("scale", 5)
                 nucleus_channel_idx = job.get("nucleus_channel_idx")
                 color_map = job.get("color_map")
                 
@@ -362,7 +365,7 @@ async def setup_service(server, server_id="agent-lens-tools"):
                 microscope_id = job["microscope_id"]
                 channel_config = job["channel_config"]
                 application_id = job.get("application_id", "hypha-agents-notebook")
-                scale = job.get("scale", 8)
+                scale = job.get("scale", 5)
                 positions = job.get("positions")
                 wells = job.get("wells")
                 well_offset = job.get("well_offset")
@@ -1312,7 +1315,7 @@ async def setup_service(server, server_id="agent-lens-tools"):
         microscope_id: str,
         channel_config: List[Dict[str, Any]],
         application_id: str = "hypha-agents-notebook",
-        scale: int = 8,
+        scale: int = 5,
         positions: Optional[List[Dict[str, float]]] = None,
         wells: Optional[List[str]] = None,
         well_offset: Optional[List[Dict[str, float]]] = None,
@@ -1327,7 +1330,7 @@ async def setup_service(server, server_id="agent-lens-tools"):
             microscope_id: Microscope service ID
             channel_config: List of channel configurations for imaging
             application_id: Application identifier for Vector Database storage
-            scale: Downscaling factor for segmentation (default: 8)
+            scale: Downscaling factor for segmentation (default: 5)
             positions: (Position mode) Optional list of absolute stage positions to visit.
                       Each position is a dict with keys: x, y, and optionally z.
             wells: (Well grid mode) List of well IDs to scan (e.g., ["A1", "B2", "C3"]).
