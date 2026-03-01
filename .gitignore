@@ -34,7 +34,7 @@ coverage/
 .vscode/
 
 # Jupyter notebooks
-*.ipynb
+docs/*.ipynb
 docs/*.png
 docs/*.json
 docs/figure_exports*/*

@@ -1,6 +1,6 @@
 services:
   agent-lens:
-    image: ghcr.io/aicell-lab/agent-lens:sha-acd6e67
+    image: ghcr.io/aicell-lab/agent-lens:sha-b1f3dbd
     container_name: agent-lens
     pull_policy: if_not_present
     environment:
@@ -42,7 +42,7 @@ services:
       - ALL
 
   squid-control:
-    image: ghcr.io/aicell-lab/squid-control:sha-c5aef54
+    image: ghcr.io/aicell-lab/squid-control:sha-9021757
     container_name: squid-control
     pull_policy: if_not_present
     network_mode: "host"
@@ -68,6 +68,8 @@ services:
       - /mnt/shared_documents/hpa_plate3/data.zarr:/mnt/shared_documents/hpa_plate3/data.zarr:ro
       - /mnt/shared_documents/hpa_plate4/data.zarr:/mnt/shared_documents/hpa_plate4/data.zarr:ro
       - /mnt/shared_documents/hpa_plate5/data.zarr:/mnt/shared_documents/hpa_plate5/data.zarr:ro
+      - /mnt/shared_documents/hpa_plate6/data.zarr:/mnt/shared_documents/hpa_plate6/data.zarr:ro
+      - /mnt/shared_documents/hpa_plate7/data.zarr:/mnt/shared_documents/hpa_plate7/data.zarr:ro
     # Default: HCS_v2 (U2OS_FUCCI). Use switch_sample API to switch to HPA_PLATE1..5 at runtime.
     command: ["python", "-m", "squid_control", "microscope", "--simulation"]
     healthcheck:
