@@ -41,6 +41,7 @@ dependencies = [
     "aiohttp==3.11.14",
     "scikit-image==0.25.2",
     "zarr==2.15.0",
+    "weaviate-client",
     
     # AI and machine learning
     "torch==2.5.1",
