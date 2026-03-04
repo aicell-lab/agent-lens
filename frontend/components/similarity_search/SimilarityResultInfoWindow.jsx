@@ -167,7 +167,7 @@ const SimilarityResultInfoWindow = ({
         uuid: objectUUID
       });
       
-      const response = await fetch(`/agent-lens/apps/${serviceId}/similarity/update?${queryParams}`, {
+      const response = await fetch(`/reef-imaging/apps/${serviceId}/similarity/update?${queryParams}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'

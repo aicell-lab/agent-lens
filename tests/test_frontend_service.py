@@ -26,7 +26,7 @@ from agent_lens.register_frontend_service import setup_service, get_frontend_api
 
 # Test configuration
 TEST_SERVER_URL = "https://hypha.aicell.io"
-TEST_WORKSPACE = "agent-lens"
+TEST_WORKSPACE = "reef-imaging"
 TEST_TIMEOUT = 120  # seconds
 WORKSPACE_TOKEN = os.getenv('WORKSPACE_TOKEN')  # Get token from environment
 
@@ -1007,7 +1007,7 @@ async def test_frontend_webrtc_operations(test_frontend_service):
             # Select simulated microscope
             print("🔍 Selecting simulated microscope...")
             simulated_microscope_selectors = [
-                'option[value="agent-lens/squid-control-simulation"]',
+                'option[value="reef-imaging/squid-control-simulation"]',
                 'select option:has-text("Simulated Microscope")',
                 'text="Simulated Microscope"'
             ]
@@ -1020,7 +1020,7 @@ async def test_frontend_webrtc_operations(test_frontend_service):
                         if 'option' in selector:
                             # Select the option from dropdown
                             parent_select = page.locator('select').filter(has=element)
-                            await parent_select.select_option('agent-lens/squid-control-simulation')
+                            await parent_select.select_option('reef-imaging/squid-control-simulation')
                         else:
                             await element.click()
                         await page.wait_for_timeout(2000)

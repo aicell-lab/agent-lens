@@ -10,7 +10,7 @@
             "preLaunchTask": "Build Frontend",
             "args": [
                 "connect-server",
-                "--workspace_name=agent-lens",
+                "--workspace_name=reef-imaging",
                 "--server_url=https://hypha.aicell.io"
             ],
         }

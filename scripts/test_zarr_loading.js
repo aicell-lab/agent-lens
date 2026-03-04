@@ -10,7 +10,7 @@ import { PNG } from 'pngjs';
 import fs from 'fs';
 import path from 'path';
 
-const BASE_URL = 'https://hypha.aicell.io/agent-lens/artifacts/test-20250718-115143/zip-files/well_A2_96.zip/~/data.zarr/';
+const BASE_URL = 'https://hypha.aicell.io/reef-imaging/artifacts/test-20250718-115143/zip-files/well_A2_96.zip/~/data.zarr/';
 
 // OME-Zarr 0.4 specification parameters
 const T = 0;  // Time point

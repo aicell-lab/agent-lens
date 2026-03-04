@@ -21,7 +21,7 @@ pytestmark = [pytest.mark.asyncio, pytest.mark.integration]
 
 # Test configuration
 TEST_SERVER_URL = "https://hypha.aicell.io"
-TEST_WORKSPACE = "agent-lens"
+TEST_WORKSPACE = "reef-imaging"
 TEST_TIMEOUT = 300  # seconds (longer for large uploads)
 
 async def cleanup_test_galleries(artifact_manager):
@@ -113,7 +113,7 @@ from pathlib import Path
 pytestmark = [pytest.mark.asyncio, pytest.mark.integration]
 
 TEST_SERVER_URL = "https://hypha.aicell.io"
-TEST_WORKSPACE = "agent-lens"
+TEST_WORKSPACE = "reef-imaging"
 
 @pytest_asyncio.fixture(scope="function")
 async def artifact_manager():

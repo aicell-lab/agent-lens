@@ -338,7 +338,7 @@ def get_frontend_api():
             formatted_datasets = []
             if time_lapse_datasets:
                 for dataset_item in time_lapse_datasets:
-                    full_id = dataset_item.get("id") # e.g., "agent-lens/20250506-scan-..."
+                    full_id = dataset_item.get("id") # e.g., "reef-imaging/20250506-scan-..."
                     display_name = dataset_item.get("manifest", {}).get("name", dataset_item.get("alias", full_id))
                     
                     if full_id:
@@ -437,7 +437,7 @@ def get_frontend_api():
             await artifact_manager_instance.connect_server(server_for_am) # Connect artifact_manager_instance
         try:
             # Construct the full hypha artifact ID using the workspace and the dataset_id (alias)
-            workspace = artifact_manager_instance.server.config.workspace # Should be "agent-lens"
+            workspace = artifact_manager_instance.server.config.workspace # Should be "reef-imaging"
             full_hypha_dataset_id = f"{workspace}/{dataset_id}"
             
             logger.info(f"Listing files for full Hypha ID: {full_hypha_dataset_id}, dir_path: {dir_path}")

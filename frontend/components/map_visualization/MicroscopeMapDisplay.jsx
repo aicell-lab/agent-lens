@@ -3821,7 +3821,7 @@ const MicroscopeMapDisplay = forwardRef(({
     setDatasets([]);
     setDatasetsError(null);
     const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
-    fetch(`/agent-lens/apps/${serviceId}/list-microscope-galleries`)
+    fetch(`/reef-imaging/apps/${serviceId}/list-microscope-galleries`)
       .then(res => res.json())
       .then(data => {
         if (data.success) {
@@ -3862,7 +3862,7 @@ const MicroscopeMapDisplay = forwardRef(({
     setDatasetsError(null);
     setDatasets([]);
     const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
-    fetch(`/agent-lens/apps/${serviceId}/list-gallery-datasets?gallery_id=${encodeURIComponent(selectedGallery.id)}`)
+    fetch(`/reef-imaging/apps/${serviceId}/list-gallery-datasets?gallery_id=${encodeURIComponent(selectedGallery.id)}`)
       .then(res => res.json())
       .then(data => {
         if (data.success) {
@@ -3913,13 +3913,13 @@ const MicroscopeMapDisplay = forwardRef(({
       
       // Prepare query parameters
       const queryParams = new URLSearchParams({
-        collection_name: convertToValidCollectionName('agent-lens'),
+        collection_name: convertToValidCollectionName('reef-imaging'),
         application_id: applicationId,
         query_text: query.trim(),
         limit: '10'
       });
       
-      const response = await fetch(`/agent-lens/apps/${serviceId}/similarity/search/text?${queryParams}`, {
+      const response = await fetch(`/reef-imaging/apps/${serviceId}/similarity/search/text?${queryParams}`, {
         method: 'POST'
       });
 
@@ -3984,14 +3984,14 @@ const MicroscopeMapDisplay = forwardRef(({
               try {
                 // Try to fetch all annotations and find the one with matching UUID
                 const fetchParams = new URLSearchParams({
-                  collection_name: convertToValidCollectionName('agent-lens'),
+                  collection_name: convertToValidCollectionName('reef-imaging'),
                   application_id: applicationId,
                   limit: '10000',
                   include_vector: 'false',
                   use_prefix_match: 'true'
                 });
                 
-                const fetchResponse = await fetch(`/agent-lens/apps/${serviceId}/similarity/fetch-all?${fetchParams}`, {
+                const fetchResponse = await fetch(`/reef-imaging/apps/${serviceId}/similarity/fetch-all?${fetchParams}`, {
                   method: 'GET'
                 });
                 
@@ -4079,13 +4079,13 @@ const MicroscopeMapDisplay = forwardRef(({
       
       // Prepare query parameters
       const queryParams = new URLSearchParams({
-        collection_name: convertToValidCollectionName('agent-lens'),
+        collection_name: convertToValidCollectionName('reef-imaging'),
         application_id: applicationId,
         limit: '10',
         include_vector: 'false'
       });
       
-      const response = await fetch(`/agent-lens/apps/${serviceId}/similarity/search/vector?${queryParams}`, {
+      const response = await fetch(`/reef-imaging/apps/${serviceId}/similarity/search/vector?${queryParams}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -6302,7 +6302,7 @@ const MicroscopeMapDisplay = forwardRef(({
               <>
                 {/* Notice */}
                 <div className="bg-blue-900 bg-opacity-40 text-blue-200 text-xs p-2 px-4 border-b border-blue-700">
-                  This is for data browsing, for management, please go to <a href="https://hypha.aicell.io/agent-lens#artifacts" target="_blank" rel="noopener noreferrer" className="underline text-blue-300">https://hypha.aicell.io/agent-lens#artifacts</a> if you have access.
+                  This is for data browsing, for management, please go to <a href="https://hypha.aicell.io/reef-imaging#artifacts" target="_blank" rel="noopener noreferrer" className="underline text-blue-300">https://hypha.aicell.io/reef-imaging#artifacts</a> if you have access.
                 </div>
                 {/* Modal Body: Two columns */}
                 <div className="flex flex-row divide-x divide-gray-700" style={{ minHeight: '350px' }}>

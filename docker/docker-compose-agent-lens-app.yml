@@ -29,7 +29,7 @@ services:
         condition: on-failure
         delay: 20s
     healthcheck:
-      test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/agent-lens/services/probes/liveness | jq -e '.status == \"ok\"'"]
+      test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/reef-imaging/services/probes/liveness | jq -e '.status == \"ok\"'"]
       interval: 120s
       timeout: 50s
       retries: 3
@@ -73,7 +73,7 @@ services:
     # Default: HCS_v2 (U2OS_FUCCI). Use switch_sample API to switch to HPA_PLATE1..5 at runtime.
     command: ["python", "-m", "squid_control", "microscope", "--simulation"]
     healthcheck:
-      test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/agent-lens/services/squid-control-simulation/is_service_healthy | jq -e '.status == \"ok\"'"]
+      test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/reef-imaging/services/squid-control-simulation/is_service_healthy | jq -e '.status == \"ok\"'"]
       interval: 120s
       timeout: 30s
       retries: 1

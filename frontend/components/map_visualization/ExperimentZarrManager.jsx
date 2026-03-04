@@ -180,7 +180,7 @@ const useExperimentZarrManager = ({
         return valid;
       };
       
-      const collectionName = convertToValidCollectionName('agent-lens');
+      const collectionName = convertToValidCollectionName('reef-imaging');
       
       // Prepare query parameters
       const queryParams = new URLSearchParams({
@@ -188,7 +188,7 @@ const useExperimentZarrManager = ({
         application_id: experimentName
       });
       
-      const response = await fetch(`/agent-lens/apps/${serviceId}/similarity/applications/delete?${queryParams}`, {
+      const response = await fetch(`/reef-imaging/apps/${serviceId}/similarity/applications/delete?${queryParams}`, {
         method: 'DELETE'
       });
       
