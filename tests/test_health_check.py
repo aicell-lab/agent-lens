@@ -5,7 +5,6 @@ Mirrors exactly what check_liveness() does in register_frontend_service.py.
 
 import os
 import time
-import asyncio
 import pytest
 import pytest_asyncio
 
