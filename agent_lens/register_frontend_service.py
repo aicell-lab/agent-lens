@@ -1417,6 +1417,32 @@ def get_frontend_api():
             logger.error(traceback.format_exc())
             raise HTTPException(status_code=500, detail=str(e))
 
+    @app.get("/is_service_healthy")
+    async def is_service_healthy():
+        """
+        Health check endpoint for the agent-lens service.
+        Checks artifact manager connectivity.
+        """
+        health_status = {
+            "status": "ok",
+            "service": "agent-lens",
+            "checks": {}
+        }
+        try:
+            if artifact_manager_instance._svc is None:
+                health_status["checks"]["artifact_manager"] = "degraded: not connected"
+                health_status["status"] = "degraded"
+                logger.warning("🔴 [agent-lens] health: artifact manager not connected")
+            else:
+                await artifact_manager_instance._svc.list(limit=1)
+                health_status["checks"]["artifact_manager"] = "ok"
+                logger.info("🟢 [agent-lens] health: ok")
+        except Exception as e:
+            health_status["checks"]["artifact_manager"] = f"error: {str(e)}"
+            health_status["status"] = "degraded"
+            logger.warning(f"🔴 [agent-lens] health: artifact manager error — {e}")
+        return health_status
+
     async def serve_fastapi(args):
         await app(args["scope"], args["receive"], args["send"])
 
@@ -1463,56 +1489,5 @@ async def setup_service(server, server_id="agent-lens"):
     )
 
     logger.info(f"Frontend service registered successfully with ID: {server_id}")
-
-    # Register health probes if running in Docker mode
-    if is_docker:
-        logger.info("Docker mode detected - registering health probes...")
-        
-        def check_readiness():
-            """Check if the service is ready to accept requests."""
-            return {"status": "ok", "service": server_id}
-        
-        async def check_liveness():
-            """
-            Check if the frontend service is alive and all critical connections are working.
-            This checks:
-            1. Artifact manager connection (for microscope galleries and datasets)
-            
-            Note: ChromaDB and segmentation service checks are now in agent-lens-tools service.
-            """
-            health_status = {
-                "status": "ok",
-                "service": server_id,
-                "checks": {}
-            }
-            
-            # Check artifact manager connection
-            try:
-                if artifact_manager_instance._svc is None:
-                    health_status["checks"]["artifact_manager"] = "degraded: not connected"
-                    health_status["status"] = "degraded"
-                else:
-                    await artifact_manager_instance._svc.list()
-                    health_status["checks"]["artifact_manager"] = "ok"
-            except Exception as e:
-                logger.warning(f"Artifact manager health check failed: {e}")
-                health_status["checks"]["artifact_manager"] = f"error: {str(e)}"
-                health_status["status"] = "degraded"
-            
-            return health_status
-        
-        # Register probes for the service
-        await server.register_probes({
-            "readiness": check_readiness,
-            "liveness": check_liveness,
-        })
-        
-        logger.info(f"Health probes registered at workspace: {server.config.workspace}")
-        logger.info(f"Liveness probe URL: {SERVER_URL}/{server.config.workspace}/services/probes/liveness")
-        logger.info(f"Readiness probe URL: {SERVER_URL}/{server.config.workspace}/services/probes/readiness")
-    else:
-        logger.info("Not in Docker mode - skipping health probe registration")
-
-    # Store the cleanup function in the server's config
-    # Note: No specific cleanup needed since artifact_manager_instance is global
+    logger.info(f"Health check: {SERVER_URL}/{server.config.workspace}/apps/{server_id}/is_service_healthy")
  

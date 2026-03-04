@@ -40,6 +40,7 @@ def setup_logging(log_file, max_bytes=100000, backup_count=3):
     
     # Clear any existing handlers to avoid duplicates
     logger.handlers.clear()
+    logger.propagate = False
     
     # Rotating file handler
     file_handler = logging.handlers.RotatingFileHandler(

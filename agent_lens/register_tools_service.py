@@ -1526,6 +1526,11 @@ async def setup_service(server, server_id="agent-lens-tools"):
                 "message": f"Error: {str(e)}"
             }
     
+    async def is_service_healthy():
+        """Health check for the agent-lens-tools service."""
+        logger.info("🟢 [agent-lens-tools] health: ok")
+        return {"status": "ok", "service": server_id}
+
     # Register the service with RPC methods only (no ASGI)
     await server.register_service({
         "id": server_id,
@@ -1538,51 +1543,9 @@ async def setup_service(server, server_id="agent-lens-tools"):
         "make_umap_cluster_figure_interactive": make_umap_cluster_figure_interactive_rpc,
         "reset_application": reset_application,
         "fetch_cell_data": fetch_cell_data,
-        "similarity_search_cells": similarity_search_cells
+        "similarity_search_cells": similarity_search_cells,
+        "is_service_healthy": is_service_healthy,
     })
-    
+
     logger.info(f"Tools service registered successfully with ID: {server_id}")
-    
-    # Register health probes if running in Docker mode
-    if is_docker:
-        await register_tools_health_probes(server, server_id)
-
-
-async def register_tools_health_probes(server, server_id):
-    """Register health probes for the tools service."""
-
-    def check_readiness():
-        """Check if tools service is ready."""
-        return {"status": "ok", "service": server_id}
-
-    async def check_liveness():
-        """
-        Check if tools service is alive.
-        Checks:
-        1. ChromaDB connection (cell storage)
-        """
-        health_status = {
-            "status": "ok",
-            "service": server_id,
-            "checks": {}
-        }
-
-        # Check ChromaDB
-        try:
-            collections = chroma_storage.list_collections()
-            health_status["checks"]["chromadb"] = "ok"
-        except Exception as e:
-            logger.warning(f"ChromaDB health check failed: {e}")
-            health_status["checks"]["chromadb"] = f"error: {str(e)}"
-            health_status["status"] = "degraded"
-
-        return health_status
-
-    await server.register_probes({
-        "readiness": check_readiness,
-        "liveness": check_liveness,
-    })
-
-    logger.info(f"Tools health probes registered")
-    logger.info(f"Liveness: {SERVER_URL}/{server.config.workspace}/services/{server_id}/probes/liveness")
-    logger.info(f"Readiness: {SERVER_URL}/{server.config.workspace}/services/{server_id}/probes/readiness")
+    logger.info(f"Health check: {SERVER_URL}/{server.config.workspace}/services/{server_id}/is_service_healthy")
