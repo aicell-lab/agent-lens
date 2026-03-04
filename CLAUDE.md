@@ -1,4 +1,4 @@
-# Agent-Lens Smart Microscopy Platform - Cursor Rules
+# Agent-Lens Smart Microscopy Platform - Development Guidelines
 
 ## 1. Project Overview
 Agent-Lens is an AI-powered smart microscopy web application that provides autonomous control of microscopy hardware with LLM-based AI agents. The platform integrates multiple microscope control, real-time image analysis, advanced data acquisition, and intelligent decision-making.
@@ -9,10 +9,9 @@ Agent-Lens is an AI-powered smart microscopy web application that provides auton
 
 #### Backend (Python)
 - **Framework**: FastAPI with Hypha-RPC for service communication
-- **Core Services**: 
+- **Core Services**:
   - Frontend service (`register_frontend_service.py`) - ASGI web server and REST APIs
   - Tools service (`register_tools_service.py`) - AI/ML operations, embeddings, segmentation, cell analysis
-  - Similarity search service (`register_similarity_search_service.py`)
 - **Key Libraries**: numpy, pillow, scikit-image, zarr, aiohttp, fastapi
 
 #### Frontend (React)
@@ -263,14 +262,22 @@ tests/                     # Test suite (project root level)
 │   ├── run_tests.js                        # Main test runner
 │   ├── test_tile_processing_manager.js     # TileProcessingManager tests
 │   └── test_layer_panel.js                 # LayerPanel component tests
+├── hypha-agents-integration/  # Hypha agent integration tests
+│   ├── test-integration.js                 # Full integration tests
+│   ├── test-kernel-service.js              # Kernel service tests
+│   ├── test-hypha-connection.js            # Hypha connection tests
+│   ├── kernel-manager.js                   # Kernel management utilities
+│   ├── run-all-tests.sh                    # Shell test runner
+│   └── README.md                           # Integration test docs
 ├── conftest.py           # Test configuration and fixtures
 ├── test_basic.py         # Basic functionality tests
-├── test_artifact_manager.py  # Artifact manager tests
 ├── test_artifact_manager_basic.py  # Basic artifact manager tests
+├── test_chroma_integration.py  # ChromaDB integration tests
 ├── test_similarity_service.py  # Similarity service tests
 ├── test_frontend_service.py  # Frontend service tests (Playwright)
+├── test_health_check.py  # Service health check tests
 ├── test_frontend_integration.js  # Frontend integration tests
-├── test_artifact_zarr_loader.js  # Artifact Zarr loader tests
+├── test_zarr_streaming.js  # Zarr streaming tests
 ├── run_js_tests.sh       # JavaScript test runner script
 └── package.json          # JavaScript test dependencies
 
@@ -281,6 +288,17 @@ frontend/                  # React application
 ├── vite.config.mjs       # Vite build configuration
 ├── package.json          # Frontend dependencies and scripts
 ├── components/           # Reusable UI components
+│   ├── agent/                   # AI agent notebook interface
+│   │   ├── AgentPanel.jsx            # Main agent interface
+│   │   ├── AgentPanel.css            # Agent panel styles
+│   │   ├── AgentSettings.jsx         # Model selection and configuration
+│   │   ├── ChatInput.jsx             # Multi-modal chat input
+│   │   ├── CodeCell.jsx              # Code execution cell
+│   │   ├── JupyterOutput.jsx         # Jupyter kernel output rendering
+│   │   ├── MarkdownCell.jsx          # Markdown rendering cell
+│   │   ├── NotebookContent.jsx       # Notebook UI container
+│   │   ├── SystemPromptViewer.jsx    # System prompt display
+│   │   └── ThinkingCell.jsx          # AI reasoning visualization
 │   ├── similarity_search/       # Similarity search and annotation system
 │   │   ├── AnnotationCanvas.jsx      # Canvas for drawing annotations
 │   │   ├── AnnotationDetailsWindow.jsx  # Annotation details modal
@@ -303,7 +321,8 @@ frontend/                  # React application
 │   │   ├── MicroscopeMapDisplay.css      # Microscope map display styles
 │   │   ├── MicroscopeMapDisplay.jsx      # Main microscope map visualization
 │   │   ├── README_TileProcessingManager.md  # Tile processing documentation
-│   │   └── TileProcessingManager.jsx    # Tile processing and caching
+│   │   ├── TileProcessingManager.jsx    # Tile processing and caching
+│   │   └── WellPlateOffsetPanel.jsx     # Well plate calibration adjustments
 │   ├── CameraSettings.jsx        # Camera configuration component
 │   ├── ChannelSettings.jsx       # Channel configuration component
 │   ├── ChatbotButton.jsx         # AI chatbot interface button
@@ -319,10 +338,18 @@ frontend/                  # React application
 │   ├── Sidebar.css                   # Main sidebar styles
 │   └── Sidebar.jsx                   # Main application sidebar
 ├── utils/                # Frontend utility modules
-│   ├── artifactZarrLoader.js  # OME-Zarr data loading service
+│   ├── agentConfigLoader.js   # Agent configuration loading
+│   ├── agentKernelManager.js  # Python kernel management for agents
 │   ├── annotationEmbeddingService.js  # Annotation embedding service
 │   ├── annotationUtils.js     # Annotation utility functions
-│   └── previewImageUtils.js   # Image preview utilities
+│   ├── ansi-utils.js          # ANSI escape code parsing
+│   ├── artifactZarrLoader.js  # OME-Zarr data loading service
+│   ├── cellManager.js         # Cell data management
+│   ├── chatCompletion.js      # OpenAI API integration
+│   ├── loadWebPythonKernel.js # Pyodide-based web Python kernel
+│   ├── openaiConfig.js        # OpenAI configuration
+│   ├── previewImageUtils.js   # Image preview utilities
+│   └── segmentationUtils.js   # Image segmentation utilities
 ├── utils.jsx            # Utility functions, service connections, and input validation
 └── favicon/              # Application icons and metadata
     ├── apple-touch-icon.png
@@ -342,11 +369,8 @@ scripts/                  # Development and deployment scripts
 ├── run_dev.sh           # Development server script
 └── test_zarr_loading.js  # Zarr loading test utilities
 
-performance-analysis/     # Performance analysis tools
-├── README.md            # Performance analysis documentation
-├── chunk_performance_analysis.js  # Chunk loading performance tests
-├── server_processing_bottleneck_analysis.js  # Server bottleneck analysis
-└── parallel_curl_test.sh  # Parallel request testing
+bioengine-app/            # Cell segmentation BioEngine app
+└── cell-segmenter.py    # BioEngine service for microSAM/Cellpose
 
 Root files:
 ├── pyproject.toml       # Python project configuration and dependencies
