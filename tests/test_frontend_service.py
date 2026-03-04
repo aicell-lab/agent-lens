@@ -1752,7 +1752,7 @@ async def test_frontend_incubator_control_slot_management(test_frontend_service)
                     
                     if edit_form_found:
                         # Modify sample name
-                        edit_name_input = page.locator('label:has-text("Sample Name") + input').first
+                        edit_name_input = page.locator('input[placeholder*="sample name"], label:has-text("Sample Name") ~ div input').first
                         if await edit_name_input.count() > 0:
                             await edit_name_input.fill("Test Sample 1 - Edited")
                             print("✅ Modified sample name")
