@@ -127,209 +127,6 @@ async def setup_service(server, server_id="agent-lens-tools"):
     logger.info("Preloading embedding models...")
     await preload_embedding_models()
     
-    # Get API server for microscope connections
-    api_server = server
-    
-    # Connect to Cellpose segmentation service
-    segmentation_service = await api_server.get_service("agent-lens/cell-segmenter")
-    logger.info("Connected to Cellpose segmentation service.")
-
-    # Background queues: segmentation -> build_cell_records
-    segment_queue: asyncio.Queue = asyncio.Queue()
-    build_queue: asyncio.Queue = asyncio.Queue()
-    segment_and_extract_results: List[List[Dict[str, Any]]] = []
-    segment_and_extract_idle = asyncio.Event()
-    segment_and_extract_idle.set()
-    
-    # Background queue for snap (server-side acquisition)
-    snap_queue: asyncio.Queue = asyncio.Queue()
-    snap_worker_busy = asyncio.Event()
-    snap_worker_busy.clear()  # Initially not busy
-    microscope_service_cache: Dict[str, Any] = {}
-
-    async def _run_segmentation(input_rgb: np.ndarray, scale: int = 8) -> np.ndarray:
-        """
-        Encode an (H,W,3) uint8 RGB array, run segmentation, and return the upscaled mask.
-        Mirrors the notebook segment_image encode/decode pipeline exactly.
-        """
-        H, W = input_rgb.shape[:2]
-
-        # Downscale with safe min-size guard
-        if scale and scale > 1:
-            pil_img = PILImage.fromarray(input_rgb, "RGB").resize(
-                (max(1, W // scale), max(1, H // scale)), PILImage.BILINEAR
-            )
-        else:
-            pil_img = PILImage.fromarray(input_rgb, "RGB")
-
-        buf = BytesIO()
-        pil_img.save(buf, format="PNG")
-        b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-
-        res = await segmentation_service.segment_all(b64)
-        mask_small = res["mask"] if isinstance(res, dict) else res
-
-        # Upscale mask back to original size
-        if scale and scale > 1:
-            mask = np.array(
-                PILImage.fromarray(np.array(mask_small, dtype=np.uint16)).resize((W, H), PILImage.NEAREST)
-            )
-        else:
-            mask = np.array(mask_small)
-
-        return mask
-
-    async def _segment_image_from_channel(channel_data: np.ndarray, scale: int = 8) -> np.ndarray:
-        """
-        Segment a single fluorescence channel (e.g. nucleus).
-        Normalises with 1-99th percentile, promotes to 3-channel RGB, then runs segmentation.
-        """
-        if channel_data is None:
-            raise ValueError("Channel data is None")
-
-        channel_data = np.ascontiguousarray(channel_data)
-
-        # Percentile normalise to uint8
-        if channel_data.dtype != np.uint8:
-            g = channel_data.astype(np.float32)
-            p_low = np.percentile(g, 1.0)
-            p_high = np.percentile(g, 99.0)
-            g = np.clip(g, p_low, p_high)
-            if p_high > p_low:
-                g = (g - p_low) / (p_high - p_low) * 255.0
-            channel_data = np.clip(g, 0, 255).astype(np.uint8)
-
-        # Promote grayscale to 3-channel RGB
-        if channel_data.ndim == 2:
-            input_rgb = np.stack([channel_data] * 3, axis=-1)
-        else:
-            input_rgb = channel_data  # already RGB
-
-        return await _run_segmentation(input_rgb, scale=scale)
-
-    async def _segment_image_from_bf(
-        image_data: Any,
-        scale: int = 8,
-        color_map: Optional[Dict[str, Tuple[float, float, float]]] = None,
-    ) -> np.ndarray:
-        """
-        Segment cells from image: BF (channel 0) if present and valid; otherwise use overlay composite.
-        Accepts:
-          - image_data as np.ndarray (H,W,C) or (H,W)
-          - or list/tuple of channels (can include None)
-          - color_map: Optional custom color map for overlay composite
-        """
-        # Convert to channel list (preserve indices including None)
-        if isinstance(image_data, (list, tuple)):
-            chans = list(image_data)
-        else:
-            arr = np.asarray(image_data)
-            if arr.ndim == 2:
-                chans = [arr]
-            else:
-                chans = [arr[:, :, i] for i in range(arr.shape[2])]
-
-        # Pick segmentation input (always RGB, matching notebook pattern)
-        bf = chans[0] if len(chans) > 0 else None
-        if bf is not None and np.nanstd(bf) > 1e-6:
-            if bf.dtype != np.uint8:
-                g = bf.astype(np.float32)
-                p_low = np.percentile(g, 1.0)
-                p_high = np.percentile(g, 99.0)
-                g = np.clip(g, p_low, p_high)
-                if p_high > p_low:
-                    g = (g - p_low) / (p_high - p_low) * 255.0
-                gray_u8 = np.clip(g, 0, 255).astype(np.uint8)
-            else:
-                gray_u8 = bf
-            input_rgb = np.stack([gray_u8] * 3, axis=-1)
-        else:
-            logger.info("Brightfield channel unavailable or has no variation, using RGB overlay composite for segmentation")
-            input_rgb = overlay(chans, color_map=color_map)  # (H,W,3) uint8
-
-        return await _run_segmentation(input_rgb, scale=scale)
-
-    # Background worker functions
-    async def _segment_worker():
-        """Background worker to segment images and enqueue for build."""
-        while True:
-            job = await segment_queue.get()
-            segment_and_extract_idle.clear()
-            try:
-                image_data = job["image_data"]
-                microscope_status = job.get("microscope_status")
-                application_id = job.get("application_id", "hypha-agents-notebook")
-                scale = job.get("scale", 5)
-                nucleus_channel_idx = job.get("nucleus_channel_idx")
-                color_map = job.get("color_map")
-                
-                # Always segment cells from BF (channel 0)
-                cell_mask = await _segment_image_from_bf(image_data, scale=scale, color_map=color_map)
-                
-                # Optionally segment nuclei from specified channel
-                if nucleus_channel_idx is not None:
-                    # Extract nucleus channel
-                    if isinstance(image_data, (list, tuple)):
-                        nucleus_channel = image_data[nucleus_channel_idx] if nucleus_channel_idx < len(image_data) else None
-                    elif isinstance(image_data, np.ndarray) and image_data.ndim == 3:
-                        nucleus_channel = image_data[:, :, nucleus_channel_idx] if nucleus_channel_idx < image_data.shape[2] else None
-                    else:
-                        nucleus_channel = None
-                    
-                    if nucleus_channel is not None and nucleus_channel.max() > 0:
-                        # Segment nucleus channel
-                        nucleus_mask = await _segment_image_from_channel(nucleus_channel, scale=scale)
-                        # Pass as list: [cell_mask, nucleus_mask]
-                        segmentation_mask = [cell_mask, nucleus_mask]
-                    else:
-                        # Nucleus channel empty or invalid, fall back to cell mask only
-                        print(f"Warning: Nucleus channel {nucleus_channel_idx} is empty or invalid, using cell mask only")
-                        segmentation_mask = cell_mask
-                else:
-                    # No nucleus segmentation requested
-                    segmentation_mask = cell_mask
-                
-                await build_queue.put(
-                    {
-                        "image_data": image_data,
-                        "segmentation_mask": segmentation_mask,
-                        "microscope_status": microscope_status,
-                        "application_id": application_id,
-                        "color_map": color_map,
-                    }
-                )
-            except Exception as e:
-                logger.error(f"segment worker failed: {e}", exc_info=True)
-            finally:
-                segment_queue.task_done()
-                if segment_queue.empty() and build_queue.empty():
-                    segment_and_extract_idle.set()
-
-    async def _build_worker():
-        """Background worker to run build_cell_records."""
-        while True:
-            job = await build_queue.get()
-            segment_and_extract_idle.clear()
-            try:
-                records = await build_cell_records(
-                    image_data_np=job["image_data"],
-                    segmentation_mask=job["segmentation_mask"],
-                    microscope_status=job.get("microscope_status"),
-                    application_id=job.get("application_id", "hypha-agents-notebook"),
-                    color_map=job.get("color_map"),
-                )
-                segment_and_extract_results.extend(records)
-            except Exception as e:
-                logger.error(f"build worker failed: {e}", exc_info=True)
-            finally:
-                build_queue.task_done()
-                if segment_queue.empty() and build_queue.empty():
-                    segment_and_extract_idle.set()
-
-    # Start background workers
-    asyncio.create_task(_segment_worker())
-    asyncio.create_task(_build_worker())
-    
     # Fixed channel order for microscopy
     fixed_channel_order = ['BF_LED_matrix_full', 'Fluorescence_405_nm_Ex', 'Fluorescence_488_nm_Ex', 'Fluorescence_638_nm_Ex', 'Fluorescence_561_nm_Ex', 'Fluorescence_730_nm_Ex']
 
@@ -356,159 +153,6 @@ async def setup_service(server, server_id="agent-lens-tools"):
         'Fluorescence_730_nm_Ex': (0, 255, 255),    # Cyan (far-red/NIR)
     }
     
-    async def _snap_segment_extract_worker():
-        """Background worker to move stage, snap images, then enqueue for segment+extract."""
-        while True:
-            job = await snap_queue.get()
-            snap_worker_busy.set()  # Mark as busy
-            try:
-                microscope_id = job["microscope_id"]
-                channel_config = job["channel_config"]
-                application_id = job.get("application_id", "hypha-agents-notebook")
-                scale = job.get("scale", 5)
-                positions = job.get("positions")
-                wells = job.get("wells")
-                well_offset = job.get("well_offset")
-                well_plate_type = job.get("well_plate_type", "96")
-                nucleus_channel_idx = job.get("nucleus_channel_idx")
-                color_map = job.get("color_map")
-                
-                microscope = microscope_service_cache.get(microscope_id)
-                if microscope is None:
-                    microscope = await api_server.get_service(microscope_id)
-                    microscope_service_cache[microscope_id] = microscope
-                
-                # Determine which mode to use
-                if wells is not None:
-                    # NEW MODE: Well grid scanning
-                    # Parse well IDs and navigate to each well, then apply offsets
-                    for well_id in wells:
-                        # Parse well_id (e.g., "A1" -> row="A", col=1)
-                        row = well_id[0]  # First character is the row letter
-                        col = int(well_id[1:])  # Remaining characters are the column number
-                        
-                        # Navigate to the well center
-                        await microscope.navigate_to_well(
-                            row=row, 
-                            col=col, 
-                            well_plate_type=well_plate_type
-                        )
-                        
-                        # Autofocus at well center
-                        await microscope.reflection_autofocus()
-                        
-                        # Get base position for this well
-                        status = await microscope.get_status()
-                        base_x = status["current_x"]
-                        base_y = status["current_y"]
-                        base_z = status["current_z"]
-                        
-                        # Scan grid positions within this well
-                        for offset in well_offset:
-                            if isinstance(offset, dict):
-                                dx = offset.get("dx", 0)
-                                dy = offset.get("dy", 0)
-                            else:
-                                # Hypha-RPC may deserialize Dict[str, float] as a list [dx, dy]
-                                dx = offset[0] if len(offset) > 0 else 0
-                                dy = offset[1] if len(offset) > 1 else 0
-                            target_x = base_x + dx
-                            target_y = base_y + dy
-                            
-                            # Move to grid position (only if offset is non-zero)
-                            if dx != 0 or dy != 0:
-                                await microscope.move_to_position(
-                                    x=target_x,
-                                    y=target_y,
-                                    z=base_z
-                                )
-                            
-                            # Snap channels into sparse list
-                            channel_to_idx = {ch: idx for idx, ch in enumerate(fixed_channel_order)}
-                            channels: List[Optional[np.ndarray]] = [None] * len(fixed_channel_order)
-                            
-                            for config in channel_config:
-                                channel_name = config["channel"]
-                                channel_idx = channel_to_idx[channel_name]
-                                exposure_time = config["exposure_time"]
-                                intensity = config["intensity"]
-                                
-                                image_np = await microscope.snap(
-                                    channel=channel_name,
-                                    exposure_time=exposure_time,
-                                    intensity=intensity,
-                                    return_array=True
-                                )
-                                channels[channel_idx] = image_np
-                            
-                            # Get current status for metadata
-                            status = await microscope.get_status()
-                            
-                            # Enqueue for segmentation + extraction
-                            await segment_queue.put(
-                                {
-                                    "image_data": channels,
-                                    "microscope_status": status,
-                                    "application_id": application_id,
-                                    "scale": scale,
-                                    "nucleus_channel_idx": nucleus_channel_idx,
-                                    "color_map": color_map,
-                                }
-                            )
-                else:
-                    # LEGACY MODE: Absolute position list
-                    # Default: single snap at current position
-                    if not positions:
-                        positions = [None]
-                    
-                    for pos in positions:
-                        if pos is not None:
-                            await microscope.move_to_position(
-                                x=pos["x"],
-                                y=pos["y"],
-                                z=pos.get("z")
-                            )
-                        # Autofocus
-                        await microscope.reflection_autofocus()
-                        # Snap channels into sparse list
-                        channel_to_idx = {ch: idx for idx, ch in enumerate(fixed_channel_order)}
-                        channels: List[Optional[np.ndarray]] = [None] * len(fixed_channel_order)
-                        
-                        for config in channel_config:
-                            channel_name = config["channel"]
-                            channel_idx = channel_to_idx[channel_name]
-                            exposure_time = config["exposure_time"]
-                            intensity = config["intensity"]
-                            
-                            image_np = await microscope.snap(
-                                channel=channel_name,
-                                exposure_time=exposure_time,
-                                intensity=intensity,
-                                return_array=True
-                            )
-                            channels[channel_idx] = image_np
-                        
-                        status = await microscope.get_status()
-                        # Enqueue for segmentation + extraction
-                        await segment_queue.put(
-                            {
-                                "image_data": channels,
-                                "microscope_status": status,
-                                "application_id": application_id,
-                                "scale": scale,
-                                "nucleus_channel_idx": nucleus_channel_idx,
-                                "color_map": color_map,
-                            }
-                        )
-            except Exception as e:
-                logger.error(f"snap_segment_extract worker failed: {e}", exc_info=True)
-            finally:
-                snap_queue.task_done()
-                snap_worker_busy.clear()  # Mark as not busy
-    
-    # Start snap+segment+extract worker
-    asyncio.create_task(_snap_segment_extract_worker())
-
     def resize_and_pad_to_square_rgb(cell_rgb_u8: np.ndarray, out_size: int, pad_value: int) -> np.ndarray:
         """
         Resize and pad cell image to a square for consistent embedding.
@@ -1311,144 +955,6 @@ async def setup_service(server, server_id="agent-lens-tools"):
 
 
     @schema_function()
-    async def snap_segment_extract_put_queue(
-        microscope_id: str,
-        channel_config: List[Dict[str, Any]],
-        application_id: str = "hypha-agents-notebook",
-        scale: int = 5,
-        positions: Optional[List[Dict[str, float]]] = None,
-        wells: Optional[List[str]] = None,
-        well_offset: Optional[List[Dict[str, float]]] = None,
-        well_plate_type: str = "96",
-        nucleus_channel_name: Optional[str] = None,
-        color_map: Optional[Dict[str, tuple]] = None,
-    ) -> dict:
-        """
-        Enqueue a job to snap image(s), segment, and extract cell records.
-        
-        Args:
-            microscope_id: Microscope service ID
-            channel_config: List of channel configurations for imaging
-            application_id: Application identifier for Vector Database storage
-            scale: Downscaling factor for segmentation (default: 5)
-            positions: (Position mode) Optional list of absolute stage positions to visit.
-                      Each position is a dict with keys: x, y, and optionally z.
-            wells: (Well grid mode) List of well IDs to scan (e.g., ["A1", "B2", "C3"]).
-                  Must be provided together with `well_offset`.
-            well_offset: (Well grid mode) List of relative (dx, dy) offsets in mm to create 
-                        a grid scan pattern within each well. For example:
-                        [{"dx": 0, "dy": 0}, {"dx": 0.5, "dy": 0}, {"dx": 0, "dy": 0.5}]
-                        will scan 3 positions per well.
-            well_plate_type: Well plate format, e.g., "96", "48", "24" (default: "96")
-            nucleus_channel_name: Optional channel name for nucleus segmentation (e.g., "Fluorescence_405_nm_Ex" for DAPI).
-                                 If None, only segments cells from BF or fluorescence composite.
-                                 If specified, segments both:
-                                 - Cell mask from BF (if available) or fluorescence composite
-                                 - Nucleus mask from the specified channel
-            color_map: Optional custom color map indexed by channel number as string (0=BF, 1-5=fluorescence).
-        
-        Returns:
-            dict with success flag and queue size
-        """
-        # Validate mutually exclusive modes
-        if wells is not None and positions is not None:
-            raise ValueError("Cannot use both 'wells' and 'positions' modes simultaneously. Choose one.")
-        
-        if wells is not None and well_offset is None:
-            raise ValueError("When using 'wells' mode, 'well_offset' must be provided.")
-        
-        # Convert nucleus channel name to index
-        nucleus_channel_idx = None
-        if nucleus_channel_name is not None:
-            try:
-                nucleus_channel_idx = fixed_channel_order.index(nucleus_channel_name)
-            except ValueError:
-                raise ValueError(
-                    f"Invalid nucleus_channel_name '{nucleus_channel_name}'. "
-                    f"Must be one of: {fixed_channel_order}"
-                )
-        
-        await snap_queue.put(
-            {
-                "microscope_id": microscope_id,
-                "channel_config": channel_config,
-                "application_id": application_id,
-                "scale": scale,
-                "positions": positions,
-                "wells": wells,
-                "well_offset": well_offset,
-                "well_plate_type": well_plate_type,
-                "nucleus_channel_idx": nucleus_channel_idx,
-                "color_map": color_map,
-            }
-        )
-        return {
-            "success": True,
-            "queued": True,
-            "queue_size": snap_queue.qsize(),
-        }
-
-    @schema_function()
-    async def poll_snap_segment_extract_status() -> Dict[str, Any]:
-        """
-        Poll the status of snap, segment, and extract queues without blocking.
-        
-        Returns:
-            Dictionary with status information:
-            - If not started: {'status': 'idle'}
-            - If running: {'status': 'running', 'queue_sizes': {...}, 'results_count': int}
-            - If error: {'status': 'error', 'error': str} (currently errors are logged but not tracked)
-            - If succeed: {'status': 'succeed', 'result': [...]}
-        """
-        # Check if queues are empty
-        snap_empty = snap_queue.empty()
-        segment_empty = segment_queue.empty()
-        build_empty = build_queue.empty()
-        
-        # Check if we have any results
-        has_results = len(segment_and_extract_results) > 0
-        
-        # Check if workers are busy
-        snap_busy = snap_worker_busy.is_set()
-        segment_build_idle = segment_and_extract_idle.is_set()
-        
-        # Determine status
-        # We're running if ANY queue has items OR any worker is busy
-        all_queues_empty = snap_empty and segment_empty and build_empty
-        all_workers_idle = not snap_busy and segment_build_idle
-        
-        if not all_queues_empty or not all_workers_idle:
-            # Processing in progress
-            return {
-                "status": "running",
-                "queue_sizes": {
-                    "snap_queue": snap_queue.qsize(),
-                    "segment_queue": segment_queue.qsize(),
-                    "build_queue": build_queue.qsize()
-                },
-                "workers_busy": {
-                    "snap_worker": snap_busy,
-                    "segment_build_workers": not segment_build_idle
-                },
-                "results_count": len(segment_and_extract_results)
-            }
-        
-        # All queues are empty AND all workers are idle
-        if has_results:
-            # Processing complete with results
-            results = list(segment_and_extract_results)
-            segment_and_extract_results.clear()
-            return {
-                "status": "succeed",
-                "result": results
-            }
-        else:
-            # No work has been queued or all results have been retrieved
-            return {
-                "status": "idle"
-            }
-    
-    @schema_function()
     async def build_cell_records(
         image_data_np: Any, 
         segmentation_mask: Any,
@@ -2029,8 +1535,6 @@ async def setup_service(server, server_id="agent-lens-tools"):
         # Register all RPC methods
         "generate_image_embeddings_batch": generate_image_embeddings_batch_rpc,
         "build_cell_records": build_cell_records,
-        "snap_segment_extract_put_queue": snap_segment_extract_put_queue,
-        "poll_snap_segment_extract_status": poll_snap_segment_extract_status,
         "make_umap_cluster_figure_interactive": make_umap_cluster_figure_interactive_rpc,
         "reset_application": reset_application,
         "fetch_cell_data": fetch_cell_data,
@@ -2041,30 +1545,28 @@ async def setup_service(server, server_id="agent-lens-tools"):
     
     # Register health probes if running in Docker mode
     if is_docker:
-        await register_tools_health_probes(server, server_id, segmentation_service, segment_queue, build_queue, snap_queue)
+        await register_tools_health_probes(server, server_id)
 
 
-async def register_tools_health_probes(server, server_id, segmentation_service, segment_queue, build_queue, snap_queue):
+async def register_tools_health_probes(server, server_id):
     """Register health probes for the tools service."""
-    
+
     def check_readiness():
         """Check if tools service is ready."""
         return {"status": "ok", "service": server_id}
-    
+
     async def check_liveness():
         """
         Check if tools service is alive.
         Checks:
         1. ChromaDB connection (cell storage)
-        2. Background workers are running
-        3. Segmentation service connection
         """
         health_status = {
             "status": "ok",
             "service": server_id,
             "checks": {}
         }
-        
+
         # Check ChromaDB
         try:
             collections = chroma_storage.list_collections()
@@ -2073,30 +1575,14 @@ async def register_tools_health_probes(server, server_id, segmentation_service, 
             logger.warning(f"ChromaDB health check failed: {e}")
             health_status["checks"]["chromadb"] = f"error: {str(e)}"
             health_status["status"] = "degraded"
-        
-        # Check segmentation service
-        try:
-            await segmentation_service.ping()
-            health_status["checks"]["segmentation_service"] = "ok"
-        except Exception as e:
-            logger.warning(f"Segmentation service health check failed: {e}")
-            health_status["checks"]["segmentation_service"] = f"error: {str(e)}"
-            health_status["status"] = "degraded"
-        
-        # Check background queues
-        health_status["checks"]["queues"] = {
-            "segment_queue": segment_queue.qsize(),
-            "build_queue": build_queue.qsize(),
-            "snap_queue": snap_queue.qsize()
-        }
-        
+
         return health_status
-    
+
     await server.register_probes({
         "readiness": check_readiness,
         "liveness": check_liveness,
     })
-    
+
     logger.info(f"Tools health probes registered")
     logger.info(f"Liveness: {SERVER_URL}/{server.config.workspace}/services/{server_id}/probes/liveness")
     logger.info(f"Readiness: {SERVER_URL}/{server.config.workspace}/services/{server_id}/probes/readiness")
