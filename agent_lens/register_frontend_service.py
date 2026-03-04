@@ -19,6 +19,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 import uuid
 import asyncio
+import traceback
 # Configure logging
 from .log import setup_logging
 
@@ -26,11 +27,14 @@ logger = setup_logging("agent_lens_frontend_service.log")
 
 DEFAULT_CHANNEL = "BF_LED_matrix_full"
 
-# Create a global AgentLensArtifactManager instance
-artifact_manager_instance = AgentLensArtifactManager()
+# Lazily initialized in setup_service() so that importing this module
+# (e.g. in tests) does not trigger network connections or file I/O.
+artifact_manager_instance: Optional[AgentLensArtifactManager] = None
 
-# Global state for current active application (for similarity search)
-current_application_id = None
+# Server-side "active application" state shared across similarity endpoints.
+# TODO(phase-2): replace with per-session state via FastAPI Depends() to avoid
+# the race condition where two concurrent clients overwrite each other's selection.
+_app_state: Dict[str, Any] = {"current_application_id": None}
 
 SERVER_URL = "https://hypha.aicell.io"
 WORKSPACE_TOKEN = os.getenv("WORKSPACE_TOKEN")
@@ -676,6 +680,8 @@ def get_frontend_api():
             try:
                 if not await similarity_service.ensure_connected():
                     raise HTTPException(status_code=503, detail="Similarity search service is not available")
+            except HTTPException:
+                raise
             except Exception as e:
                 logger.warning(f"Similarity service not available: {e}")
                 raise HTTPException(status_code=503, detail="Similarity search service is not available")
@@ -710,8 +716,7 @@ def get_frontend_api():
             )
             
             # Set as current application
-            global current_application_id
-            current_application_id = application_id
+            _app_state["current_application_id"] = application_id
             logger.info(f"Set current application to: {application_id}")
             
             return {
@@ -938,10 +943,9 @@ def get_frontend_api():
         Returns:
             dict: Current application information
         """
-        global current_application_id
         return {
             "success": True,
-            "application_id": current_application_id,
+            "application_id": _app_state["current_application_id"],
             "collection_name": WEAVIATE_COLLECTION_NAME
         }
 
@@ -956,12 +960,11 @@ def get_frontend_api():
         Returns:
             dict: Confirmation of the set operation
         """
-        global current_application_id
-        current_application_id = application_id
+        _app_state["current_application_id"] = application_id
         logger.info(f"Set current application to: {application_id}")
         return {
             "success": True,
-            "application_id": current_application_id,
+            "application_id": _app_state["current_application_id"],
             "collection_name": WEAVIATE_COLLECTION_NAME
         }
 
@@ -991,15 +994,15 @@ def get_frontend_api():
                 logger.warning(f"Similarity service not available: {e}")
                 raise HTTPException(status_code=503, detail="Similarity search service is not available")
             
-            # Use global application_id if not provided
-            global current_application_id
+            # Use server-side active application_id if not provided
             if application_id is None:
-                if current_application_id is None:
+                active = _app_state["current_application_id"]
+                if active is None:
                     raise HTTPException(
                         status_code=400,
                         detail="No application_id provided and no active application set. Please set an active application first."
                     )
-                application_id = current_application_id
+                application_id = active
                 logger.info(f"Using current application: {application_id}")
             
             # Always use the existing 'Agentlens' collection - never create new collections
@@ -1092,15 +1095,15 @@ def get_frontend_api():
                 logger.warning(f"Similarity service not available: {e}")
                 raise HTTPException(status_code=503, detail="Similarity search service is not available")
             
-            # Use global application_id if not provided
-            global current_application_id
+            # Use server-side active application_id if not provided
             if application_id is None:
-                if current_application_id is None:
+                active = _app_state["current_application_id"]
+                if active is None:
                     raise HTTPException(
                         status_code=400,
                         detail="No application_id provided and no active application set. Please set an active application first."
                     )
-                application_id = current_application_id
+                application_id = active
                 logger.info(f"Using current application: {application_id}")
             
             # Always use the existing 'Agentlens' collection
@@ -1156,15 +1159,15 @@ def get_frontend_api():
                 logger.warning(f"Similarity service not available: {e}")
                 raise HTTPException(status_code=503, detail="Similarity search service is not available")
             
-            # Use global application_id if not provided
-            global current_application_id
+            # Use server-side active application_id if not provided
             if application_id is None:
-                if current_application_id is None:
+                active = _app_state["current_application_id"]
+                if active is None:
                     raise HTTPException(
                         status_code=400,
                         detail="No application_id provided and no active application set. Please set an active application first."
                     )
-                application_id = current_application_id
+                application_id = active
                 logger.info(f"Using current application: {application_id}")
             
             # Always use the existing 'Agentlens' collection
@@ -1224,9 +1227,8 @@ def get_frontend_api():
             )
             
             # Clear current application if it was deleted
-            global current_application_id
-            if current_application_id == clean_application_id:
-                current_application_id = None
+            if _app_state["current_application_id"] == clean_application_id:
+                _app_state["current_application_id"] = None
                 logger.info("Cleared current application (was deleted)")
             
             logger.info(f"Deleted application '{clean_application_id}' from collection '{valid_collection_name}'")
@@ -1456,18 +1458,16 @@ async def setup_service(server, server_id="agent-lens"):
     Args:
         server (Server): The server instance.
     """
-    # Get command line arguments
-    cmd_args = " ".join(sys.argv)
-    
-    # Check if we're in connect-server mode and not in docker mode
-    is_connect_server = "connect-server" in cmd_args
-    is_docker = "--docker" in cmd_args
-    
-    # Use 'agent-lens-test' as service_id only when using connect-server in VSCode (not in docker)
-    if is_connect_server and not is_docker:
+    # Determine service ID from AGENT_LENS_ENV (set by __main__.py).
+    # "test" = VSCode dev mode; anything else (or unset) = production ID.
+    if os.environ.get("AGENT_LENS_ENV") == "test":
         server_id = "agent-lens-test"
     
-    # Ensure artifact_manager_instance is connected
+    # Instantiate and connect the artifact manager here (not at import time)
+    # so that importing this module in tests has no side effects.
+    global artifact_manager_instance
+    if artifact_manager_instance is None:
+        artifact_manager_instance = AgentLensArtifactManager()
     if artifact_manager_instance.server is None:
         try:
             api_server, artifact_manager = await get_artifact_manager()

@@ -4,6 +4,7 @@ that handles AI/ML operations including embeddings, segmentation, and cell analy
 """
 
 import os
+import math
 from typing import List, Optional, Dict, Any, Tuple
 import numpy as np
 import sys
@@ -112,15 +113,9 @@ async def setup_service(server, server_id="agent-lens-tools"):
         server (Server): The Hypha server instance.
         server_id (str): Service identifier.
     """
-    # Get command line arguments
-    cmd_args = " ".join(sys.argv)
-    
-    # Check if we're in connect-server mode and not in docker mode
-    is_connect_server = "connect-server" in cmd_args
-    is_docker = "--docker" in cmd_args
-    
-    # Use 'agent-lens-tools-test' as service_id only when using connect-server in VSCode (not in docker)
-    if is_connect_server and not is_docker:
+    # Determine service ID from AGENT_LENS_ENV (set by __main__.py).
+    # "test" = VSCode dev mode; anything else (or unset) = production ID.
+    if os.environ.get("AGENT_LENS_ENV") == "test":
         server_id = "agent-lens-tools-test"
     
     # Preload embedding models for faster startup
@@ -650,59 +645,59 @@ async def setup_service(server, server_id="agent-lens-tools"):
             # Morphological features
             try:
                 metadata["area"] = float(prop.area)
-            except:
+            except Exception:
                 metadata["area"] = None
-            
+
             try:
                 metadata["perimeter"] = float(prop.perimeter)
-            except:
+            except Exception:
                 metadata["perimeter"] = None
-            
+
             try:
                 metadata["equivalent_diameter"] = float(prop.equivalent_diameter)
-            except:
+            except Exception:
                 metadata["equivalent_diameter"] = None
-            
+
             try:
                 metadata["bbox_width"] = float(max_col - min_col)
                 metadata["bbox_height"] = float(max_row - min_row)
-            except:
+            except Exception:
                 metadata["bbox_width"] = None
                 metadata["bbox_height"] = None
-            
+
             try:
                 if prop.minor_axis_length > 0:
                     metadata["aspect_ratio"] = float(prop.major_axis_length / prop.minor_axis_length)
                 else:
                     metadata["aspect_ratio"] = None
-            except:
+            except Exception:
                 metadata["aspect_ratio"] = None
-            
+
             try:
                 if metadata["perimeter"] is not None and metadata["perimeter"] > 0 and metadata["area"] is not None:
                     metadata["circularity"] = float(4 * math.pi * metadata["area"] / (metadata["perimeter"] ** 2))
                 else:
                     metadata["circularity"] = None
-            except:
+            except Exception:
                 metadata["circularity"] = None
-            
+
             try:
                 metadata["eccentricity"] = float(prop.eccentricity)
-            except:
+            except Exception:
                 metadata["eccentricity"] = None
-            
+
             try:
                 metadata["solidity"] = float(prop.solidity)
-            except:
+            except Exception:
                 metadata["solidity"] = None
-            
+
             try:
                 if metadata["perimeter"] is not None and metadata["perimeter"] > 0:
                     convex_perimeter = float(prop.perimeter_crofton)
                     metadata["convexity"] = float(convex_perimeter / metadata["perimeter"])
                 else:
                     metadata["convexity"] = None
-            except:
+            except Exception:
                 metadata["convexity"] = None
             
             # Intensity/texture features
@@ -737,9 +732,9 @@ async def setup_service(server, server_id="agent-lens-tools"):
                                     metadata[f"mean_intensity_{sanitized_name}_cytosol"] = None
                                 if nucleus_region is not None and cytosol_region is not None:
                                     metadata[f"ratio_{sanitized_name}_nuc_cyto"] = None
-                    except Exception as e:
+                    except Exception:
                         # If fluorescence calculation fails, continue without it
-                        pass
+                        logger.debug("Fluorescence intensity calculation failed", exc_info=True)
                 else:
                     # Compute region-wise intensities for each channel
                     try:
@@ -805,13 +800,14 @@ async def setup_service(server, server_id="agent-lens-tools"):
                                         metadata[f"ratio_{sanitized_name}_nuc_cyto"] = float(nuc_intensity / cyto_intensity)
                                     else:
                                         metadata[f"ratio_{sanitized_name}_nuc_cyto"] = None
-                    except Exception as e:
+                    except Exception:
                         # If fluorescence calculation fails, continue without it
-                        pass
+                        logger.debug("Fluorescence intensity calculation failed", exc_info=True)
                     
 
-            except:
+            except Exception:
                 # Set all intensity features to None on error
+                logger.debug("Intensity feature extraction failed for cell", exc_info=True)
                 try:
                     if image_data_np.ndim == 3:
                         for channel_idx in range(1, min(6, image_data_np.shape[2])):  # Channels 1-5 (skip brightfield)
@@ -1538,6 +1534,7 @@ async def setup_service(server, server_id="agent-lens-tools"):
         "type": "generic",
         "config": {"visibility": "public"},
         # Register all RPC methods
+        "generate_text_embedding": generate_text_embedding_rpc,
         "generate_image_embeddings_batch": generate_image_embeddings_batch_rpc,
         "build_cell_records": build_cell_records,
         "make_umap_cluster_figure_interactive": make_umap_cluster_figure_interactive_rpc,
