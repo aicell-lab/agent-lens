@@ -311,8 +311,8 @@ export class HyphaServerManager {
       console.log(`[HyphaServerManager] Creating new connection promise for workspace: ${workspace}`);
       this.servers[workspace] = window.hyphaWebsocketClient.connectToServer({
         server_url: this.defaultServerUrl,
-        token: workspace === 'reef-imaging' ? null : this.token,
-        workspace: workspace === 'reef-imaging' ? null : workspace,
+        token: this.token,
+        workspace: workspace,
         method_timeout: 30000, // Increased timeout slightly
         ping_interval: 60000,  // Send ping every 60 seconds to prevent idle timeout
         ping_timeout: 30000,   // Wait 30 seconds for pong response
