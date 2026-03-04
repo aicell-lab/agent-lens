@@ -4173,47 +4173,6 @@ const MicroscopeMapDisplay = forwardRef(({
     };
   }, [isHistoricalDataMode, getEnabledZarrChannels, getSelectedChannels, realMicroscopeChannelConfigs, selectedHistoricalDataset]);
   
-  // Handle simulated sample switching - update dataset when sample changes
-  useEffect(() => {
-    if (isSimulatedMicroscopeSelected && sampleLoadStatus?.isSampleLoaded && sampleLoadStatus?.selectedSampleId) {
-      // Map sample IDs to their data aliases (same as in SampleSelector)
-      const sampleDataAliases = {
-        'simulated-sample-1': 'agent-lens/20250824-example-data-20250824-221822',
-        'hpa-sample': 'agent-lens/hpa-example-sample-20250114-150051'
-      };
-      
-      const dataAlias = sampleDataAliases[sampleLoadStatus.selectedSampleId];
-      if (dataAlias) {
-        console.log('[Simulated Microscope] Sample switched, updating dataset to:', dataAlias);
-        
-        // Clear existing tiles to force reload with new data
-        setStitchedTiles([]);
-        browseDataRequestsRef.current.clear();
-      scanDataRequestsRef.current.clear();
-      activeTileRequestsRef.current.clear();
-        
-        // Create new mock dataset with the selected sample's data alias
-        const mockDataset = {
-          id: dataAlias,
-          name: `Simulated Sample Data (${sampleLoadStatus.selectedSampleId})`,
-          created_at: new Date().toISOString(),
-          metadata: {
-            microscope_service_id: selectedMicroscopeId,
-            sample_id: sampleLoadStatus.selectedSampleId
-          }
-        };
-        
-        // Update the dataset and gallery
-        setSelectedHistoricalDataset(mockDataset);
-        setSelectedGallery({
-          id: dataAlias, // Use the actual dataset ID as gallery ID
-          name: `Simulated Microscope Gallery (${sampleLoadStatus.selectedSampleId})`,
-          microscope_service_id: selectedMicroscopeId
-        });
-      }
-    }
-  }, [isSimulatedMicroscopeSelected, sampleLoadStatus?.isSampleLoaded, sampleLoadStatus?.selectedSampleId, selectedMicroscopeId, setStitchedTiles, setSelectedGallery]);
-  
   // Auto-select first dataset when datasets are loaded in historical mode
   useEffect(() => {
     if (isHistoricalDataMode && datasets.length > 0 && !selectedHistoricalDataset) {

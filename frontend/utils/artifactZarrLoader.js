@@ -13,7 +13,7 @@
 import * as zarr from "zarrita";
 
 // Endpoint for the example zarr dataset
-const ZARR_ENDPOINT = "https://hypha.aicell.io/agent-lens/apps/agent-lens/example-image-data.zarr";
+const ZARR_ENDPOINT = "https://hypha.aicell.io/reef-imaging/apps/agent-lens/example-image-data.zarr";
 
 class ArtifactZarrLoader {
   constructor() {

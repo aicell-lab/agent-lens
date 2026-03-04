@@ -1488,13 +1488,12 @@ async def setup_service(server, server_id="agent-lens"):
             
             # Check artifact manager connection
             try:
-                # Try to list microscope galleries to verify artifact manager is working
-                result = await artifact_manager_instance.list_microscope_galleries(microscope_service_id="microscope-squid-1")
-                if result and not result.get("error"):
-                    health_status["checks"]["artifact_manager"] = "ok"
-                else:
-                    health_status["checks"]["artifact_manager"] = "degraded"
+                if artifact_manager_instance._svc is None:
+                    health_status["checks"]["artifact_manager"] = "degraded: not connected"
                     health_status["status"] = "degraded"
+                else:
+                    await artifact_manager_instance._svc.list()
+                    health_status["checks"]["artifact_manager"] = "ok"
             except Exception as e:
                 logger.warning(f"Artifact manager health check failed: {e}")
                 health_status["checks"]["artifact_manager"] = f"error: {str(e)}"

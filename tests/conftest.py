@@ -108,7 +108,7 @@ async def hypha_server():
         connection_config = {
             "server_url": "https://hypha.aicell.io",
             "token": token,
-            "workspace": "agent-lens",
+            "workspace": "reef-imaging",
         }
         
         server = await connect_to_server(connection_config)

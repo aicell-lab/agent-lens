@@ -18,7 +18,7 @@ server = await connect_to_server({
 })
 
 # Connect to simulation microscope service
-microscope_id = "agent-lens/squid-control-simulation"
+microscope_id = "reef-imaging/squid-control-simulation"
 microscope = await server.get_service(microscope_id)
 
 print(f"✓ Connected to simulation microscope: {microscope_id}")

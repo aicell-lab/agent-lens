@@ -54,12 +54,12 @@ export const rgbToHex = (rgb) => {
 // This configuration object centralizes all microscope service information,
 // eliminating hardcoded service IDs scattered across multiple components.
 export const MICROSCOPE_CONFIG = {
-  'agent-lens/squid-control-simulation': {
-    id: 'agent-lens/squid-control-simulation',
+  'reef-imaging/squid-control-simulation': {
+    id: 'reef-imaging/squid-control-simulation',
     type: 'simulated',
     model: 'squid',
     displayName: 'Simulated 0',
-    videoTrackServiceId: 'agent-lens/video-track-squid-control-simulation',
+    videoTrackServiceId: 'reef-imaging/video-track-squid-control-simulation',
     orchestratorId: null, // Not supported for time-lapse
     microscopeNumber: null, // Not a real microscope
   },
@@ -298,8 +298,8 @@ export class HyphaServerManager {
 
   async getServer(workspace) {
     if (!workspace) {
-      console.warn("[HyphaServerManager] Workspace cannot be null or empty. Using default 'agent-lens'.");
-      workspace = "agent-lens"; // Or handle as an error
+      console.warn("[HyphaServerManager] Workspace cannot be null or empty. Using default 'reef-imaging'.");
+      workspace = "reef-imaging"; // Or handle as an error
     }
 
     if (this.serverConnections[workspace]) {
@@ -311,8 +311,8 @@ export class HyphaServerManager {
       console.log(`[HyphaServerManager] Creating new connection promise for workspace: ${workspace}`);
       this.servers[workspace] = window.hyphaWebsocketClient.connectToServer({
         server_url: this.defaultServerUrl,
-        token: workspace === 'agent-lens' ? null : this.token,
-        workspace: workspace === 'agent-lens' ? null : workspace,
+        token: workspace === 'reef-imaging' ? null : this.token,
+        workspace: workspace === 'reef-imaging' ? null : workspace,
         method_timeout: 30000, // Increased timeout slightly
         ping_interval: 60000,  // Send ping every 60 seconds to prevent idle timeout
         ping_timeout: 30000,   // Wait 30 seconds for pong response
@@ -438,9 +438,9 @@ export const tryGetService = async (hyphaManager, name, remoteIdWithWorkspace, l
     if (parts.length < 2 && !isLocal()) {
         // If not local and no workspace specified, this is an issue unless it's a public service meant to be in default workspace
         // However, our manager always needs a workspace. Assume default if not parseable.
-        console.warn(`[tryGetService] Remote ID '${remoteIdWithWorkspace}' for '${name}' does not seem to contain a workspace. Defaulting to 'agent-lens'.`);
+        console.warn(`[tryGetService] Remote ID '${remoteIdWithWorkspace}' for '${name}' does not seem to contain a workspace. Defaulting to 'reef-imaging'.`);
     }
-    const workspaceName = parts.length > 1 ? parts[0] : 'agent-lens'; // Default to agent-lens if no workspace in ID
+    const workspaceName = parts.length > 1 ? parts[0] : 'reef-imaging'; // Default to reef-imaging if no workspace in ID
     let serviceIdToGet; // MODIFIED: Declare serviceIdToGet; initial assignment is now conditional.
 
     const useLocal = localId && isLocal();
@@ -449,9 +449,9 @@ export const tryGetService = async (hyphaManager, name, remoteIdWithWorkspace, l
       console.log(`[tryGetService] Attempting to get LOCAL service '${serviceIdToGet}' in workspace '${workspaceName}' for '${name}'`);
     } else {
       // MODIFIED: Logic for remote service ID determination based on workspaceName.
-      if (workspaceName === 'agent-lens') {
-        // For 'agent-lens', use the full remoteIdWithWorkspace, as per user's request for getService.
-        // This ensures "agent-lens/service-name" is passed if remoteIdWithWorkspace is such.
+      if (workspaceName === 'reef-imaging') {
+        // For 'reef-imaging', use the full remoteIdWithWorkspace, as per user's request for getService.
+        // This ensures "reef-imaging/service-name" is passed if remoteIdWithWorkspace is such.
         serviceIdToGet = remoteIdWithWorkspace;
       } else {
         // For other remote workspaces, strip the workspace prefix.
