@@ -15,7 +15,7 @@ services:
     labels:
       - "autoheal.enable=true"
     volumes:
-      - agent-lens-cache:/app/.cache
+      - agent-lens-chroma:/app/chroma_cell_data
       - /mnt/shared_documents/20251215-illumination-calibrated/data.zarr:/mnt/shared_documents/20251215-illumination-calibrated/data.zarr:ro
     runtime: nvidia
     deploy:
@@ -103,5 +103,5 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
 
 volumes:
-  agent-lens-cache:
+  agent-lens-chroma:
   squid-control-cache:
