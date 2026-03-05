@@ -271,7 +271,6 @@ tests/                     # Test suite (project root level)
 │   └── README.md                           # Integration test docs
 ├── conftest.py           # Test configuration and fixtures
 ├── test_basic.py         # Basic functionality tests
-├── test_artifact_manager_basic.py  # Basic artifact manager tests
 ├── test_chroma_integration.py  # ChromaDB integration tests
 ├── test_similarity_service.py  # Similarity service tests
 ├── test_frontend_service.py  # Frontend service tests (Playwright)
