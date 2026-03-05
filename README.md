@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://hypha.aicell.io/agent-lens/apps/agent-lens/">🔬 Try Live Demo</a> |
+  <a href="https://hypha.aicell.io/reef-imaging/apps/agent-lens/">🔬 Try Live Demo</a> |
   <a href="#quick-start">⚡ Quick Start</a> |
   <a href="#installation">📦 Installation</a>
 </p>
@@ -23,7 +23,7 @@ Agent-Lens is a web-based platform for intelligent microscopy control, combining
 ## Quick Start
 
 ### Try Online
-Visit [https://hypha.aicell.io/agent-lens/apps/agent-lens/](https://hypha.aicell.io/agent-lens/apps/agent-lens/)
+Visit [https://hypha.aicell.io/reef-imaging/apps/agent-lens/](https://hypha.aicell.io/reef-imaging/apps/agent-lens/)
 
 ### Local Development
 ```bash
@@ -33,10 +33,10 @@ conda activate squid
 
 # Connect to Hypha server (no local server needed)
 python -m agent_lens connect-server \
-    --workspace_name=agent-lens \
+    --workspace_name=reef-imaging \
     --server_url=https://hypha.aicell.io
 
-# Access at: https://hypha.aicell.io/agent-lens/apps/agent-lens-test/
+# Access at: https://hypha.aicell.io/reef-imaging/apps/agent-lens-test/
 ```
 
 ### Docker
@@ -138,7 +138,7 @@ agent-lens/
 ### Backend
 ```bash
 conda activate squid
-python -m agent_lens connect-server --workspace_name=agent-lens
+python -m agent_lens connect-server --workspace_name=reef-imaging
 ```
 
 ### Frontend
@@ -195,7 +195,7 @@ Deploy microSAM & Cellpose for cell segmentation:
 # Start worker
 conda activate microsam
 python -m bioengine.worker \
-    --workspace agent-lens \
+    --workspace reef-imaging \
     --head_num_gpus 2
 
 # Deploy service (see bioengine-app/README.md)
@@ -204,7 +204,7 @@ python scripts/deploy_cellsegmenter.py
 
 Usage:
 ```python
-segmenter = await server.get_service("agent-lens/cell-segmenter")
+segmenter = await server.get_service("reef-imaging/cell-segmenter")
 result = await segmenter.segment_all(image=image)
 ```
 

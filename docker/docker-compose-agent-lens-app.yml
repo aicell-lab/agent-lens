@@ -1,7 +1,8 @@
 services:
   agent-lens:
-    image: ghcr.io/aicell-lab/agent-lens:sha-2ce526d
+    image: ghcr.io/aicell-lab/agent-lens:sha-6d9e4d8
     container_name: agent-lens
+    working_dir: /app
     pull_policy: if_not_present
     environment:
       - WORKSPACE_TOKEN=${WORKSPACE_TOKEN}
@@ -15,7 +16,7 @@ services:
     labels:
       - "autoheal.enable=true"
     volumes:
-      - agent-lens-chroma:/app/chroma_cell_data
+      - /tmp/agent-lens-chroma:/app/chroma_cell_data
       - /mnt/shared_documents/20251215-illumination-calibrated/data.zarr:/mnt/shared_documents/20251215-illumination-calibrated/data.zarr:ro
     runtime: nvidia
     deploy:
@@ -42,7 +43,7 @@ services:
       - ALL
 
   squid-control:
-    image: ghcr.io/aicell-lab/squid-control:sha-9021757
+    image: ghcr.io/aicell-lab/squid-control:sha-2f1ae25
     container_name: squid-control
     pull_policy: if_not_present
     network_mode: "host"
@@ -103,5 +104,4 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
 
 volumes:
-  agent-lens-chroma:
   squid-control-cache:
