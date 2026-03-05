@@ -1621,16 +1621,16 @@ async def test_frontend_incubator_control_slot_management(test_frontend_service)
             
             # Try to add sample without filling required fields
             add_sample_button = page.locator('button:has-text("Add Sample")').first
+            warning_selectors = [
+                '.bg-red-100:has-text("Please fill in the required fields")',
+                'div:has-text("Please fill in the required fields")',
+                '.text-red-700'
+            ]
             if await add_sample_button.count() > 0:
                 await add_sample_button.click()
                 await page.wait_for_timeout(1000)
-                
+
                 # Check for warning message
-                warning_selectors = [
-                    '.bg-red-100:has-text("Please fill in the required fields")',
-                    'div:has-text("Please fill in the required fields")',
-                    '.text-red-700'
-                ]
                 
                 warning_found = False
                 for selector in warning_selectors:
