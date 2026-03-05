@@ -76,11 +76,11 @@ function injectBaseUrl(code) {
 
 /**
  * Normalize microscope ID by removing workspace prefix
- * @param {string} microscopeId - Microscope ID (e.g., 'agent-lens/squid-control-simulation' or 'squid-control-simulation')
+ * @param {string} microscopeId - Microscope ID (e.g., 'reef-imaging/squid-control-simulation' or 'squid-control-simulation')
  * @returns {string} - Normalized ID (e.g., 'squid-control-simulation')
  */
 function normalizeMicroscopeId(microscopeId) {
-  // Remove workspace prefix if present (e.g., 'agent-lens/squid-control-simulation' -> 'squid-control-simulation')
+  // Remove workspace prefix if present (e.g., 'reef-imaging/squid-control-simulation' -> 'squid-control-simulation')
   // Also handle other patterns like 'reef-imaging/microscope-squid-1' -> 'microscope-squid-1'
   if (microscopeId.includes('/')) {
     return microscopeId.split('/').pop();
@@ -90,7 +90,7 @@ function normalizeMicroscopeId(microscopeId) {
 
 /**
  * Load agent configuration for a specific microscope ID
- * @param {string} microscopeId - The microscope ID (e.g., 'squid-control-simulation', 'microscope-squid-1', or 'agent-lens/squid-control-simulation')
+ * @param {string} microscopeId - The microscope ID (e.g., 'squid-control-simulation', 'microscope-squid-1', or 'reef-imaging/squid-control-simulation')
  * @param {string|null} token - Optional authentication token to inject (replaces login() call)
  * @returns {Promise<string>} - The system cell code with token injected if provided
  */
@@ -100,7 +100,7 @@ export async function loadAgentConfig(microscopeId, token = null) {
     const normalizedId = normalizeMicroscopeId(microscopeId);
     
     // Use the current page URL as base, which should be the frontend service URL
-    // This ensures the request goes to the correct service endpoint (e.g., /agent-lens/agent-configs/...)
+    // This ensures the request goes to the correct service endpoint (e.g., /reef-imaging/apps/agent-lens/agent-configs/...)
     const baseUrl = window.location.origin + window.location.pathname.replace(/\/$/, '');
     const configPath = `${baseUrl}/agent-configs/${normalizedId}.js`;
     console.log(`[AgentConfigLoader] Loading config for "${microscopeId}" (normalized: "${normalizedId}") from:`, configPath);
@@ -205,7 +205,7 @@ token = await login({"server_url": "https://hypha.aicell.io"})
 server = await connect_to_server({
   "server_url": "https://hypha.aicell.io", 
   "token": token, 
-  "workspace": "agent-lens"
+  "workspace": "reef-imaging"
 })
 
 SYSTEM_PROMPT = """You are a microscopy assistant for the Agent-Lens platform.

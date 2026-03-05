@@ -22,7 +22,7 @@ async def deploy_cellsegmenter():
         "token": token,
     })
     # Songtao's workspace
-    workspace = "agent-lens"
+    workspace = "reef-imaging"
     # Get the worker service
     worker = await server.get_service(f"{workspace}/cell_segmenter:bioengine-worker")
     

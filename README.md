@@ -117,17 +117,18 @@ Hypha Server (hypha.aicell.io)
 ```
 agent-lens/
 ├── agent_lens/                 # Python backend
-│   ├── register_frontend_service.py  # ASGI service
-│   └── utils/                  # Artifact manager, embeddings
+│   ├── register_frontend_service.py  # ASGI service + REST APIs
+│   ├── register_tools_service.py     # AI/ML tools service
+│   └── utils/                  # Artifact manager, embeddings, ChromaDB
 ├── frontend/                   # React application
 │   ├── components/
-│   │   ├── agent/              # AI agent interface
+│   │   ├── agent/              # AI agent notebook interface
 │   │   ├── map_visualization/  # Stage map & OME-Zarr
 │   │   ├── similarity_search/  # Vector search UI
 │   │   └── microscope_acquisition/  # Scan config
-│   └── utils/                  # Zarr loader, embeddings
+│   └── utils/                  # Zarr loader, embeddings, kernel, OpenAI
 ├── bioengine-app/              # Cellpose & microSAM deployment
-├── tests/                      # Test suite
+├── tests/                      # Test suite (Python + JavaScript)
 ├── docker/                     # Containerization
 └── scripts/                    # Automation scripts
 ```
@@ -305,7 +306,7 @@ CI/CD runs automatically on push via GitHub Actions.
 
 ## Documentation
 
-- [.cursorrules](.cursorrules) - Comprehensive development guidelines
+- [CLAUDE.md](CLAUDE.md) - Comprehensive development guidelines
 - [tests/README.md](tests/README.md) - Testing documentation
 - [bioengine-app/README.md](bioengine-app/README.md) - BioEngine services
 

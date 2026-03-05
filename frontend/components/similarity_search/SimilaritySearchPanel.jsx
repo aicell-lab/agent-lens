@@ -556,7 +556,7 @@ const SimilaritySearchPanel = ({
       return;
     }
 
-    const collectionName = convertToValidCollectionName('agent-lens');
+    const collectionName = convertToValidCollectionName('reef-imaging');
     let uploadedCount = 0;
     let failedCount = 0;
 
@@ -642,7 +642,7 @@ const SimilaritySearchPanel = ({
 
           // Use the insert endpoint with correct URL pattern
           const serviceId = window.location.href.includes('agent-lens-test') ? 'agent-lens-test' : 'agent-lens';
-          const insertResponse = await fetch(`/agent-lens/apps/${serviceId}/similarity/insert?${queryParams}`, {
+          const insertResponse = await fetch(`/reef-imaging/apps/${serviceId}/similarity/insert?${queryParams}`, {
             method: 'POST',
             body: requestBody
           });
@@ -703,12 +703,12 @@ const SimilaritySearchPanel = ({
       
       // Prepare query parameters
       const queryParams = new URLSearchParams({
-        collection_name: convertToValidCollectionName('agent-lens'),
+        collection_name: convertToValidCollectionName('reef-imaging'),
         prefix: prefix,
         limit: '10000'
       });
       
-      const response = await fetch(`/agent-lens/apps/${serviceId}/similarity/list-applications?${queryParams}`, {
+      const response = await fetch(`/reef-imaging/apps/${serviceId}/similarity/list-applications?${queryParams}`, {
         method: 'GET'
       });
 
@@ -775,14 +775,14 @@ const SimilaritySearchPanel = ({
       
       // Prepare query parameters
       const queryParams = new URLSearchParams({
-        collection_name: convertToValidCollectionName('agent-lens'),
+        collection_name: convertToValidCollectionName('reef-imaging'),
         application_id: applicationId,
         limit: '10000',
         include_vector: 'false',
         use_prefix_match: usePrefixMatch ? 'true' : 'false'
       });
       
-      const response = await fetch(`/agent-lens/apps/${serviceId}/similarity/fetch-all?${queryParams}`, {
+      const response = await fetch(`/reef-imaging/apps/${serviceId}/similarity/fetch-all?${queryParams}`, {
         method: 'GET'
       });
 

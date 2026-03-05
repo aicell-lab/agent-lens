@@ -40,7 +40,7 @@ async function testFullIntegration() {
     // Step 3: Test Microscope Service Access
     console.log('STEP 3: Microscope Service');
     console.log('-'.repeat(60));
-    const microscope = await server.getService('agent-lens/squid-control-simulation');
+    const microscope = await server.getService('reef-imaging/squid-control-simulation');
     const status = await microscope.get_status();
     results.microscope = true;
     console.log('✅ Microscope accessible');
@@ -59,7 +59,7 @@ server = await connect_to_server(
     server_url="${server.config.public_base_url}",
     token="${await server.generateToken()}"
 )
-microscope = await server.get_service("agent-lens/squid-control-simulation")
+microscope = await server.get_service("reef-imaging/squid-control-simulation")
 
 # Get current status
 status = await microscope.get_status()

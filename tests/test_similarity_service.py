@@ -31,7 +31,7 @@ async def test_frontend_service(hypha_server):
         print("✅ Frontend service ready for similarity search testing")
         
         # Get the service URL for HTTP testing
-        service_url = f"https://hypha.aicell.io/agent-lens/apps/{test_id}"
+        service_url = f"https://hypha.aicell.io/reef-imaging/apps/{test_id}"
         print(f"🌐 Service URL: {service_url}")
         
         yield service, service_url
@@ -899,7 +899,7 @@ class TestWeaviateSimilarityService:
         try:
             async with aiohttp.ClientSession() as session:
                 # First, we need to insert some test data
-                collection_name = "agent-lens"
+                collection_name = "reef-imaging"
                 application_id = "test-endpoint-uuid-search"
                 
                 print("🧪 Testing UUID search endpoint...")

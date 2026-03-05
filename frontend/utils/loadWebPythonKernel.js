@@ -22,7 +22,7 @@ export async function loadWebPythonKernel() {
   loadingPromise = (async () => {
     try {
       // Construct URL relative to the document base
-      // This works in both dev (http://localhost:5173/) and production (https://hypha.aicell.io/agent-lens/)
+      // This works in both dev (http://localhost:5173/) and production (https://hypha.aicell.io/reef-imaging/apps/agent-lens/)
       const modulePath = new URL('web-python-kernel.mjs', document.baseURI).href;
       
       console.log('[loadWebPythonKernel] Loading from:', modulePath);

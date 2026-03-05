@@ -14,7 +14,7 @@
 import * as zarr from "zarrita";
 
 // Test configuration
-const ZARR_ENDPOINT = "https://hypha.aicell.io/agent-lens/apps/agent-lens/example-image-data.zarr";
+const ZARR_ENDPOINT = "https://hypha.aicell.io/reef-imaging/apps/agent-lens/example-image-data.zarr";
 
 // Hardcoded OME-Zarr structure (to avoid listing 3 million chunks)
 // Based on: /mnt/shared_documents/20251215-illumination-calibrated/data.zarr

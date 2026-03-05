@@ -192,7 +192,7 @@ class AgentLensArtifactManager:
         Returns a list of gallery info dicts from all microscopes.
         """
         try:
-            # List all collections in the agent-lens workspace (top-level)
+            # List all collections in the reef-imaging workspace (top-level)
             all_collections = await self._svc.list()
             logger.info(f"Listing all galleries (microscope_service_id: {microscope_service_id})")
             #logger.info(f"All collections: {all_collections}")

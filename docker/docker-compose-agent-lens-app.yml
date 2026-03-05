@@ -15,7 +15,7 @@ services:
     labels:
       - "autoheal.enable=true"
     volumes:
-      - agent-lens-cache:/app/.cache
+      - agent-lens-chroma:/app/chroma_cell_data
       - /mnt/shared_documents/20251215-illumination-calibrated/data.zarr:/mnt/shared_documents/20251215-illumination-calibrated/data.zarr:ro
     runtime: nvidia
     deploy:
@@ -29,10 +29,10 @@ services:
         condition: on-failure
         delay: 20s
     healthcheck:
-      test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/agent-lens/services/probes/liveness | jq -e '.status == \"ok\"'"]
-      interval: 120s
-      timeout: 50s
-      retries: 3
+      test: ["CMD", "/bin/sh", "-c", "curl -sf -H \"Authorization: Bearer ${WORKSPACE_TOKEN}\" https://hypha.aicell.io/reef-imaging/apps/agent-lens/is_service_healthy | jq -e '.status == \"ok\"' && curl -sf -H \"Authorization: Bearer ${WORKSPACE_TOKEN}\" https://hypha.aicell.io/reef-imaging/services/agent-lens-tools/is_service_healthy | jq -e '.status == \"ok\"'"]
+      interval: 30s
+      timeout: 10s
+      retries: 2
       start_period: 300s
     restart: on-failure
     stop_grace_period: 30s
@@ -73,7 +73,7 @@ services:
     # Default: HCS_v2 (U2OS_FUCCI). Use switch_sample API to switch to HPA_PLATE1..5 at runtime.
     command: ["python", "-m", "squid_control", "microscope", "--simulation"]
     healthcheck:
-      test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/agent-lens/services/squid-control-simulation/is_service_healthy | jq -e '.status == \"ok\"'"]
+      test: ["CMD", "/bin/sh", "-c", "curl -s https://hypha.aicell.io/reef-imaging/services/squid-control-simulation/is_service_healthy | jq -e '.status == \"ok\"'"]
       interval: 120s
       timeout: 30s
       retries: 1
@@ -103,5 +103,5 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
 
 volumes:
-  agent-lens-cache:
+  agent-lens-chroma:
   squid-control-cache:

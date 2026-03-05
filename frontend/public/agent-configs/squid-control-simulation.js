@@ -13,12 +13,12 @@ token = await login({"server_url": "https://hypha.aicell.io"})
 server = await connect_to_server({
   "server_url": "https://hypha.aicell.io", 
   "token": token, 
-  "workspace": "agent-lens",
+  "workspace": "reef-imaging",
   "ping_interval": None
 })
 
 # Connect to simulation microscope service
-microscope_id = "agent-lens/squid-control-simulation"
+microscope_id = "reef-imaging/squid-control-simulation"
 microscope = await server.get_service(microscope_id)
 
 print(f"✓ Connected to simulation microscope: {microscope_id}")
@@ -36,7 +36,7 @@ The Python kernel has already been initialized with the following variables avai
 - Just use \`microscope\` directly in your code - no setup needed!
 
 **Connected Microscope:** Squid Control Simulation
-**Workspace:** agent-lens
+**Workspace:** reef-imaging
 
 **Available Operations (use the \`microscope\` variable directly):**
 

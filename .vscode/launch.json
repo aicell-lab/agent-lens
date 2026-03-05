@@ -1,0 +1,18 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: connect-server",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "agent_lens",
+            "justMyCode": false,
+            "preLaunchTask": "Build Frontend",
+            "args": [
+                "connect-server",
+                "--workspace_name=reef-imaging",
+                "--server_url=https://hypha.aicell.io"
+            ],
+        }
+    ]
+}

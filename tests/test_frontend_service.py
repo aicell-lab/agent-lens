@@ -26,7 +26,7 @@ from agent_lens.register_frontend_service import setup_service, get_frontend_api
 
 # Test configuration
 TEST_SERVER_URL = "https://hypha.aicell.io"
-TEST_WORKSPACE = "agent-lens"
+TEST_WORKSPACE = "reef-imaging"
 TEST_TIMEOUT = 120  # seconds
 WORKSPACE_TOKEN = os.getenv('WORKSPACE_TOKEN')  # Get token from environment
 
@@ -1007,7 +1007,7 @@ async def test_frontend_webrtc_operations(test_frontend_service):
             # Select simulated microscope
             print("🔍 Selecting simulated microscope...")
             simulated_microscope_selectors = [
-                'option[value="agent-lens/squid-control-simulation"]',
+                'option[value="reef-imaging/squid-control-simulation"]',
                 'select option:has-text("Simulated Microscope")',
                 'text="Simulated Microscope"'
             ]
@@ -1020,7 +1020,7 @@ async def test_frontend_webrtc_operations(test_frontend_service):
                         if 'option' in selector:
                             # Select the option from dropdown
                             parent_select = page.locator('select').filter(has=element)
-                            await parent_select.select_option('agent-lens/squid-control-simulation')
+                            await parent_select.select_option('reef-imaging/squid-control-simulation')
                         else:
                             await element.click()
                         await page.wait_for_timeout(2000)
@@ -1621,16 +1621,16 @@ async def test_frontend_incubator_control_slot_management(test_frontend_service)
             
             # Try to add sample without filling required fields
             add_sample_button = page.locator('button:has-text("Add Sample")').first
+            warning_selectors = [
+                '.bg-red-100:has-text("Please fill in the required fields")',
+                'div:has-text("Please fill in the required fields")',
+                '.text-red-700'
+            ]
             if await add_sample_button.count() > 0:
                 await add_sample_button.click()
                 await page.wait_for_timeout(1000)
-                
+
                 # Check for warning message
-                warning_selectors = [
-                    '.bg-red-100:has-text("Please fill in the required fields")',
-                    'div:has-text("Please fill in the required fields")',
-                    '.text-red-700'
-                ]
                 
                 warning_found = False
                 for selector in warning_selectors:
@@ -1752,7 +1752,7 @@ async def test_frontend_incubator_control_slot_management(test_frontend_service)
                     
                     if edit_form_found:
                         # Modify sample name
-                        edit_name_input = page.locator('label:has-text("Sample Name") + input').first
+                        edit_name_input = page.locator('input[placeholder*="sample name"], label:has-text("Sample Name") ~ div input').first
                         if await edit_name_input.count() > 0:
                             await edit_name_input.fill("Test Sample 1 - Edited")
                             print("✅ Modified sample name")

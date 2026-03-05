@@ -20,7 +20,6 @@ html/
 bin/mc*
 bin/minio*
 *.log*
-.vscode/
 
 # ChromaDB local storage
 chroma_cell_data/
@@ -31,7 +30,9 @@ chroma_cell_data/
 coverage/
 
 # IDE settings (user-specific)
-.vscode/
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
 
 # Jupyter notebooks
 docs/*.ipynb

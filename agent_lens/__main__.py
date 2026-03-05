@@ -80,8 +80,17 @@ async def connect_server(args):
     is_workspace = args.workspace_name is not None
     token = get_token(is_workspace)
 
+    # Signal to services which environment we're in so they can pick the right
+    # service ID without inspecting sys.argv.
+    # "test" = VSCode dev (connect-server, not in Docker), "docker" = container.
+    is_docker = getattr(args, "docker", False)
+    if is_docker:
+        os.environ.setdefault("AGENT_LENS_ENV", "docker")
+    else:
+        os.environ.setdefault("AGENT_LENS_ENV", "test")
+
     server = await connect_to_server(
-        {   
+        {
             "client_id": f"agent-lens-frontend-{uuid.uuid4()}",
             "server_url": args.server_url,
             "token": token,
