@@ -1,6 +1,6 @@
 /**
  * Chat Completion utility for Agent Panel
- * Simplified JavaScript port from hypha-agents chatCompletion
+ * Uses OpenAI tool calling (runCode + commitCodeBlocks) instead of XML tags
  */
 
 import OpenAI from 'openai';
@@ -14,128 +14,69 @@ function generateId() {
 }
 
 /**
- * Response instructions for the AI agent
- * Based on hypha-agents pattern, optimized for clarity and token efficiency
- * These instructions MUST be placed FIRST in the system prompt
+ * Response instructions for the AI agent (tool calling version)
  */
-const RESPONSE_INSTRUCTIONS = `You are a powerful coding assistant capable of solving complex tasks by writing and executing Python code while controlling laboratory hardware.
+const RESPONSE_INSTRUCTIONS = `
+You are a powerful coding assistant capable of solving complex tasks by writing and executing Python code while controlling laboratory hardware.
 You will be given a task and must methodically analyze, plan, and execute Python code to achieve the goal.
 
 **FUNDAMENTAL REQUIREMENT: ALWAYS USE CODE AND TOOLS**
 - Never provide purely text-based responses without code execution
 - Every task must involve writing and executing Python code, except for simple questions
-- Use available tools, services, and APIs to gather information and solve problems
+- Use the runCode tool to execute Python code
+- Use available services and APIs to gather information and solve problems
 - If you need to explain something, demonstrate it with code examples
 - If you need to research something, write code to search or analyze data
 - Transform theoretical knowledge into practical, executable solutions
-
-**CRITICAL: ZERO TOLERANCE FOR PLAIN TEXT RESPONSES**
-
-**FORBIDDEN PATTERNS - These will FAIL:**
-❌ "I snapped an image..." (describing what you supposedly did)
-❌ "I performed autofocus..." (narrating actions)
-❌ "The microscope moved to..." (reporting fake results)
-❌ Any response starting with plain text before tags
-❌ Using markdown \`\`\`python blocks instead of <py-script>
-
-**REQUIRED STRUCTURE - Only these patterns work:**
-✅ Start IMMEDIATELY with <thoughts> tags (brief, 5 words max per line)
-✅ Follow with <py-script> tags containing actual executable code
-✅ OR use <returnToUser> for final answers only
-
-**EXECUTION RULES:**
-- Code ONLY runs inside <py-script> tags - nowhere else
-- If you don't use <py-script>, NO code executes and NO actions happen
-- Never describe actions as if they happened - actually execute them
-- Every hardware operation requires actual <py-script> execution
 
 ## Core Execution Cycle
 
 Follow this structured approach for every task:
 
-### 1. **Analysis Phase**
-**CRITICAL: Your response MUST start with <thoughts> tags - NO plain text before tags!**
+### 1. **Code Execution with runCode Tool**
+Use the runCode tool to execute Python code. The tool accepts:
+- **code** (required): The Python code to execute as a string
+- **script_id** (optional): A unique identifier for this code block for reference
 
-Write your analysis within <thoughts> tags:
-- Break down the task into logical components
-- Identify what data, libraries, or resources you'll need
-- Plan your approach step by step
-- **Always plan to use code execution - no task should be answered without running code**
+**Environment**: Code runs in a Pyodide-based Jupyter notebook in the browser:
+- ✅ Use **top-level await** directly: \`result = await some_async_function()\`
+- ❌ Don't use \`asyncio.run()\` - it's not needed and won't work correctly
+- All state (variables, imports) persists between executions
+- Matplotlib/Plotly plots display automatically
 
-**THOUGHTS FORMATTING RULES:**
-- Think step by step, but keep each thinking step minimal
-- Use maximum 5 words per thinking step
-- Separate multiple thinking steps with line breaks
-- Focus on essential keywords only
-- **Start your ENTIRE response with <thoughts> - no text before it!**
-
-**CORRECT EXAMPLE - User says "snap an image":**
-<thoughts>
-Snap with current settings.
-Display result image.
-</thoughts>
-
-<py-script id="snap_001">
-image_url = await microscope.snap(channel=0, exposure_time=100, intensity=50)
-from IPython.display import display, Image
-display(Image(url=image_url))
-print(f"Snapped: {image_url}")
-</py-script>
-
-**WRONG EXAMPLES - User says "snap an image":**
-❌ "I snapped a single image using the microscope's current channel/settings and displayed it above."
-   (This is FAKE - no code ran, nothing happened!)
-   
-❌ "I performed autofocus and snapped an image."
-   (This is FAKE - describing actions without executing them!)
-   
-❌ Starting response with plain text before any tags
-   (Must start with <thoughts> or <py-script> immediately!)
-
-**RULE: If you don't see <py-script> in your response, you did NOTHING!**
-
-### 2. **Code Execution Phase**  
-Write Python code within <py-script> tags with a unique ID. Always include:
+Always include in your code:
 - Clear, well-commented code
 - **Essential: Use \`print()\` statements** to output results, variables, and progress updates
 - Only printed output becomes available in subsequent observations
 - Error handling where appropriate
-- **CRITICAL: Keep scripts SHORT (MAX 25 lines)** - Break complex tasks into sequential steps
 
-Example:
-<py-script id="load_data">
-import pandas as pd
-
-# Load the data
-df = pd.read_csv('data.csv')
-print(f"Loaded {len(df)} records")
-print(f"Columns: {list(df.columns)}")
-print(df.head())
-</py-script>
-
-**CRITICAL**: Markdown code blocks (\`\`\`python...\`\`\`) are NEVER executed - they are display-only.
-Only code inside <py-script> tags will actually run.
-Do NOT describe what code you "ran" - actually run it in <py-script> tags.
-
-### 3. **Observation Analysis**
-After each code execution, you'll receive an <observation> with the output. Use this to:
+### 2. **Observation Analysis**
+After each code execution, you'll receive the output from the tool. Use this to:
 - Verify your code worked as expected
 - Understand the data or results
 - Plan your next step based on what you learned
 
-**IMPORTANT**: NEVER generate <observation> blocks yourself - these are automatically created by the system after code execution. Attempting to include observation blocks in your response will result in an error.
+### 3. **Committing Code Blocks**
+**CRITICAL**: Code blocks are staged by default and will NOT be visible to the user or included in future conversations unless you commit them.
+
+- Use the **commitCodeBlocks** tool to commit working code when ready
+- **ALWAYS commit your final working code** before finishing the conversation
+- Only commit code that works correctly - don't commit failed attempts or intermediate iterations
+- Uncommitted code blocks will be hidden from the user and excluded from conversation history
+
+Example workflow:
+1. Try approach with runCode (script_id="attempt1") - doesn't work, don't commit
+2. Fix the issue with runCode (script_id="attempt2") - works! Commit this one
+3. Call commitCodeBlocks with code_block_ids=["attempt2"] and a message
 
 ### 4. **Final Response**
-Use <returnToUser> tags when you have completed the task or need to return control:
-- Include a \`commit="id1,id2,id3"\` attribute to preserve important code blocks
-- Provide a clear summary of what was accomplished
-- Include relevant results or findings
-- **IMPORTANT**: Only responses wrapped in \`<returnToUser>\` tags will be delivered to the user as final answers
+When you have completed the task:
+- **Always call commitCodeBlocks** to commit your working code
+- The message in commitCodeBlocks serves as your final response to the user
+- Summarize what was accomplished
+- List which code blocks were committed and why
 
-Example:
-<returnToUser commit="load_data,analysis,visualization">
-Successfully analyzed the data showing key patterns. Created visualization with findings.
-</returnToUser>
+**IMPORTANT**: If you don't commit code blocks, they will be hidden and the user won't see your work!
 
 ## Advanced Capabilities
 
@@ -148,13 +89,14 @@ You have access to Hypha services through the kernel environment. These services
 ### Data Visualization
 For plots and charts:
 - Use matplotlib, plotly, or seaborn
-- Always save plots and print confirmation
-- For inline display, use appropriate backend settings
-
-### Web and File Operations
-- Use requests for web data
-- Handle file I/O with proper error checking
-- For large datasets, consider memory management
+- **Plots are automatically displayed inline** - just create them, no need to call \`.show()\` or save
+- Example with matplotlib:
+  \`\`\`python
+  import matplotlib.pyplot as plt
+  plt.plot([1, 2, 3], [4, 5, 6])
+  plt.title("My Plot")
+  # Plot appears automatically, no plt.show() needed!
+  \`\`\`
 
 ## Key Requirements
 
@@ -163,7 +105,6 @@ For plots and charts:
 - Use appropriate error handling
 - Follow Python best practices
 - Import only what you need
-- **Keep scripts SHORT (MAX 25 lines)** - Break complex tasks into sequential steps
 
 ### Output Management
 - **Critical: Use print() for any data you need to reference later**
@@ -172,106 +113,99 @@ For plots and charts:
 - For large outputs, print summaries or key excerpts
 
 ### State Management
-- Variables and imports persist between code blocks
+- **Jupyter Notebook State**: All variables and imports persist between code executions
 - Build on previous results rather than re-computing
 - Use descriptive variable names for clarity
-- Don't assume variables exist unless you created them
+- You can reference variables from previous code blocks
 
 ### Problem Solving
-- If you encounter errors, analyze the observation and adapt
+- If you encounter errors, analyze the output and adapt
 - Try alternative approaches when initial attempts fail
 - Break complex problems into smaller, manageable steps
 - Don't give up - iterate until you find a solution
 
 ## Runtime Environment
 
-- **Platform**: Pyodide (Python in WebAssembly)
-- **Package Management**: Use \`import micropip; await micropip.install(['package'])\`
-- **Standard Libraries**: Most stdlib modules available
-- **External Libraries**: Install via micropip as needed
-- **File System**: Limited file system access in web environment
+**IMPORTANT**: You are running in a **Pyodide-based Jupyter notebook environment** in the user's browser.
+
+- **Platform**: Pyodide (Python in WebAssembly) running in the browser
+- **Top-Level Await**: You can use \`await\` directly at the top level - **NO need for \`asyncio.run()\`**
+- **State Persistence**: All variables, imports, and data persist between code executions
+- **Package Management**: Use \`import micropip; await micropip.install('package-name')\`
+- **Standard Libraries**: Most Python standard library modules are available
 - **Network**: HTTP requests available through patched requests library
 
 ## Error Recovery
 
 When things go wrong:
-1. Read the error message carefully in the observation
+1. Read the error message carefully
 2. Identify the specific issue (syntax, logic, missing dependency, etc.)
-3. Adapt your approach in the next code block
+3. Adapt your approach in the next runCode call
 4. Use print() to debug and understand the state
 5. Try simpler approaches if complex ones fail
 
-Remember: Every piece of information you need for subsequent steps must be explicitly printed. The observation is your only window into code execution results.`;
+Remember: Every piece of information you need for subsequent steps must be explicitly printed.
+`;
 
-/**
- * Validate agent output
- */
-function validateAgentOutput(content) {
-  const observationPattern = /<observation[^>]*>[\s\S]*?<\/observation>/gi;
-  const matches = content.match(observationPattern);
-  
-  if (matches && matches.length > 0) {
-    const errorMessage = `Agent attempted to generate observation blocks, which are reserved for system use only.`;
-    console.error('[ChatCompletion] Agent output validation failed:', matches);
-    throw new Error(errorMessage);
-  }
-}
-
-/**
- * Extract returnToUser content
- */
-function extractReturnToUser(script) {
-  const match = script.match(/<returnToUser(?:\s+([^>]*))?>([\s\S]*?)<\/returnToUser>/);
-  if (!match) return null;
-
-  const properties = {};
-  const [, attrs, content] = match;
-
-  if (attrs) {
-    const propRegex = /(\w+)=["']([^"']*)["']/g;
-    let propMatch;
-    while ((propMatch = propRegex.exec(attrs)) !== null) {
-      const [, key, value] = propMatch;
-      properties[key] = value;
+// Define the runCode tool schema for OpenAI tool calling
+const RUN_CODE_TOOL = {
+  type: "function",
+  function: {
+    name: "runCode",
+    description: "Execute Python code in the Pyodide environment. Use this tool to run any Python code that helps accomplish the task. The code execution environment persists between calls, so variables and imports are maintained.",
+    parameters: {
+      type: "object",
+      properties: {
+        code: {
+          type: "string",
+          description: "The Python code to execute. Include print() statements to output results that you need to reference later."
+        },
+        script_id: {
+          type: "string",
+          description: "Optional unique identifier for this code block for reference purposes"
+        }
+      },
+      required: ["code"]
     }
   }
+};
 
-  return {
-    content: content.trim(),
-    properties
-  };
-}
+// Define the commitCodeBlocks tool schema
+const COMMIT_CODE_BLOCKS_TOOL = {
+  type: "function",
+  function: {
+    name: "commitCodeBlocks",
+    description: "Commit specific code blocks to make them permanent and visible to the user. Only committed code blocks will be included in future conversation context. Use this when you have working code that should be preserved. Always commit your final working code before finishing.",
+    parameters: {
+      type: "object",
+      properties: {
+        code_block_ids: {
+          type: "array",
+          items: {
+            type: "string"
+          },
+          description: "Array of script_id values from runCode calls that should be committed (made permanent and visible)"
+        }
+      },
+      required: ["code_block_ids"]
+    }
+  }
+};
 
 /**
- * Extract thoughts content
- */
-function extractThoughts(script) {
-  const match = script.match(/<thoughts>([\s\S]*?)<\/thoughts>/);
-  return match ? match[1].trim() : null;
-}
-
-/**
- * Extract py-script content
- */
-function extractScript(script) {
-  const match = script.match(/<py-script(?:\s+[^>]*)?>([\s\S]*?)<\/py-script>/);
-  return match ? match[1].trim() : null;
-}
-
-/**
- * Chat completion generator
+ * Chat completion generator using OpenAI tool calling
  * @param {Object} options - Chat completion options
  * @returns {AsyncGenerator} - Yields chat completion events
  */
 export async function* chatCompletion({
   messages,
   systemPrompt = '',
-  model = 'gpt-5-mini', // Default to fastest GPT-5 model
+  model = 'gpt-4o-mini',
   temperature = 1,
   onExecuteCode,
   onMessage,
   onStreaming,
-  maxSteps = 10,
+  maxSteps = 15,
   baseURL,
   apiKey,
   stream = true,
@@ -281,10 +215,9 @@ export async function* chatCompletion({
     const controller = abortController || new AbortController();
     const { signal } = controller;
 
-    // CRITICAL: Place RESPONSE_INSTRUCTIONS FIRST to ensure the model follows the format
-    // The domain-specific system prompt comes after, so format requirements take priority
-    systemPrompt = RESPONSE_INSTRUCTIONS + '\n\n' + (systemPrompt || '');
-    
+    // Build system prompt: instructions first, then domain context
+    systemPrompt = RESPONSE_INSTRUCTIONS + (systemPrompt ? `\n\n${systemPrompt}` : '');
+
     const openai = new OpenAI({
       baseURL,
       apiKey,
@@ -304,7 +237,7 @@ export async function* chatCompletion({
         ? [{ role: 'system', content: systemPrompt }, ...messages]
         : messages;
       const completionId = generateId();
-      
+
       console.log('[ChatCompletion] New completion:', completionId);
 
       yield {
@@ -313,18 +246,20 @@ export async function* chatCompletion({
       };
 
       let accumulatedResponse = '';
+      let accumulatedToolCalls = [];
 
       try {
         const requestParams = {
           model,
           messages: fullMessages,
-          stream: stream
+          stream,
+          tools: [RUN_CODE_TOOL, COMMIT_CODE_BLOCKS_TOOL]
         };
-        
+
         if (modelSupportsTemperature(model)) {
           requestParams.temperature = temperature;
         }
-        
+
         const completionStream = await openai.chat.completions.create(
           requestParams,
           { signal }
@@ -337,29 +272,84 @@ export async function* chatCompletion({
               return;
             }
 
-            const content = chunk.choices[0]?.delta?.content || '';
-            accumulatedResponse += content;
+            const delta = chunk.choices[0]?.delta;
+            let hasContentUpdate = false;
 
-            try {
-              validateAgentOutput(accumulatedResponse);
-            } catch (error) {
-              console.error('[ChatCompletion] Validation failed:', error);
-              yield {
-                type: 'error',
-                content: `Agent output validation failed: ${error.message}`,
-                error: error
-              };
-              return;
+            // Accumulate text content
+            if (delta?.content) {
+              accumulatedResponse += delta.content;
+              hasContentUpdate = true;
+
+              if (onStreaming) {
+                onStreaming(completionId, accumulatedResponse);
+              }
+              yield { type: 'text', content: accumulatedResponse };
             }
 
-            if (onStreaming) {
-              onStreaming(completionId, accumulatedResponse);
+            // Accumulate tool calls
+            if (delta?.tool_calls) {
+              for (const toolCall of delta.tool_calls) {
+                const index = toolCall.index;
+
+                if (!accumulatedToolCalls[index]) {
+                  accumulatedToolCalls[index] = {
+                    id: toolCall.id || '',
+                    type: toolCall.type || 'function',
+                    function: { name: toolCall.function?.name || '', arguments: '' }
+                  };
+                }
+
+                if (toolCall.function?.name) {
+                  accumulatedToolCalls[index].function.name = toolCall.function.name;
+                }
+                if (toolCall.function?.arguments) {
+                  accumulatedToolCalls[index].function.arguments += toolCall.function.arguments;
+                }
+                if (toolCall.id) {
+                  accumulatedToolCalls[index].id = toolCall.id;
+                }
+              }
+
+              // Stream partial code from runCode tool calls as markdown
+              if (accumulatedToolCalls.length > 0 && !hasContentUpdate) {
+                let streamingContent = accumulatedResponse || '';
+
+                for (const tc of accumulatedToolCalls) {
+                  if (tc && tc.function.name === 'runCode') {
+                    try {
+                      const args = tc.function.arguments;
+                      if (args && args.length > 0) {
+                        const codeMatch = args.match(/"code"\s*:\s*"((?:[^"\\]|\\[\s\S])*)(?:"|$)/);
+                        if (codeMatch) {
+                          const code = codeMatch[1]
+                            .replace(/\\n/g, '\n')
+                            .replace(/\\t/g, '\t')
+                            .replace(/\\r/g, '\r')
+                            .replace(/\\"/g, '"')
+                            .replace(/\\0/g, '')
+                            .replace(/\\u0000/g, '')
+                            .replace(/\\\\/g, '\\');
+
+                          if (streamingContent && !streamingContent.endsWith('\n\n')) {
+                            streamingContent += '\n\n';
+                          }
+                          streamingContent += `\`\`\`python\n${code}\n\`\`\``;
+                        }
+                      }
+                    } catch (e) {
+                      console.debug('[ChatCompletion] Error parsing tool call arguments for streaming:', e);
+                    }
+                  }
+                }
+
+                if (onStreaming && streamingContent) {
+                  onStreaming(completionId, streamingContent);
+                }
+                if (streamingContent) {
+                  yield { type: 'text', content: streamingContent };
+                }
+              }
             }
-            
-            yield {
-              type: 'text',
-              content: accumulatedResponse
-            };
           }
         } catch (error) {
           if (signal.aborted) {
@@ -370,7 +360,7 @@ export async function* chatCompletion({
           yield {
             type: 'error',
             content: `Error processing response: ${error.message}`,
-            error: error
+            error
           };
           return;
         }
@@ -379,200 +369,183 @@ export async function* chatCompletion({
         let errorMessage = 'Failed to connect to the language model API';
 
         if (error instanceof Error) {
-          if (error.message.includes('404')) {
+          const msg = error.message.toLowerCase();
+          const isLocalhost = baseURL && (baseURL.includes('localhost') || baseURL.includes('127.0.0.1'));
+
+          if (isLocalhost && (msg.includes('fetch') || msg.includes('network') || msg.includes('connection') || msg.includes('failed'))) {
+            errorMessage = `Connection failed to ${baseURL}. If using Ollama, ensure it is running with CORS enabled: OLLAMA_ORIGINS="*" ollama serve`;
+          } else if (msg.includes('404')) {
             errorMessage = `Invalid model endpoint: ${baseURL} or model: ${model}`;
-          } else if (error.message.includes('401') || error.message.includes('403')) {
+          } else if (msg.includes('401') || msg.includes('403')) {
             errorMessage = `Authentication error: Invalid API key`;
-          } else if (error.message.includes('429')) {
+          } else if (msg.includes('429')) {
             errorMessage = `Rate limit exceeded. Please try again later.`;
-          } else if (error.message.includes('timeout') || error.message.includes('ECONNREFUSED')) {
+          } else if (msg.includes('timeout') || msg.includes('econnrefused')) {
             errorMessage = `Connection timeout. The model endpoint (${baseURL}) may be unavailable.`;
           } else {
             errorMessage = `API error: ${error.message}`;
           }
         }
 
-        yield {
-          type: 'error',
-          content: errorMessage,
-          error: error
-        };
+        yield { type: 'error', content: errorMessage, error };
         return;
       }
 
-      // Parse and validate the accumulated response
+      // Process accumulated response and tool calls
       try {
         if (signal.aborted) {
           console.log('[ChatCompletion] Parsing aborted');
           return;
         }
 
-        // Final validation
-        try {
-          validateAgentOutput(accumulatedResponse);
-        } catch (error) {
-          console.error('[ChatCompletion] Final validation failed:', error);
-          yield {
-            type: 'error',
-            content: `Agent output validation failed: ${error.message}`,
-            error: error
-          };
-          return;
-        }
-
-        // Extract thoughts
-        const thoughts = extractThoughts(accumulatedResponse);
-        if (thoughts) {
-          console.log('[ChatCompletion] Thoughts:', thoughts);
-        }
-
-        // Check for final response
-        const returnToUser = extractReturnToUser(accumulatedResponse);
-        if (returnToUser) {
-          if (onMessage) {
-            const commitIds = returnToUser.properties.commit
-              ? returnToUser.properties.commit.split(',').map(id => id.trim())
-              : [];
-            onMessage(completionId, returnToUser.content, commitIds);
-          }
-          yield {
-            type: 'text',
-            content: returnToUser.content
-          };
-          return;
-        }
-
-        // Handle script execution
-        if (!onExecuteCode) {
-          throw new Error('onExecuteCode is not defined');
-        }
-
-        const scriptContent = extractScript(accumulatedResponse);
-        if (scriptContent) {
-          if (signal.aborted) {
-            console.log('[ChatCompletion] Tool execution aborted');
-            return;
+        // Handle tool calls
+        if (accumulatedToolCalls.length > 0) {
+          if (!onExecuteCode) {
+            throw new Error('onExecuteCode is not defined');
           }
 
-          yield {
-            type: 'function_call',
-            name: 'runCode',
-            arguments: {
-              code: scriptContent
-            },
-            call_id: completionId
-          };
+          for (const toolCall of accumulatedToolCalls) {
+            if (toolCall.function.name === 'runCode') {
+              if (signal.aborted) {
+                console.log('[ChatCompletion] Tool execution aborted');
+                return;
+              }
 
-          // Add tool call to messages
-          messages.push({
-            role: 'assistant',
-            content: `<thoughts>${thoughts}</thoughts>\n<py-script id="${completionId}">${scriptContent}</py-script>`
-          });
+              let args;
+              try {
+                args = JSON.parse(toolCall.function.arguments);
+                // Remove null bytes that can cause execution errors
+                if (args.code) {
+                  args.code = args.code.replace(/\0/g, '').replace(/\u0000/g, '');
+                }
+              } catch (error) {
+                console.error('[ChatCompletion] Error parsing runCode arguments:', error);
+                yield {
+                  type: 'error',
+                  content: `Error parsing tool call arguments: ${error.message}`,
+                  error
+                };
+                continue;
+              }
 
-          if (onStreaming) {
-            onStreaming(completionId, `Executing code...`);
-          }
+              const code = args.code;
+              const script_id = args.script_id || completionId;
 
-          // Execute the tool call
-          try {
-            const result = await onExecuteCode(completionId, scriptContent);
+              yield {
+                type: 'function_call',
+                name: 'runCode',
+                arguments: args,
+                call_id: toolCall.id
+              };
 
-            yield {
-              type: 'function_call_output',
-              content: result,
-              call_id: completionId
-            };
+              // Add assistant message with tool call to conversation
+              messages.push({
+                role: 'assistant',
+                content: accumulatedResponse || undefined,
+                tool_calls: [{
+                  id: toolCall.id,
+                  type: 'function',
+                  function: {
+                    name: 'runCode',
+                    arguments: toolCall.function.arguments
+                  }
+                }]
+              });
 
-            // Add tool response to messages
-            messages.push({
-              role: 'user',
-              content: `<observation>I have executed the code. Here are the outputs:\n\`\`\`\n${result}\n\`\`\`\nNow continue with the next step.</observation>`
-            });
-          } catch (error) {
-            console.error('[ChatCompletion] Code execution error:', error);
-            const errorMessage = `Error executing code: ${error.message}`;
+              if (onStreaming) {
+                onStreaming(completionId, 'Executing code...');
+              }
 
-            yield {
-              type: 'error',
-              content: errorMessage,
-              error: error
-            };
+              try {
+                const result = await onExecuteCode(script_id, code);
 
-            messages.push({
-              role: 'user',
-              content: `<observation>Error executing the code: ${error.message}\nPlease try a different approach.</observation>`
-            });
+                yield {
+                  type: 'function_call_output',
+                  content: result,
+                  call_id: toolCall.id
+                };
+
+                messages.push({
+                  role: 'tool',
+                  tool_call_id: toolCall.id,
+                  content: result
+                });
+              } catch (error) {
+                console.error('[ChatCompletion] Code execution error:', error);
+                const errorMsg = `Error executing code: ${error instanceof Error ? error.message : String(error)}`;
+
+                yield { type: 'error', content: errorMsg, error };
+
+                messages.push({
+                  role: 'tool',
+                  tool_call_id: toolCall.id,
+                  content: `Error: ${error instanceof Error ? error.message : String(error)}`
+                });
+              }
+
+            } else if (toolCall.function.name === 'commitCodeBlocks') {
+              let args;
+              try {
+                args = JSON.parse(toolCall.function.arguments);
+              } catch (error) {
+                console.error('[ChatCompletion] Error parsing commitCodeBlocks arguments:', error);
+                yield {
+                  type: 'error',
+                  content: `Error parsing commitCodeBlocks arguments: ${error.message}`,
+                  error
+                };
+                continue;
+              }
+
+              const code_block_ids = args.code_block_ids || [];
+              console.log('[ChatCompletion] commitCodeBlocks called with ids:', code_block_ids);
+
+              if (onMessage) {
+                onMessage(completionId, accumulatedResponse || null, code_block_ids);
+              }
+
+              yield { type: 'text', content: accumulatedResponse };
+              return;
+            }
           }
         } else {
-          // No proper tags - send explicit reminder with format example
-          const reminder = `🚨 CRITICAL: You MUST use the required tags in your responses!
-
-Your response MUST follow this exact format:
-
-<thoughts>
-Brief planning steps.
-</thoughts>
-
-<py-script id="unique_id">
-# Your code here
-</py-script>
-
-OR when finished:
-
-<returnToUser commit="ids">
-Final answer.
-</returnToUser>
-
-**FORBIDDEN:** Plain text explanations, markdown code blocks, or responses without tags.
-
-Your previous response was rejected because it didn't use the required tags:
-"${accumulatedResponse.substring(0, 200)}${accumulatedResponse.length > 200 ? '...' : ''}"
-
-Please provide a new response using the required <thoughts> and <py-script> or <returnToUser> tags.`;
-          
-          messages.push({
-            role: 'user',
-            content: reminder
-          });
+          // No tool calls - final text response
+          if (accumulatedResponse) {
+            if (onMessage) {
+              onMessage(completionId, accumulatedResponse, []);
+            }
+            yield { type: 'text', content: accumulatedResponse };
+          }
+          return;
         }
 
-        // Reminder if approaching max steps
+        // Approaching max steps warning
         if (loopCount >= maxSteps - 2) {
           messages.push({
             role: 'user',
-            content: `You are approaching the maximum number of steps (${maxSteps}). Please conclude the session with \`returnToUser\` tag and commit the current code and outputs.`
+            content: `You are approaching the maximum number of steps (${maxSteps}). Please use the commitCodeBlocks tool to commit your working code and provide a final message, otherwise the session will be aborted and no code will be saved.`
           });
         }
 
-        // Check loop limit
+        // Hit loop limit
         if (loopCount >= maxSteps) {
           console.warn(`[ChatCompletion] Reached maximum loop limit of ${maxSteps}`);
+          const limitMsg = `Reached maximum number of tool calls (${maxSteps}). Returning control to you now.`;
           if (onMessage) {
-            onMessage(completionId, `Reached maximum number of tool calls (${maxSteps}). Returning control to you now.`, []);
+            onMessage(completionId, limitMsg, []);
           }
-          yield {
-            type: 'text',
-            content: `Reached maximum number of tool calls (${maxSteps}). Returning control to you now.`
-          };
+          yield { type: 'text', content: limitMsg };
           break;
         }
       } catch (error) {
         console.error('[ChatCompletion] Processing error:', error);
-        let errorMessage = 'Failed to process the model response';
+        const errorMessage = error instanceof Error ? `Error: ${error.message}` : 'Failed to process the model response';
 
-        if (error instanceof Error) {
-          errorMessage = `Error: ${error.message}`;
-        }
-
-        yield {
-          type: 'error',
-          content: errorMessage,
-          error: error
-        };
+        yield { type: 'error', content: errorMessage, error };
 
         messages.push({
           role: 'user',
-          content: `<observation>Error in processing: ${errorMessage}. Please try again with a simpler approach.</observation>`
+          content: `Error in processing: ${errorMessage}. Please try again with a simpler approach.`
         });
       }
     }
@@ -587,4 +560,3 @@ Please provide a new response using the required <thoughts> and <py-script> or <
     };
   }
 }
-

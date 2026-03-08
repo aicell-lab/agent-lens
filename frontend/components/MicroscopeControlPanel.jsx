@@ -145,6 +145,7 @@ const MicroscopeControlPanel = ({
 
   // State for collapsing the right panel - THIS WAS ACCIDENTALLY REMOVED, ADDING IT BACK
   const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false);
+  const [isChatPanelExpanded, setIsChatPanelExpanded] = useState(false);
 
   // State for collapsing the contrast controls (collapsed by default to not block video)
   const [isContrastControlsCollapsed, setIsContrastControlsCollapsed] = useState(true);
@@ -2087,7 +2088,7 @@ const MicroscopeControlPanel = ({
       )}
 
       {/* Collapsible Chat Panel - Right Side */}
-      <div className={`collapsible-chat-panel ${isRightPanelCollapsed ? 'collapsed' : 'expanded'}`}>
+      <div className={`collapsible-chat-panel ${isRightPanelCollapsed ? 'collapsed' : 'expanded'} ${isChatPanelExpanded ? 'with-canvas' : ''}`}>
         <div className="chat-panel-header !pt-0 !mt-0" style={{ paddingTop: 0, marginTop: 0, minHeight: 0, height: 'auto' }}>
           <button 
             onClick={toggleRightPanel}
@@ -2104,6 +2105,7 @@ const MicroscopeControlPanel = ({
             selectedMicroscopeId={selectedMicroscopeId}
             appendLog={appendLog}
             showNotification={showNotification}
+            onExpandPanel={setIsChatPanelExpanded}
           />
         </div>
       </div>

@@ -1060,6 +1060,10 @@
   transform: translateX(0);
 }
 
+.collapsible-chat-panel.expanded.with-canvas {
+  width: 700px;
+}
+
 .collapsible-chat-panel.collapsed {
   width: 350px;
   transform: translateX(calc(100% - 20px));
@@ -1161,6 +1165,11 @@
 .collapsible-chat-panel.expanded + .mcp-image-display-area,
 .mcp-image-display-area:has(+ .collapsible-chat-panel.expanded) {
   margin-right: 350px;
+}
+
+.collapsible-chat-panel.expanded.with-canvas + .mcp-image-display-area,
+.mcp-image-display-area:has(+ .collapsible-chat-panel.expanded.with-canvas) {
+  margin-right: 700px;
 }
 
 .floating-panel-header {
