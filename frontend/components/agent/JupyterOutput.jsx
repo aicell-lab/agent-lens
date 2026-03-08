@@ -17,8 +17,8 @@ const JupyterOutput = ({ outputs, className = '', wrapLongLines = false }) => {
   }
 
   // Separate outputs by type
-  const textAndErrorOutputs = outputs.filter(o => 
-    o.type === 'stdout' || o.type === 'stderr' || o.type === 'text' || o.type === 'error'
+  const textAndErrorOutputs = outputs.filter(o =>
+    o.type === 'stdout' || o.type === 'stderr' || o.type === 'text' || o.type === 'error' || o.type === 'result'
   );
 
   const htmlOutputs = outputs.filter(o => 
@@ -44,78 +44,96 @@ const JupyterOutput = ({ outputs, className = '', wrapLongLines = false }) => {
   const renderOutput = (output, outputId, isExpanded, toggleExpansion) => {
     const wrapClass = wrapLongLines ? 'whitespace-pre-wrap break-words' : 'whitespace-pre';
     
+    const LINE_COLLAPSE_THRESHOLD = 16;
+
     switch (output.type) {
       case 'stdout':
-      case 'text':
+      case 'text': {
         const content = output.content || '';
-        const isLong = content.length > 1000;
+        const lines = content.split('\n');
+        const isLong = lines.length > LINE_COLLAPSE_THRESHOLD;
         const shouldTruncate = isLong && !isExpanded;
-        const displayContent = shouldTruncate ? content.substring(0, 1000) : content;
+        const displayContent = shouldTruncate ? lines.slice(0, LINE_COLLAPSE_THRESHOLD).join('\n') : content;
         const isProcessedAnsi = output.attrs?.isProcessedAnsi;
+        const hiddenLines = isLong ? lines.length - LINE_COLLAPSE_THRESHOLD : 0;
 
         if (isProcessedAnsi) {
-          // Already processed ANSI
           return (
             <div className={`output-content ${wrapClass}`}>
-              <div 
+              <div
                 className="ansi-processed"
                 dangerouslySetInnerHTML={{ __html: processTextOutput(displayContent) }}
               />
               {shouldTruncate && (
-                <button
-                  onClick={() => toggleExpansion(outputId)}
-                  className="output-expand-button"
-                >
-                  Show more ({content.length - 1000} more characters)
+                <button onClick={() => toggleExpansion(outputId)} className="output-expand-button">
+                  Show all outputs ({hiddenLines} more lines)
                 </button>
               )}
               {isExpanded && isLong && (
-                <button
-                  onClick={() => toggleExpansion(outputId)}
-                  className="output-expand-button"
-                >
+                <button onClick={() => toggleExpansion(outputId)} className="output-expand-button">
                   Show less
                 </button>
               )}
             </div>
           );
         } else {
-          // Regular text
           return (
             <div className={`output-content ${wrapClass}`}>
               <pre className="output-text">{displayContent}</pre>
               {shouldTruncate && (
-                <button
-                  onClick={() => toggleExpansion(outputId)}
-                  className="output-expand-button"
-                >
-                  Show more ({content.length - 1000} more characters)
+                <button onClick={() => toggleExpansion(outputId)} className="output-expand-button">
+                  Show all outputs ({hiddenLines} more lines)
                 </button>
               )}
               {isExpanded && isLong && (
-                <button
-                  onClick={() => toggleExpansion(outputId)}
-                  className="output-expand-button"
-                >
+                <button onClick={() => toggleExpansion(outputId)} className="output-expand-button">
                   Show less
                 </button>
               )}
             </div>
           );
         }
+      }
+
+      case 'result': {
+        const content = output.content || '';
+        const lines = content.split('\n');
+        const isLong = lines.length > LINE_COLLAPSE_THRESHOLD;
+        const shouldTruncate = isLong && !isExpanded;
+        const displayContent = shouldTruncate ? lines.slice(0, LINE_COLLAPSE_THRESHOLD).join('\n') : content;
+        const hiddenLines = isLong ? lines.length - LINE_COLLAPSE_THRESHOLD : 0;
+
+        return (
+          <div className={`output-content ${wrapClass}`}>
+            <pre className="output-text result-output">{displayContent}</pre>
+            {shouldTruncate && (
+              <button onClick={() => toggleExpansion(outputId)} className="output-expand-button">
+                Show all outputs ({hiddenLines} more lines)
+              </button>
+            )}
+            {isExpanded && isLong && (
+              <button onClick={() => toggleExpansion(outputId)} className="output-expand-button">
+                Show less
+              </button>
+            )}
+          </div>
+        );
+      }
 
       case 'stderr':
-      case 'error':
+      case 'error': {
         const errorContent = output.content || '';
-        const errorIsLong = errorContent.length > 1000;
+        const errorLines = errorContent.split('\n');
+        const errorIsLong = errorLines.length > LINE_COLLAPSE_THRESHOLD;
         const errorShouldTruncate = errorIsLong && !isExpanded;
-        const errorDisplayContent = errorShouldTruncate ? errorContent.substring(0, 1000) : errorContent;
+        const errorDisplayContent = errorShouldTruncate ? errorLines.slice(0, LINE_COLLAPSE_THRESHOLD).join('\n') : errorContent;
         const errorIsProcessedAnsi = output.attrs?.isProcessedAnsi;
+        const errorHiddenLines = errorIsLong ? errorLines.length - LINE_COLLAPSE_THRESHOLD : 0;
 
         return (
           <div className={`output-content output-error ${wrapClass}`}>
             {errorIsProcessedAnsi ? (
-              <div 
+              <div
                 className="ansi-processed error-output"
                 dangerouslySetInnerHTML={{ __html: processTextOutput(errorDisplayContent) }}
               />
@@ -123,23 +141,18 @@ const JupyterOutput = ({ outputs, className = '', wrapLongLines = false }) => {
               <pre className="output-text error-text">{errorDisplayContent}</pre>
             )}
             {errorShouldTruncate && (
-              <button
-                onClick={() => toggleExpansion(outputId)}
-                className="output-expand-button"
-              >
-                Show more ({errorContent.length - 1000} more characters)
+              <button onClick={() => toggleExpansion(outputId)} className="output-expand-button">
+                Show all outputs ({errorHiddenLines} more lines)
               </button>
             )}
             {isExpanded && errorIsLong && (
-              <button
-                onClick={() => toggleExpansion(outputId)}
-                className="output-expand-button"
-              >
+              <button onClick={() => toggleExpansion(outputId)} className="output-expand-button">
                 Show less
               </button>
             )}
           </div>
         );
+      }
 
       case 'html':
         return (

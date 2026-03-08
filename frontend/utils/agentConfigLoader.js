@@ -11,30 +11,53 @@
  */
 function injectToken(code, token) {
   if (!token) {
-    // No token provided, keep original login behavior
     return code;
   }
 
-  // Escape token for Python string (JWT tokens are typically safe, but handle edge cases)
-  // Replace any double quotes in token with escaped quotes, though JWT tokens shouldn't have them
   const escapedToken = token.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 
-  // Pattern to match: token = await login({"server_url": "https://hypha.aicell.io"})
-  // This handles variations in whitespace and parameter formatting
+  // New pattern: workspace_token = "" (used in hpa-analysis / microscope-control.js)
+  const workspaceTokenPattern = /workspace_token\s*=\s*"[^"]*"/g;
+  if (workspaceTokenPattern.test(code)) {
+    const modified = code.replace(/workspace_token\s*=\s*"[^"]*"/g, `workspace_token = "${escapedToken}"`);
+    console.log('[AgentConfigLoader] Token injected into workspace_token');
+    return modified;
+  }
+
+  // Legacy pattern: token = await login({"server_url": "https://hypha.aicell.io"})
   const loginPattern = /token\s*=\s*await\s+login\s*\(\s*\{[^}]*"server_url"[^}]*\}\s*\)/g;
-  
-  const replacement = `token = "${escapedToken}"`;
-  
-  const modifiedCode = code.replace(loginPattern, replacement);
-  
+  const modifiedCode = code.replace(loginPattern, `token = "${escapedToken}"`);
+
   if (modifiedCode === code) {
-    // No replacement occurred, log warning but don't fail
-    console.warn('[AgentConfigLoader] Token provided but login pattern not found in code');
+    console.warn('[AgentConfigLoader] Token provided but no injection pattern found in code');
   } else {
     console.log('[AgentConfigLoader] Token injected into system cell code');
   }
-  
+
   return modifiedCode;
+}
+
+/**
+ * Inject the microscope ID into the config code
+ * @param {string} code - Python code string
+ * @param {string} microscopeId - Full microscope service ID (e.g. "reef-imaging/microscope-squid-1")
+ * @returns {string} - Code with microscope ID injected
+ */
+function injectMicroscopeId(code, microscopeId) {
+  if (!microscopeId) return code;
+  return code.replace('MICROSCOPE_ID_PLACEHOLDER', microscopeId);
+}
+
+/**
+ * Inject the agent-lens tools service ID (test vs prod) into the config code
+ * @param {string} code - Python code string
+ * @returns {string} - Code with service ID injected
+ */
+function injectAgentLensServiceId(code) {
+  const serviceId = window.location.href.includes('agent-lens-test')
+    ? 'reef-imaging/agent-lens-tools-test'
+    : 'reef-imaging/agent-lens-tools';
+  return code.replace('AGENT_LENS_SERVICE_PLACEHOLDER', serviceId);
 }
 
 /**
@@ -98,47 +121,57 @@ export async function loadAgentConfig(microscopeId, token = null) {
   try {
     // Normalize microscope ID (remove workspace prefix if present)
     const normalizedId = normalizeMicroscopeId(microscopeId);
-    
-    // Use the current page URL as base, which should be the frontend service URL
-    // This ensures the request goes to the correct service endpoint (e.g., /reef-imaging/apps/agent-lens/agent-configs/...)
+
     const baseUrl = window.location.origin + window.location.pathname.replace(/\/$/, '');
-    const configPath = `${baseUrl}/agent-configs/${normalizedId}.js`;
-    console.log(`[AgentConfigLoader] Loading config for "${microscopeId}" (normalized: "${normalizedId}") from:`, configPath);
-    
-    const response = await fetch(configPath);
-    
-    if (!response.ok) {
-      console.warn(`[AgentConfigLoader] Config not found for ${microscopeId}, using default`);
-      // Fall back to default config
-      return await loadDefaultConfig();
+
+    // Try per-microscope override file first (for microscope-specific customisation)
+    let configModule = null;
+    const overridePath = `${baseUrl}/agent-configs/${normalizedId}.js`;
+    console.log(`[AgentConfigLoader] Looking for override config at:`, overridePath);
+    const overrideResponse = await fetch(overridePath);
+    if (overrideResponse.ok) {
+      configModule = await overrideResponse.text();
+      console.log(`[AgentConfigLoader] Using per-microscope override for "${normalizedId}"`);
+    } else {
+      // Fall back to shared microscope-control.js
+      const sharedPath = `${baseUrl}/agent-configs/microscope-control.js`;
+      console.log(`[AgentConfigLoader] No override found, loading shared config from:`, sharedPath);
+      const sharedResponse = await fetch(sharedPath);
+      if (sharedResponse.ok) {
+        configModule = await sharedResponse.text();
+        console.log(`[AgentConfigLoader] Using shared microscope-control.js for "${microscopeId}"`);
+      } else {
+        console.error('[AgentConfigLoader] Shared config not found');
+        return getMinimalDefaultConfig(token);
+      }
     }
-    
-    const configModule = await response.text();
-    
+
     // Extract systemCellCode from the module export
-    // The file should export: export const systemCellCode = `...`;
     const match = configModule.match(/export\s+const\s+systemCellCode\s*=\s*`([\s\S]*?)`;/);
-    
     if (!match || !match[1]) {
       console.error('[AgentConfigLoader] Invalid config format, missing systemCellCode export');
-      return await loadDefaultConfig(token);
+      return getMinimalDefaultConfig(token);
     }
-    
+
     let systemCellCode = match[1];
-    console.log(`[AgentConfigLoader] Loaded config for ${microscopeId}`);
-    
+
+    // Inject full microscope ID (before normalization strips workspace prefix)
+    systemCellCode = injectMicroscopeId(systemCellCode, microscopeId);
+
+    // Inject agent-lens tools service ID (test vs prod)
+    systemCellCode = injectAgentLensServiceId(systemCellCode);
+
     // Inject token if provided
     systemCellCode = injectToken(systemCellCode, token);
-    
+
     // Inject base_url for similarity search API
     systemCellCode = injectBaseUrl(systemCellCode);
-    
+
     return systemCellCode;
-    
+
   } catch (error) {
     console.error('[AgentConfigLoader] Error loading config:', error);
-    console.log('[AgentConfigLoader] Falling back to default config');
-    return await loadDefaultConfig(token);
+    return getMinimalDefaultConfig(token);
   }
 }
 
@@ -149,38 +182,29 @@ export async function loadAgentConfig(microscopeId, token = null) {
  */
 async function loadDefaultConfig(token = null) {
   try {
-    // Use the current page URL as base, which should be the frontend service URL
     const baseUrl = window.location.origin + window.location.pathname.replace(/\/$/, '');
-    // Use squid-control-simulation as default (safer for fallback - it's a simulation)
-    const configPath = `${baseUrl}/agent-configs/squid-control-simulation.js`;
+    const configPath = `${baseUrl}/agent-configs/microscope-control.js`;
     console.log(`[AgentConfigLoader] Loading default config from:`, configPath);
-    
+
     const response = await fetch(configPath);
-    
     if (!response.ok) {
       console.error('[AgentConfigLoader] Default config not found');
-      // Return a minimal default configuration
-      return getMinimalDefaultConfig();
+      return getMinimalDefaultConfig(token);
     }
-    
+
     const configModule = await response.text();
     const match = configModule.match(/export\s+const\s+systemCellCode\s*=\s*`([\s\S]*?)`;/);
-    
     if (!match || !match[1]) {
       console.error('[AgentConfigLoader] Invalid default config format');
       return getMinimalDefaultConfig(token);
     }
-    
+
     let systemCellCode = match[1];
-    
-    // Inject token if provided
+    systemCellCode = injectAgentLensServiceId(systemCellCode);
     systemCellCode = injectToken(systemCellCode, token);
-    
-    // Inject base_url for similarity search API
     systemCellCode = injectBaseUrl(systemCellCode);
-    
     return systemCellCode;
-    
+
   } catch (error) {
     console.error('[AgentConfigLoader] Error loading default config:', error);
     return getMinimalDefaultConfig(token);

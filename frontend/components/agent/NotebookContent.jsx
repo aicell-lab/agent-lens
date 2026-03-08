@@ -89,7 +89,7 @@ const NotebookContent = ({
 
   return (
     <div className="notebook-content-container">
-      {cells.map((cell) => (
+      {cells.filter(cell => !cell.metadata?.staged).map((cell) => (
         <div
           key={cell.id}
           data-cell-id={cell.id}
