@@ -16,7 +16,6 @@ function injectToken(code, token) {
 
   const escapedToken = token.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 
-  // New pattern: workspace_token = "" (used in hpa-analysis / microscope-control.js)
   const workspaceTokenPattern = /workspace_token\s*=\s*"[^"]*"/g;
   if (workspaceTokenPattern.test(code)) {
     const modified = code.replace(/workspace_token\s*=\s*"[^"]*"/g, `workspace_token = "${escapedToken}"`);
