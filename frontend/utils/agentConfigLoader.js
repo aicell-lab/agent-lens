@@ -146,13 +146,18 @@ export async function loadAgentConfig(microscopeId, token = null) {
     }
 
     // Extract systemCellCode from the module export
-    const match = configModule.match(/export\s+const\s+systemCellCode\s*=\s*`([\s\S]*?)`;/);
+    const match = configModule.match(/export\s+const\s+systemCellCode\s*=\s*`([\s\S]*)`;/);
     if (!match || !match[1]) {
       console.error('[AgentConfigLoader] Invalid config format, missing systemCellCode export');
       return getMinimalDefaultConfig(token);
     }
 
     let systemCellCode = match[1];
+
+    // Unescape JS template literal escape sequences that are invalid in Python:
+    // \` → ` (backtick was escaped to avoid ending the JS template literal)
+    // \$ → $ (dollar sign was escaped to avoid JS template interpolation)
+    systemCellCode = systemCellCode.replace(/\\`/g, '`').replace(/\\\$/g, '$');
 
     // Inject full microscope ID (before normalization strips workspace prefix)
     systemCellCode = injectMicroscopeId(systemCellCode, microscopeId);
@@ -192,13 +197,17 @@ async function loadDefaultConfig(token = null) {
     }
 
     const configModule = await response.text();
-    const match = configModule.match(/export\s+const\s+systemCellCode\s*=\s*`([\s\S]*?)`;/);
+    const match = configModule.match(/export\s+const\s+systemCellCode\s*=\s*`([\s\S]*)`;/);
     if (!match || !match[1]) {
       console.error('[AgentConfigLoader] Invalid default config format');
       return getMinimalDefaultConfig(token);
     }
 
     let systemCellCode = match[1];
+
+    // Unescape JS template literal escape sequences that are invalid in Python
+    systemCellCode = systemCellCode.replace(/\\`/g, '`').replace(/\\\$/g, '$');
+
     systemCellCode = injectAgentLensServiceId(systemCellCode);
     systemCellCode = injectToken(systemCellCode, token);
     systemCellCode = injectBaseUrl(systemCellCode);
