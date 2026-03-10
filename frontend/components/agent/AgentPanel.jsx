@@ -55,7 +55,6 @@ const AgentPanel = ({
   const [hyphaCoreWindows, setHyphaCoreWindows] = useState([]);
   const [activeWindowId, setActiveWindowId] = useState(null);
 
-  // handleAddWindow must be stable before kernelManager is created
   const handleAddWindow = useCallback((config) => {
     const src = config.src || '';
     const isHtml = isHtmlContent(src);
@@ -81,20 +80,11 @@ const AgentPanel = ({
     if (onExpandPanel) onExpandPanel(true);
   }, [onExpandPanel]);
 
-  // kernelManager is created once; it captures handleAddWindow via ref
+  // kernelManager is stored in a ref so a fresh instance can be created on re-init
   const handleAddWindowRef = useRef(handleAddWindow);
   useEffect(() => { handleAddWindowRef.current = handleAddWindow; }, [handleAddWindow]);
 
-  const [kernelManager] = useState(() => new AgentKernelManager(null, {
-    onAddWindow: (config) => handleAddWindowRef.current(config),
-    get agentSettings() {
-      return {
-        model: getOpenAIModel(),
-        apiKey: getOpenAIApiKey(),
-        baseURL: getOpenAIBaseURL(),
-      };
-    },
-  }));
+  const kernelManagerRef = useRef(null);
 
   // Close a canvas window
   const handleCloseWindow = useCallback((windowId) => {
@@ -121,9 +111,37 @@ const AgentPanel = ({
     let mounted = true;
     let initialized = false;
 
+    // Destroy any existing kernel manager before creating a new one
+    const previousManager = kernelManagerRef.current;
+    kernelManagerRef.current = null;
+
     const initializeAgent = async () => {
       if (initialized) return;
       initialized = true;
+
+      // Wait for previous manager to fully destroy before starting new one
+      if (previousManager) {
+        try {
+          await previousManager.destroy();
+        } catch (err) {
+          console.warn('[AgentPanel] Error destroying previous kernel manager:', err);
+        }
+      }
+
+      if (!mounted) return;
+
+      // Create a fresh kernel manager instance for this microscope
+      const kernelManager = new AgentKernelManager(null, {
+        onAddWindow: (config) => handleAddWindowRef.current(config),
+        get agentSettings() {
+          return {
+            model: getOpenAIModel(),
+            apiKey: getOpenAIApiKey(),
+            baseURL: getOpenAIBaseURL(),
+          };
+        },
+      });
+      kernelManagerRef.current = kernelManager;
 
       try {
         appendLog('[AgentPanel] Initializing agent...');
@@ -206,11 +224,10 @@ const AgentPanel = ({
 
     return () => {
       mounted = false;
-      kernelManager.destroy().catch(err => {
-        console.error('[AgentPanel] Cleanup error:', err);
-      });
+      // kernelManager will be destroyed at the start of the next effect run
+      // (after awaiting previousManager.destroy()), so no need to destroy here.
     };
-  }, [hyphaManager, selectedMicroscopeId, kernelManager, cellManager, appendLog, showNotification]);
+  }, [hyphaManager, selectedMicroscopeId, cellManager, appendLog, showNotification]);
 
   /**
    * Handle user message send
@@ -278,7 +295,7 @@ const AgentPanel = ({
 
           try {
             const result = await cellManager.executeCell(completionId, async (code, callbacks) => {
-              return await kernelManager.executePython(code, callbacks);
+              return await kernelManagerRef.current.executePython(code, callbacks);
             });
             setCells([...cellManager.getCells()]);
             return result;
@@ -358,7 +375,7 @@ const AgentPanel = ({
       setCells(prev => prev.filter(cell => cell.type !== 'thinking'));
     }
   }, [
-    kernelStatus, isProcessing, cellManager, kernelManager,
+    kernelStatus, isProcessing, cellManager,
     appendLog, showNotification, systemPrompt
   ]);
 
@@ -437,7 +454,7 @@ const AgentPanel = ({
               }
               try {
                 await cellManager.executeCell(cellId, async (code, callbacks) => {
-                  return await kernelManager.executePython(code, callbacks);
+                  return await kernelManagerRef.current.executePython(code, callbacks);
                 });
                 setCells([...cellManager.getCells()]);
               } catch (error) {

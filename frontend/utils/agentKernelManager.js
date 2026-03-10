@@ -376,5 +376,14 @@ print("HyphaCore api ready - api.createWindow() is now available")
       }
       this.kernelId = null;
     }
+    if (this.hyphaCore) {
+      try {
+        await this.hyphaCore.stop();
+        console.log('[AgentKernelManager] HyphaCore stopped');
+      } catch (error) {
+        console.warn('[AgentKernelManager] Error stopping HyphaCore:', error);
+      }
+      this.hyphaCore = null;
+    }
   }
 }
