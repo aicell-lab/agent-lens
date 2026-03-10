@@ -648,38 +648,22 @@ const ImagingTasksModal = ({
       const nxStr = window.prompt('Enter Nx (number of FOVs in X direction):', '3');
       if (nxStr === null) return;
       const nxVal = parseInt(nxStr, 10);
-      if (isNaN(nxVal) || nxVal < 1 || nxVal > 20) {
-        showNotification('Invalid Nx value. Must be between 1 and 20.', 'error');
-        return;
-      }
 
       // Prompt for Ny
       const nyStr = window.prompt('Enter Ny (number of FOVs in Y direction):', '3');
       if (nyStr === null) return;
       const nyVal = parseInt(nyStr, 10);
-      if (isNaN(nyVal) || nyVal < 1 || nyVal > 20) {
-        showNotification('Invalid Ny value. Must be between 1 and 20.', 'error');
-        return;
-      }
 
       // Prompt for dx
       const defaultSpacingVal = getDefaultSpacing();
       const dxStr = window.prompt(`Enter dx (X spacing in mm):`, defaultSpacingVal.dx);
       if (dxStr === null) return;
       const dxVal = parseFloat(dxStr);
-      if (isNaN(dxVal) || dxVal < 0.1 || dxVal > 5.0) {
-        showNotification('Invalid dx value. Must be between 0.1 and 5.0 mm.', 'error');
-        return;
-      }
 
       // Prompt for dy
       const dyStr = window.prompt(`Enter dy (Y spacing in mm):`, defaultSpacingVal.dy);
       if (dyStr === null) return;
       const dyVal = parseFloat(dyStr);
-      if (isNaN(dyVal) || dyVal < 0.1 || dyVal > 5.0) {
-        showNotification('Invalid dy value. Must be between 0.1 and 5.0 mm.', 'error');
-        return;
-      }
 
       const newPosition = {
         x: status.current_x,
@@ -747,38 +731,22 @@ const ImagingTasksModal = ({
     const nxStr = window.prompt('Enter Nx (number of FOVs in X direction):', '3');
     if (nxStr === null) return;
     const nxVal = parseInt(nxStr, 10);
-    if (isNaN(nxVal) || nxVal < 1 || nxVal > 20) {
-      showNotification('Invalid Nx value. Must be between 1 and 20.', 'error');
-      return;
-    }
 
     // Prompt for Ny
     const nyStr = window.prompt('Enter Ny (number of FOVs in Y direction):', '3');
     if (nyStr === null) return;
     const nyVal = parseInt(nyStr, 10);
-    if (isNaN(nyVal) || nyVal < 1 || nyVal > 20) {
-      showNotification('Invalid Ny value. Must be between 1 and 20.', 'error');
-      return;
-    }
 
     // Prompt for dx
     const defaultSpacingVal = getDefaultSpacing();
     const dxStr = window.prompt(`Enter dx (X spacing in mm):`, defaultSpacingVal.dx);
     if (dxStr === null) return;
     const dxVal = parseFloat(dxStr);
-    if (isNaN(dxVal) || dxVal < 0.1 || dxVal > 5.0) {
-      showNotification('Invalid dx value. Must be between 0.1 and 5.0 mm.', 'error');
-      return;
-    }
 
     // Prompt for dy
     const dyStr = window.prompt(`Enter dy (Y spacing in mm):`, defaultSpacingVal.dy);
     if (dyStr === null) return;
     const dyVal = parseFloat(dyStr);
-    if (isNaN(dyVal) || dyVal < 0.1 || dyVal > 5.0) {
-      showNotification('Invalid dy value. Must be between 0.1 and 5.0 mm.', 'error');
-      return;
-    }
 
     const newPosition = {
       x: xVal,
@@ -812,34 +780,18 @@ const ImagingTasksModal = ({
     const nxStr = window.prompt('Enter Nx (number of FOVs in X direction):', position.Nx.toString());
     if (nxStr === null) return;
     const nxVal = parseInt(nxStr, 10);
-    if (isNaN(nxVal) || nxVal < 1 || nxVal > 20) {
-      showNotification('Invalid Nx value. Must be between 1 and 20.', 'error');
-      return;
-    }
 
     const nyStr = window.prompt('Enter Ny (number of FOVs in Y direction):', position.Ny.toString());
     if (nyStr === null) return;
     const nyVal = parseInt(nyStr, 10);
-    if (isNaN(nyVal) || nyVal < 1 || nyVal > 20) {
-      showNotification('Invalid Ny value. Must be between 1 and 20.', 'error');
-      return;
-    }
 
     const dxStr = window.prompt('Enter dx (X spacing in mm):', position.dx.toString());
     if (dxStr === null) return;
     const dxVal = parseFloat(dxStr);
-    if (isNaN(dxVal) || dxVal < 0.1 || dxVal > 5.0) {
-      showNotification('Invalid dx value. Must be between 0.1 and 5.0 mm.', 'error');
-      return;
-    }
 
     const dyStr = window.prompt('Enter dy (Y spacing in mm):', position.dy.toString());
     if (dyStr === null) return;
     const dyVal = parseFloat(dyStr);
-    if (isNaN(dyVal) || dyVal < 0.1 || dyVal > 5.0) {
-      showNotification('Invalid dy value. Must be between 0.1 and 5.0 mm.', 'error');
-      return;
-    }
 
     const updatedPosition = {
       ...position,
