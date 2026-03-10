@@ -43,7 +43,7 @@ services:
       - ALL
 
   squid-control:
-    image: ghcr.io/aicell-lab/squid-control:sha-5b416d0
+    image: ghcr.io/aicell-lab/squid-control:sha-860d577
     container_name: squid-control
     pull_policy: if_not_present
     network_mode: "host"
