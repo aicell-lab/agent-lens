@@ -1286,6 +1286,23 @@
   overflow: hidden;
   background-color: #000;
   /* Remove fixed aspect ratio to allow natural image dimensions */
+  margin-bottom: 8px;
+}
+
+.floating-panel.sample-panel .video-container:last-child {
+  margin-bottom: 0;
+}
+
+.floating-panel.sample-panel .video-camera-label {
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  z-index: 1;
+  font-size: 10px;
+  color: #d1d5db;
+  background-color: rgba(0, 0, 0, 0.55);
+  padding: 1px 5px;
+  border-radius: 3px;
 }
 
 .floating-panel.sample-panel .lab-video-img {

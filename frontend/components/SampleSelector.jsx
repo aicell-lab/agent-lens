@@ -23,6 +23,7 @@ const SampleSelector = ({
   const [workflowMessages, setWorkflowMessages] = useState([]);
   // Track loaded sample ID on current microscope
   const [loadedSampleOnMicroscope, setLoadedSampleOnMicroscope] = useState(null);
+  const [labVideoStreamUrls, setLabVideoStreamUrls] = useState({});
 
   // Use centralized config utility functions
   const isRealMicroscopeSelected = isRealMicroscope(selectedMicroscopeId);
@@ -141,11 +142,19 @@ const SampleSelector = ({
     if (isRealMicroscopeSelected && orchestratorManagerService) {
       // Check immediately
       checkTransportQueueStatus();
-      
+
       // Set up periodic checking every 5 seconds
       const interval = setInterval(checkTransportQueueStatus, 5000);
-      
+
       return () => clearInterval(interval);
+    }
+  }, [isRealMicroscopeSelected, orchestratorManagerService]);
+
+  useEffect(() => {
+    if (isRealMicroscopeSelected && orchestratorManagerService) {
+      orchestratorManagerService.get_lab_video_stream_urls()
+        .then(urls => setLabVideoStreamUrls(urls || {}))
+        .catch(err => console.error('Failed to fetch lab video stream URLs:', err));
     }
   }, [isRealMicroscopeSelected, orchestratorManagerService]);
 
@@ -347,21 +356,24 @@ const SampleSelector = ({
   return (
     <div className={`sample-selector-container ${!isVisible ? 'hidden' : ''}`}>
       {/* Live Lab Video Feed - Only show for real microscopes */}
-      {isVisible && isRealMicroscopeSelected && (
+      {isVisible && isRealMicroscopeSelected && Object.keys(labVideoStreamUrls).length > 0 && (
         <div className="lab-video-feed">
           <h5 className="video-feed-title">
             <i className="fas fa-video mr-2"></i>
             Live Lab Feed
           </h5>
-          <div className="video-container">
-            <img
-              src="https://hypha.aicell.io/reef-imaging/apps/reef-live-feed/"
-              alt="Live Lab Feed"
-              className="lab-video-img"
-              onLoad={() => console.log('Lab video feed loaded')}
-              onError={() => console.log('Lab video feed failed to load')}
-            />
-          </div>
+          {Object.entries(labVideoStreamUrls).map(([cameraId, url]) => (
+            <div key={cameraId} className="video-container">
+              <div className="video-camera-label">{cameraId}</div>
+              <img
+                src={url}
+                alt={`Lab Feed - ${cameraId}`}
+                className="lab-video-img"
+                onLoad={() => console.log(`Lab video feed loaded: ${cameraId}`)}
+                onError={() => console.log(`Lab video feed failed to load: ${cameraId}`)}
+              />
+            </div>
+          ))}
         </div>
       )}
       
