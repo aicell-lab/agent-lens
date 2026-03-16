@@ -43,7 +43,7 @@ services:
       - ALL
 
   squid-control:
-    image: ghcr.io/aicell-lab/squid-control:sha-1a86f7c
+    image: ghcr.io/aicell-lab/squid-control:sha-79d9d76
     container_name: squid-control
     pull_policy: if_not_present
     network_mode: "host"
@@ -63,6 +63,7 @@ services:
       - squid-control-cache:/app/.cache
       # Sample 1: U2OS FUCCI (20x, HCS_v2) — default
       - /mnt/shared_documents/20251215-illumination-calibrated/data.zarr:/mnt/shared_documents/20251215-illumination-calibrated/data.zarr:ro
+      - /mnt/shared_documents/hpa-full-scan-2026-03-10-17-48/data.zarr:/mnt/shared_documents/hpa-full-scan-2026-03-10-17-48/data.zarr:ro
       # Samples 2-6: Human Protein Atlas plates 1-5 (63x, HCS_v2_63x)
       - /mnt/shared_documents/hpa_plate1/data.zarr:/mnt/shared_documents/hpa_plate1/data.zarr:ro
       - /mnt/shared_documents/hpa_plate2/data.zarr:/mnt/shared_documents/hpa_plate2/data.zarr:ro
