@@ -35,7 +35,7 @@ services:
       timeout: 10s
       retries: 2
       start_period: 300s
-    restart: on-failure
+    restart: unless-stopped
     stop_grace_period: 30s
     security_opt:
       - no-new-privileges:true
@@ -80,11 +80,11 @@ services:
       timeout: 30s
       retries: 1
       start_period: 120s
-    restart: on-failure
+    restart: unless-stopped
     stop_grace_period: 30s
     deploy:
       restart_policy:
-        condition: on-failure
+        condition: any
         delay: 20s
     security_opt:
       - no-new-privileges:true
