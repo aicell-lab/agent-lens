@@ -147,7 +147,7 @@ def make_umap_cluster_figure_base64(
         n_components=2,
         n_neighbors=min(n_neighbors, len(E) - 1),
         min_dist=min_dist,
-        metric="cosine",
+        metric=metric,
         random_state=random_state,
         n_jobs=n_jobs,
     )
@@ -200,24 +200,30 @@ def make_umap_cluster_figure_interactive(
     all_cells: list,
     n_neighbors: int = 15,
     min_dist: float = 0.1,
+    metric: str = "cosine",
     random_state: Optional[int] = None,
     n_jobs: Optional[int] = None,
     metadata_fields: Optional[List[str]] = None,
+    n_clusters: Optional[int] = None,
+    marker_size: int = 6,
+    opacity: float = 0.7,
 ) -> Optional[Dict]:
     """
     Interactive UMAP visualization using Plotly with switchable coloring modes.
-    Returns dictionary with HTML string and cluster labels.
     
     Args:
-        all_cells: List of cell dictionaries with embeddings and optional metadata
-        n_neighbors: Number of neighbors for UMAP (default: 15)
-        min_dist: Minimum distance for UMAP (default: 0.1)
-        random_state: Random state for reproducibility (default: None)
-        n_jobs: Number of parallel jobs, -1 uses all cores (default: None)
-        metadata_fields: Metadata fields for heatmap tabs (default: None)
+        all_cells: List of cell dictionaries with embeddings
+        n_neighbors: UMAP neighbors (default: 15)
+        min_dist: UMAP min distance (default: 0.1)
+        metric: UMAP distance metric (default: "cosine")
+        random_state: Random seed (default: None)
+        n_jobs: Parallel jobs, -1 for all cores (default: None)
+        metadata_fields: Fields for heatmap coloring (default: None)
+        n_clusters: KMeans clusters, auto if None (default: None)
+        marker_size: Scatter point size (default: 6)
+        opacity: Point opacity 0-1 (default: 0.7)
     Returns:
-        Dictionary with 'html' (interactive Plotly figure) and 'cluster_labels' (list of cluster assignments),
-        or None if failed
+        Dict with 'html', 'cluster_labels', 'uuids' or None if failed
     """
     import time
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -399,7 +405,8 @@ def make_umap_cluster_figure_interactive(
     print(f"✓ UMAP completed in {umap_time:.2f}s")
     
     # --- Clustering on 2D UMAP coordinates with optimized settings ---
-    n_clusters = max(2, min(10, int(np.sqrt(n_samples / 2))))
+    if n_clusters is None:
+        n_clusters = max(2, min(10, int(np.sqrt(n_samples / 2))))
     
     # Adaptive n_init for KMeans (reduce for large datasets)
     adaptive_n_init = 10 if n_samples < 1000 else (5 if n_samples < 5000 else 3)
@@ -558,9 +565,9 @@ def make_umap_cluster_figure_interactive(
         y=X_2d[:, 1],
         mode='markers',
         marker=dict(
-            size=6,
+            size=marker_size,
             color=cluster_colors,
-            opacity=0.7,
+            opacity=opacity,
             line=dict(width=0.5, color='white')
         ),
         text=hover_text,
