@@ -1280,20 +1280,28 @@ async def setup_service(server, server_id="agent-lens-tools"):
         application_id: str = "hypha-agents-notebook",
         n_neighbors: int = 15,
         min_dist: float = 0.1,
+        metric: str = "cosine",
         random_state: Optional[int] = None,
         n_jobs: int = -1,
         metadata_fields: Optional[List[str]] = None,
+        n_clusters: Optional[int] = None,
+        marker_size: int = 6,
+        opacity: float = 0.7,
     ) -> dict:
         """
         Generate interactive UMAP visualization (Plotly HTML) by extracting data from ChromaDB.
         
         Args:
             application_id: ChromaDB collection name
-            n_neighbors: Number of neighbors for UMAP
-            min_dist: Minimum distance for UMAP
-            random_state: Random state for reproducibility
-            n_jobs: Number of parallel jobs
-            metadata_fields: Metadata fields for heatmap tabs
+            n_neighbors: UMAP neighbors
+            min_dist: UMAP min distance
+            metric: UMAP distance metric (cosine, euclidean, etc.)
+            random_state: Random seed for reproducibility
+            n_jobs: Parallel jobs, -1 for all cores
+            metadata_fields: Fields for heatmap coloring
+            n_clusters: KMeans clusters, auto if None
+            marker_size: Scatter point size
+            opacity: Point opacity 0-1
             
         Returns:
             dict with success flag, HTML string, cluster labels, and UUIDs
@@ -1331,9 +1339,13 @@ async def setup_service(server, server_id="agent-lens-tools"):
                 all_cells=all_cells,
                 n_neighbors=n_neighbors,
                 min_dist=min_dist,
+                metric=metric,
                 random_state=random_state,
                 metadata_fields=metadata_fields,
                 n_jobs=n_jobs,
+                n_clusters=n_clusters,
+                marker_size=marker_size,
+                opacity=opacity,
             )
             
             if result is None:
