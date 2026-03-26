@@ -474,6 +474,86 @@ Root files:
 - **Emergency Cleanup**: Implement cleanup procedures to safely disconnect robotic arm on errors
 - **Service Validation**: Check for essential methods (`home_stage`, `return_stage`) before proceeding with operations
 
+#### Microscope Busy-State Operation Guards (squid-control v2.0+)
+The microscope service implements centralized busy-state guards to prevent conflicting operations and hardware collisions.
+
+**New RPC Methods:**
+- `get_busy_status()` → Returns `{busy_status: {...}, hardware_busy: bool, processing_busy: bool}`
+  - Lightweight alternative to `get_status()` when you only need lock state
+  
+**Enhanced Status Responses:**
+- `get_status()` now includes:
+  ```javascript
+  {
+    busy_status: {
+      hardware_busy: boolean,  // Physical hardware in motion
+      processing_busy: boolean // Background processing active
+    },
+    hardware_busy: boolean,    // Top-level flag
+    processing_busy: boolean,  // Top-level flag
+    // ... existing fields
+  }
+  ```
+- `scan_get_status()` now returns `busy_status` field with same structure
+
+**Busy Scope Definitions:**
+- **hardware_busy**: Physical stage movement, illumination changes, objective switching
+- **processing_busy**: Background scan operations, image processing, autofocus routines
+
+**Error Handling:**
+Conflicting operations now fail with `MicroscopeBusyError`:
+```javascript
+try {
+  await microscopeService.move_by_distance(dx, dy, dz);
+} catch (error) {
+  if (error.message.startsWith('MICROSCOPE_BUSY')) {
+    // Operation rejected - microscope is busy with another operation
+    showNotification('Microscope is busy, please wait', 'warning');
+  }
+}
+```
+
+**Scan Cancellation Behavior:**
+`scan_cancel()` no longer guarantees immediate idle state:
+```javascript
+const result = await microscopeService.scan_cancel();
+if (result.success) {
+  if (result.message.includes('stopping in the background')) {
+    // Scan is winding down - continue polling status
+    // Don't clear busy state immediately
+    appendLog('Scan cancellation requested - stopping in background...');
+  } else {
+    // Immediate cancellation
+    setMicroscopeBusy(false);
+  }
+}
+```
+
+**Implementation Pattern:**
+```jsx
+// Frontend should use server-side busy state for accuracy
+const fetchStatusAndUpdateBusy = async () => {
+  const status = await microscopeService.get_status();
+  
+  // Use server's busy_status for UI state
+  const busyStatus = status.busy_status;
+  const isBusy = busyStatus.hardware_busy || busyStatus.processing_busy;
+  setMicroscopeBusy(isBusy);
+  
+  // Also check scan status
+  if (status.scan_status?.state === 'running') {
+    setIsScanInProgress(true);
+  }
+};
+```
+
+**Important Notes:**
+- Always check `error.message.startsWith('MICROSCOPE_BUSY')` when handling operation failures
+- Don't assume `scan_cancel()` means immediate idle - continue polling status
+- Use `get_busy_status()` for lightweight busy checking vs full `get_status()`
+- The service tracks busy by scope: hardware operations block other hardware, processing blocks other processing
+- All microscope control operations require squid-control v2.0+ with busy-state guards
+
 ### 4.4. AI Agent Integration
 - Use vector embeddings for image similarity search
 - Use LLM agents for microscopy control code generation

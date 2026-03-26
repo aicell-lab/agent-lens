@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, useImperativeHandle, forwardRef } from 'react';
 import PropTypes from 'prop-types';
-import { useValidatedNumberInput, isSquidPlusMicroscope, isSimulatedMicroscope, getMicroscopeConfig } from '../../utils'; // Import validation utilities
+import { useValidatedNumberInput, isSquidPlusMicroscope, isSimulatedMicroscope, getMicroscopeConfig, extractConciseErrorMessage, isMicroscopeBusyError } from '../../utils'; // Import validation utilities
 import ArtifactZarrLoader from '../../utils/artifactZarrLoader.js';
 import LayerPanel from './LayerPanel';
 import useExperimentZarrManager from './ExperimentZarrManager';
@@ -101,7 +101,8 @@ const MicroscopeMapDisplay = forwardRef(({
       await microscopeControlService.reflection_autofocus();
       if (appendLog) appendLog('Laser autofocus completed');
     } catch (error) {
-      if (appendLog) appendLog(`Error in laser autofocus: ${error.message}`);
+      const conciseMessage = extractConciseErrorMessage(error);
+      if (appendLog) appendLog(`Error in laser autofocus: ${conciseMessage}`);
       console.error('[MicroscopeMapDisplay] Laser autofocus error:', error);
     } finally {
       setMicroscopeBusy(false);
@@ -122,7 +123,8 @@ const MicroscopeMapDisplay = forwardRef(({
         // The parent will receive the updated configuration through its normal mechanisms
       }
     } catch (error) {
-      if (appendLog) appendLog(`Error reloading configuration: ${error.message}`);
+      const conciseMessage = extractConciseErrorMessage(error);
+      if (appendLog) appendLog(`Error reloading configuration: ${conciseMessage}`);
       console.error('[MicroscopeMapDisplay] Configuration reload error:', error);
     }
   }, [microscopeControlService, appendLog]);
@@ -432,7 +434,7 @@ const MicroscopeMapDisplay = forwardRef(({
 
   // Callback for handling scan status updates from MicroscopeControlPanel
   const handleScanStatusUpdate = useCallback((scanStatus) => {
-    const { state, saved_data_type, error_message, scanJustCompleted } = scanStatus;
+    const { state, saved_data_type, error_message, scanJustCompleted, busy_status } = scanStatus;
     
     // Update scan progress states based on state and data type
     if (state === 'running') {
@@ -449,18 +451,34 @@ const MicroscopeMapDisplay = forwardRef(({
       setIsQuickScanInProgress(false);
       
       // Unlock hardware when scan completes or fails
-      // IMPORTANT: Don't clear busy state if a sample operation (loading/unloading) is in progress
+      // Use server-side busy_status for more accurate state (squid-control v2.0+)
+      const serverHardwareBusy = busy_status?.hardware_busy ?? false;
+      const serverProcessingBusy = busy_status?.processing_busy ?? false;
+      const serverBusy = serverHardwareBusy || serverProcessingBusy;
+      
+      // IMPORTANT: Don't clear busy state if:
+      // 1. Server still reports busy (background stopping in progress)
+      // 2. A sample operation (loading/unloading) is in progress
       if (setMicroscopeBusy) {
-        // Only clear busy state if there's no active sample operation
-        if (currentOperation !== 'loading' && currentOperation !== 'unloading') {
+        if (serverBusy) {
+          // Server reports still busy (e.g., scan cancel background stopping)
+          console.log(`[MicroscopeMapDisplay] Scan state is ${state} but server reports busy (hardware: ${serverHardwareBusy}, processing: ${serverProcessingBusy}) - keeping busy state`);
+        } else if (currentOperation !== 'loading' && currentOperation !== 'unloading') {
+          // Safe to clear busy state
           setMicroscopeBusy(false);
         } else {
           console.log(`[MicroscopeMapDisplay] Scan completed but sample operation (${currentOperation}) in progress - keeping busy state`);
         }
       }
+      
       // Only clear currentOperation if it's related to scanning, not sample operations
+      // Also check server busy state for scan cancellation background stopping
       if (setCurrentOperation && currentOperation !== 'loading' && currentOperation !== 'unloading') {
-        setCurrentOperation(null);
+        if (!serverBusy) {
+          setCurrentOperation(null);
+        } else {
+          console.log(`[MicroscopeMapDisplay] Server still busy - deferring currentOperation clear`);
+        }
       }
       
       // If scan just completed successfully, refresh results and show notification
@@ -1140,9 +1158,10 @@ const MicroscopeMapDisplay = forwardRef(({
         }
       }
     } catch (error) {
+      const conciseMessage = extractConciseErrorMessage(error);
       console.error('Error refreshing experiment data:', error);
       if (appendLog) {
-        appendLog(`Error refreshing experiment data: ${error.message}`);
+        appendLog(`Error refreshing experiment data: ${conciseMessage}`);
       }
     }
   }, [microscopeControlService, activeExperiment, appendLog]);
@@ -1265,9 +1284,10 @@ const MicroscopeMapDisplay = forwardRef(({
           console.error('Failed to get segmentation status:', status.error);
         }
       } catch (error) {
+        const conciseMessage = extractConciseErrorMessage(error);
         console.error('Error polling segmentation status:', error);
         if (appendLog) {
-          appendLog(`Error checking segmentation status: ${error.message}`);
+          appendLog(`Error checking segmentation status: ${conciseMessage}`);
         }
       }
     }, 5000); // Poll every 5 seconds
@@ -1301,10 +1321,11 @@ const MicroscopeMapDisplay = forwardRef(({
         }
       }
     } catch (error) {
+      const conciseMessage = extractConciseErrorMessage(error);
       console.error('Error cancelling segmentation:', error);
-      showNotification(`Error cancelling segmentation: ${error.message}`, 'error');
+      showNotification(`Error cancelling segmentation: ${conciseMessage}`, 'error');
       if (appendLog) {
-        appendLog(`Error cancelling segmentation: ${error.message}`);
+        appendLog(`Error cancelling segmentation: ${conciseMessage}`);
       }
     }
   }, [microscopeControlService, segmentationState.isRunning, stopSegmentationPolling, showNotification, appendLog]);
@@ -2071,12 +2092,18 @@ const MicroscopeMapDisplay = forwardRef(({
         }
       }
     } catch (error) {
-      const errorMsg = `Error moving stage: ${error.message}`;
+      const conciseMessage = extractConciseErrorMessage(error);
+      const errorMsg = `Error moving stage: ${conciseMessage}`;
       if (appendLog) {
         appendLog(errorMsg);
       }
       if (showNotification) {
-        showNotification(errorMsg, 'error');
+        // Show simpler message for busy errors
+        if (isMicroscopeBusyError(error)) {
+          showNotification('Microscope is busy. Please wait.', 'warning');
+        } else {
+          showNotification(errorMsg, 'error');
+        }
       }
       console.error('[MicroscopeMapDisplay] Error moving stage:', error);
     }
@@ -3015,8 +3042,9 @@ const MicroscopeMapDisplay = forwardRef(({
         appendLog(`Loaded current microscope settings: ${channelName}, ${intensity}% intensity, ${exposure_time}ms exposure`);
       }
     } catch (error) {
+      const conciseMessage = extractConciseErrorMessage(error);
       if (appendLog) {
-        appendLog(`Failed to load microscope settings: ${error.message}`);
+        appendLog(`Failed to load microscope settings: ${conciseMessage}`);
       }
       console.error('[MicroscopeMapDisplay] Failed to load microscope settings:', error);
     }
@@ -3468,10 +3496,11 @@ const MicroscopeMapDisplay = forwardRef(({
           throw new Error(result.message || 'Upload failed');
         }
       } catch (error) {
+        const conciseMessage = extractConciseErrorMessage(error);
         console.error('Upload zarr dataset error:', error);
-        showNotification(`Upload failed: ${error.message}`, 'error');
+        showNotification(`Upload failed: ${conciseMessage}`, 'error');
         if (appendLog) {
-          appendLog(`Upload failed: ${error.message}`);
+          appendLog(`Upload failed: ${conciseMessage}`);
         }
       }
     };
@@ -3547,10 +3576,11 @@ const MicroscopeMapDisplay = forwardRef(({
           throw new Error(result.error || 'Failed to start segmentation');
         }
       } catch (error) {
+        const conciseMessage = extractConciseErrorMessage(error);
         console.error('Segmentation start error:', error);
-        showNotification(`Segmentation failed: ${error.message}`, 'error');
+        showNotification(`Segmentation failed: ${conciseMessage}`, 'error');
         if (appendLog) {
-          appendLog(`Segmentation failed: ${error.message}`);
+          appendLog(`Segmentation failed: ${conciseMessage}`);
         }
       }
     };
@@ -4554,8 +4584,9 @@ const MicroscopeMapDisplay = forwardRef(({
         setIsRealTimeLoading(false);
         
       } catch (error) {
+        const conciseMessage = extractConciseErrorMessage(error);
         console.error('Failed to load historical tiles:', error);
-        if (appendLog) appendLog(`Failed to load historical tiles: ${error.message}`);
+        if (appendLog) appendLog(`Failed to load historical tiles: ${conciseMessage}`);
       } finally {
         // Remove from browse data requests
         browseDataRequestsRef.current.delete(requestKey);
@@ -4767,9 +4798,10 @@ const MicroscopeMapDisplay = forwardRef(({
             console.warn(`🎨 FREE_PAN: TileProcessingManager returned empty tile for experiment ${experimentName}, channels: "${getChannelString()}"`);
           }
         } catch (error) {
+          const conciseMessage = extractConciseErrorMessage(error);
           console.error(`🎨 FREE_PAN: Failed to load tile for experiment ${experimentName}:`, error);
           if (appendLog) {
-            appendLog(`Failed to load tile for experiment ${experimentName}: ${error.message}`);
+            appendLog(`Failed to load tile for experiment ${experimentName}: ${conciseMessage}`);
           }
         }
       }
@@ -4809,8 +4841,9 @@ const MicroscopeMapDisplay = forwardRef(({
       
       console.log('[loadStitchedTiles] ✅ Scan data loading completed successfully');
     } catch (error) {
+      const conciseMessage = extractConciseErrorMessage(error);
       console.error('Failed to load stitched tile:', error);
-      if (appendLog) appendLog(`Failed to load scan tile: ${error.message}`);
+      if (appendLog) appendLog(`Failed to load scan tile: ${conciseMessage}`);
     } finally {
       // Remove from scan data requests
       scanDataRequestsRef.current.delete(requestKey);

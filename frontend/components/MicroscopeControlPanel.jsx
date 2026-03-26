@@ -14,6 +14,8 @@ import {
   getVideoTrackServiceId,
   getMicroscopeDisplayName,
   getOrchestratorMicroscopeId,
+  extractConciseErrorMessage,
+  isMicroscopeBusyError,
 } from '../utils';
 import './microscope_acquisition/ImagingTasksModal.css';
 
@@ -451,6 +453,29 @@ const MicroscopeControlPanel = ({
         exposureForDesiredSync = pairForUIScheduledChannel[1];
       }
 
+      // Handle busy status from server-side busy-state guards (squid-control v2.0+)
+      // Use server-side busy state for more accurate hardware state tracking
+      const busyStatus = status.busy_status;
+      const serverHardwareBusy = busyStatus?.hardware_busy ?? false;
+      const serverProcessingBusy = busyStatus?.processing_busy ?? false;
+      const serverBusy = serverHardwareBusy || serverProcessingBusy;
+      
+      // Only update busy state if server reports not busy AND no sample operation is in progress
+      // This prevents premature clearing during scan cancel background stopping
+      if (!serverBusy && !currentOperation) {
+        // Server reports not busy - safe to clear our busy state
+        if (microscopeBusyRef.current) {
+          console.log('[MicroscopeBusy] Server reports idle, clearing local busy state');
+          updateMicroscopeBusy(false);
+        }
+      } else if (serverBusy) {
+        // Server reports busy - sync our state
+        if (!microscopeBusyRef.current) {
+          console.log(`[MicroscopeBusy] Server reports busy (hardware: ${serverHardwareBusy}, processing: ${serverProcessingBusy})`);
+          updateMicroscopeBusy(true);
+        }
+      }
+
       // Handle scan status updates
       if (status.scan_status && microscopeMapDisplayRef.current) {
         const currentScanState = status.scan_status.state || 'idle';
@@ -461,12 +486,16 @@ const MicroscopeControlPanel = ({
         const scanJustCompleted = prevScanState === 'running' && (currentScanState === 'completed' || currentScanState === 'failed');
         
         // Update scan status via ref to MicroscopeMapDisplay
+        // Include busy_status for enhanced state management
         if (microscopeMapDisplayRef.current.handleScanStatusUpdate) {
           microscopeMapDisplayRef.current.handleScanStatusUpdate({
             state: currentScanState,
             saved_data_type: currentDataType,
             error_message: status.scan_status.error_message,
-            scanJustCompleted: scanJustCompleted
+            scanJustCompleted: scanJustCompleted,
+            busy_status: status.scan_status.busy_status,
+            hardware_busy: status.scan_status.hardware_busy ?? serverHardwareBusy,
+            processing_busy: status.scan_status.processing_busy ?? serverProcessingBusy
           });
         }
         
@@ -1050,7 +1079,14 @@ const MicroscopeControlPanel = ({
         appendLog(`Move failed: ${result.message}`);
       }
     } catch (error) {
-      appendLog(`Error in moveMicroscope: ${error.message}`);
+      // Handle MICROSCOPE_BUSY errors from server-side busy-state guards
+      const conciseMessage = extractConciseErrorMessage(error);
+      if (isMicroscopeBusyError(error)) {
+        appendLog(`Move failed: ${conciseMessage}`);
+        if (showNotification) showNotification('Microscope is busy. Please wait.', 'warning');
+      } else {
+        appendLog(`Error in moveMicroscope: ${conciseMessage}`);
+      }
     } finally {
       setMicroscopeBusy(false);
     }
@@ -1069,7 +1105,14 @@ const MicroscopeControlPanel = ({
         appendLog(`Move failed: ${result.message}`);
       }
     } catch (error) {
-      appendLog(`Error in moveToPosition: ${error.message}`);
+      // Handle MICROSCOPE_BUSY errors from server-side busy-state guards
+      const conciseMessage = extractConciseErrorMessage(error);
+      if (isMicroscopeBusyError(error)) {
+        appendLog(`Move to position failed: ${conciseMessage}`);
+        if (showNotification) showNotification('Microscope is busy. Please wait.', 'warning');
+      } else {
+        appendLog(`Error in moveToPosition: ${conciseMessage}`);
+      }
     } finally {
       setMicroscopeBusy(false);
     }
@@ -1504,8 +1547,15 @@ const MicroscopeControlPanel = ({
           appendLog(`Drag move failed: ${result.message}`);
         }
       } catch (error) {
-        appendLog(`Error in drag move: ${error.message}`);
-        console.error("[MicroscopeControlPanel] Error in drag move:", error);
+        // Handle MICROSCOPE_BUSY errors from server-side busy-state guards
+        const conciseMessage = extractConciseErrorMessage(error);
+        if (isMicroscopeBusyError(error)) {
+          appendLog(`Drag move failed: ${conciseMessage}`);
+          if (showNotification) showNotification('Microscope is busy. Please wait.', 'warning');
+        } else {
+          appendLog(`Error in drag move: ${conciseMessage}`);
+          console.error("[MicroscopeControlPanel] Error in drag move:", error);
+        }
       } finally {
         setMicroscopeBusy(false);
       }

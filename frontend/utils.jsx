@@ -678,6 +678,69 @@ export const useValidatedNumberInput = (
   };
 };
 
+/**
+ * Extract a concise error message from RPC errors that may contain full Python tracebacks.
+ * This filters out the traceback noise and returns just the relevant error message.
+ * 
+ * @param {Error|string} error - The error object or message
+ * @returns {string} Concise error message suitable for UI display
+ */
+export const extractConciseErrorMessage = (error) => {
+  if (!error) return 'Unknown error';
+  
+  const errorString = typeof error === 'string' ? error : (error.message || error.toString() || 'Unknown error');
+  
+  // Check for MICROSCOPE_BUSY errors - extract the full message line
+  // The message can contain periods, so we capture until newline or "Exception:" marker
+  const microscopeBusyMatch = errorString.match(/MICROSCOPE_BUSY:[^\n]+/);
+  if (microscopeBusyMatch) {
+    return microscopeBusyMatch[0].trim();
+  }
+  
+  // Check for MicroscopeBusyError with the actual message
+  const busyErrorMatch = errorString.match(/MicroscopeBusyError:\s*([^\n]+)/);
+  if (busyErrorMatch) {
+    return busyErrorMatch[1].trim();
+  }
+  
+  // Check for RemoteException or RemoteError with nested message
+  const remoteErrorMatch = errorString.match(/RemoteError:(.+?)(?=Exception:|$)/s);
+  if (remoteErrorMatch) {
+    // Try to find MICROSCOPE_BUSY within the RemoteError section
+    const busyInRemote = remoteErrorMatch[1].match(/MICROSCOPE_BUSY:[^\n]+/);
+    if (busyInRemote) {
+      return busyInRemote[0].trim();
+    }
+  }
+  
+  // Check for other Python exceptions and extract just the exception line
+  const exceptionMatch = errorString.match(/(\w+Error):\s*([^\n]+)/);
+  if (exceptionMatch) {
+    return `${exceptionMatch[1]}: ${exceptionMatch[2].trim()}`;
+  }
+  
+  // If no patterns match, return the first line of the error (before any traceback)
+  const firstLine = errorString.split('\n')[0].trim();
+  if (firstLine && firstLine.length > 10) {
+    return firstLine;
+  }
+  
+  // Fallback: return cleaned error string
+  return errorString.replace(/\s+/g, ' ').substring(0, 200);
+};
+
+/**
+ * Check if an error is a MICROSCOPE_BUSY error.
+ * 
+ * @param {Error|string} error - The error object or message
+ * @returns {boolean} True if this is a microscope busy error
+ */
+export const isMicroscopeBusyError = (error) => {
+  if (!error) return false;
+  const errorString = typeof error === 'string' ? error : (error.message || error.toString() || '');
+  return errorString.includes('MICROSCOPE_BUSY');
+};
+
 // Helper function to get CSS classes for input validation state
 export const getInputValidationClasses = (isValid, hasUnsavedChanges, baseClasses = '') => {
   let classes = baseClasses;

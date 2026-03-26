@@ -1,5 +1,5 @@
 import React from 'react';
-import { useValidatedNumberInput, getInputValidationClasses } from '../../utils';
+import { useValidatedNumberInput, getInputValidationClasses, extractConciseErrorMessage, isMicroscopeBusyError } from '../../utils';
 import './QuickScanConfig.css';
 
 const QuickScanConfig = ({
@@ -317,9 +317,19 @@ const QuickScanConfig = ({
                   const result = await microscopeControlService.scan_cancel();
                   
                   if (result.success) {
-                    if (showNotification) showNotification('Quick scan cancelled successfully', 'success');
-                    // Note: scan state will be updated by status polling, no need to manually reset
-                    if (appendLog) appendLog('Quick scan cancelled - operation interrupted');
+                    // Handle new scan_cancel behavior: may return "stopping in the background"
+                    const isBackgroundStopping = result.message && result.message.includes('stopping in the background');
+                    
+                    if (isBackgroundStopping) {
+                      // Scan is winding down in background - don't clear busy state immediately
+                      if (showNotification) showNotification('Quick scan cancellation requested - stopping in background...', 'info');
+                      if (appendLog) appendLog('Quick scan cancellation requested - scan is stopping in the background');
+                      // Note: busy state will be cleared by status polling when scan actually stops
+                    } else {
+                      // Immediate cancellation
+                      if (showNotification) showNotification('Quick scan cancelled successfully', 'success');
+                      if (appendLog) appendLog('Quick scan cancelled - operation interrupted');
+                    }
                   } else {
                     if (showNotification) showNotification(`Failed to cancel quick scan: ${result.message}`, 'error');
                     if (appendLog) appendLog(`Quick scan cancel failed: ${result.message}`);
@@ -366,10 +376,17 @@ const QuickScanConfig = ({
                     if (setCurrentOperation) setCurrentOperation(null);
                   }
                 } catch (error) {
-                  // If error occurred, show error and reset busy states
-                  if (showNotification) showNotification(`Error starting quick scan: ${error.message}`, 'error');
-                  if (appendLog) appendLog(`Quick scan start error: ${error.message}`);
-                  console.error('Quick scan error:', error);
+                  // Handle MICROSCOPE_BUSY errors from server-side busy-state guards
+                  const conciseMessage = extractConciseErrorMessage(error);
+                  if (isMicroscopeBusyError(error)) {
+                    if (showNotification) showNotification('Microscope is busy. Please wait.', 'warning');
+                    if (appendLog) appendLog(`Quick scan start failed: ${conciseMessage}`);
+                  } else {
+                    // If error occurred, show error and reset busy states
+                    if (showNotification) showNotification(`Error starting quick scan: ${conciseMessage}`, 'error');
+                    if (appendLog) appendLog(`Quick scan start error: ${conciseMessage}`);
+                    console.error('Quick scan error:', error);
+                  }
                   // Reset busy states since scan didn't start
                   if (setMicroscopeBusy) setMicroscopeBusy(false);
                   if (setCurrentOperation) setCurrentOperation(null);

@@ -1,5 +1,5 @@
 import React from 'react';
-import { useValidatedNumberInput, getInputValidationClasses } from '../../utils';
+import { useValidatedNumberInput, getInputValidationClasses, extractConciseErrorMessage, isMicroscopeBusyError } from '../../utils';
 import './NormalScanConfig.css';
 
 const NormalScanConfig = ({
@@ -258,11 +258,22 @@ const NormalScanConfig = ({
                 const result = await microscopeControlService.scan_cancel();
                 
                 if (result.success) {
-                  if (showNotification) showNotification('Scan cancelled successfully', 'success');
-                  if (appendLog) appendLog('Scan cancelled - operation interrupted');
-                  // Note: scan state will be updated by status polling, no need to manually reset
-                  if (setMicroscopeBusy) setMicroscopeBusy(false);
-                  if (setCurrentOperation) setCurrentOperation(null); // Re-enable sidebar
+                  // Handle new scan_cancel behavior: may return "stopping in the background"
+                  const isBackgroundStopping = result.message && result.message.includes('stopping in the background');
+                  
+                  if (isBackgroundStopping) {
+                    // Scan is winding down in background - don't clear busy state immediately
+                    if (showNotification) showNotification('Scan cancellation requested - stopping in background...', 'info');
+                    if (appendLog) appendLog('Scan cancellation requested - scan is stopping in the background');
+                    // Note: busy state will be cleared by status polling when scan actually stops
+                  } else {
+                    // Immediate cancellation
+                    if (showNotification) showNotification('Scan cancelled successfully', 'success');
+                    if (appendLog) appendLog('Scan cancelled - operation interrupted');
+                    // Only clear busy states for immediate cancellation
+                    if (setMicroscopeBusy) setMicroscopeBusy(false);
+                    if (setCurrentOperation) setCurrentOperation(null); // Re-enable sidebar
+                  }
                 } else {
                   if (showNotification) showNotification(`Failed to cancel scan: ${result.message}`, 'error');
                   if (appendLog) appendLog(`Failed to cancel scan: ${result.message}`);
@@ -353,8 +364,15 @@ const NormalScanConfig = ({
                 if (setCurrentOperation) setCurrentOperation(null);
               }
             } catch (error) {
-              if (showNotification) showNotification(`Error starting scan: ${error.message}`, 'error');
-              if (appendLog) appendLog(`Error starting scan: ${error.message}`);
+              // Handle MICROSCOPE_BUSY errors from server-side busy-state guards
+              const conciseMessage = extractConciseErrorMessage(error);
+              if (isMicroscopeBusyError(error)) {
+                if (showNotification) showNotification('Microscope is busy. Please wait.', 'warning');
+                if (appendLog) appendLog(`Scan start failed: ${conciseMessage}`);
+              } else {
+                if (showNotification) showNotification(`Error starting scan: ${conciseMessage}`, 'error');
+                if (appendLog) appendLog(`Error starting scan: ${conciseMessage}`);
+              }
               // Reset busy states on error
               if (setMicroscopeBusy) setMicroscopeBusy(false);
               if (setCurrentOperation) setCurrentOperation(null);
