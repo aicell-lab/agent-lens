@@ -21,32 +21,6 @@ const normalizeSimulationSamples = (samples) => {
     .sort((left, right) => left.name.localeCompare(right.name));
 };
 
-const createSimulationSampleFromStatus = (simulationDataSource) => {
-  const sampleName =
-    simulationDataSource?.sampleInfo?.name ||
-    simulationDataSource?.activeSample ||
-    null;
-
-  if (!sampleName) {
-    return [];
-  }
-
-  return [
-    {
-      id: sampleName,
-      name: sampleName,
-      description: simulationDataSource?.sampleInfo?.description || null,
-      objective: simulationDataSource?.sampleInfo?.objective || null,
-      cellLine: simulationDataSource?.sampleInfo?.cell_line || null,
-      staining: simulationDataSource?.sampleInfo?.staining || null,
-      channels: Array.isArray(simulationDataSource?.sampleInfo?.channels)
-        ? simulationDataSource.sampleInfo.channels
-        : [],
-      configName: simulationDataSource?.sampleInfo?.config_name || null,
-    },
-  ];
-};
-
 const SampleSelector = ({
   isVisible,
   selectedMicroscopeId,
@@ -140,10 +114,9 @@ const SampleSelector = ({
     }
 
     if (typeof microscopeControlService.list_simulation_samples !== 'function') {
-      const fallbackSamples = createSimulationSampleFromStatus(simulationDataSource);
-      setSimulationSamples(fallbackSamples);
+      setSimulationSamples([]);
       setSimulationSamplesError(
-        'Connected microscope service does not expose list_simulation_samples(). Update or redeploy squid-control to enable full simulated sample selection.'
+        'Connected microscope service does not expose list_simulation_samples(). Refresh the page or reconnect the microscope service after redeploying squid-control.'
       );
       return;
     }
@@ -154,9 +127,10 @@ const SampleSelector = ({
       setSimulationSamplesError('');
     } catch (error) {
       console.error('[SampleSelector] Failed to fetch simulation samples:', error);
-      setSimulationSamples(createSimulationSampleFromStatus(simulationDataSource));
+      setSimulationSamples([]);
       setSimulationSamplesError(
-        error?.message || 'Failed to load simulated samples.'
+        error?.message ||
+          'Failed to load simulated samples from list_simulation_samples().'
       );
     }
   };
@@ -607,8 +581,15 @@ const SampleSelector = ({
           ))}
         </div>
       )}
-      
+
       <div className="sample-options-container">
+        {isSimulatedMicroscopeSelected && simulationSamplesError && (
+          <div className="workflow-message border-red-500">
+            <i className="fas fa-exclamation-circle text-red-400 mr-2"></i>
+            {simulationSamplesError}
+          </div>
+        )}
+
         {/* Sample Control Buttons */}
         <div className="sample-controls">
           {currentOperation === 'unloading' ? (
@@ -698,7 +679,9 @@ const SampleSelector = ({
           ))}
           {isSimulatedMicroscopeSelected && simulationSamples.length === 0 && (
             <div className="sample-item" style={{ color: '#9ca3af', fontStyle: 'italic' }}>
-              {simulationSamplesError || 'No simulated samples available from the microscope service.'}
+              {simulationSamplesError
+                ? 'Simulated sample list unavailable.'
+                : 'No simulated samples available from the microscope service.'}
             </div>
           )}
           {isRealMicroscopeSelected && incubatorSlots.length > 0 && incubatorSlots.map(slot => (
