@@ -13,11 +13,13 @@ import ArtifactZarrLoader from '../frontend/utils/artifactZarrLoader.js';
 console.log('🔬 Frontend Integration Test for ArtifactZarrLoader');
 console.log('============================================================');
 
+const simulationZarrEndpoint = process.env.SIMULATION_ZARR_ENDPOINT || null;
+
 async function testFrontendIntegration() {
   try {
     // Test 1: Import and instantiation
     console.log('🧪 Test 1: Import and Instantiation');
-    const loader = new ArtifactZarrLoader();
+    const loader = new ArtifactZarrLoader(simulationZarrEndpoint);
     console.log('✅ ArtifactZarrLoader imported and instantiated successfully');
     
     // Test 2: Check if methods exist (simulating React component usage)
@@ -26,7 +28,10 @@ async function testFrontendIntegration() {
       'loadRegion',
       'getMultipleWellRegionsRealTimeCancellable',
       'clearCaches',
+      'resetState',
       'cancelActiveRequests',
+      'configure',
+      'setBaseUrl',
       'getImageExtent',
       'openArray'
     ];
@@ -60,25 +65,29 @@ async function testFrontendIntegration() {
     // Test 4: Test basic functionality
     console.log('🧪 Test 4: Basic Functionality Test');
     const newLoader = new ArtifactZarrLoader();
+    newLoader.setBaseUrl('https://example.test/simulation-zarr/');
+    console.log(`✅ Base URL configured: ${newLoader.baseUrl}`);
+    newLoader.resetState();
+    console.log('✅ Loader reset without errors');
+
+    if (simulationZarrEndpoint) {
+      console.log(`🌐 Optional metadata test enabled via SIMULATION_ZARR_ENDPOINT=${simulationZarrEndpoint}`);
+      await newLoader.configure(simulationZarrEndpoint, { forceReload: true });
+
+      const extent = newLoader.getImageExtent();
+      console.log(`✅ Image extent: X[${extent.xMin}, ${extent.xMax}]mm, Y[${extent.yMin}, ${extent.yMax}]mm`);
+
+      const dims = newLoader.getImageDimensions(0);
+      console.log(`✅ Image dimensions at scale 0: ${dims.x}×${dims.y} pixels`);
+
+      const pixelSize = newLoader.getPixelSize(0);
+      console.log(`✅ Pixel size at scale 0: ${pixelSize.toFixed(3)} µm/pixel`);
+    } else {
+      console.log('ℹ️ Skipping remote metadata fetch (set SIMULATION_ZARR_ENDPOINT to enable it)');
+    }
     
-    // Initialize the loader to load metadata from .zattrs
-    await newLoader.init();
-    
-    // Test getImageExtent
-    const extent = newLoader.getImageExtent();
-    console.log(`✅ Image extent: X[${extent.xMin}, ${extent.xMax}]mm, Y[${extent.yMin}, ${extent.yMax}]mm`);
-    
-    // Test getImageDimensions
-    const dims = newLoader.getImageDimensions(0);
-    console.log(`✅ Image dimensions at scale 0: ${dims.x}×${dims.y} pixels`);
-    
-    // Test pixel size
-    const pixelSize = newLoader.getPixelSize(0);
-    console.log(`✅ Pixel size at scale 0: ${pixelSize.toFixed(3)} µm/pixel`);
-    
-    // Note: We skip actual data loading in Node.js environment since it requires DOM APIs (canvas, document)
-    // The loadRegion method requires browser environment with canvas support
-    console.log(`✅ Basic functionality tests completed (data loading requires browser environment)`);
+    // Note: We skip actual data loading in Node.js environment since it requires DOM APIs (canvas, document).
+    console.log('✅ Basic functionality tests completed (data loading requires browser environment)');
     
     // Cleanup
     newLoader.clearCaches();
@@ -103,4 +112,4 @@ async function testFrontendIntegration() {
 // Run the test
 testFrontendIntegration().then(success => {
   process.exit(success ? 0 : 1);
-}); 
+});

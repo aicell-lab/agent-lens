@@ -1,7 +1,7 @@
 /**
  * Artifact Zarr Loader Service - Simplified zarrita.js Implementation
  * 
- * Loads OME-Zarr data from the example-image-data.zarr endpoint using zarrita.js.
+ * Loads OME-Zarr data from a runtime-provided endpoint using zarrita.js.
  * This is a simplified loader for the simulated microscope that loads a single
  * continuous image (no well structure).
  * 
@@ -12,12 +12,9 @@
 
 import * as zarr from "zarrita";
 
-// Endpoint for the example zarr dataset
-const ZARR_ENDPOINT = "https://hypha.aicell.io/reef-imaging/apps/agent-lens/example-image-data.zarr";
-
 class ArtifactZarrLoader {
-  constructor() {
-    this.baseUrl = ZARR_ENDPOINT;
+  constructor(baseUrl = null) {
+    this.baseUrl = baseUrl;
     this.arrayCache = new Map();
     
     // These will be populated by init() from .zattrs
@@ -25,14 +22,57 @@ class ArtifactZarrLoader {
     this.imageExtent = null;
     this.initialized = false;
     this.initPromise = null;
+    this.configurationVersion = 0;
     
+  }
+
+  normalizeBaseUrl(baseUrl) {
+    if (!baseUrl || typeof baseUrl !== 'string') {
+      throw new Error('A valid Zarr base URL is required');
+    }
+    return baseUrl.replace(/\/+$/, '');
+  }
+
+  setBaseUrl(baseUrl, { forceReload = false } = {}) {
+    const normalizedBaseUrl = this.normalizeBaseUrl(baseUrl);
+    const urlChanged = this.baseUrl !== normalizedBaseUrl;
+    this.baseUrl = normalizedBaseUrl;
+
+    if (urlChanged || forceReload) {
+      this.resetState();
+    }
+
+    return urlChanged || forceReload;
+  }
+
+  resetState() {
+    this.arrayCache.clear();
+    this.structure = null;
+    this.imageExtent = null;
+    this.initialized = false;
+    this.initPromise = null;
+    this.configurationVersion += 1;
+  }
+
+  async configure(baseUrl, { forceReload = false } = {}) {
+    this.setBaseUrl(baseUrl, { forceReload });
+    await this.init();
+    return this;
   }
   
   /**
    * Initialize the loader by fetching metadata from .zattrs
    * This must be called before using the loader
    */
-  async init() {
+  async init(baseUrl = null) {
+    if (baseUrl) {
+      this.setBaseUrl(baseUrl);
+    }
+
+    if (!this.baseUrl) {
+      throw new Error('ArtifactZarrLoader requires a Zarr base URL before initialization');
+    }
+
     if (this.initialized) {
       return this;
     }
@@ -51,6 +91,8 @@ class ArtifactZarrLoader {
    * Load metadata from the zarr's .zattrs file
    */
   async _loadMetadata() {
+    const configurationVersion = this.configurationVersion;
+
     try {
       const response = await fetch(`${this.baseUrl}/.zattrs`);
       if (!response.ok) {
@@ -127,6 +169,10 @@ class ArtifactZarrLoader {
       // Summary log
       const activeChannels = channels.filter(c => c.active).map(c => c.label);
       console.log(`✅ Zarr initialized: ${canvasWidthMm}×${canvasHeightMm}mm, ${channels.length} channels (${activeChannels.length} active), ${scaleLevels.length} scale levels`);
+
+      if (configurationVersion !== this.configurationVersion) {
+        return;
+      }
       
       this.initialized = true;
       

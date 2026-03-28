@@ -12,7 +12,7 @@ import SimilaritySearchPanel from '../similarity_search/SimilaritySearchPanel';
 import AnnotationCanvas from '../similarity_search/AnnotationCanvas';
 import SimilarityResultsRenderer from '../similarity_search/SimilarityResultsRenderer';
 import SimilarityResultInfoWindow from '../similarity_search/SimilarityResultInfoWindow';
-import { 
+import {
   startSegmentation, 
   getSegmentationStatus, 
   cancelSegmentation, 
@@ -24,6 +24,41 @@ import {
   isSegmentationFailed
 } from '../../utils/segmentationUtils.js';
 import './MicroscopeMapDisplay.css';
+
+const SIMULATION_GALLERY_ID = 'simulation-gallery';
+
+const getSimulationSampleName = (simulationDataSource) => {
+  return simulationDataSource?.sampleInfo?.name ||
+    simulationDataSource?.activeSample ||
+    'Simulated Sample';
+};
+
+const getSimulationDatasetName = (simulationDataSource) => {
+  const sampleName = getSimulationSampleName(simulationDataSource);
+  const objective = simulationDataSource?.sampleInfo?.objective;
+  return objective ? `${sampleName} (${objective})` : sampleName;
+};
+
+const createSimulationGallery = () => ({
+  id: SIMULATION_GALLERY_ID,
+  manifest: { name: 'Simulated Microscope Data' },
+});
+
+const createSimulationDataset = (simulationDataSource) => {
+  const datasetName = getSimulationDatasetName(simulationDataSource);
+  return {
+    id: simulationDataSource?.activeSample || 'simulated-sample',
+    name: datasetName,
+    alias: datasetName,
+    manifest: {
+      name: datasetName,
+      description: simulationDataSource?.sampleInfo?.description ||
+        'Currently active simulated microscope sample.',
+    },
+    zarrUrl: simulationDataSource?.zarrUrl || null,
+    sampleInfo: simulationDataSource?.sampleInfo || null,
+  };
+};
 
 const MicroscopeMapDisplay = forwardRef(({
   isOpen,
@@ -71,6 +106,7 @@ const MicroscopeMapDisplay = forwardRef(({
   onFreePanAutoCollapse,
   onFitToViewUncollapse,
   sampleLoadStatus,
+  simulationDataSource,
   // Panel control props
   isSamplePanelOpen,
   setIsSamplePanelOpen,
@@ -90,6 +126,11 @@ const MicroscopeMapDisplay = forwardRef(({
   
   // Check if using simulated microscope - disable scanning features
   const isSimulatedMicroscopeSelected = isSimulatedMicroscope(selectedMicroscopeId);
+  const simulationGallery = useMemo(() => createSimulationGallery(), []);
+  const simulationDataset = useMemo(
+    () => createSimulationDataset(simulationDataSource),
+    [simulationDataSource]
+  );
   
   // Laser autofocus handler for FOV controls
   const handleLaserAutoFocus = useCallback(async () => {
@@ -1947,44 +1988,53 @@ const MicroscopeMapDisplay = forwardRef(({
     }
   }, [mapViewMode, autoFittedScale, autoFittedPan, appendLog, currentStagePosition, stageDimensions, pixelsPerMm, containerDimensions]);
   
-  // Auto-load example data when entering FREE_PAN mode for simulated microscope
+  const activateSimulationBrowseMode = useCallback((trigger = 'manual') => {
+    setShowBrowseDataModal(false);
+    setIsHistoricalDataMode(true);
+    setStitchedTiles([]);
+    setSelectedGallery(simulationGallery);
+    setSelectedHistoricalDataset(simulationDataset);
+
+    setLayers(prev => {
+      const existingBrowseLayer = prev.find(layer => layer.type === 'load-server');
+      if (!existingBrowseLayer) {
+        const browseDataLayer = {
+          id: `browse-data-${Date.now()}`,
+          name: simulationDataset.name,
+          type: 'load-server',
+          visible: true,
+          channels: [],
+          readonly: false
+        };
+        return [...prev, browseDataLayer];
+      }
+
+      return prev.map(layer => (
+        layer.type === 'load-server'
+          ? { ...layer, name: simulationDataset.name }
+          : layer
+      ));
+    });
+
+    if (appendLog) {
+      appendLog(
+        `${trigger === 'auto' ? 'Auto-loading' : 'Loading'} simulated OME-Zarr dataset for ${simulationDataset.name}...`
+      );
+    }
+  }, [appendLog, simulationDataset, simulationGallery]);
+
+  // Auto-load simulated browse data when entering FREE_PAN mode.
   useEffect(() => {
     if (mapViewMode === 'FREE_PAN' && isSimulatedMicroscopeSelected && !isHistoricalDataMode) {
-      console.log('🔄 Auto-loading example data for simulated microscope in FREE_PAN mode');
-      
-      // Set historical mode and example data
-      setIsHistoricalDataMode(true);
-      setStitchedTiles([]); // Clear all loaded tiles
-      
-      // Set a mock gallery and dataset for the example data
-      setSelectedGallery({ id: 'example-gallery', manifest: { name: 'Example Data' } });
-      setSelectedHistoricalDataset({ 
-        id: 'example-image-data', 
-        manifest: { name: 'U2OS Full Plate' } 
-      });
-      
-      // Create a Browse Data layer if it doesn't exist
-      setLayers(prev => {
-        const existingBrowseLayer = prev.find(layer => layer.type === 'load-server');
-        if (!existingBrowseLayer) {
-          const browseDataLayer = {
-            id: `browse-data-${Date.now()}`,
-            name: 'Example Data',
-            type: 'load-server',
-            visible: true,
-            channels: [],
-            readonly: false
-          };
-          return [...prev, browseDataLayer];
-        }
-        return prev;
-      });
-      
-      if (appendLog) {
-        appendLog('Auto-loading example OME-Zarr dataset for simulated microscope...');
-      }
+      console.log('🔄 Auto-loading simulated browse data for FREE_PAN mode');
+      activateSimulationBrowseMode('auto');
     }
-  }, [mapViewMode, isSimulatedMicroscopeSelected, isHistoricalDataMode, appendLog]);
+  }, [
+    activateSimulationBrowseMode,
+    isHistoricalDataMode,
+    isSimulatedMicroscopeSelected,
+    mapViewMode,
+  ]);
   
   // Switch back to FOV_FITTED mode
   const fitToView = useCallback(() => {
@@ -3844,6 +3894,17 @@ const MicroscopeMapDisplay = forwardRef(({
   // Fetch galleries when modal opens (no microscope isolation - show all galleries)
   useEffect(() => {
     if (!showBrowseDataModal) return;
+
+    if (isSimulatedMicroscopeSelected) {
+      setGalleries([]);
+      setGalleriesLoading(false);
+      setGalleriesError(null);
+      setSelectedGallery(null);
+      setDatasets([]);
+      setDatasetsError(null);
+      return;
+    }
+
     setGalleriesLoading(true);
     setGalleriesError(null);
     setGalleries([]);
@@ -3868,10 +3929,10 @@ const MicroscopeMapDisplay = forwardRef(({
       })
       .catch(e => setGalleriesError(e.message))
       .finally(() => setGalleriesLoading(false));
-  }, [showBrowseDataModal]);
+  }, [showBrowseDataModal, isSimulatedMicroscopeSelected]);
 
-  // Fetch datasets when a gallery is selected
-  // Skip for simulated microscope with example data (no artifact manager needed)
+  // Fetch datasets when a gallery is selected.
+  // For simulated microscope mode, the currently active sample behaves like a single dataset.
   useEffect(() => {
     if (!selectedGallery) {
       setDatasets([]);
@@ -3879,10 +3940,8 @@ const MicroscopeMapDisplay = forwardRef(({
       return;
     }
     
-    // Skip artifact manager fetch for simulated microscope example data
-    if (isSimulatedMicroscopeSelected && selectedGallery.id === 'example-gallery') {
-      // For simulated microscope, we use hardcoded example data - no need to fetch
-      setDatasets([{ id: 'example-image-data', manifest: { name: 'U2OS Full Plate' } }]);
+    if (isSimulatedMicroscopeSelected && selectedGallery.id === SIMULATION_GALLERY_ID) {
+      setDatasets([simulationDataset]);
       setDatasetsLoading(false);
       setDatasetsError(null);
       return;
@@ -3903,7 +3962,12 @@ const MicroscopeMapDisplay = forwardRef(({
       })
       .catch(e => setDatasetsError(e.message))
       .finally(() => setDatasetsLoading(false));
-  }, [selectedGallery, selectedMicroscopeId, isSimulatedMicroscopeSelected]);
+  }, [
+    selectedGallery,
+    selectedMicroscopeId,
+    isSimulatedMicroscopeSelected,
+    simulationDataset,
+  ]);
 
   // Add state for selected dataset in historical mode
   const [selectedHistoricalDataset, setSelectedHistoricalDataset] = useState(null);
@@ -4211,6 +4275,80 @@ const MicroscopeMapDisplay = forwardRef(({
     }
   }, [isHistoricalDataMode, datasets, selectedHistoricalDataset]);
 
+  // Create the loader once and clean up when the component unmounts.
+  useEffect(() => {
+    if (!artifactZarrLoaderRef.current) {
+      artifactZarrLoaderRef.current = new ArtifactZarrLoader();
+    }
+
+    return () => {
+      if (artifactZarrLoaderRef.current) {
+        artifactZarrLoaderRef.current.clearCaches();
+        artifactZarrLoaderRef.current.cancelActiveRequests();
+      }
+    };
+  }, []);
+
+  // Reconfigure the simulated Zarr loader whenever the active simulated sample changes.
+  useEffect(() => {
+    if (!isSimulatedMicroscopeSelected || !simulationDataSource?.zarrUrl) {
+      return;
+    }
+
+    let isCancelled = false;
+
+    const syncSimulationLoader = async () => {
+      if (!artifactZarrLoaderRef.current) {
+        artifactZarrLoaderRef.current = new ArtifactZarrLoader();
+      }
+
+      setSelectedHistoricalDataset(simulationDataset);
+      setZarrChannelConfigs({});
+      setAvailableZarrChannels([]);
+      setIsMultiChannelMode(false);
+      setStitchedTiles([]);
+
+      setLayers(prev => prev.map(layer => (
+        layer.type === 'load-server'
+          ? { ...layer, name: simulationDataset.name }
+          : layer
+      )));
+
+      if (selectedGallery?.id === SIMULATION_GALLERY_ID) {
+        setSelectedGallery(simulationGallery);
+      }
+
+      try {
+        await artifactZarrLoaderRef.current.configure(
+          simulationDataSource.zarrUrl,
+          { forceReload: true }
+        );
+
+        if (!isCancelled) {
+          console.log(
+            `[Simulation Zarr] Active sample ready: ${simulationDataset.name} -> ${simulationDataSource.zarrUrl}`
+          );
+        }
+      } catch (error) {
+        if (!isCancelled) {
+          console.error('[Simulation Zarr] Failed to configure loader:', error);
+        }
+      }
+    };
+
+    syncSimulationLoader();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [
+    isSimulatedMicroscopeSelected,
+    selectedGallery?.id,
+    simulationDataSource,
+    simulationDataset,
+    simulationGallery,
+  ]);
+
   // Load zarr channel metadata when dataset changes (historical mode only)
   useEffect(() => {
     const loadZarrChannelMetadata = async () => {
@@ -4241,35 +4379,6 @@ const MicroscopeMapDisplay = forwardRef(({
     
     loadZarrChannelMetadata();
   }, [isHistoricalDataMode, selectedHistoricalDataset, initializeZarrChannelsFromMetadata]);
-
-  
-  // Initialize ArtifactZarrLoader for historical data
-  // Initialize the loader when component mounts and load metadata from .zattrs
-  useEffect(() => {
-    const initLoader = async () => {
-      if (!artifactZarrLoaderRef.current) {
-        artifactZarrLoaderRef.current = new ArtifactZarrLoader();
-      }
-      
-      // Initialize the loader (loads metadata from .zattrs dynamically)
-      try {
-        await artifactZarrLoaderRef.current.init();
-        console.log('✅ ArtifactZarrLoader initialized with metadata from .zattrs');
-      } catch (error) {
-        console.error('❌ Failed to initialize ArtifactZarrLoader:', error);
-      }
-    };
-    
-    initLoader();
-    
-    // Cleanup on unmount
-    return () => {
-      if (artifactZarrLoaderRef.current) {
-        artifactZarrLoaderRef.current.clearCaches();
-        artifactZarrLoaderRef.current.cancelActiveRequests();
-      }
-    };
-  }, []);
 
   // Helper function to get wells that intersect with a region
   const getIntersectingWells = useCallback((regionMinX, regionMaxX, regionMinY, regionMaxY) => {
@@ -4565,7 +4674,7 @@ const MicroscopeMapDisplay = forwardRef(({
               activeChannel,
             timestamp: Date.now(),
             isHistorical: true,
-            datasetId: selectedHistoricalDataset?.id || 'example',
+            datasetId: selectedHistoricalDataset?.id || 'simulation',
             isPartial: false,
             loadingProgress: 1.0,
             metadata: result.metadata
@@ -6253,7 +6362,7 @@ const MicroscopeMapDisplay = forwardRef(({
             <div className="flex justify-between items-center p-4 border-b border-gray-600">
               <h3 className="text-lg font-semibold text-gray-200 flex items-center">
                 <i className="fas fa-database text-blue-400 mr-2"></i>
-                {isSimulatedMicroscopeSelected ? 'Load Example Data' : 'Browse Imaging Data'}
+                {isSimulatedMicroscopeSelected ? 'Load Simulated Data' : 'Browse Imaging Data'}
               </h3>
               <button
                 onClick={() => setShowBrowseDataModal(false)}
@@ -6264,70 +6373,53 @@ const MicroscopeMapDisplay = forwardRef(({
               </button>
             </div>
             
-            {/* Simulated Microscope: Simplified UI for example data */}
+            {/* Simulated Microscope: Simplified UI for active sample data */}
             {isSimulatedMicroscopeSelected ? (
               <div className="p-6">
-                {/* Example Data Info */}
+                {/* Active Simulation Data Info */}
                 <div className="bg-gray-700 rounded-lg p-4 mb-4">
                   <div className="flex items-center mb-3">
                     <i className="fas fa-microscope text-green-400 text-2xl mr-3"></i>
                     <div>
-                      <div className="text-white font-medium">Example OME-Zarr Dataset</div>
-                      <div className="text-gray-400 text-sm">U2OS Full Plate Imaging</div>
+                      <div className="text-white font-medium">{simulationDataset.name}</div>
+                      <div className="text-gray-400 text-sm">
+                        {simulationDataSource?.zarrServiceId || 'Active simulated microscope sample'}
+                      </div>
                     </div>
                   </div>
                   <div className="text-gray-300 text-sm space-y-1">
-                    <div><span className="text-gray-500">Shape:</span> 20 timepoints × 6 channels × 247,296 × 361,984 pixels</div>
-                    <div><span className="text-gray-500">Scale levels:</span> 6 (0-5)</div>
-                    <div><span className="text-gray-500">Pixel size:</span> 0.31 µm/px</div>
+                    <div><span className="text-gray-500">Active sample:</span> {getSimulationSampleName(simulationDataSource)}</div>
+                    {simulationDataSource?.sampleInfo?.objective && (
+                      <div><span className="text-gray-500">Objective:</span> {simulationDataSource.sampleInfo.objective}</div>
+                    )}
+                    {simulationDataSource?.sampleInfo?.cell_line && (
+                      <div><span className="text-gray-500">Cell line:</span> {simulationDataSource.sampleInfo.cell_line}</div>
+                    )}
+                    {simulationDataSource?.sampleInfo?.channels && (
+                      <div><span className="text-gray-500">Channels:</span> {simulationDataSource.sampleInfo.channels.join(', ')}</div>
+                    )}
+                    {simulationDataSource?.sampleInfo?.description && (
+                      <div><span className="text-gray-500">Description:</span> {simulationDataSource.sampleInfo.description}</div>
+                    )}
                   </div>
                 </div>
                 
                 {/* Notice */}
                 <div className="bg-blue-900 bg-opacity-40 text-blue-200 text-xs p-3 rounded mb-4">
                   <i className="fas fa-info-circle mr-1"></i>
-                  This example dataset is streamed from the server. Pan and zoom to explore different regions.
+                  This view is streamed from `squid-control` and follows the active simulated sample. When `switch_sample()` changes upstream, this browse layer will refresh to match.
                 </div>
                 
                 {/* Load Button */}
                 <button
-                  className="w-full px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors"
-                  onClick={() => {
-                    setShowBrowseDataModal(false);
-                    setIsHistoricalDataMode(true);
-                    setStitchedTiles([]); // Clear all loaded tiles
-                    
-                    // Set a mock gallery and dataset for the example data
-                    setSelectedGallery({ id: 'example-gallery', manifest: { name: 'Example Data' } });
-                    setSelectedHistoricalDataset({ 
-                      id: 'example-image-data', 
-                      manifest: { name: 'U2OS Full Plate' } 
-                    });
-                    
-                    // Create a Browse Data layer if it doesn't exist
-                    setLayers(prev => {
-                      const existingBrowseLayer = prev.find(layer => layer.type === 'load-server');
-                      if (!existingBrowseLayer) {
-                        const browseDataLayer = {
-                          id: `browse-data-${Date.now()}`,
-                          name: 'Example Data',
-                          type: 'load-server',
-                          visible: true,
-                          channels: [],
-                          readonly: false
-                        };
-                        return [...prev, browseDataLayer];
-                      }
-                      return prev;
-                    });
-                    
-                    if (appendLog) {
-                      appendLog('Loading example OME-Zarr dataset...');
-                    }
-                  }}
+                  className="w-full px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={!simulationDataSource?.zarrUrl}
+                  onClick={() => activateSimulationBrowseMode('manual')}
                 >
                   <i className="fas fa-play mr-2"></i>
-                  Load Example Data
+                  {simulationDataSource?.zarrUrl
+                    ? `Load ${simulationDataset.name}`
+                    : 'Waiting for simulated sample stream...'}
                 </button>
               </div>
             ) : (
@@ -6527,6 +6619,7 @@ MicroscopeMapDisplay.propTypes = {
   onFreePanAutoCollapse: PropTypes.func,
   onFitToViewUncollapse: PropTypes.func,
   sampleLoadStatus: PropTypes.object,
+  simulationDataSource: PropTypes.object,
   // Panel control props
   isSamplePanelOpen: PropTypes.bool,
   setIsSamplePanelOpen: PropTypes.func,
@@ -6541,4 +6634,3 @@ MicroscopeMapDisplay.propTypes = {
 };
 
 export default MicroscopeMapDisplay; 
-

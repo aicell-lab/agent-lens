@@ -191,6 +191,7 @@ const MicroscopeControlPanel = ({
     isRealMicroscope: false,
     isSimulatedMicroscope: false
   });
+  const [simulationDataSource, setSimulationDataSource] = useState(null);
 
   // WebRTC DataChannel states for metadata
   const [metadataDataChannel, setMetadataDataChannel] = useState(null);
@@ -264,6 +265,34 @@ const MicroscopeControlPanel = ({
   // Callback to receive sample load status updates from SampleSelector
   const handleSampleLoadStatusChange = useCallback((status) => {
     setSampleLoadStatus(status);
+  }, []);
+
+  const updateSimulationDataSource = useCallback((status) => {
+    const activeSample = status?.simulation_active_sample;
+    const zarrUrl = status?.simulation_zarr_url;
+
+    if (!activeSample || !zarrUrl) {
+      setSimulationDataSource(prev => (prev !== null ? null : prev));
+      return;
+    }
+
+    const nextSource = {
+      activeSample,
+      sampleInfo: status.simulation_sample_info || null,
+      zarrUrl,
+      zarrServiceId: status.simulation_zarr_service_id || null,
+    };
+
+    setSimulationDataSource(prev => {
+      const unchanged = prev &&
+        prev.activeSample === nextSource.activeSample &&
+        prev.zarrUrl === nextSource.zarrUrl &&
+        prev.zarrServiceId === nextSource.zarrServiceId &&
+        prev.sampleInfo?.zarr_dataset_path === nextSource.sampleInfo?.zarr_dataset_path &&
+        prev.sampleInfo?.description === nextSource.sampleInfo?.description;
+
+      return unchanged ? prev : nextSource;
+    });
   }, []);
 
   // Validated input hooks for better UX and error handling
@@ -349,6 +378,12 @@ const MicroscopeControlPanel = ({
   useEffect(() => {
     autoContrastMaxAdjustRef.current = autoContrastMaxAdjust;
   }, [autoContrastMaxAdjust]);
+
+  useEffect(() => {
+    if (!isSimulatedMicroscope(selectedMicroscopeId)) {
+      setSimulationDataSource(null);
+    }
+  }, [selectedMicroscopeId]);
   
   // Helper function to update microscopeBusy only when value actually changes
   // IMPORTANT: This function updates the ref synchronously to prevent race conditions
@@ -421,6 +456,7 @@ const MicroscopeControlPanel = ({
       setYPosition(status.current_y);
       setZPosition(status.current_z);
       setIsLightOn(status.is_illumination_on);
+      updateSimulationDataSource(status);
 
       const hardwareChannel = status.current_channel?.toString();
 
@@ -1723,6 +1759,7 @@ const MicroscopeControlPanel = ({
             onFreePanAutoCollapse={handleCombinedAutoCollapse}
             onFitToViewUncollapse={handleCombinedUncollapse}
             sampleLoadStatus={sampleLoadStatus}
+            simulationDataSource={simulationDataSource}
             // Panel control props
             isSamplePanelOpen={isSamplePanelOpen}
             setIsSamplePanelOpen={setIsSamplePanelOpen}
@@ -2247,4 +2284,4 @@ MicroscopeControlPanel.propTypes = {
   onFitToViewUncollapse: PropTypes.func,
 };
 
-export default MicroscopeControlPanel; 
+export default MicroscopeControlPanel;

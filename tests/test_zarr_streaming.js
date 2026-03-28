@@ -4,8 +4,8 @@
  * This test verifies that the zarr streaming endpoint works correctly
  * with zarrita.js library for accessing OME-Zarr datasets.
  * 
- * Usage: 
- *   node tests/test_zarr_streaming.js
+ * Usage:
+ *   SIMULATION_ZARR_ENDPOINT=https://... node tests/test_zarr_streaming.js
  * 
  * Prerequisites:
  *   npm install zarrita
@@ -14,7 +14,7 @@
 import * as zarr from "zarrita";
 
 // Test configuration
-const ZARR_ENDPOINT = "https://hypha.aicell.io/reef-imaging/apps/agent-lens/example-image-data.zarr";
+const ZARR_ENDPOINT = process.env.SIMULATION_ZARR_ENDPOINT || null;
 
 // Hardcoded OME-Zarr structure (to avoid listing 3 million chunks)
 // Based on: /mnt/shared_documents/20251215-illumination-calibrated/data.zarr
@@ -411,9 +411,16 @@ class ZarrStreamingTest {
   async runAllTests() {
     console.log("🧪 Zarr Streaming Endpoint Test Suite");
     console.log("=".repeat(60));
-    console.log(`🔗 Endpoint: ${ZARR_ENDPOINT}`);
+    console.log(`🔗 Endpoint: ${ZARR_ENDPOINT || "(not configured)"}`);
     console.log(`📚 Library: zarrita.js`);
     console.log();
+
+    if (!ZARR_ENDPOINT) {
+      console.log(
+        "ℹ️ SIMULATION_ZARR_ENDPOINT is not set. Skipping remote Zarr streaming checks."
+      );
+      return;
+    }
 
     try {
       // Test 1: Create store
@@ -478,4 +485,3 @@ if (process.argv[1] && process.argv[1].includes('test_zarr_streaming.js')) {
 }
 
 export default ZarrStreamingTest;
-
