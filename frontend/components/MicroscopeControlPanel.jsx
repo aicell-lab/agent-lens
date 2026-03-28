@@ -1061,8 +1061,12 @@ const MicroscopeControlPanel = ({
     if (currentOperation && isWebRtcActive) {
       // Handle both string operations (from SampleSelector) and object operations (from well navigation)
       if (typeof currentOperation === 'string') {
-        // String operations like 'loading' and 'unloading' from SampleSelector should stop WebRTC
-        if (currentOperation === 'loading' || currentOperation === 'unloading') {
+        // String operations from SampleSelector should stop WebRTC while samples change.
+        if (
+          currentOperation === 'loading' ||
+          currentOperation === 'unloading' ||
+          currentOperation === 'switching'
+        ) {
           appendLog(`Sample operation '${currentOperation}' started, stopping WebRTC stream.`);
           memoizedStopWebRtcStream();
         }
@@ -1373,7 +1377,11 @@ const MicroscopeControlPanel = ({
   // Note: We set busy=true immediately for instant feedback, then let the 1-second
   // transport queue polling be the source of truth for the actual operation status
   useEffect(() => {
-    if (currentOperation === 'loading' || currentOperation === 'unloading') {
+    if (
+      currentOperation === 'loading' ||
+      currentOperation === 'unloading' ||
+      currentOperation === 'switching'
+    ) {
       console.log(`[MicroscopeControlPanel] Setting microscopeBusy to TRUE due to currentOperation: ${currentOperation}`);
       updateMicroscopeBusy(true); // Only updates if value changes
     }
@@ -1791,6 +1799,7 @@ const MicroscopeControlPanel = ({
               isVisible={true}
               selectedMicroscopeId={selectedMicroscopeId}
               microscopeControlService={isSimulatedMicroscope(selectedMicroscopeId) ? microscopeControlService : null}
+              simulationDataSource={simulationDataSource}
               incubatorControlService={incubatorControlService}
               orchestratorManagerService={orchestratorManagerService}
               currentOperation={currentOperation}

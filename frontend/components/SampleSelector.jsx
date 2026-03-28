@@ -6,9 +6,26 @@ import { isRealMicroscope, isSimulatedMicroscope, getMicroscopeNumber, getOrches
 // .sample-selector-dropdown { position: absolute; top: 50px; /* Adjust as needed */ left: 20px; z-index: 1000; background: white; border: 1px solid #ccc; box-shadow: 0 2px 10px rgba(0,0,0,0.1); padding: 15px; border-radius: 5px; width: 300px; /* Or max-content */ }
 // .hidden { display: none; }
 
+const normalizeSimulationSamples = (samples) => {
+  return Object.entries(samples || {})
+    .map(([id, info]) => ({
+      id,
+      name: id,
+      description: info?.description || null,
+      objective: info?.objective || null,
+      cellLine: info?.cell_line || null,
+      staining: info?.staining || null,
+      channels: Array.isArray(info?.channels) ? info.channels : [],
+      configName: info?.config_name || null,
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+};
+
 const SampleSelector = ({
   isVisible,
   selectedMicroscopeId,
+  microscopeControlService,
+  simulationDataSource,
   incubatorControlService,
   orchestratorManagerService,
   currentOperation,
@@ -24,11 +41,17 @@ const SampleSelector = ({
   // Track loaded sample ID on current microscope
   const [loadedSampleOnMicroscope, setLoadedSampleOnMicroscope] = useState(null);
   const [labVideoStreamUrls, setLabVideoStreamUrls] = useState({});
+  const [simulationSamples, setSimulationSamples] = useState([]);
+  const [simulationSamplesError, setSimulationSamplesError] = useState('');
 
   // Use centralized config utility functions
   const isRealMicroscopeSelected = isRealMicroscope(selectedMicroscopeId);
   const isSimulatedMicroscopeSelected = isSimulatedMicroscope(selectedMicroscopeId);
   const currentMicroscopeNumber = getMicroscopeNumber(selectedMicroscopeId) || 0;
+  const isSampleTransitionInProgress =
+    currentOperation === 'loading' ||
+    currentOperation === 'unloading' ||
+    currentOperation === 'switching';
 
   // Notify parent when sample load status changes
   useEffect(() => {
@@ -36,10 +59,22 @@ const SampleSelector = ({
       // Find the sample name for the loaded sample (only for real microscopes)
       let loadedSampleName = null;
       if (loadedSampleOnMicroscope) {
-        const loadedSlot = incubatorSlots.find(slot => slot.id === loadedSampleOnMicroscope);
-        loadedSampleName = loadedSlot?.name || null;
+        if (isRealMicroscopeSelected) {
+          const loadedSlot = incubatorSlots.find(
+            slot => slot.id === loadedSampleOnMicroscope
+          );
+          loadedSampleName = loadedSlot?.name || null;
+        } else if (isSimulatedMicroscopeSelected) {
+          const loadedSimulationSample = simulationSamples.find(
+            sample => sample.id === loadedSampleOnMicroscope
+          );
+          loadedSampleName =
+            loadedSimulationSample?.name ||
+            simulationDataSource?.sampleInfo?.name ||
+            loadedSampleOnMicroscope;
+        }
       }
-      
+
       onSampleLoadStatusChange({
         isSampleLoaded,
         loadedSampleOnMicroscope,
@@ -49,7 +84,17 @@ const SampleSelector = ({
         isSimulatedMicroscope: isSimulatedMicroscopeSelected
       });
     }
-  }, [isSampleLoaded, loadedSampleOnMicroscope, selectedSampleId, isRealMicroscopeSelected, isSimulatedMicroscopeSelected, onSampleLoadStatusChange, incubatorSlots]);
+  }, [
+    incubatorSlots,
+    isRealMicroscopeSelected,
+    isSampleLoaded,
+    isSimulatedMicroscopeSelected,
+    loadedSampleOnMicroscope,
+    onSampleLoadStatusChange,
+    selectedSampleId,
+    simulationDataSource?.sampleInfo?.name,
+    simulationSamples,
+  ]);
 
   // Helper function to add workflow messages
   const addWorkflowMessage = (message) => {
@@ -61,6 +106,25 @@ const SampleSelector = ({
     setWorkflowMessages([]);
   };
 
+  const fetchSimulationSamples = async () => {
+    if (!microscopeControlService || !isSimulatedMicroscopeSelected) {
+      setSimulationSamples([]);
+      setSimulationSamplesError('');
+      return;
+    }
+
+    try {
+      const samples = await microscopeControlService.list_simulation_samples();
+      setSimulationSamples(normalizeSimulationSamples(samples));
+      setSimulationSamplesError('');
+    } catch (error) {
+      console.error('[SampleSelector] Failed to fetch simulation samples:', error);
+      setSimulationSamples([]);
+      setSimulationSamplesError(
+        error?.message || 'Failed to load simulated samples.'
+      );
+    }
+  };
 
   // Check transport queue status
   const checkTransportQueueStatus = async () => {
@@ -124,9 +188,9 @@ const SampleSelector = ({
         setSelectedSampleId(null);
         setLoadedSampleOnMicroscope(null);
       }
-    } else { // No specific microscope type or no service
-      setIncubatorSlots([]); 
-      setSelectedSampleId(null); 
+    } else if (!isSimulatedMicroscopeSelected) { // No specific microscope type or no service
+      setIncubatorSlots([]);
+      setSelectedSampleId(null);
       setIsSampleLoaded(false);
       setLoadedSampleOnMicroscope(null);
     }
@@ -136,6 +200,43 @@ const SampleSelector = ({
   useEffect(() => {
     fetchIncubatorData();
   }, [selectedMicroscopeId, incubatorControlService, currentMicroscopeNumber]);
+
+  useEffect(() => {
+    if (!isVisible || !isSimulatedMicroscopeSelected) {
+      return;
+    }
+
+    fetchSimulationSamples();
+  }, [
+    isVisible,
+    isSimulatedMicroscopeSelected,
+    microscopeControlService,
+    selectedMicroscopeId,
+  ]);
+
+  useEffect(() => {
+    if (!isSimulatedMicroscopeSelected) {
+      setSimulationSamples([]);
+      setSimulationSamplesError('');
+      return;
+    }
+
+    const activeSample =
+      simulationDataSource?.activeSample ||
+      simulationDataSource?.sampleInfo?.name ||
+      null;
+
+    setIsSampleLoaded(Boolean(activeSample));
+    setLoadedSampleOnMicroscope(activeSample);
+
+    if (activeSample) {
+      setSelectedSampleId(activeSample);
+    }
+  }, [
+    isSimulatedMicroscopeSelected,
+    simulationDataSource?.activeSample,
+    simulationDataSource?.sampleInfo?.name,
+  ]);
 
   // Check transport queue status periodically and when operations complete
   useEffect(() => {
@@ -159,6 +260,12 @@ const SampleSelector = ({
   }, [isRealMicroscopeSelected, orchestratorManagerService]);
 
   const handleSampleSelect = (sampleId) => {
+    if (isSimulatedMicroscopeSelected) {
+      setSelectedSampleId(sampleId);
+      console.log(`Simulated sample selected: ${sampleId}`);
+      return;
+    }
+
     if (isSampleLoaded) {
       // If a sample is loaded, only allow re-selecting the currently loaded sample.
       const currentlyLoadedSample = loadedSampleOnMicroscope;
@@ -179,6 +286,53 @@ const SampleSelector = ({
     }
 
     clearWorkflowMessages();
+
+    if (isSimulatedMicroscopeSelected) {
+      if (!microscopeControlService) {
+        addWorkflowMessage('Error: No microscope service available');
+        setLoadingStatus('Error: No microscope service available');
+        setTimeout(() => setLoadingStatus(''), 3000);
+        return;
+      }
+
+      if (selectedSampleId === loadedSampleOnMicroscope) {
+        setLoadingStatus(`Sample ${selectedSampleId} is already active.`);
+        setTimeout(() => setLoadingStatus(''), 2000);
+        return;
+      }
+
+      addWorkflowMessage(
+        `Switching simulated microscope to sample ${selectedSampleId}`
+      );
+      setLoadingStatus(`Switching simulated sample to ${selectedSampleId}...`);
+      setCurrentOperation('switching');
+
+      try {
+        const result = await microscopeControlService.switch_sample(selectedSampleId);
+        const activeSample =
+          result?.simulation_active_sample ||
+          result?.active_sample ||
+          selectedSampleId;
+
+        setIsSampleLoaded(Boolean(activeSample));
+        setLoadedSampleOnMicroscope(activeSample);
+        setSelectedSampleId(activeSample);
+        addWorkflowMessage(
+          result?.message || `Successfully switched simulated sample to ${activeSample}`
+        );
+        setLoadingStatus(`Successfully switched simulated sample to ${activeSample}.`);
+        await fetchSimulationSamples();
+      } catch (error) {
+        console.error('Failed to switch simulated sample:', error);
+        addWorkflowMessage(`Error: ${error.message}`);
+        setLoadingStatus(`Error switching sample: ${error.message}`);
+      } finally {
+        setCurrentOperation(null);
+        setTimeout(() => setLoadingStatus(''), 3000);
+      }
+
+      return;
+    }
 
     { // Real Microscope
       console.log(`[SampleSelector] Loading sample on microscope. Selected ID: ${selectedMicroscopeId}`);
@@ -312,6 +466,10 @@ const SampleSelector = ({
 
   // Determine if a sample can be selected based on its location
   const canSelectSample = (slot) => {
+    if (isSimulatedMicroscopeSelected) {
+      return true;
+    }
+
     // If a sample is loaded on this real microscope, only that sample itself is selectable (to enable unload)
     if (isSampleLoaded && isRealMicroscopeSelected && slot.id === loadedSampleOnMicroscope) {
       return true;
@@ -326,7 +484,15 @@ const SampleSelector = ({
   // Get class name for sample button based on location and selected state
   const getSampleButtonClass = (slot) => {
     let className = 'sample-option';
-    
+
+    if (
+      isSimulatedMicroscopeSelected &&
+      (slot.id === loadedSampleOnMicroscope || slot.id === selectedSampleId)
+    ) {
+      className += ' active';
+      return className;
+    }
+
     if (isSampleLoaded && slot.id === loadedSampleOnMicroscope) {
       // If a sample is loaded on this real microscope, it's active
       className += ' active';
@@ -348,13 +514,33 @@ const SampleSelector = ({
     return className;
   };
 
-  // Simulated microscope has no sample selection UI
-  if (isSimulatedMicroscopeSelected) {
-    return null;
-  }
-
   return (
     <div className={`sample-selector-container ${!isVisible ? 'hidden' : ''}`}>
+      {isVisible && isSimulatedMicroscopeSelected && (
+        <div className="workflow-message">
+          <div className="flex items-center justify-between gap-2">
+            <span>
+              Active simulated sample:{' '}
+              <strong>{loadedSampleOnMicroscope || 'Unknown'}</strong>
+            </span>
+            <button
+              className="sample-button load-button"
+              onClick={fetchSimulationSamples}
+              disabled={isSampleTransitionInProgress || !microscopeControlService}
+              type="button"
+            >
+              <i className="fas fa-rotate-right"></i>
+              Refresh
+            </button>
+          </div>
+          {simulationDataSource?.sampleInfo?.description && (
+            <div className="mt-2 text-xs text-gray-300">
+              {simulationDataSource.sampleInfo.description}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Live Lab Video Feed - Only show for real microscopes */}
       {isVisible && isRealMicroscopeSelected && Object.keys(labVideoStreamUrls).length > 0 && (
         <div className="lab-video-feed">
@@ -388,15 +574,23 @@ const SampleSelector = ({
               <i className="fas fa-spinner fa-spin mr-2"></i>
               <span>Unloading Sample...</span>
             </button>
+          ) : currentOperation === 'switching' ? (
+            <button
+              className="sample-button"
+              disabled={true}
+            >
+              <i className="fas fa-spinner fa-spin mr-2"></i>
+              <span>Switching Sample...</span>
+            </button>
           ) : currentOperation === 'loading' ? (
             <button 
               className="sample-button"
               disabled={true}
             >
               <i className="fas fa-spinner fa-spin mr-2"></i>
-              <span>Loading Sample...</span>
+              <span>{isSimulatedMicroscopeSelected ? 'Switching Sample...' : 'Loading Sample...'}</span>
             </button>
-          ) : isSampleLoaded ? (
+          ) : isRealMicroscopeSelected && isSampleLoaded ? (
             <button 
               className="sample-button unload-button"
               onClick={handleUnloadSample}
@@ -411,17 +605,57 @@ const SampleSelector = ({
             <button 
               className="sample-button load-button"
               onClick={handleLoadSample}
-              disabled={!selectedSampleId || currentOperation !== null || microscopeBusy ||
-                          (isRealMicroscopeSelected && incubatorSlots.find(s=>s.id === selectedSampleId)?.location !== 'incubator_slot')
+              disabled={
+                !selectedSampleId ||
+                currentOperation !== null ||
+                microscopeBusy ||
+                (isRealMicroscopeSelected &&
+                  incubatorSlots.find(s => s.id === selectedSampleId)?.location !== 'incubator_slot') ||
+                (isSimulatedMicroscopeSelected &&
+                  (!microscopeControlService ||
+                    selectedSampleId === loadedSampleOnMicroscope))
               }
             >
               <i className="fas fa-upload mr-2"></i>
-              <span>Load Sample on Microscope</span>
+              <span>
+                {isSimulatedMicroscopeSelected
+                  ? selectedSampleId === loadedSampleOnMicroscope
+                    ? 'Current Sample Active'
+                    : 'Switch Sample'
+                  : 'Load Sample on Microscope'}
+              </span>
             </button>
           )}
         </div>
         
         <div className="sample-list">
+          {isSimulatedMicroscopeSelected && simulationSamples.length > 0 && simulationSamples.map(sample => (
+            <div
+              key={sample.id}
+              className={`sample-item ${getSampleButtonClass(sample).includes('active') ? 'selected' : ''}`}
+              onClick={() => currentOperation === null ? handleSampleSelect(sample.id) : null}
+              style={{ cursor: currentOperation !== null ? 'not-allowed' : 'pointer' }}
+            >
+              <i className="fas fa-microscope mr-2"></i>
+              <div className="sample-info">
+                <span className="sample-name">
+                  {sample.name}
+                  {sample.id === loadedSampleOnMicroscope ? ' (active)' : ''}
+                </span>
+                <span className="sample-location">
+                  {[sample.objective, sample.cellLine].filter(Boolean).join(' • ') || 'Simulated sample'}
+                </span>
+                {sample.description && (
+                  <span className="sample-location">{sample.description}</span>
+                )}
+              </div>
+            </div>
+          ))}
+          {isSimulatedMicroscopeSelected && simulationSamples.length === 0 && (
+            <div className="sample-item" style={{ color: '#9ca3af', fontStyle: 'italic' }}>
+              {simulationSamplesError || 'No simulated samples available from the microscope service.'}
+            </div>
+          )}
           {isRealMicroscopeSelected && incubatorSlots.length > 0 && incubatorSlots.map(slot => (
             <div
               key={slot.id}
@@ -463,13 +697,13 @@ const SampleSelector = ({
         <div className={`workflow-message ${
           loadingStatus.includes('successfully') || loadingStatus.includes('Sample loaded!') || loadingStatus.includes('Sample unloaded!') ? 'border-green-500' : 
           loadingStatus.includes('Error') ? 'border-red-500' :
-          currentOperation === 'loading' || currentOperation === 'unloading' ? 'border-blue-500' :
+          isSampleTransitionInProgress ? 'border-blue-500' :
           'border-blue-500'
         }`}>
           <i className={`fas ${
             loadingStatus.includes('successfully') || loadingStatus.includes('Sample loaded!') || loadingStatus.includes('Sample unloaded!') ? 'fa-check-circle text-green-400' : 
             loadingStatus.includes('Error') ? 'fa-exclamation-circle text-red-400' :
-            currentOperation === 'loading' || currentOperation === 'unloading' ? 'fa-spinner fa-spin text-blue-400' :
+            isSampleTransitionInProgress ? 'fa-spinner fa-spin text-blue-400' :
             'fa-info-circle text-blue-400'
           } mr-2`}></i>
           {loadingStatus}
@@ -482,6 +716,8 @@ const SampleSelector = ({
 SampleSelector.propTypes = {
   isVisible: PropTypes.bool.isRequired,
   selectedMicroscopeId: PropTypes.string.isRequired,
+  microscopeControlService: PropTypes.object,
+  simulationDataSource: PropTypes.object,
   incubatorControlService: PropTypes.object,
   orchestratorManagerService: PropTypes.object,
   currentOperation: PropTypes.string,
@@ -490,4 +726,4 @@ SampleSelector.propTypes = {
   microscopeBusy: PropTypes.bool,
 };
 
-export default SampleSelector; 
+export default SampleSelector;
