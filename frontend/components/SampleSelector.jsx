@@ -21,6 +21,32 @@ const normalizeSimulationSamples = (samples) => {
     .sort((left, right) => left.name.localeCompare(right.name));
 };
 
+const createSimulationSampleFromStatus = (simulationDataSource) => {
+  const sampleName =
+    simulationDataSource?.sampleInfo?.name ||
+    simulationDataSource?.activeSample ||
+    null;
+
+  if (!sampleName) {
+    return [];
+  }
+
+  return [
+    {
+      id: sampleName,
+      name: sampleName,
+      description: simulationDataSource?.sampleInfo?.description || null,
+      objective: simulationDataSource?.sampleInfo?.objective || null,
+      cellLine: simulationDataSource?.sampleInfo?.cell_line || null,
+      staining: simulationDataSource?.sampleInfo?.staining || null,
+      channels: Array.isArray(simulationDataSource?.sampleInfo?.channels)
+        ? simulationDataSource.sampleInfo.channels
+        : [],
+      configName: simulationDataSource?.sampleInfo?.config_name || null,
+    },
+  ];
+};
+
 const SampleSelector = ({
   isVisible,
   selectedMicroscopeId,
@@ -113,13 +139,22 @@ const SampleSelector = ({
       return;
     }
 
+    if (typeof microscopeControlService.list_simulation_samples !== 'function') {
+      const fallbackSamples = createSimulationSampleFromStatus(simulationDataSource);
+      setSimulationSamples(fallbackSamples);
+      setSimulationSamplesError(
+        'Connected microscope service does not expose list_simulation_samples(). Update or redeploy squid-control to enable full simulated sample selection.'
+      );
+      return;
+    }
+
     try {
       const samples = await microscopeControlService.list_simulation_samples();
       setSimulationSamples(normalizeSimulationSamples(samples));
       setSimulationSamplesError('');
     } catch (error) {
       console.error('[SampleSelector] Failed to fetch simulation samples:', error);
-      setSimulationSamples([]);
+      setSimulationSamples(createSimulationSampleFromStatus(simulationDataSource));
       setSimulationSamplesError(
         error?.message || 'Failed to load simulated samples.'
       );
@@ -212,6 +247,7 @@ const SampleSelector = ({
     isSimulatedMicroscopeSelected,
     microscopeControlService,
     selectedMicroscopeId,
+    simulationDataSource,
   ]);
 
   useEffect(() => {
@@ -292,6 +328,15 @@ const SampleSelector = ({
         addWorkflowMessage('Error: No microscope service available');
         setLoadingStatus('Error: No microscope service available');
         setTimeout(() => setLoadingStatus(''), 3000);
+        return;
+      }
+
+      if (typeof microscopeControlService.switch_sample !== 'function') {
+        const errorMessage =
+          'Connected microscope service does not expose switch_sample(). Update or redeploy squid-control to enable simulated sample switching.';
+        addWorkflowMessage(`Error: ${errorMessage}`);
+        setLoadingStatus(`Error switching sample: ${errorMessage}`);
+        setTimeout(() => setLoadingStatus(''), 4000);
         return;
       }
 
