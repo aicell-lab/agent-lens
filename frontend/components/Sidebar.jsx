@@ -64,25 +64,10 @@ const Sidebar = React.forwardRef(({
     }
   };
 
-  // Function to collapse sidebar from parent (for FREE_PAN auto-collapse)
-  const collapseSidebar = () => {
-    if (!currentOperation && !isMainSidebarCollapsed) {
-      setIsMainSidebarCollapsed(true);
-    }
-  };
-
-  // Function to expand sidebar from parent (for Fit to View)
-  const expandSidebar = () => {
-    if (!currentOperation && isMainSidebarCollapsed) {
-      setIsMainSidebarCollapsed(false);
-    }
-  };
-
-  // Expose collapse and expand functions to parent via useImperativeHandle
+  // Expose any needed functions to parent via useImperativeHandle
   React.useImperativeHandle(ref, () => ({
-    collapseSidebar,
-    expandSidebar
-  }), [currentOperation, isMainSidebarCollapsed]);
+    // Sidebar functions can be exposed here if needed
+  }), []);
 
   return (
     <div className="sidebar-container">

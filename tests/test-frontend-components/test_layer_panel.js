@@ -49,7 +49,6 @@ class LayerPanelTest {
       
       // Multi-Channel props
       shouldUseMultiChannelLoading: () => true,
-      mapViewMode: 'FREE_PAN',
       availableZarrChannels: [
         { label: 'BF_LED_matrix_full', color: 'FFFFFF', index: 0, window: { start: 0, end: 255 } },
         { label: 'Fluorescence_488_nm_Ex', color: '00FF00', index: 1, window: { start: 0, end: 255 } },

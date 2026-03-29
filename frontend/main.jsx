@@ -240,32 +240,6 @@ const MicroscopeControl = () => {
     appendLog('Sending image to ImageJ.js...');
   }, [setActiveTab]);
 
-  // Function to handle FREE_PAN mode auto-collapse (every time)
-  const handleFreePanAutoCollapse = useCallback(() => {
-    appendLog(`FREE_PAN mode triggered on ${selectedMicroscopeId} - auto-collapsing sidebar and right panel`);
-    
-    // Collapse sidebar via ref
-    if (sidebarRef.current && sidebarRef.current.collapseSidebar) {
-      sidebarRef.current.collapseSidebar();
-    }
-    
-    // Return true to indicate the MicroscopeControlPanel should also collapse its right panel
-    return true;
-  }, [selectedMicroscopeId, appendLog]);
-
-  // Function to handle uncollapsing panels when "Fit to View" is clicked
-  const handleFitToViewUncollapse = useCallback(() => {
-    appendLog('Fit to View clicked - expanding sidebar and right panel');
-    
-    // Expand sidebar via ref (we need to add an expand function to Sidebar)
-    if (sidebarRef.current && sidebarRef.current.expandSidebar) {
-      sidebarRef.current.expandSidebar();
-    }
-    
-    // Return true to indicate the MicroscopeControlPanel should also expand its right panel
-    return true;
-  }, [appendLog]);
-
   const renderContent = () => {
     switch (activeTab) {
       case 'microscope':
@@ -287,8 +261,6 @@ const MicroscopeControl = () => {
             showNotification={showNotification}
             onOpenImageJ={handleOpenImageJ}
             imjoyApi={imjoyApi}
-            onFreePanAutoCollapse={handleFreePanAutoCollapse}
-            onFitToViewUncollapse={handleFitToViewUncollapse}
             onClose={() => {}}
           />
         );

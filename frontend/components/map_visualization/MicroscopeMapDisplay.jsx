@@ -103,8 +103,6 @@ const MicroscopeMapDisplay = forwardRef(({
   onMouseUp,
   onMouseLeave,
   toggleWebRtcStream,
-  onFreePanAutoCollapse,
-  onFitToViewUncollapse,
   sampleLoadStatus,
   simulationDataSource,
   // Panel control props
@@ -230,10 +228,9 @@ const MicroscopeMapDisplay = forwardRef(({
   }, [microscopeConfiguration]);
 
   
-  // Map view mode: 'FOV_FITTED' for fitted video view, 'FREE_PAN' for stage map view
-  const [mapViewMode, setMapViewMode] = useState('FOV_FITTED');
-  const [scaleLevel, setScaleLevel] = useState(0); // Start at highest resolution for FOV_FITTED mode
-  const [zoomLevel, setZoomLevel] = useState(1.0); // Start at 100% zoom for FOV_FITTED mode
+  // Map view mode removed - always FREE_PAN
+  const [scaleLevel, setScaleLevel] = useState(2); // Start at scale 2 for a wider initial view
+  const [zoomLevel, setZoomLevel] = useState(1.0); // Start at 100% zoom
   const [mapPan, setMapPan] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
@@ -653,7 +650,7 @@ const MicroscopeMapDisplay = forwardRef(({
   // Effect to refresh tiles when zarr channel contrast settings change in browse data layer
   useEffect(() => {
     const browseDataLayer = getBrowseDataLayer();
-    if (browseDataLayer && mapViewMode === 'FREE_PAN') {
+    if (browseDataLayer) {
       console.log('🎨 BROWSE DATA: Zarr channel configs changed, triggering tile refresh');
       
       // Don't clear tiles if real-time loading is in progress
@@ -686,7 +683,7 @@ const MicroscopeMapDisplay = forwardRef(({
         console.log('🎨 BROWSE DATA: Skipping tile refresh - real-time loading in progress or operation active');
       }
     }
-  }, [zarrChannelConfigs, getBrowseDataLayer, mapViewMode, currentOperation]);
+  }, [zarrChannelConfigs, getBrowseDataLayer, currentOperation]);
 
   const updateRealMicroscopeChannelConfig = useCallback((channelName, updates) => {
     console.log(`🎨 MicroscopeMapDisplay: updateRealMicroscopeChannelConfig called for ${channelName} with updates:`, updates);
@@ -1432,7 +1429,7 @@ const MicroscopeMapDisplay = forwardRef(({
   // ALWAYS use microscope configuration for consistent well plate positioning
   const stageDimensions = useMemo(() => {
     if (!microscopeConfiguration?.limits?.software_pos_limit) {
-      return { width: 100, height: 70 }; // Default dimensions in mm
+      return { width: 100, height: 70, xMin: 0, xMax: 100, yMin: 0, yMax: 70 }; // Default dimensions in mm
     }
     const limits = microscopeConfiguration.limits.software_pos_limit;
     const width = limits.x_positive - limits.x_negative;
@@ -1723,73 +1720,17 @@ const MicroscopeMapDisplay = forwardRef(({
     return null;
   }, [frameMetadata, fallbackStagePosition]);
 
-  // In FOV_FITTED mode, automatically calculate scale and pan to fit video in the display
-  // In FREE_PAN mode, use manual scale and pan controls
+  // Use manual scale and pan controls
   // Scale levels: 0=1x, 1=0.25x, 2=0.0625x, 3=0.015625x, 4=0.00390625x (4x difference between levels)
   // Zoom range: 25% to 6400% (0.25x to 64x) within each scale level - increased to allow scale level transitions
   const baseScale = 1 / Math.pow(4, scaleLevel);
   const calculatedMapScale = baseScale * zoomLevel;
   
-  // Auto-calculate scale and pan for FOV_FITTED mode
-  const autoFittedScale = useMemo(() => {
-    if (containerDimensions.width === 0 || containerDimensions.height === 0) return 1;
-    
-    // In FOV_FITTED mode, we want the FOV box to always appear as a consistent size
-    // representing the video display area, regardless of microscope configuration loading
-    const containerWidth = containerDimensions.width;
-    const containerHeight = containerDimensions.height;
-    
-    // Use a fixed FOV display size that represents the video window
-    // This should be consistent regardless of whether config is loaded
-    const videoDisplaySize = Math.min(containerWidth, containerHeight) * 0.8; // 80% of container
-    
-    // If we have real configuration data, use it for accurate scaling
-    if (currentStagePosition && stageDimensions && fovSize && pixelsPerMm > 0) {
-      const fovPixelWidth = fovSize * pixelsPerMm;
-      const fovPixelHeight = fovSize * pixelsPerMm;
-      
-      // Scale to fit FOV comfortably in the container
-      const scaleX = containerWidth / (fovPixelWidth * 1.2);
-      const scaleY = containerHeight / (fovPixelHeight * 1.2);
-      return Math.min(scaleX, scaleY);
-    }
-    
-    // Fallback: ensure a reasonable scale that shows a fixed-size FOV box
-    // This prevents the "jumping" by providing a consistent fallback
-    return videoDisplaySize / 400; // Assume 400px default FOV size
-  }, [containerDimensions, currentStagePosition, stageDimensions, fovSize, pixelsPerMm]);
-  
-  const autoFittedPan = useMemo(() => {
-    if (containerDimensions.width === 0 || containerDimensions.height === 0) return { x: 0, y: 0 };
-    
-    // Always center the FOV in the container for FOV_FITTED mode
-    const containerWidth = containerDimensions.width;
-    const containerHeight = containerDimensions.height;
-    
-    // If we have real position data, center based on actual stage position
-    if (currentStagePosition && stageDimensions && autoFittedScale) {
-      const stagePosX = (currentStagePosition.x - stageDimensions.xMin) * pixelsPerMm * autoFittedScale;
-      const stagePosY = (currentStagePosition.y - stageDimensions.yMin) * pixelsPerMm * autoFittedScale;
-      
-      return {
-        x: containerWidth / 2 - stagePosX,
-        y: containerHeight / 2 - stagePosY
-      };
-    }
-    
-    // Fallback: center the FOV box in the container
-    // This prevents jumping by always centering the FOV display
-    return {
-      x: containerWidth / 2,
-      y: containerHeight / 2
-    };
-  }, [containerDimensions, currentStagePosition, stageDimensions, pixelsPerMm, autoFittedScale]);
-  
-  // Effect to adjust mapPan when pixelsPerMm changes (e.g., after objective switch in FREE_PAN mode)
+  // Effect to adjust mapPan when pixelsPerMm changes (e.g., after objective switch)
   const prevPixelsPerMmRef = useRef(pixelsPerMm);
   useEffect(() => {
-    // Only adjust in FREE_PAN mode and when pixelsPerMm actually changes
-    if (mapViewMode === 'FREE_PAN' && prevPixelsPerMmRef.current !== pixelsPerMm && prevPixelsPerMmRef.current > 0 && pixelsPerMm > 0) {
+    // Only adjust when pixelsPerMm actually changes
+    if (prevPixelsPerMmRef.current !== pixelsPerMm && prevPixelsPerMmRef.current > 0 && pixelsPerMm > 0) {
       // Calculate the scale ratio change
       const scaleRatio = pixelsPerMm / prevPixelsPerMmRef.current;
       
@@ -1811,33 +1752,17 @@ const MicroscopeMapDisplay = forwardRef(({
     
     // Update the ref for next comparison
     prevPixelsPerMmRef.current = pixelsPerMm;
-  }, [pixelsPerMm, mapViewMode, currentStagePosition, stageDimensions, containerDimensions, calculatedMapScale]);
+  }, [pixelsPerMm, currentStagePosition, stageDimensions, containerDimensions, calculatedMapScale]);
 
-  // Use fitted values in FOV_FITTED mode, manual values in FREE_PAN mode
-  const mapScale = mapViewMode === 'FOV_FITTED' ? autoFittedScale : calculatedMapScale;
-  const effectivePan = mapViewMode === 'FOV_FITTED' ? autoFittedPan : mapPan;
+  // Always use manual values (FREE_PAN mode only)
+  const mapScale = calculatedMapScale;
+  const effectivePan = mapPan;
 
   // Calculate video frame position on the map
   const videoFramePosition = useMemo(() => {
     if (containerDimensions.width === 0 || containerDimensions.height === 0) return null;
     
-         // In FOV_FITTED mode, always show a centered FOV box representing the video display
-     if (mapViewMode === 'FOV_FITTED') {
-       const containerWidth = containerDimensions.width;
-       const containerHeight = containerDimensions.height;
-       
-       // Fixed FOV box size for consistent video display representation
-       const videoDisplaySize = Math.min(containerWidth, containerHeight) * 0.9; // 90% of container to better fill the space
-      
-      return {
-        x: containerWidth / 2,
-        y: containerHeight / 2,
-        width: videoDisplaySize,
-        height: videoDisplaySize
-      };
-    }
-    
-    // In FREE_PAN mode, calculate based on actual stage position and configuration
+    // Calculate based on actual stage position and configuration
     if (!currentStagePosition || !stageDimensions) {
       return null;
     }
@@ -1850,7 +1775,7 @@ const MicroscopeMapDisplay = forwardRef(({
       width: fovSize * pixelsPerMm * mapScale,
       height: fovSize * pixelsPerMm * mapScale
     };
-  }, [containerDimensions, mapViewMode, currentStagePosition, stageDimensions, mapScale, effectivePan, fovSize, pixelsPerMm]);
+  }, [containerDimensions, currentStagePosition, stageDimensions, mapScale, effectivePan, fovSize, pixelsPerMm]);
 
   // Split interaction controls: hardware vs map browsing, exclude simulated microscope in historical mode
   const isHardwareInteractionDisabled = (isHistoricalDataMode && !(isSimulatedMicroscopeSelected && isHistoricalDataMode)) || microscopeBusy || currentOperation !== null || isScanInProgress || isQuickScanInProgress || isDrawingMode || isHardwareLocked;
@@ -1859,9 +1784,9 @@ const MicroscopeMapDisplay = forwardRef(({
   // Legacy compatibility - some UI elements still use the general disabled state
   const isInteractionDisabled = isHardwareInteractionDisabled;
 
-  // Handle panning (only in FREE_PAN mode)
+  // Handle panning
   const handleMapPanning = (e) => {
-    if (mapViewMode !== 'FREE_PAN' || isMapBrowsingDisabled) return;
+    if (isMapBrowsingDisabled) return;
     
     // During active scanning, disable rectangle selection to allow map browsing
     if (isRectangleSelection && !isScanInProgress && !isQuickScanInProgress) {
@@ -1882,7 +1807,7 @@ const MicroscopeMapDisplay = forwardRef(({
       return;
     }
     
-    if (isPanning && mapViewMode === 'FREE_PAN' && !isMapBrowsingDisabled) {
+    if (isPanning && !isMapBrowsingDisabled) {
       // Cancel any pending tile loads during active panning
       if (canvasUpdateTimerRef.current) {
         clearTimeout(canvasUpdateTimerRef.current);
@@ -1912,81 +1837,6 @@ const MicroscopeMapDisplay = forwardRef(({
       setIsPanning(false);
     }, 100); // Small delay to ensure pan operation is complete
   };
-  
-  // Switch to FREE_PAN mode when zooming out in FOV_FITTED mode
-  const transitionToFreePan = useCallback(() => {
-    if (mapViewMode === 'FOV_FITTED') {
-      setMapViewMode('FREE_PAN');
-      
-      // Trigger auto-collapse on FREE_PAN transition
-      if (onFreePanAutoCollapse) {
-        const shouldCollapseRightPanel = onFreePanAutoCollapse();
-        if (shouldCollapseRightPanel && appendLog) {
-          appendLog('Auto-collapsed sidebar and right panel for FREE_PAN mode');
-        }
-      }
-      
-      // Start at higher scale level to avoid loading huge high-resolution data
-      // Calculate appropriate scale level based on fitted scale to bias towards lower resolution
-      const baseEffectiveScale = autoFittedScale; // Base scale from FOV_FITTED mode
-      
-      let initialScaleLevel = 1; // Default to scale 1
-      let initialZoomLevel;
-      
-      // Very aggressive thresholds for maximum resolution access - users can see high resolution much more easily
-      if (baseEffectiveScale < 1.2) { // Very zoomed out - scale 4
-        initialScaleLevel = 4; // Use lowest resolution
-        initialZoomLevel = baseEffectiveScale * Math.pow(4, 4);
-      } else if (baseEffectiveScale < 2.5) { // Zoomed out - scale 3
-        initialScaleLevel = 3; // Use low resolution  
-        initialZoomLevel = baseEffectiveScale * Math.pow(4, 3);
-      } else if (baseEffectiveScale < 6.0) { // Medium zoom - scale 2 (much more aggressive)
-        initialScaleLevel = 2; // Use medium resolution
-        initialZoomLevel = baseEffectiveScale * Math.pow(4, 2);
-      } else if (baseEffectiveScale < 16.0) { // Close zoom - scale 1 (much more aggressive)
-        initialScaleLevel = 1; // Use higher resolution (but not highest)
-        initialZoomLevel = baseEffectiveScale * Math.pow(4, 1);
-      } else { // Very close zoom - scale 0 (very easy to reach now)
-        initialScaleLevel = 0; // Use highest resolution
-        initialZoomLevel = baseEffectiveScale;
-      }
-      
-      // Clamp zoom level to valid range
-      initialZoomLevel = Math.max(0.25, Math.min(64.0, initialZoomLevel));
-      
-      // Calculate new map scale for FREE_PAN mode
-      const newMapScale = (1 / Math.pow(4, initialScaleLevel)) * initialZoomLevel;
-      
-      // Calculate pan position to keep FOV box in view during transition
-      // This maintains the FOV position relative to the container at the new scale level
-      let calculatedPan = { x: 0, y: 0 };
-      if (currentStagePosition && stageDimensions && containerDimensions.width > 0) {
-        // Calculate where the FOV should be positioned on the new scale
-        const stagePosX = (currentStagePosition.x - stageDimensions.xMin) * pixelsPerMm * newMapScale;
-        const stagePosY = (currentStagePosition.y - stageDimensions.yMin) * pixelsPerMm * newMapScale;
-        
-        // Center the FOV in the container
-        calculatedPan = {
-          x: containerDimensions.width / 2 - stagePosX,
-          y: containerDimensions.height / 2 - stagePosY
-        };
-      } else {
-        // Fallback: use the autoFittedPan scaled appropriately
-        const scaleRatio = newMapScale / autoFittedScale;
-        calculatedPan = {
-          x: autoFittedPan.x * scaleRatio,
-          y: autoFittedPan.y * scaleRatio
-        };
-      }
-      
-      setScaleLevel(initialScaleLevel);
-      setZoomLevel(initialZoomLevel);
-      setMapPan(calculatedPan);
-      if (appendLog) {
-        appendLog(`Switched to stage map view (scale ${initialScaleLevel}, zoom ${(initialZoomLevel * 100).toFixed(1)}%)`);
-      }
-    }
-  }, [mapViewMode, autoFittedScale, autoFittedPan, appendLog, currentStagePosition, stageDimensions, pixelsPerMm, containerDimensions]);
   
   const activateSimulationBrowseMode = useCallback((trigger = 'manual') => {
     setShowBrowseDataModal(false);
@@ -2023,50 +1873,17 @@ const MicroscopeMapDisplay = forwardRef(({
     }
   }, [appendLog, simulationDataset, simulationGallery]);
 
-  // Auto-load simulated browse data when entering FREE_PAN mode.
+  // Auto-load simulated browse data.
   useEffect(() => {
-    if (mapViewMode === 'FREE_PAN' && isSimulatedMicroscopeSelected && !isHistoricalDataMode) {
-      console.log('🔄 Auto-loading simulated browse data for FREE_PAN mode');
+    if (isSimulatedMicroscopeSelected && !isHistoricalDataMode) {
+      console.log('🔄 Auto-loading simulated browse data');
       activateSimulationBrowseMode('auto');
     }
   }, [
     activateSimulationBrowseMode,
     isHistoricalDataMode,
     isSimulatedMicroscopeSelected,
-    mapViewMode,
   ]);
-  
-  // Switch back to FOV_FITTED mode
-  const fitToView = useCallback(() => {
-    // First, uncollapse panels if the function is provided
-    if (onFitToViewUncollapse) {
-      const panelsExpanded = onFitToViewUncollapse();
-      if (panelsExpanded && appendLog) {
-        appendLog('Expanded sidebar and right panel for fitted video view');
-      }
-    }
-    
-    setMapViewMode('FOV_FITTED');
-    setScaleLevel(0); // FOV_FITTED mode always uses scale 0 (highest resolution)
-    setZoomLevel(1.0); // Reset to 100% zoom
-    setMapPan({ x: 0, y: 0 }); // Reset pan to center for clean FOV_FITTED view
-    
-    // Reset video zoom to 100% for clean FOV_FITTED view
-    if (setVideoZoom) {
-      setVideoZoom(1.0);
-    }
-    
-    // For simulated microscope, quit historical mode when switching to FOV_FITTED
-    // Note: Data loading is now handled by layer visibility, not mode switching
-    
-    if (appendLog) {
-      appendLog('Switched to fitted video view');
-    }
-    
-    // Container dimensions will be automatically updated by ResizeObserver
-    // No need for setTimeout hack - memoized calculations will recalculate
-    // when containerDimensions state updates
-  }, [onFitToViewUncollapse, appendLog, isSimulatedMicroscopeSelected, isHistoricalDataMode, setStitchedTiles, setVideoZoom]);
 
   const handleDoubleClick = async (e) => {
     if (!microscopeControlService || !microscopeConfiguration || !stageDimensions || isHardwareInteractionDisabled) {
@@ -2189,19 +2006,7 @@ const MicroscopeMapDisplay = forwardRef(({
       setIsZooming(false);
     }, 500);
     
-    if (mapViewMode === 'FOV_FITTED') {
-      // In FOV_FITTED mode, zoom out transitions to FREE_PAN mode
-      if (e.deltaY > 0) { // Zoom out
-        transitionToFreePan();
-      }
-      // Zoom in is handled by videoZoom in the video element itself
-      if (setVideoZoom && e.deltaY < 0) {
-        setVideoZoom(prev => Math.min(3.0, prev * 1.1));
-      }
-      return;
-    }
-    
-    // FREE_PAN mode - normal map zoom behavior
+    // Normal map zoom behavior
     const zoomDelta = e.deltaY > 0 ? 0.95 : 1.05; // Smaller steps for smoother zoom
     let newZoomLevel = zoomLevel * zoomDelta;
     
@@ -2225,7 +2030,7 @@ const MicroscopeMapDisplay = forwardRef(({
       newZoomLevel = Math.max(0.25, Math.min(64.0, newZoomLevel));
       zoomToPoint(newZoomLevel, scaleLevel, mouseX, mouseY);
     }
-  }, [mapViewMode, zoomLevel, scaleLevel, zoomToPoint, transitionToFreePan, setVideoZoom]);
+  }, [zoomLevel, scaleLevel, zoomToPoint]);
 
   useEffect(() => {
     const mapContainer = mapContainerRef.current;
@@ -2265,14 +2070,99 @@ const MicroscopeMapDisplay = forwardRef(({
     };
   }, [isOpen]); // Re-run when component opens/closes
 
+  // Effect to center the FOV box on initial load
+  const hasInitiallyCenteredRef = useRef(false);
+  const hadRealConfigRef = useRef(false);
+
+  // Reset centering flag when real microscope configuration becomes available
+  useEffect(() => {
+    const hasRealConfig = !!(
+      microscopeConfiguration?.limits?.software_pos_limit &&
+      microscopeConfiguration?.optics?.calculated_pixel_size_mm &&
+      microscopeConfiguration?.acquisition?.crop_width
+    );
+    if (hasRealConfig && !hadRealConfigRef.current) {
+      hadRealConfigRef.current = true;
+      hasInitiallyCenteredRef.current = false; // Re-center with real config
+    } else if (!hasRealConfig) {
+      hadRealConfigRef.current = false;
+    }
+  }, [microscopeConfiguration]);
+
+  useEffect(() => {
+    if (isOpen && containerDimensions.width > 0 && containerDimensions.height > 0 && !hasInitiallyCenteredRef.current && stageDimensions && pixelsPerMm > 0) {
+      // Use stage center if current position is not yet available
+      const centerStageX = currentStagePosition ? currentStagePosition.x : (stageDimensions.xMin + stageDimensions.xMax) / 2;
+      const centerStageY = currentStagePosition ? currentStagePosition.y : (stageDimensions.yMin + stageDimensions.yMax) / 2;
+
+      const hasRealConfig = !!(
+        microscopeConfiguration?.limits?.software_pos_limit &&
+        microscopeConfiguration?.optics?.calculated_pixel_size_mm &&
+        microscopeConfiguration?.acquisition?.crop_width
+      );
+
+      let initialScaleLevel = 2;
+      let initialZoomLevel = 1.0;
+
+      if (hasRealConfig && fovSize > 0) {
+        // Calculate appropriate initial scale level based on container size and FOV
+        // Target: fit the FOV to about 25% of the container so users see surrounding context
+        const fovPixelWidth = fovSize * pixelsPerMm;
+        const fovPixelHeight = fovSize * pixelsPerMm;
+        const scaleX = containerDimensions.width / (fovPixelWidth * 4);
+        const scaleY = containerDimensions.height / (fovPixelHeight * 4);
+        const baseEffectiveScale = Math.min(scaleX, scaleY);
+
+        if (baseEffectiveScale < 0.3) {
+          initialScaleLevel = 4;
+          initialZoomLevel = baseEffectiveScale * Math.pow(4, 4);
+        } else if (baseEffectiveScale < 0.8) {
+          initialScaleLevel = 3;
+          initialZoomLevel = baseEffectiveScale * Math.pow(4, 3);
+        } else if (baseEffectiveScale < 2.0) {
+          initialScaleLevel = 2;
+          initialZoomLevel = baseEffectiveScale * Math.pow(4, 2);
+        } else if (baseEffectiveScale < 6.0) {
+          initialScaleLevel = 1;
+          initialZoomLevel = baseEffectiveScale * Math.pow(4, 1);
+        } else {
+          initialScaleLevel = 0;
+          initialZoomLevel = baseEffectiveScale;
+        }
+
+        initialZoomLevel = Math.max(0.25, Math.min(64.0, initialZoomLevel));
+      }
+
+      const newMapScale = (1 / Math.pow(4, initialScaleLevel)) * initialZoomLevel;
+
+      const stagePosX = (centerStageX - stageDimensions.xMin) * pixelsPerMm * newMapScale;
+      const stagePosY = (centerStageY - stageDimensions.yMin) * pixelsPerMm * newMapScale;
+
+      setScaleLevel(initialScaleLevel);
+      setZoomLevel(initialZoomLevel);
+      setMapPan({
+        x: containerDimensions.width / 2 - stagePosX,
+        y: containerDimensions.height / 2 - stagePosY
+      });
+
+      hasInitiallyCenteredRef.current = true;
+      if (appendLog) {
+        appendLog(`Map centered on initial load (scale ${initialScaleLevel}, zoom ${(initialZoomLevel * 100).toFixed(1)}%)`);
+      }
+    }
+
+    if (!isOpen) {
+      hasInitiallyCenteredRef.current = false;
+      hadRealConfigRef.current = false;
+    }
+  }, [isOpen, containerDimensions, currentStagePosition, stageDimensions, pixelsPerMm, fovSize, appendLog, microscopeConfiguration]);
+
   // Effect to handle window resize and recalculate FOV positioning
   useEffect(() => {
     const handleResize = () => {
       // Force a re-render of the FOV positioning when container size changes
       // This is particularly important when panels expand/collapse
-      if (mapViewMode === 'FOV_FITTED' && mapContainerRef.current) {
-        // The autoFittedPan and autoFittedScale will automatically recalculate
-        // due to their dependency on container dimensions
+      if (mapContainerRef.current) {
         setContainerDimensions({
           width: mapContainerRef.current.clientWidth,
           height: mapContainerRef.current.clientHeight
@@ -2284,7 +2174,7 @@ const MicroscopeMapDisplay = forwardRef(({
     return () => {
       window.removeEventListener('resize', handleResize);
     };
-  }, [mapViewMode]);
+  }, []);
 
   // Helper functions for tile management
   const getTileKey = useCallback((bounds, scale, channel, experimentName = null) => {
@@ -2395,11 +2285,6 @@ const MicroscopeMapDisplay = forwardRef(({
 
   const cleanupOldTiles = useCallback((currentScale, activeChannel, maxTilesPerScale = 20) => {
     setStitchedTiles(prevTiles => {
-      // FREE_PAN mode: No tile caching or cleanup - tiles are managed directly by addOrUpdateTile
-      if (mapViewMode === 'FREE_PAN') {
-        return prevTiles; // No cleanup in FREE_PAN mode
-      }
-      
       // For historical mode, be more conservative with cleanup to prevent map clearing during zoom
       if (isHistoricalDataMode) {
         // 🔍 EARLY CHECK #1: Preserve tiles during active zooming
@@ -2457,46 +2342,30 @@ const MicroscopeMapDisplay = forwardRef(({
       
       return [...currentTiles, ...otherTiles];
     });
-  }, [mapViewMode, isHistoricalDataMode, scaleLevel, isZooming, isPanning, currentOperation, getTileKey]);
+  }, [isHistoricalDataMode, scaleLevel, isZooming, isPanning, currentOperation, getTileKey]);
 
   // Note: Channel change cleanup is now handled automatically in loadStitchedTiles()
   // Tiles are marked for replacement when new ones are loaded, and removed after loading completes
 
 
 
-  // Handle video source assignment for both main video and map video refs
+  // Handle video source assignment for map video ref
   useEffect(() => {
     if (isWebRtcActive && remoteStream) {
-      // In FOV_FITTED mode, prioritize main video ref
-      if (mapViewMode === 'FOV_FITTED') {
-        if (videoRef?.current && videoRef.current.srcObject !== remoteStream) {
-          console.log('Setting video source for main video element (FOV_FITTED mode)');
-          videoRef.current.srcObject = remoteStream;
-          videoRef.current.play().catch(error => {
-            console.error('Error playing main video:', error);
+      // Use map video ref for scales 0-3
+      if (scaleLevel <= 3) {
+        if (mapVideoRef.current && mapVideoRef.current.srcObject !== remoteStream) {
+          console.log('Setting video source for map video element');
+          mapVideoRef.current.srcObject = remoteStream;
+          mapVideoRef.current.play().catch(error => {
+            console.error('Error playing map video:', error);
           });
         }
-        // Clear map video ref in FOV_FITTED mode to avoid conflicts
-        if (mapVideoRef.current && mapVideoRef.current.srcObject) {
-          console.log('Clearing map video source in FOV_FITTED mode');
-          mapVideoRef.current.srcObject = null;
-        }
       } else {
-        // In FREE_PAN mode, use map video ref for scales 0-3
-        if (scaleLevel <= 3) {
-          if (mapVideoRef.current && mapVideoRef.current.srcObject !== remoteStream) {
-            console.log('Setting video source for map video element (FREE_PAN mode)');
-            mapVideoRef.current.srcObject = remoteStream;
-            mapVideoRef.current.play().catch(error => {
-              console.error('Error playing map video:', error);
-            });
-          }
-        } else {
-          // Clear map video ref at higher scales
-          if (mapVideoRef.current && mapVideoRef.current.srcObject) {
-            console.log('Clearing map video source at high scale');
-            mapVideoRef.current.srcObject = null;
-          }
+        // Clear map video ref at higher scales
+        if (mapVideoRef.current && mapVideoRef.current.srcObject) {
+          console.log('Clearing map video source at high scale');
+          mapVideoRef.current.srcObject = null;
         }
       }
     } else {
@@ -2510,7 +2379,7 @@ const MicroscopeMapDisplay = forwardRef(({
         mapVideoRef.current.srcObject = null;
       }
     }
-  }, [isWebRtcActive, remoteStream, mapViewMode, scaleLevel, videoRef]);
+  }, [isWebRtcActive, remoteStream, scaleLevel, videoRef]);
 
 
   // State to trigger canvas redraw on container resize
@@ -2870,33 +2739,21 @@ const MicroscopeMapDisplay = forwardRef(({
 
   // Helper function to convert display coordinates to stage coordinates
   const displayToStageCoords = useCallback((displayX, displayY) => {
-    if (mapViewMode === 'FOV_FITTED') {
-      // In FOV_FITTED mode, use a simpler conversion
-      return { x: 0, y: 0 }; // Not applicable in FOV_FITTED mode
-    }
-    
-    // In FREE_PAN mode, account for pan and scale correctly
     const mapX = (displayX - effectivePan.x) / mapScale;
     const mapY = (displayY - effectivePan.y) / mapScale;
     const stageX_mm = (mapX / pixelsPerMm) + stageDimensions.xMin;
     const stageY_mm = (mapY / pixelsPerMm) + stageDimensions.yMin;
     return { x: stageX_mm, y: stageY_mm };
-  }, [mapViewMode, effectivePan, mapScale, pixelsPerMm, stageDimensions]);
+  }, [effectivePan, mapScale, pixelsPerMm, stageDimensions]);
   
   // Helper function to convert stage coordinates to display coordinates
   const stageToDisplayCoords = useCallback((stageX_mm, stageY_mm) => {
-    if (mapViewMode === 'FOV_FITTED') {
-      // In FOV_FITTED mode, not applicable
-      return { x: 0, y: 0 };
-    }
-    
-    // In FREE_PAN mode, convert stage coordinates to display coordinates
     const mapX = (stageX_mm - stageDimensions.xMin) * pixelsPerMm;
     const mapY = (stageY_mm - stageDimensions.yMin) * pixelsPerMm;
     const displayX = mapX * mapScale + effectivePan.x;
     const displayY = mapY * mapScale + effectivePan.y;
     return { x: displayX, y: displayY };
-  }, [mapViewMode, stageDimensions, pixelsPerMm, mapScale, effectivePan]);
+  }, [stageDimensions, pixelsPerMm, mapScale, effectivePan]);
 
   // Note: wellRelativeToStageCoords is implemented in SimilarityResultsRenderer
   // const wellRelativeToStageCoords = useCallback((wellRelativeX, wellRelativeY, wellInfo) => {
@@ -2963,14 +2820,8 @@ const MicroscopeMapDisplay = forwardRef(({
     setPreviousMapState({
       mapPan: { ...mapPan },
       scaleLevel: scaleLevel,  // Current scaleLevel from state
-      zoomLevel: zoomLevel,    // Current zoomLevel from state
-      mapViewMode: mapViewMode
+      zoomLevel: zoomLevel     // Current zoomLevel from state
     });
-
-    // Switch to FREE_PAN mode if not already
-    if (mapViewMode !== 'FREE_PAN') {
-      setMapViewMode('FREE_PAN');
-    }
 
     // Convert stage coordinates to display coordinates
     const mapX = (stageX_mm - stageDimensions.xMin) * pixelsPerMm;
@@ -2998,7 +2849,7 @@ const MicroscopeMapDisplay = forwardRef(({
     if (appendLog) {
       appendLog(`Navigated to coordinates: (${stageX_mm.toFixed(3)}, ${stageY_mm.toFixed(3)})`);
     }
-  }, [stageDimensions, pixelsPerMm, mapPan, mapScale, scaleLevel, zoomLevel, mapViewMode, showNotification, appendLog]);
+  }, [stageDimensions, pixelsPerMm, mapPan, mapScale, scaleLevel, zoomLevel, showNotification, appendLog]);
 
   // Function to go back to previous map position
   const goBackToPreviousPosition = useCallback(() => {
@@ -3010,7 +2861,6 @@ const MicroscopeMapDisplay = forwardRef(({
     }
 
     // Restore previous map state
-    setMapViewMode(previousMapState.mapViewMode);
     setScaleLevel(previousMapState.scaleLevel);
     setZoomLevel(previousMapState.zoomLevel);
     setMapPan(previousMapState.mapPan);
@@ -3112,7 +2962,7 @@ const MicroscopeMapDisplay = forwardRef(({
   
   // Effect to refresh tiles when channel selection changes
   useEffect(() => {
-    if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && !isSimulatedMicroscopeSelected) {
+    if (visibleLayers.scanResults && !isSimulatedMicroscopeSelected) {
       // Only clear tiles if we actually have a meaningful channel change
       const selectedChannels = Object.entries(visibleLayers.channels)
         .filter(([, isVisible]) => isVisible)
@@ -3154,7 +3004,7 @@ const MicroscopeMapDisplay = forwardRef(({
         console.log(`[Channel Change] No real channel change detected - LayerPanel UI update only`);
       }
     }
-  }, [visibleLayers.channels, mapViewMode, isSimulatedMicroscopeSelected, appendLog]); // Removed visibleLayers.scanResults to prevent triggering on layer toggles
+  }, [visibleLayers.channels, isSimulatedMicroscopeSelected, appendLog]); // Removed visibleLayers.scanResults to prevent triggering on layer toggles
 
   // Effect to handle historical layer cleanup when layers are toggled off or deleted
   useEffect(() => {
@@ -3218,15 +3068,15 @@ const MicroscopeMapDisplay = forwardRef(({
   useEffect(() => {
     const handleContrastSettingsChanged = (event) => {
       console.log(`🎨 MicroscopeMapDisplay: Received contrast settings change event:`, event.detail);
-      console.log(`🎨 MicroscopeMapDisplay: Current conditions - mapViewMode: ${mapViewMode}, scanResults: ${visibleLayers.scanResults}, isSimulated: ${isSimulatedMicroscopeSelected}`);
+      console.log(`🎨 MicroscopeMapDisplay: Current conditions - scanResults: ${visibleLayers.scanResults}, isSimulated: ${isSimulatedMicroscopeSelected}`);
       
-      if (mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && !isSimulatedMicroscopeSelected) {
+      if (visibleLayers.scanResults && !isSimulatedMicroscopeSelected) {
         console.log(`🎨 MicroscopeMapDisplay: Processing contrast settings change event`);
         
         // Clear active requests to prevent conflicts
         browseDataRequestsRef.current.clear();
-      scanDataRequestsRef.current.clear();
-      activeTileRequestsRef.current.clear();
+        scanDataRequestsRef.current.clear();
+        activeTileRequestsRef.current.clear();
         
         console.log(`🎨 MicroscopeMapDisplay: Refreshing tiles after contrast change, current configs:`, realMicroscopeChannelConfigs);
         if (appendLog) {
@@ -3247,12 +3097,12 @@ const MicroscopeMapDisplay = forwardRef(({
     return () => {
       window.removeEventListener('contrastSettingsChanged', handleContrastSettingsChanged);
     };
-  }, [mapViewMode, isSimulatedMicroscopeSelected, appendLog]); // Removed visibleLayers.scanResults to prevent triggering on layer toggles
+  }, [isSimulatedMicroscopeSelected, appendLog]); // Removed visibleLayers.scanResults to prevent triggering on layer toggles
 
   // Initialize real microscope channel configs for visible channels
   useEffect(() => {
     const scanDataLayer = getScanDataLayer();
-    if (scanDataLayer && !isSimulatedMicroscopeSelected && mapViewMode === 'FREE_PAN') {
+    if (scanDataLayer && !isSimulatedMicroscopeSelected) {
       const visibleChannels = Object.entries(visibleLayers.channels)
         .filter(([_, isVisible]) => isVisible)
         .map(([channelName]) => channelName);
@@ -3279,7 +3129,7 @@ const MicroscopeMapDisplay = forwardRef(({
         }));
       }
     }
-  }, [visibleLayers.channels, getScanDataLayer, isSimulatedMicroscopeSelected, mapViewMode, realMicroscopeChannelConfigs]);
+  }, [visibleLayers.channels, getScanDataLayer, isSimulatedMicroscopeSelected, realMicroscopeChannelConfigs]);
 
 
 
@@ -3796,13 +3646,10 @@ const MicroscopeMapDisplay = forwardRef(({
     };
   }, []);
 
-  // Effect to periodically refresh tiles during scan/quick scan in FREE_PAN mode
+  // Effect to periodically refresh tiles during scan/quick scan
   useEffect(() => {
     let intervalId = null;
-    if (
-      mapViewMode === 'FREE_PAN' &&
-      (isScanInProgress || isQuickScanInProgress)
-    ) {
+    if (isScanInProgress || isQuickScanInProgress) {
       // Set needsTileReload every 3 seconds
       intervalId = setInterval(() => {
         setNeedsTileReload(true);
@@ -3811,7 +3658,7 @@ const MicroscopeMapDisplay = forwardRef(({
     return () => {
       if (intervalId) clearInterval(intervalId);
     };
-  }, [mapViewMode, isScanInProgress, isQuickScanInProgress]);
+  }, [isScanInProgress, isQuickScanInProgress]);
 
   // Helper: get well plate layout for grid
   const getWellPlateGridLabels = useCallback(() => {
@@ -4543,10 +4390,7 @@ const MicroscopeMapDisplay = forwardRef(({
     }
     lastTileLoadAttemptRef.current = now;
     
-    if (mapViewMode !== 'FREE_PAN') {
-      console.log('[loadStitchedTiles] Skipping - not in FREE_PAN mode');
-      return;
-    }
+    // FREE_PAN mode only - no mode check needed anymore
 
     // Check for visible data layers
     const browseDataLayer = getBrowseDataLayer();
@@ -4874,7 +4718,7 @@ const MicroscopeMapDisplay = forwardRef(({
             // Only mark tiles for THIS specific experiment that have the same key as the new tile
             // addOrUpdateTile will handle replacement, but we want to remove OTHER tiles from this experiment
             // that don't match (e.g., from previous pan/zoom positions)
-            if (mapViewMode === 'FREE_PAN') {
+            {
               const newTileKey = getTileKey(newTile.bounds, newTile.scale, newTile.channel, newTile.experimentName);
               const experimentTileKeys = new Set();
               
@@ -4921,9 +4765,9 @@ const MicroscopeMapDisplay = forwardRef(({
         tileKeys.forEach(key => oldTileKeysToRemove.add(key));
       });
       
-      // FREE_PAN mode: Remove old tiles IMMEDIATELY after new tiles are loaded
+      // Remove old tiles IMMEDIATELY after new tiles are loaded
       // Only remove tiles for experiments that successfully loaded new tiles
-      if (mapViewMode === 'FREE_PAN' && oldTileKeysToRemove.size > 0) {
+      if (oldTileKeysToRemove.size > 0) {
         console.log(`🎨 FREE_PAN: Removing ${oldTileKeysToRemove.size} old tiles IMMEDIATELY after loading`);
         
         setStitchedTiles(prevTiles => {
@@ -4940,7 +4784,7 @@ const MicroscopeMapDisplay = forwardRef(({
           
           return filteredTiles;
         });
-      } else if (mapViewMode === 'FREE_PAN') {
+      } else {
         console.log(`🎨 FREE_PAN: No old tiles to remove (first load or no matching tiles)`);
       }
       
@@ -4967,7 +4811,7 @@ const MicroscopeMapDisplay = forwardRef(({
     
     // Run both browse data and scan data loading in parallel
     await Promise.all([browseDataPromise, scanDataPromise]);
-  }, [getBrowseDataLayer, getScanDataLayer, microscopeControlService, visibleLayers.channels, mapViewMode, scaleLevel, displayToStageCoords, stageDimensions, pixelsPerMm, getTileKey, addOrUpdateTile, appendLog, isSimulatedMicroscopeSelected, selectedHistoricalDataset, selectedGallery, getIntersectingWells, calculateWellRegion, wellPlateType, realMicroscopeChannelConfigs, zarrChannelConfigs, getEnabledZarrChannels, shouldUseMultiChannelLoading, visibleExperiments, activeExperiment, getLayerContrastSettings, experiments]);
+  }, [getBrowseDataLayer, getScanDataLayer, microscopeControlService, visibleLayers.channels, scaleLevel, displayToStageCoords, stageDimensions, pixelsPerMm, getTileKey, addOrUpdateTile, appendLog, isSimulatedMicroscopeSelected, selectedHistoricalDataset, selectedGallery, getIntersectingWells, calculateWellRegion, wellPlateType, realMicroscopeChannelConfigs, zarrChannelConfigs, getEnabledZarrChannels, shouldUseMultiChannelLoading, visibleExperiments, activeExperiment, getLayerContrastSettings, experiments]);
 
   // Add a ref to track previous experiment selection to avoid unnecessary reloads
   const previousExperimentSelectionRef = useRef(null);
@@ -5002,7 +4846,7 @@ const MicroscopeMapDisplay = forwardRef(({
     
     const scanDataLayer = getScanDataLayer();
     const hasScanResults = visibleLayers.scanResults && visibleExperiments.length > 0;
-    if (mapViewMode === 'FREE_PAN' && (scanDataLayer || hasScanResults)) {
+    if (scanDataLayer || hasScanResults) {
       const activeChannel = getChannelString();
       
       // Check if microscope service is available
@@ -5063,7 +4907,7 @@ const MicroscopeMapDisplay = forwardRef(({
         console.log(`[Experiment Change] No real experiment change detected - UI update only`);
       }
     }
-  }, [visibleExperiments, activeExperiment, mapViewMode, getScanDataLayer, visibleLayers.scanResults, microscopeControlService, isSimulatedMicroscopeSelected, stitchedTiles, getChannelString, isPanning, isZooming, appendLog, setNeedsTileReload]); // Removed scaleLevel from deps - checked via lastTileRequestRef
+  }, [visibleExperiments, activeExperiment, getScanDataLayer, visibleLayers.scanResults, microscopeControlService, isSimulatedMicroscopeSelected, stitchedTiles, getChannelString, isPanning, isZooming, appendLog, setNeedsTileReload]); // Removed scaleLevel from deps - checked via lastTileRequestRef
 
   // Debounce tile loading - only load after user stops interacting for 1 second
   const scheduleTileUpdate = useCallback((source = 'unknown') => {
@@ -5137,7 +4981,7 @@ const MicroscopeMapDisplay = forwardRef(({
       return;
     }
     
-    if (mapViewMode !== 'FREE_PAN' || !visibleLayers.scanResults) {
+    if (!visibleLayers.scanResults) {
       return;
     }
 
@@ -5178,7 +5022,6 @@ const MicroscopeMapDisplay = forwardRef(({
       scheduleTileUpdate('tile-loading-effect');
     }
     }, [
-      mapViewMode, 
       visibleLayers.scanResults, 
       isPanning, 
       isZooming, 
@@ -5216,7 +5059,7 @@ const MicroscopeMapDisplay = forwardRef(({
     const hasData = scanDataLayer || hasScanResults || (hasExperiments && visibleLayers.scanResults);
     
     // Trigger initial load when map is open AND we have data available AND haven't loaded yet
-    if (isOpen && hasData && !hasInitialLoadedRef.current && mapViewMode === 'FREE_PAN' && !isZooming && !isPanning) {
+    if (isOpen && hasData && !hasInitialLoadedRef.current && !isZooming && !isPanning) {
       hasInitialLoadedRef.current = true;
       
       console.log('[Initial Tile Loading] Triggering initial tile loading - data is available');
@@ -5231,14 +5074,14 @@ const MicroscopeMapDisplay = forwardRef(({
     if (!isOpen) {
       hasInitialLoadedRef.current = false;
     }
-  }, [isOpen, mapViewMode, isZooming, isPanning, scheduleTileUpdate, getScanDataLayer, visibleLayers.scanResults, visibleExperiments, experiments]); // Added experiments dependency
+  }, [isOpen, isZooming, isPanning, scheduleTileUpdate, getScanDataLayer, visibleLayers.scanResults, visibleExperiments, experiments]); // Added experiments dependency
 
   // Effect to trigger tile loading when needsTileReload is set
   useEffect(() => {
     const browseDataLayer = getBrowseDataLayer();
     const scanDataLayer = getScanDataLayer();
     const hasScanResults = visibleLayers.scanResults && visibleExperiments.length > 0;
-    if (needsTileReload && mapViewMode === 'FREE_PAN' && (browseDataLayer || scanDataLayer || hasScanResults) && !isZooming && !isPanning) {
+    if (needsTileReload && (browseDataLayer || scanDataLayer || hasScanResults) && !isZooming && !isPanning) {
       // Check if tiles are currently loading - only check relevant layer types
       const isBrowseLoading = browseDataLayer && isBrowseDataLoading;
       const isScanLoading = (scanDataLayer || hasScanResults) && isScanDataLoading;
@@ -5256,7 +5099,7 @@ const MicroscopeMapDisplay = forwardRef(({
       // Call loadStitchedTiles directly instead of scheduling to prevent duplicate calls
       loadStitchedTiles();
     }
-  }, [needsTileReload, mapViewMode, getBrowseDataLayer, getScanDataLayer, visibleLayers.scanResults, visibleExperiments, loadStitchedTiles, isZooming, isPanning, isBrowseDataLoading, isScanDataLoading]);
+  }, [needsTileReload, getBrowseDataLayer, getScanDataLayer, visibleLayers.scanResults, visibleExperiments, loadStitchedTiles, isZooming, isPanning, isBrowseDataLoading, isScanDataLoading]);
 
 
   if (!isOpen) return null;
@@ -5294,94 +5137,72 @@ const MicroscopeMapDisplay = forwardRef(({
 
           </div>
           
-          {mapViewMode === 'FREE_PAN' && (
-            <>
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={(e) => {
-                    if (isInteractionDisabled) return;
-                    
-                    // Track zoom operation
-                    setIsZooming(true);
-                    if (zoomTimeoutRef.current) {
-                      clearTimeout(zoomTimeoutRef.current);
-                    }
-                    zoomTimeoutRef.current = setTimeout(() => {
-                      setIsZooming(false);
-                    }, 500);
-                    
-                    const newZoom = zoomLevel * 0.9;
-                    const rect = mapContainerRef.current.getBoundingClientRect();
-                    const centerX = rect.width / 2;
-                    const centerY = rect.height / 2;
-                    
-                    if (newZoom < 0.25 && scaleLevel < 4) {
-                      zoomToPoint(0.25, scaleLevel + 1, centerX, centerY);
-                    } else {
-                      zoomToPoint(Math.max(0.25, newZoom), scaleLevel, centerX, centerY);
-                    }
-                  }}
-                  className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                  title="Zoom Out"
-                  disabled={isInteractionDisabled || (scaleLevel === 4 && zoomLevel <= 0.25)}
-                >
-                  <i className="fas fa-search-minus"></i>
-                </button>
-                <span className="text-white text-xs min-w-[8rem] text-center">
-                  Scale {scaleLevel} ({(zoomLevel * 100).toFixed(1)}%)
-                </span>
-                <button
-                  onClick={(e) => {
-                    if (isInteractionDisabled) return;
-                    
-                    // Track zoom operation
-                    setIsZooming(true);
-                    if (zoomTimeoutRef.current) {
-                      clearTimeout(zoomTimeoutRef.current);
-                    }
-                    zoomTimeoutRef.current = setTimeout(() => {
-                      setIsZooming(false);
-                    }, 500);
-                    
-                    const newZoom = zoomLevel * 1.1;
-                    const rect = mapContainerRef.current.getBoundingClientRect();
-                    const centerX = rect.width / 2;
-                    const centerY = rect.height / 2;
-                    
-                          if (newZoom > 64.0 && scaleLevel > 0) {
-        zoomToPoint(0.25, scaleLevel - 1, centerX, centerY);
-      } else {
-        zoomToPoint(Math.min(64.0, newZoom), scaleLevel, centerX, centerY);
-      }
-                  }}
-                  className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                  title="Zoom In"
-                  disabled={isInteractionDisabled || (scaleLevel === 0 && zoomLevel >= 16.0)}
-                >
-                  <i className="fas fa-search-plus"></i>
-                </button>
-                <button
-                  onClick={(isInteractionDisabled && !(isSimulatedMicroscopeSelected && isHistoricalDataMode)) ? undefined : () => {
-                    // Track zoom operation
-                    setIsZooming(true);
-                    if (zoomTimeoutRef.current) {
-                      clearTimeout(zoomTimeoutRef.current);
-                    }
-                    zoomTimeoutRef.current = setTimeout(() => {
-                      setIsZooming(false);
-                    }, 500);
-                    
-                    fitToView();
-                  }}
-                  className="px-2 py-1 text-xs bg-green-600 hover:bg-green-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                  title="Fit to View"
-                  disabled={isInteractionDisabled && !(isSimulatedMicroscopeSelected && isHistoricalDataMode)}
-                >
-                  <i className="fas fa-crosshairs mr-1"></i>
-                  Fit to View
-                </button>
-                                
-              </div>
+          <>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={(e) => {
+                  if (isInteractionDisabled) return;
+                  
+                  // Track zoom operation
+                  setIsZooming(true);
+                  if (zoomTimeoutRef.current) {
+                    clearTimeout(zoomTimeoutRef.current);
+                  }
+                  zoomTimeoutRef.current = setTimeout(() => {
+                    setIsZooming(false);
+                  }, 500);
+                  
+                  const newZoom = zoomLevel * 0.9;
+                  const rect = mapContainerRef.current.getBoundingClientRect();
+                  const centerX = rect.width / 2;
+                  const centerY = rect.height / 2;
+                  
+                  if (newZoom < 0.25 && scaleLevel < 4) {
+                    zoomToPoint(0.25, scaleLevel + 1, centerX, centerY);
+                  } else {
+                    zoomToPoint(Math.max(0.25, newZoom), scaleLevel, centerX, centerY);
+                  }
+                }}
+                className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Zoom Out"
+                disabled={isInteractionDisabled || (scaleLevel === 4 && zoomLevel <= 0.25)}
+              >
+                <i className="fas fa-search-minus"></i>
+              </button>
+              <span className="text-white text-xs min-w-[8rem] text-center">
+                Scale {scaleLevel} ({(zoomLevel * 100).toFixed(1)}%)
+              </span>
+              <button
+                onClick={(e) => {
+                  if (isInteractionDisabled) return;
+                  
+                  // Track zoom operation
+                  setIsZooming(true);
+                  if (zoomTimeoutRef.current) {
+                    clearTimeout(zoomTimeoutRef.current);
+                  }
+                  zoomTimeoutRef.current = setTimeout(() => {
+                    setIsZooming(false);
+                  }, 500);
+                  
+                  const newZoom = zoomLevel * 1.1;
+                  const rect = mapContainerRef.current.getBoundingClientRect();
+                  const centerX = rect.width / 2;
+                  const centerY = rect.height / 2;
+                  
+                  if (newZoom > 64.0 && scaleLevel > 0) {
+                    zoomToPoint(0.25, scaleLevel - 1, centerX, centerY);
+                  } else {
+                    zoomToPoint(Math.min(64.0, newZoom), scaleLevel, centerX, centerY);
+                  }
+                }}
+                className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Zoom In"
+                disabled={isInteractionDisabled || (scaleLevel === 0 && zoomLevel >= 16.0)}
+              >
+                <i className="fas fa-search-plus"></i>
+              </button>
+            </div>
               
               {/* Layer selector dropdown */}
               <div className="relative" ref={layerDropdownRef}>
@@ -5421,7 +5242,6 @@ const MicroscopeMapDisplay = forwardRef(({
                       
                       // Multi-Channel props
                       shouldUseMultiChannelLoading={shouldUseMultiChannelLoading}
-                      mapViewMode={mapViewMode}
                       availableZarrChannels={availableZarrChannels}
                       zarrChannelConfigs={zarrChannelConfigs}
                       updateZarrChannelConfig={updateZarrChannelConfig}
@@ -5447,8 +5267,6 @@ const MicroscopeMapDisplay = forwardRef(({
                       selectedMicroscopeId={selectedMicroscopeId}
                       
                       // Layout props
-                      isFovFittedMode={mapViewMode === 'FOV_FITTED'}
-                      
                       // Scan configuration props
                       showScanConfig={showScanConfig}
                       setShowScanConfig={setShowScanConfig}
@@ -5528,24 +5346,15 @@ const MicroscopeMapDisplay = forwardRef(({
                   </div>
                 </div>
               )}
-            </>
-          )}
-          
-          {mapViewMode === 'FOV_FITTED' && (
-            <div className="flex items-center space-x-2">
-              <span className="text-xs text-gray-300">Zoom: {Math.round(videoZoom * 100)}%</span>
-              <span className="text-xs text-gray-400">• Scroll down to see stage map</span>
-            </div>
-          )}
+          </>
         </div>
         
         {/* Right side controls */}
         <div className="flex items-center space-x-2">
-          {mapViewMode === 'FREE_PAN' && (
-            <>
-              {/* Similarity search panel - now controlled by layer panel */}
-              <div className="relative mr-4" ref={similaritySearchDropdownRef}>
-                <div className={`absolute top-full right-0 mt-3 z-20 ${isSimilaritySearchDropdownOpen ? 'block' : 'hidden'}`}>
+          <>
+            {/* Similarity search panel - now controlled by layer panel */}
+            <div className="relative mr-4" ref={similaritySearchDropdownRef}>
+              <div className={`absolute top-full right-0 mt-3 z-20 ${isSimilaritySearchDropdownOpen ? 'block' : 'hidden'}`}>
                   <SimilaritySearchPanel
                       isDrawingMode={isDrawingMode}
                       setIsDrawingMode={setIsDrawingMode}
@@ -5613,10 +5422,9 @@ const MicroscopeMapDisplay = forwardRef(({
                       setSimilaritySearchResults={setSimilaritySearchResults}
                     />
                 </div>
-              </div>
-              
-            </>
-          )}
+            </div>
+            
+          </>
         </div>
       </div>
 
@@ -5628,32 +5436,28 @@ const MicroscopeMapDisplay = forwardRef(({
             ? 'cursor-crosshair' 
             : isMapBrowsingMode
               ? (isDragging || isPanning ? 'cursor-grabbing' : 'cursor-grab')
-              : mapViewMode === 'FOV_FITTED' 
-                ? (isHardwareInteractionDisabled ? 'cursor-not-allowed' : 'cursor-grab')
-                : (isRectangleSelection && !isScanInProgress && !isQuickScanInProgress)
-                  ? (isHardwareInteractionDisabled ? 'cursor-not-allowed' : 'cursor-crosshair')
-                  : 'cursor-move'
+              : (isRectangleSelection && !isScanInProgress && !isQuickScanInProgress)
+                ? (isHardwareInteractionDisabled ? 'cursor-not-allowed' : 'cursor-crosshair')
+                : 'cursor-move'
         } ${isDragging || isPanning ? 'cursor-grabbing' : ''}`}
-        onMouseDown={isMapBrowsingDisabled ? undefined : (mapViewMode === 'FOV_FITTED' ? (isHardwareInteractionDisabled ? undefined : onMouseDown) : handleMapPanning)}
-        onMouseMove={isMapBrowsingDisabled ? undefined : (mapViewMode === 'FOV_FITTED' ? (isHardwareInteractionDisabled ? undefined : onMouseMove) : handleMapPanMove)}
-        onMouseUp={isMapBrowsingDisabled ? undefined : (mapViewMode === 'FOV_FITTED' ? (isHardwareInteractionDisabled ? undefined : onMouseUp) : handleMapPanEnd)}
-        onMouseLeave={isMapBrowsingDisabled ? undefined : (mapViewMode === 'FOV_FITTED' ? (isHardwareInteractionDisabled ? undefined : onMouseLeave) : handleMapPanEnd)}
-        onDoubleClick={isHardwareInteractionDisabled ? undefined : (mapViewMode === 'FREE_PAN' && !isRectangleSelection ? handleDoubleClick : undefined)}
-                  style={{
-            userSelect: 'none',
-            transition: isDragging || isPanning ? 'none' : 'transform 0.3s ease-out',
-            opacity: isDrawingMode ? 0.9 : 1,
-            cursor: (isRectangleSelection && !isScanInProgress && !isQuickScanInProgress) && mapViewMode === 'FREE_PAN' && !isHardwareInteractionDisabled ? 'crosshair' : undefined,
-            zIndex: 1 // Ensure map container stays below other UI elements
-          }}
+        onMouseDown={isMapBrowsingDisabled ? undefined : handleMapPanning}
+        onMouseMove={isMapBrowsingDisabled ? undefined : handleMapPanMove}
+        onMouseUp={isMapBrowsingDisabled ? undefined : handleMapPanEnd}
+        onMouseLeave={isMapBrowsingDisabled ? undefined : handleMapPanEnd}
+        onDoubleClick={isHardwareInteractionDisabled ? undefined : (!isRectangleSelection ? handleDoubleClick : undefined)}
+        style={{
+          userSelect: 'none',
+          transition: isDragging || isPanning ? 'none' : 'transform 0.3s ease-out',
+          opacity: isDrawingMode ? 0.9 : 1,
+          cursor: (isRectangleSelection && !isScanInProgress && !isQuickScanInProgress) && !isHardwareInteractionDisabled ? 'crosshair' : undefined,
+          zIndex: 1 // Ensure map container stays below other UI elements
+        }}
       >
-        {/* Map canvas for FREE_PAN mode */}
-        {mapViewMode === 'FREE_PAN' && (
-          <canvas ref={canvasRef} className="absolute inset-0" />
-        )}
+        {/* Map canvas */}
+        <canvas ref={canvasRef} className="absolute inset-0" />
         
         {/* Stitched scan results tiles layer (below other elements) */}
-        {mapViewMode === 'FREE_PAN' && visibleTiles.map((tile, index) => {
+        {visibleTiles.map((tile, index) => {
           // Calculate z-index for multi-layer experiments and scale-based layering
           // Strategy: Higher resolution (lower scale number) appears on top
           // This allows old lower-resolution tiles to show through transparent areas
@@ -5713,14 +5517,14 @@ const MicroscopeMapDisplay = forwardRef(({
         })}
         
         {/* Loading indicator for canvas */}
-        {mapViewMode === 'FREE_PAN' && visibleLayers.scanResults && isLoadingCanvas && (
+        {visibleLayers.scanResults && isLoadingCanvas && (
           <div className="absolute top-2 right-2 bg-black bg-opacity-60 text-white text-xs px-2 py-1 rounded" style={{ zIndex: 25 }}>
             <i className="fas fa-spinner fa-spin mr-1"></i>Loading scan results...
           </div>
         )}
         
-        {/* Well plate overlay for FREE_PAN mode */}
-        {mapViewMode === 'FREE_PAN' && render96WellPlate()}
+        {/* Well plate overlay */}
+        {render96WellPlate()}
         
          {/* Annotation Canvas Overlay */}
          <AnnotationCanvas
@@ -5742,9 +5546,8 @@ const MicroscopeMapDisplay = forwardRef(({
            channelInfo={getCurrentChannelInfo()}
          />
          
-        {/* Similarity Results Renderer - only in FREE_PAN mode */}
-        {mapViewMode === 'FREE_PAN' && (
-          <SimilarityResultsRenderer
+        {/* Similarity Results Renderer */}
+        <SimilarityResultsRenderer
             containerRef={mapContainerRef}
             similarityResults={similarityResults}
             isVisible={showSimilarityResults}
@@ -5756,8 +5559,7 @@ const MicroscopeMapDisplay = forwardRef(({
             isDrawingMode={isDrawingMode}
             isMapBrowsingMode={isMapBrowsingMode}
             onResultClick={handleSimilarityResultClick}
-          />
-        )}
+        />
         
         {/* Similarity Result Info Window - shows details when clicking results */}
         <SimilarityResultInfoWindow
@@ -5773,7 +5575,7 @@ const MicroscopeMapDisplay = forwardRef(({
         />
         
         {/* Rectangle selection active indicator */}
-        {mapViewMode === 'FREE_PAN' && isRectangleSelection && !rectangleStart && !isScanInProgress && !isQuickScanInProgress && (
+        {isRectangleSelection && !rectangleStart && !isScanInProgress && !isQuickScanInProgress && (
           <div className="absolute top-16 left-1/2 transform -translate-x-1/2 bg-blue-600 bg-opacity-90 text-white px-4 py-2 rounded-lg border border-blue-400 animate-pulse" style={{ zIndex: 30 }}>
             <div className="flex items-center space-x-2">
               <i className="fas fa-vector-square text-lg"></i>
@@ -5786,7 +5588,7 @@ const MicroscopeMapDisplay = forwardRef(({
         )}
 
         {/* Rectangle selection overlay - only show during active selection */}
-        {mapViewMode === 'FREE_PAN' && isRectangleSelection && rectangleStart && rectangleEnd && !isScanInProgress && !isQuickScanInProgress && (
+        {isRectangleSelection && rectangleStart && rectangleEnd && !isScanInProgress && !isQuickScanInProgress && (
           <>
             {/* Well boundary indicator */}
             {dragSelectedWell && (() => {
@@ -5924,7 +5726,7 @@ const MicroscopeMapDisplay = forwardRef(({
         )}
 
         {/* FOV boxes preview during scan configuration */}
-        {mapViewMode === 'FREE_PAN' && showScanConfig && (() => {
+        {showScanConfig && (() => {
           // For each selected well, show FOV grid overlay
           const layout = getWellPlateLayout();
           const wellConfig = getWellPlateConfig();
@@ -5975,7 +5777,7 @@ const MicroscopeMapDisplay = forwardRef(({
         {videoFramePosition && (!isHistoricalDataMode || (isSimulatedMicroscopeSelected && isHistoricalDataMode)) && !isHardwareLocked && (
           <>
             {/* Control buttons above FOV box for FREE_PAN mode */}
-            {mapViewMode === 'FREE_PAN' && microscopeControlService && (
+            {microscopeControlService && (
               <div
                 className="absolute pointer-events-auto flex gap-1 bg-black bg-opacity-80 rounded p-1"
                 style={{
@@ -6042,65 +5844,8 @@ const MicroscopeMapDisplay = forwardRef(({
                 zIndex: isSimulatedMicroscopeSelected ? 100 : 10 // Much higher z-index for simulated microscope
               }}
             >
-              {/* Show video content based on mode */}
-              {mapViewMode === 'FOV_FITTED' ? (
-              // FOV_FITTED mode: Show full-screen video/image
-              <div className="w-full h-full flex items-center justify-center">
-                {isWebRtcActive && !webRtcError ? (
-                  <video 
-                    ref={videoRef} 
-                    autoPlay 
-                    playsInline 
-                    muted 
-                    className="pointer-events-none"
-                    style={{
-                      transform: `translate(${dragTransform.x}px, ${dragTransform.y}px) scale(${videoZoom})`,
-                      transition: isDragging ? 'none' : 'transform 0.3s ease-out',
-                      width: '750px',
-                      height: '750px',
-                      objectFit: 'contain',
-                    }}
-                  />
-                ) : snappedImageData?.url ? (
-                  <>
-                    <img
-                      src={snappedImageData.url}
-                      alt="Microscope Snapshot"
-                      className="pointer-events-none"
-                      style={{
-                        transform: `translate(${dragTransform.x}px, ${dragTransform.y}px) scale(${videoZoom})`,
-                        transition: isDragging ? 'none' : 'transform 0.3s ease-out',
-                        width: '750px',
-                        height: '750px',
-                        objectFit: 'contain',
-                      }}
-                    />
-                    {/* ImageJ.js Badge */}
-                    {onOpenImageJ && (
-                      <button
-                        onClick={() => onOpenImageJ(snappedImageData.numpy)}
-                        className="imagej-badge absolute top-2 right-2 p-1 bg-white bg-opacity-90 hover:bg-opacity-100 rounded shadow-md transition-all duration-200 flex items-center gap-1 text-xs font-medium text-gray-700 hover:text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed z-10"
-                        title={imjoyApi ? "Open in ImageJ.js" : "ImageJ.js integration is loading..."}
-                        disabled={!imjoyApi}
-                        style={{ pointerEvents: 'auto' }}
-                      >
-                        <img 
-                          src="https://ij.imjoy.io/assets/badge/open-in-imagej-js-badge.svg" 
-                          alt="Open in ImageJ.js" 
-                          className="h-4"
-                        />
-                      </button>
-                    )}
-                  </>
-                ) : (
-                  <p className="text-center text-gray-300">
-                    {webRtcError ? `WebRTC Error: ${webRtcError}` : (microscopeControlService ? 'Video Display' : 'Microscope not connected')}
-                  </p>
-                )}
-              </div>
-            ) : (
-              // FREE_PAN mode: Show video in map frame when at high zoom, or snapped image
-              scaleLevel <= 3 && (
+              {/* Show video content in map frame when at high zoom, or snapped image */}
+              {scaleLevel <= 3 && (
                 isWebRtcActive && remoteStream ? (
                   <video
                     ref={mapVideoRef}
@@ -6124,33 +5869,16 @@ const MicroscopeMapDisplay = forwardRef(({
                     }}
                   />
                 ) : null
-              )
-            )}
+              )}
 
             {/* Stage position label */}
-            {currentStagePosition && mapViewMode === 'FREE_PAN' && (
+            {currentStagePosition && (
               <div className="absolute -top-6 left-0 text-yellow-400 text-xs whitespace-nowrap">
                 X: {currentStagePosition.x.toFixed(2)}mm, Y: {currentStagePosition.y.toFixed(2)}mm
               </div>
             )}
           </div>
         </>
-        )}
-        
-        {/* Drag move instructions overlay for FOV_FITTED mode */}
-        {mapViewMode === 'FOV_FITTED' && (isWebRtcActive || snapshotImage) && microscopeControlService && !isHardwareInteractionDisabled && !isDragging && (
-          <div className="absolute bottom-2 left-2 bg-black bg-opacity-60 text-white text-xs px-2 py-1 rounded pointer-events-none">
-            <i className="fas fa-hand-paper mr-1"></i>
-            Drag to move stage
-          </div>
-        )}
-        
-        {/* Visual feedback during dragging for FOV_FITTED mode */}
-        {mapViewMode === 'FOV_FITTED' && isDragging && (
-          <div className="absolute top-2 left-2 bg-blue-500 bg-opacity-80 text-white text-xs px-2 py-1 rounded pointer-events-none">
-            <i className="fas fa-arrows-alt mr-1"></i>
-            Moving stage...
-          </div>
         )}
         
         {/* Hardware operations status indicator */}
@@ -6167,8 +5895,8 @@ const MicroscopeMapDisplay = forwardRef(({
           </div>
         )}
         
-        {/* Stage position info for FREE_PAN mode */}
-        {mapViewMode === 'FREE_PAN' && currentStagePosition && !isHistoricalDataMode && (
+        {/* Stage position info */}
+        {currentStagePosition && !isHistoricalDataMode && (
           <div className="absolute bottom-4 left-4 bg-black bg-opacity-80 text-white p-2 rounded text-xs">
             <div>Stage Position:</div>
             <div>X: {currentStagePosition.x.toFixed(3)}mm</div>
@@ -6616,8 +6344,6 @@ MicroscopeMapDisplay.propTypes = {
   onMouseUp: PropTypes.func,
   onMouseLeave: PropTypes.func,
   toggleWebRtcStream: PropTypes.func,
-  onFreePanAutoCollapse: PropTypes.func,
-  onFitToViewUncollapse: PropTypes.func,
   sampleLoadStatus: PropTypes.object,
   simulationDataSource: PropTypes.object,
   // Panel control props

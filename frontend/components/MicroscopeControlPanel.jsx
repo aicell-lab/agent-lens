@@ -77,8 +77,6 @@ const MicroscopeControlPanel = ({
   orchestratorManagerService,
   onOpenImageJ = null,
   imjoyApi = null,
-  onFreePanAutoCollapse = null,
-  onFitToViewUncollapse = null,
 }) => {
   const [isLightOn, setIsLightOn] = useState(false);
   const [xPosition, setXPosition] = useState(0);
@@ -204,24 +202,6 @@ const MicroscopeControlPanel = ({
   const [objectiveSwitcherSpeed, setObjectiveSwitcherSpeed] = useState(1.0);
   const [moveZOnObjectiveSwitch, setMoveZOnObjectiveSwitch] = useState(true);
   
-
-  // Combined auto-collapse function that handles sidebar
-  const handleCombinedAutoCollapse = useCallback(() => {
-    // Call the main app's auto-collapse function (for sidebar)
-    if (onFreePanAutoCollapse) {
-      return onFreePanAutoCollapse();
-    }
-    return false;
-  }, [onFreePanAutoCollapse]);
-
-  // Combined uncollapse function that handles sidebar expansion
-  const handleCombinedUncollapse = useCallback(() => {
-    // Call the main app's uncollapse function (for sidebar)
-    if (onFitToViewUncollapse) {
-      return onFitToViewUncollapse();
-    }
-    return false;
-  }, [onFitToViewUncollapse]);
 
   // Callback to receive sample load status updates from SampleSelector
   const handleSampleLoadStatusChange = useCallback((status) => {
@@ -1721,8 +1701,6 @@ const MicroscopeControlPanel = ({
             onMouseLeave={handleMouseLeave}
             toggleWebRtcStream={toggleWebRtcStream}
             snapImage={snapImage}
-            onFreePanAutoCollapse={handleCombinedAutoCollapse}
-            onFitToViewUncollapse={handleCombinedUncollapse}
             sampleLoadStatus={sampleLoadStatus}
             simulationDataSource={simulationDataSource}
             // Panel control props
@@ -2223,8 +2201,6 @@ MicroscopeControlPanel.propTypes = {
   orchestratorManagerService: PropTypes.object,
   onOpenImageJ: PropTypes.func,
   imjoyApi: PropTypes.object,
-  onFreePanAutoCollapse: PropTypes.func,
-  onFitToViewUncollapse: PropTypes.func,
 };
 
 export default MicroscopeControlPanel;

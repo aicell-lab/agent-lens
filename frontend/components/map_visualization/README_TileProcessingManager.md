@@ -2,9 +2,9 @@
 
 ## Overview
 
-The `TileProcessingManager` is a centralized service that simplifies tile processing by eliminating complex channel detection logic and providing a consistent workflow for both FREE_PAN and HISTORICAL modes.
+The `TileProcessingManager` is a centralized service that simplifies tile processing by eliminating complex channel detection logic and providing a consistent workflow for both live map data and historical (HISTORICAL) data.
 
-**Improtant Note**: Ideally, all tiles should be loaded and processed in `TileProcessingManager.jsx`. However, in 'historical mode', the contrast adjustment and channel merging processing is currently handled in `artifactZarrLoader.js` due to performance considerations. This will be refactored in the future to consolidate all processing logic in the TileProcessingManager.
+**Important Note**: Ideally, all tiles should be loaded and processed in `TileProcessingManager.jsx`. However, when browsing historical data, the contrast adjustment and channel merging processing is currently handled in `artifactZarrLoader.js` due to performance considerations. This will be refactored in the future to consolidate all processing logic in the TileProcessingManager.
 
 ## Core Logic
 
@@ -19,12 +19,12 @@ The `TileProcessingManager` is a centralized service that simplifies tile proces
 
 ### Data Flow
 
-#### FREE_PAN Mode
+#### Live Map Data
 ```
 enabledChannels → processSingleChannel() → mergeChannels() → finalTile
 ```
 
-#### HISTORICAL Mode  
+#### Historical Data
 ```
 enabledChannels → artifactZarrLoader.getWellRegion() → mergeChannels() → finalTile
 ```

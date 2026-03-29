@@ -22,7 +22,6 @@ const LayerPanel = ({
   
   // Multi-Channel props
   shouldUseMultiChannelLoading,
-  mapViewMode,
   availableZarrChannels,
   zarrChannelConfigs,
   updateZarrChannelConfig,
@@ -47,9 +46,6 @@ const LayerPanel = ({
   
   // Selected microscope ID for determining which microscope's sample to use
   selectedMicroscopeId,
-  
-  // Layout props
-  isFovFittedMode = false,
   
   // Scan configuration props
   setShowScanConfig,
@@ -317,7 +313,7 @@ const LayerPanel = ({
 
   // Helper function to check if this is the last selected channel
   const isLastSelectedChannel = (channelName, isEnabled) => {
-    if (isHistoricalDataMode || mapViewMode === 'FOV_FITTED') {
+    if (isHistoricalDataMode) {
       // For zarr channels, check if this is the last enabled channel
       const enabledChannels = availableZarrChannels.filter(ch => zarrChannelConfigs[ch.label]?.enabled);
       return enabledChannels.length === 1 && enabledChannels[0].label === channelName && isEnabled;
@@ -339,7 +335,7 @@ const LayerPanel = ({
     updateRealMicroscopeChannelConfig(channelName, updates);
     
     // For FREE_PAN mode, trigger a canvas refresh to apply the new contrast settings
-    if (!isHistoricalDataMode && !isSimulatedMicroscope && mapViewMode === 'FREE_PAN') {
+    if (!isHistoricalDataMode && !isSimulatedMicroscope) {
       console.log(`🎨 LayerPanel: Contrast settings changed for ${channelName}, triggering canvas refresh`);
       
       // Trigger a canvas refresh by dispatching a custom event
@@ -353,7 +349,7 @@ const LayerPanel = ({
     }
   };
   return (
-    <div className={`layer-panel ${isFovFittedMode ? 'layer-panel--compact' : ''}`}>
+    <div className="layer-panel">
       {/* Layer List Header */}
       <div className="layer-panel__header">
         <i className="fas fa-layer-group"></i>
@@ -447,7 +443,7 @@ const LayerPanel = ({
                     </span>
                   )}
                   {/* Channel count for server layers with multi-channel data */}
-                  {layer.type === 'load-server' && shouldUseMultiChannelLoading() && (isHistoricalDataMode || mapViewMode === 'FOV_FITTED') && (
+                  {layer.type === 'load-server' && shouldUseMultiChannelLoading() && isHistoricalDataMode && (
                     <span className="channel-count">({availableZarrChannels.length})</span>
                   )}
                 </div>
@@ -593,7 +589,7 @@ const LayerPanel = ({
                       </div>
                       
                       {/* Multi-Channel Controls for Historical Data */}
-                      {shouldUseMultiChannelLoading() && (isHistoricalDataMode || mapViewMode === 'FOV_FITTED') && (
+                      {shouldUseMultiChannelLoading() && isHistoricalDataMode && (
                         <div className="server-channels">
                           {availableZarrChannels.map((channel) => {
                             const config = zarrChannelConfigs[channel.label] || {};
@@ -719,7 +715,7 @@ const LayerPanel = ({
                         {exp.name}
                       </span>
                       {/* Channel count for experiment layers with real microscope channels */}
-                      {shouldUseMultiChannelLoading() && !isSimulatedMicroscope && mapViewMode !== 'FOV_FITTED' && (
+                      {shouldUseMultiChannelLoading() && !isSimulatedMicroscope && (
                         <span className="channel-count">({Object.values(visibleLayers.channels).filter(v => v).length})</span>
                       )}
                     </div>
@@ -971,7 +967,7 @@ const LayerPanel = ({
                       </div>
                       
                       {/* Real Microscope Channel Controls for this experiment */}
-                      {!isSimulatedMicroscope && mapViewMode !== 'FOV_FITTED' && (
+                      {!isSimulatedMicroscope && (
                         <div className="experiment-channels">
                           {Object.entries(visibleLayers.channels).map(([channel, isVisible]) => {
                             const isLastChannel = isLastSelectedChannel(channel, isVisible);
@@ -1081,7 +1077,7 @@ LayerPanel.propTypes = {
   
   // Multi-Channel props
   shouldUseMultiChannelLoading: PropTypes.func,
-  mapViewMode: PropTypes.string,
+
   availableZarrChannels: PropTypes.array,
   zarrChannelConfigs: PropTypes.object,
   updateZarrChannelConfig: PropTypes.func,
@@ -1109,7 +1105,7 @@ LayerPanel.propTypes = {
   selectedMicroscopeId: PropTypes.string,
   
   // Layout props
-  isFovFittedMode: PropTypes.bool,
+
   
   // Scan configuration props
   showScanConfig: PropTypes.bool,
