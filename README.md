@@ -1,7 +1,7 @@
 # Agent-Lens: AI-Powered Smart Microscopy Platform
 
 <p align="center">
-  <strong>Autonomous microscopy control with LLM-based AI agents</strong>
+  <strong>Autonomous microscopy control with advanced imaging capabilities</strong>
 </p>
 
 <p align="center">
@@ -16,7 +16,7 @@
 
 Agent-Lens is a web-based platform for intelligent microscopy control, combining:
 - **Hardware Control**: Multi-microscope coordination with robotic sample handling
-- **AI Integration**: LLM agents, SAM segmentation, CLIP/DINOv2 similarity search
+- **AI Integration**: SAM segmentation, CLIP/DINOv2 similarity search
 - **Advanced Imaging**: Time-lapse, multi-channel, OME-Zarr data management
 - **Interactive UI**: Real-time stage maps, annotations, and visualization
 
@@ -50,7 +50,7 @@ docker run -d -p 9527:9527 \
 ## Key Features
 
 🔬 **Microscopy**: XYZ positioning, autofocus, multi-channel illumination, well plate navigation  
-🤖 **AI Agents**: Natural language control, code generation, autonomous operation  
+🤖 **AI Features**: Segmentation, similarity search, autonomous operation  
 🔍 **Similarity Search**: CLIP-based annotation matching across datasets  
 🧬 **Cell Segmentation**: Fine-tuneable microSAM via BioEngine  
 ⏱️ **Time-Lapse**: Automated multi-timepoint, multi-position imaging  
@@ -122,11 +122,10 @@ agent-lens/
 │   └── utils/                  # Artifact manager, embeddings, ChromaDB
 ├── frontend/                   # React application
 │   ├── components/
-│   │   ├── agent/              # AI agent notebook interface
 │   │   ├── map_visualization/  # Stage map & OME-Zarr
 │   │   ├── similarity_search/  # Vector search UI
 │   │   └── microscope_acquisition/  # Scan config
-│   └── utils/                  # Zarr loader, embeddings, kernel, OpenAI
+│   └── utils/                  # Zarr loader, embeddings, OpenAI
 ├── bioengine-app/              # Cellpose & microSAM deployment
 ├── tests/                      # Test suite (Python + JavaScript)
 ├── docker/                     # Containerization
@@ -169,22 +168,6 @@ cd frontend && npm run build
 
 # Docker image
 docker build -f docker/dockerfile -t agent-lens:latest .
-```
-
-## AI Agent Integration
-
-Built-in LLM agents for autonomous microscopy:
-
-- **AgentPanel**: Interactive notebook interface with code execution
-- **Code Generation**: Generate control code from natural language
-- **Thinking Visualization**: View agent reasoning process
-- **Kernel Support**: Browser-based (Pyodide) or cloud-based Python execution
-
-```python
-# Agents can generate and execute code like:
-await microscope.move_to_well("A1")
-await microscope.set_exposure(100)
-image = await microscope.capture_image()
 ```
 
 ## BioEngine Services

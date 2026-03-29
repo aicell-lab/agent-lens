@@ -262,13 +262,6 @@ tests/                     # Test suite (project root level)
 │   ├── run_tests.js                        # Main test runner
 │   ├── test_tile_processing_manager.js     # TileProcessingManager tests
 │   └── test_layer_panel.js                 # LayerPanel component tests
-├── hypha-agents-integration/  # Hypha agent integration tests
-│   ├── test-integration.js                 # Full integration tests
-│   ├── test-kernel-service.js              # Kernel service tests
-│   ├── test-hypha-connection.js            # Hypha connection tests
-│   ├── kernel-manager.js                   # Kernel management utilities
-│   ├── run-all-tests.sh                    # Shell test runner
-│   └── README.md                           # Integration test docs
 ├── conftest.py           # Test configuration and fixtures
 ├── test_basic.py         # Basic functionality tests
 ├── test_chroma_integration.py  # ChromaDB integration tests
@@ -287,17 +280,6 @@ frontend/                  # React application
 ├── vite.config.mjs       # Vite build configuration
 ├── package.json          # Frontend dependencies and scripts
 ├── components/           # Reusable UI components
-│   ├── agent/                   # AI agent notebook interface
-│   │   ├── AgentPanel.jsx            # Main agent interface
-│   │   ├── AgentPanel.css            # Agent panel styles
-│   │   ├── AgentSettings.jsx         # Model selection and configuration
-│   │   ├── ChatInput.jsx             # Multi-modal chat input
-│   │   ├── CodeCell.jsx              # Code execution cell
-│   │   ├── JupyterOutput.jsx         # Jupyter kernel output rendering
-│   │   ├── MarkdownCell.jsx          # Markdown rendering cell
-│   │   ├── NotebookContent.jsx       # Notebook UI container
-│   │   ├── SystemPromptViewer.jsx    # System prompt display
-│   │   └── ThinkingCell.jsx          # AI reasoning visualization
 │   ├── similarity_search/       # Similarity search and annotation system
 │   │   ├── AnnotationCanvas.jsx      # Canvas for drawing annotations
 │   │   ├── AnnotationDetailsWindow.jsx  # Annotation details modal
@@ -324,7 +306,6 @@ frontend/                  # React application
 │   │   └── WellPlateOffsetPanel.jsx     # Well plate calibration adjustments
 │   ├── CameraSettings.jsx        # Camera configuration component
 │   ├── ChannelSettings.jsx       # Channel configuration component
-│   ├── ChatbotButton.jsx         # AI chatbot interface button
 │   ├── ControlButton.jsx         # Generic control button component
 │   ├── DualRangeSlider.jsx       # Dual range slider component
 │   ├── ImageJPanel.jsx           # ImageJ integration panel
@@ -337,16 +318,9 @@ frontend/                  # React application
 │   ├── Sidebar.css                   # Main sidebar styles
 │   └── Sidebar.jsx                   # Main application sidebar
 ├── utils/                # Frontend utility modules
-│   ├── agentConfigLoader.js   # Agent configuration loading
-│   ├── agentKernelManager.js  # Python kernel management for agents
 │   ├── annotationEmbeddingService.js  # Annotation embedding service
 │   ├── annotationUtils.js     # Annotation utility functions
-│   ├── ansi-utils.js          # ANSI escape code parsing
 │   ├── artifactZarrLoader.js  # OME-Zarr data loading service
-│   ├── cellManager.js         # Cell data management
-│   ├── chatCompletion.js      # OpenAI API integration
-│   ├── loadWebPythonKernel.js # Pyodide-based web Python kernel
-│   ├── openaiConfig.js        # OpenAI configuration
 │   ├── previewImageUtils.js   # Image preview utilities
 │   └── segmentationUtils.js   # Image segmentation utilities
 ├── utils.jsx            # Utility functions, service connections, and input validation
@@ -558,7 +532,7 @@ const fetchStatusAndUpdateBusy = async () => {
 - Use vector embeddings for image similarity search
 - Use LLM agents for microscopy control code generation
 - Implement proper embedding reset and management
-- Support chatbot integration for user assistance
+
 - Use structured prompts for microscopy control
 - Implement proper context management for long conversations
 - Support multi-modal inputs (text + images)

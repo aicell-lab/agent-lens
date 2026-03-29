@@ -4,9 +4,6 @@
   "version": "0.0.1",
   "description": "Test package for Agent-Lens JavaScript tests",
   "scripts": {
-    "test:hypha-agents:integration": "node hypha-agents-integration/test-integration.js",
-    "test:hypha-agents:kernel": "node hypha-agents-integration/test-kernel-service.js",
-    "test:hypha-agents:connection": "node hypha-agents-integration/test-hypha-connection.js",
     "test:zarr-streaming": "node test_zarr_streaming.js"
   },
   "devDependencies": {
@@ -14,7 +11,6 @@
   },
   "dependencies": {
     "hypha-rpc": "^0.21.33",
-    "openai": "^4.0.0",
     "zarrita": "^0.4.0"
   }
 }

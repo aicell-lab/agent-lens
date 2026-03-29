@@ -6,10 +6,8 @@ services:
     pull_policy: if_not_present
     environment:
       - WORKSPACE_TOKEN=${WORKSPACE_TOKEN}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - JWT_SECRET=${JWT_SECRET}
       - REEF_WORKSPACE_TOKEN=${REEF_WORKSPACE_TOKEN}
-      - HYPHA_AGENTS_TOKEN=${HYPHA_AGENTS_TOKEN}
       - NVIDIA_VISIBLE_DEVICES=all  # Make GPU visible to container
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility  # Enable GPU compute capabilities
     labels:
@@ -49,11 +47,9 @@ services:
       - "10000-10050:10000-10050/udp"
     environment:
       - SQUID_WORKSPACE_TOKEN=${SQUID_WORKSPACE_TOKEN}
-      - WORKSPACE_TOKEN_CHATBOT=${WORKSPACE_TOKEN_CHATBOT}
       - REEF_WORKSPACE_TOKEN=${REEF_WORKSPACE_TOKEN}
       - MICROSCOPE_SERVICE_ID=${MICROSCOPE_SERVICE_ID}
       - WORKSPACE_TOKEN=${WORKSPACE_TOKEN}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - AGENT_LENS_WORKSPACE_TOKEN=${AGENT_LENS_WORKSPACE_TOKEN}
     labels:
       - "autoheal.enable=true"

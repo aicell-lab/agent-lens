@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import PropTypes from 'prop-types';
-// import ChatbotButton from './ChatbotButton'; // Replaced with AgentPanel
-import AgentPanel from './agent/AgentPanel';
+
 import SampleSelector from './SampleSelector';
 import ImagingTasksModal from './microscope_acquisition/ImagingTasksModal';
 import MicroscopeMapDisplay from './map_visualization/MicroscopeMapDisplay';
@@ -145,10 +144,6 @@ const MicroscopeControlPanel = ({
   const [webRtcError, setWebRtcError] = useState(null);
   const [remoteStream, setRemoteStream] = useState(null); // State for the incoming WebRTC stream
 
-  // State for collapsing the right panel - THIS WAS ACCIDENTALLY REMOVED, ADDING IT BACK
-  const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false);
-  const [isChatPanelExpanded, setIsChatPanelExpanded] = useState(false);
-
   // State for collapsing the contrast controls (collapsed by default to not block video)
   const [isContrastControlsCollapsed, setIsContrastControlsCollapsed] = useState(true);
 
@@ -210,57 +205,23 @@ const MicroscopeControlPanel = ({
   const [moveZOnObjectiveSwitch, setMoveZOnObjectiveSwitch] = useState(true);
   
 
-      // Function to handle right panel auto-collapse (now for chat panel)
-    const handleRightPanelAutoCollapse = useCallback(() => {
-      if (!isRightPanelCollapsed) {
-        setIsRightPanelCollapsed(true);
-        return true; // Indicate that collapse happened
-      }
-      return false; // Already collapsed
-    }, [isRightPanelCollapsed]);
-
-    // Function to handle right panel expansion (now for chat panel)
-    const handleRightPanelExpansion = useCallback(() => {
-      if (isRightPanelCollapsed) {
-        setIsRightPanelCollapsed(false);
-        return true; // Indicate that expansion happened
-      }
-      return false; // Already expanded
-    }, [isRightPanelCollapsed]);
-
-  // Combined auto-collapse function that handles both sidebar and right panel
+  // Combined auto-collapse function that handles sidebar
   const handleCombinedAutoCollapse = useCallback(() => {
-    let sidebarCollapsed = false;
-    let rightPanelCollapsed = false;
-
-    // First call the main app's auto-collapse function (for sidebar)
+    // Call the main app's auto-collapse function (for sidebar)
     if (onFreePanAutoCollapse) {
-      sidebarCollapsed = onFreePanAutoCollapse();
+      return onFreePanAutoCollapse();
     }
+    return false;
+  }, [onFreePanAutoCollapse]);
 
-    // Always collapse the right panel when FREE_PAN is triggered
-    if (sidebarCollapsed) {
-      rightPanelCollapsed = handleRightPanelAutoCollapse();
-    }
-
-    return sidebarCollapsed; // Return whether collapse happened
-  }, [onFreePanAutoCollapse, handleRightPanelAutoCollapse]);
-
-  // Combined uncollapse function that handles both sidebar and right panel expansion
+  // Combined uncollapse function that handles sidebar expansion
   const handleCombinedUncollapse = useCallback(() => {
-    let sidebarExpanded = false;
-    let rightPanelExpanded = false;
-
-    // First call the main app's uncollapse function (for sidebar)
+    // Call the main app's uncollapse function (for sidebar)
     if (onFitToViewUncollapse) {
-      sidebarExpanded = onFitToViewUncollapse();
+      return onFitToViewUncollapse();
     }
-
-    // Then expand the right panel
-    rightPanelExpanded = handleRightPanelExpansion();
-
-    return sidebarExpanded || rightPanelExpanded; // Return whether any expansion happened
-  }, [onFitToViewUncollapse, handleRightPanelExpansion]);
+    return false;
+  }, [onFitToViewUncollapse]);
 
   // Callback to receive sample load status updates from SampleSelector
   const handleSampleLoadStatusChange = useCallback((status) => {
@@ -1249,10 +1210,6 @@ const MicroscopeControlPanel = ({
     setIsSampleSelectorOpen(!isSampleSelectorOpen);
   };
 
-  const toggleRightPanel = () => {
-    setIsRightPanelCollapsed(!isRightPanelCollapsed);
-  };
-
   // Poll transport queue status to determine if microscope is busy with sample operations
   const pollTransportQueueStatus = useCallback(async () => {
     if (!orchestratorManagerService || !isRealMicroscope(selectedMicroscopeId)) {
@@ -2182,29 +2139,6 @@ const MicroscopeControlPanel = ({
           </div>
         </div>
       )}
-
-      {/* Collapsible Chat Panel - Right Side */}
-      <div className={`collapsible-chat-panel ${isRightPanelCollapsed ? 'collapsed' : 'expanded'} ${isChatPanelExpanded ? 'with-canvas' : ''}`}>
-        <div className="chat-panel-header !pt-0 !mt-0" style={{ paddingTop: 0, marginTop: 0, minHeight: 0, height: 'auto' }}>
-          <button 
-            onClick={toggleRightPanel}
-            className="chat-panel-toggle"
-            title={isRightPanelCollapsed ? "Expand Chat Panel" : "Collapse Chat Panel"}
-          >
-            <i className={`fas ${isRightPanelCollapsed ? 'fa-chevron-left' : 'fa-chevron-right'}`}></i>
-          </button>
-        </div>
-        <div className="chat-panel-content">
-          <AgentPanel
-            key={selectedMicroscopeId}
-            hyphaManager={hyphaManager}
-            selectedMicroscopeId={selectedMicroscopeId}
-            appendLog={appendLog}
-            showNotification={showNotification}
-            onExpandPanel={setIsChatPanelExpanded}
-          />
-        </div>
-      </div>
 
       {/* Modals */}
       {isImagingModalOpen && (
