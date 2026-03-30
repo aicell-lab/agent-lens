@@ -440,6 +440,47 @@ Root files:
 - **Error Recovery**: Implement rollback procedures for failed sample transfer operations
 - **Sample Tracking**: Monitor sample locations (incubator_slot, robotic_arm, microscope1/2)
 
+#### Unified Transport API (Migrated 2026-03-30)
+The orchestrator and robotic arm services now use a unified `transport_plate()` API for all plate transport operations, replacing individual methods like `load_plate_from_incubator_to_microscope()`, `unload_plate_from_microscope()`, `microscope_to_incubator()`, etc.
+
+**Orchestrator Service:**
+```javascript
+// Transport between devices (slot identifies which plate when incubator involved)
+const result = await orchestratorManagerService.transport_plate(
+  "incubator",                    // from_device
+  "microscope-squid-1",           // to_device
+  incubatorSlot                   // slot number (required when incubator involved)
+);
+
+// Unload from microscope back to incubator
+const result = await orchestratorManagerService.transport_plate(
+  "microscope-squid-1",           // from_device
+  "incubator",                    // to_device
+  incubatorSlot                   // slot number
+);
+```
+
+**Robotic Arm Service:**
+```javascript
+// Direct robotic arm transport (microscope already homed, arm connected)
+const result = await roboticArmService.transport_plate(
+  "microscope-squid-1",           // from_device
+  "incubator"                     // to_device
+);
+```
+
+**Supported device IDs:**
+- `'incubator'` - The Cytomat incubator
+- `'hamilton'` - The Hamilton liquid handler
+- `'microscope-squid-1'` - Microscope 1
+- `'microscope-squid-2'` - Microscope 2
+- `'microscope-squid-plus-3'` - Microscope 3
+
+**Migration Notes:**
+- Old methods like `load_plate_from_incubator_to_microscope()`, `unload_plate_from_microscope()`, `microscope_to_incubator()`, etc. are deprecated
+- The new API uses device ID strings instead of numeric microscope numbers
+- Use `getMicroscopeServiceIdForNumber()` from utils.jsx to convert microscope numbers to service IDs
+
 #### Service Handling Safety Notices
 - **CRITICAL**: Always verify microscope homing success before robotic arm movement to prevent collisions
 - **Service Verification**: Use `get_status()` method to verify microscope service functionality, not `.api()`
