@@ -326,7 +326,7 @@ const ImagingTasksModal = ({
         .map(slot => {
           const slotNumber = slot.incubator_slot;
           const sampleName = slot.name; // Name is guaranteed to be non-empty here
-          const currentLocation = slot.location; // e.g., 'incubator_slot', 'microscope1', 'robotic_arm'
+          const currentLocation = slot.location; // e.g., 'incubator_slot', 'microscope-squid-1', 'robotic_arm'
           const wellPlateType = slot.well_plate_type || '96'; // Extract well plate type from slot info
           // const originalOccupied = slot.metadata?.occupied || false; // Original occupied flag
 

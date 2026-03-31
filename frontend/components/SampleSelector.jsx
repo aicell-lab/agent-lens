@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
-import { isRealMicroscope, isSimulatedMicroscope, getMicroscopeNumber, getOrchestratorMicroscopeId } from '../utils';
+import { isRealMicroscope, isSimulatedMicroscope, getMicroscopeNumber, getOrchestratorMicroscopeId, isSampleOnMicroscope, getLocationDisplayName, isSampleInIncubator } from '../utils';
 
 // NOTE: Ensure corresponding CSS for .sample-selector-dropdown and .hidden is added.
 // .sample-selector-dropdown { position: absolute; top: 50px; /* Adjust as needed */ left: 20px; z-index: 1000; background: white; border: 1px solid #ccc; box-shadow: 0 2px 10px rgba(0,0,0,0.1); padding: 15px; border-radius: 5px; width: 300px; /* Or max-content */ }
@@ -167,8 +167,9 @@ const SampleSelector = ({
           id: `slot-${slotInfo.incubator_slot}`
         }));
         
+        // Check if any sample is on this microscope using centralized location utility
         const sampleOnThisMicroscope = slots.find(slot => 
-          slot.location === `microscope${currentMicroscopeNumber}`
+          isSampleOnMicroscope(slot.location, selectedMicroscopeId)
         );
         
         if (sampleOnThisMicroscope) {
@@ -520,12 +521,13 @@ const SampleSelector = ({
       className += ' active';
     }
     
-    if (slot.location === 'incubator_slot') {
+    // Use centralized utilities for location matching
+    if (isSampleInIncubator(slot.location)) {
       className += ' green-sample';
-    } else if (slot.location === `microscope${currentMicroscopeNumber}`){
+    } else if (isSampleOnMicroscope(slot.location, selectedMicroscopeId)){
       // Sample on the current microscope is orange (and active if loadedSampleOnMicroscope matches)
       className += ' orange-sample';
-    } else if (slot.location !== 'incubator_slot') {
+    } else if (!isSampleInIncubator(slot.location)) {
         // Sample on another microscope or robotic arm, etc. is orange but not necessarily active
         className += ' orange-sample';
     }
@@ -695,8 +697,8 @@ const SampleSelector = ({
               <div className="sample-info">
                 <span className="sample-name">{slot.name || `Slot ${slot.incubator_slot}`}</span>
                 <span className="sample-location">
-                  Location: {slot.location}
-                  {slot.location === 'incubator_slot' && ` (Slot #${slot.incubator_slot})`}
+                  Location: {getLocationDisplayName(slot.location)}
+                  {isSampleInIncubator(slot.location) && ` (Slot #${slot.incubator_slot})`}
                 </span>
               </div>
             </div>

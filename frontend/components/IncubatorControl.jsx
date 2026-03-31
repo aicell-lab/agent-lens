@@ -6,6 +6,9 @@ import {
   getInputValidationClasses, 
   validateStringInput,
   getMicroscopeServiceIdForNumber,
+  getOrchestratorMicroscopeId,
+  isSampleOnMicroscope,
+  getLocationDisplayName,
 } from '../utils';
 
 const IncubatorControl = ({ 
@@ -251,8 +254,10 @@ const IncubatorControl = ({
     try {
       const allSlotInfo = await incubatorControlService.get_slot_information();
       if (Array.isArray(allSlotInfo)) {
+        // Map microscope number to service ID, then use centralized utility
+        const targetMicroscopeId = getMicroscopeServiceIdForNumber(microscopeNumber);
         const conflictSample = allSlotInfo.find(slot => 
-          slot && slot.location === `microscope${microscopeNumber}`
+          slot && isSampleOnMicroscope(slot.location, targetMicroscopeId)
         );
         return conflictSample;
       }
@@ -802,7 +807,7 @@ const IncubatorControl = ({
                   <div className="space-y-2 mb-4">
                     <p><strong>Name:</strong> {selectedSlot.name}</p>
                     <p><strong>Status:</strong> {selectedSlot.status}</p>
-                    <p><strong>Location:</strong> {selectedSlot.location}</p>
+                    <p><strong>Location:</strong> {getLocationDisplayName(selectedSlot.location)}</p>
                     <p><strong>Date to Incubator:</strong> {selectedSlot.date_to_incubator}</p>
                     <p><strong>Well Plate Type:</strong> {selectedSlot.well_plate_type}</p>
                   </div>

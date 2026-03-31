@@ -232,6 +232,95 @@ export const getAllMicroscopeIds = () => {
 };
 
 // ============================================================================
+// Microscope Location Utilities
+// ============================================================================
+// These functions provide centralized handling for sample location strings
+// used by the incubator service and orchestrator. Locations now use unified
+// microscope IDs (e.g., 'microscope-squid-1') instead of legacy format ('microscope1').
+
+/**
+ * Check if a location string matches a specific microscope.
+ * Used to determine if a sample is currently on a specific microscope.
+ * 
+ * @param {string} location - The location string from slot info (e.g., 'microscope-squid-1', 'incubator_slot')
+ * @param {string} microscopeId - The full service ID of the microscope (e.g., 'reef-imaging/microscope-squid-1')
+ * @returns {boolean} True if the location matches the microscope
+ * 
+ * @example
+ * isSampleOnMicroscope('microscope-squid-1', 'reef-imaging/microscope-squid-1') // true
+ * isSampleOnMicroscope('microscope-squid-2', 'reef-imaging/microscope-squid-1') // false
+ * isSampleOnMicroscope('incubator_slot', 'reef-imaging/microscope-squid-1') // false
+ */
+export const isSampleOnMicroscope = (location, microscopeId) => {
+  if (!location || !microscopeId) return false;
+  const orchestratorId = getOrchestratorMicroscopeId(microscopeId);
+  return location === orchestratorId;
+};
+
+/**
+ * Get a human-readable display name for a sample location.
+ * 
+ * @param {string} location - The location string (e.g., 'microscope-squid-1', 'incubator_slot', 'robotic_arm')
+ * @returns {string} Human-readable location name
+ * 
+ * @example
+ * getLocationDisplayName('microscope-squid-1') // 'Squid 1'
+ * getLocationDisplayName('incubator_slot') // 'Incubator'
+ * getLocationDisplayName('robotic_arm') // 'Robotic Arm'
+ */
+export const getLocationDisplayName = (location) => {
+  if (!location) return 'Unknown';
+  
+  // Check if it's a microscope location
+  for (const [serviceId, config] of Object.entries(MICROSCOPE_CONFIG)) {
+    if (config.orchestratorId === location) {
+      return config.displayName;
+    }
+  }
+  
+  // Standard location names
+  const locationNames = {
+    'incubator_slot': 'Incubator',
+    'incubator': 'Incubator',
+    'robotic_arm': 'Robotic Arm',
+    'transfer_station': 'Transfer Station',
+    'hamilton': 'Hamilton',
+  };
+  
+  return locationNames[location] || location;
+};
+
+/**
+ * Check if a sample location is in the incubator.
+ * 
+ * @param {string} location - The location string
+ * @returns {boolean} True if the sample is in the incubator
+ */
+export const isSampleInIncubator = (location) => {
+  return location === 'incubator_slot' || location === 'incubator';
+};
+
+/**
+ * Get the microscope number from an orchestrator microscope ID.
+ * Reverse of getOrchestratorMicroscopeId().
+ * 
+ * @param {string} orchestratorId - The orchestrator ID (e.g., 'microscope-squid-1')
+ * @returns {number|null} The microscope number (1, 2, 3) or null if not found
+ * 
+ * @example
+ * getMicroscopeNumberFromOrchestratorId('microscope-squid-1') // 1
+ * getMicroscopeNumberFromOrchestratorId('microscope-squid-2') // 2
+ */
+export const getMicroscopeNumberFromOrchestratorId = (orchestratorId) => {
+  for (const config of Object.values(MICROSCOPE_CONFIG)) {
+    if (config.orchestratorId === orchestratorId) {
+      return config.microscopeNumber;
+    }
+  }
+  return null;
+};
+
+// ============================================================================
 // Server and Service Management
 // ============================================================================
 
