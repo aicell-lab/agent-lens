@@ -135,21 +135,65 @@ const SampleSelector = ({
     }
   };
 
-  // Check transport queue status
-  const checkTransportQueueStatus = async () => {
+  // Check orchestrator runtime status for transport state
+  const checkOrchestratorStatus = async () => {
     if (!orchestratorManagerService || !isRealMicroscopeSelected) {
       return;
     }
     
     try {
-      const status = await orchestratorManagerService.get_transport_queue_status();
+      const status = await orchestratorManagerService.get_runtime_status();
       
-      // Add status information to workflow messages if there's an active task
-      if (status && status.active_task) {
-        addWorkflowMessage(`Transport queue: ${status.active_task} (Queue size: ${status.queue_size})`);
+      if (!status || !status.success) {
+        console.warn('Orchestrator runtime status unavailable:', status?.message);
+        return;
+      }
+
+      // Surface active transport operations from admission controller
+      const activeOps = status.active_operations || {};
+      const heldResources = status.held_resources || [];
+      const sampleFlags = status.sample_on_microscope_flags || {};
+      
+      // Build comprehensive transport state message
+      const transportState = {
+        activeTask: status.active_task,
+        activeTasks: status.active_tasks || [],
+        activeOperations: activeOps,
+        heldResources: heldResources,
+        sampleOnMicroscope: sampleFlags,
+        inCriticalOperation: status.in_critical_operation,
+        connectedServices: status.connected_services
+      };
+
+      // Log detailed transport state for debugging
+      console.log('[SampleSelector] Orchestrator transport state:', transportState);
+
+      // Surface active transport operations to UI
+      const operationEntries = Object.entries(activeOps);
+      if (operationEntries.length > 0) {
+        operationEntries.forEach(([opId, opInfo]) => {
+          const opType = opInfo?.operation_type || 'unknown';
+          const resources = opInfo?.resources?.join(', ') || 'none';
+          addWorkflowMessage(`Active transport: ${opType} (resources: ${resources})`);
+        });
+      }
+
+      // Surface held transport resources
+      const transportResources = heldResources.filter(r => 
+        r.includes('transport') || r.includes('robotic-arm') || r.includes('incubator')
+      );
+      if (transportResources.length > 0) {
+        addWorkflowMessage(`Held transport resources: ${transportResources.join(', ')}`);
+      }
+
+      // Surface sample location state
+      const currentMicroscopeId = getOrchestratorMicroscopeId(selectedMicroscopeId);
+      const hasSampleOnThisMicroscope = sampleFlags[currentMicroscopeId] || false;
+      if (hasSampleOnThisMicroscope) {
+        addWorkflowMessage(`Sample detected on ${currentMicroscopeId}`);
       }
     } catch (error) {
-      console.error('Failed to get transport queue status:', error);
+      console.error('Failed to get orchestrator runtime status:', error);
     }
   };
 
@@ -249,14 +293,14 @@ const SampleSelector = ({
     simulationDataSource?.sampleInfo?.name,
   ]);
 
-  // Check transport queue status periodically and when operations complete
+  // Check orchestrator runtime status periodically and when operations complete
   useEffect(() => {
     if (isRealMicroscopeSelected && orchestratorManagerService) {
       // Check immediately
-      checkTransportQueueStatus();
+      checkOrchestratorStatus();
 
       // Set up periodic checking every 5 seconds
-      const interval = setInterval(checkTransportQueueStatus, 5000);
+      const interval = setInterval(checkOrchestratorStatus, 5000);
 
       return () => clearInterval(interval);
     }
@@ -376,10 +420,10 @@ const SampleSelector = ({
         // Convert full service ID to the format expected by orchestrator
         const microscopeIdForOrchestrator = getOrchestratorMicroscopeId(selectedMicroscopeId);
         
-        addWorkflowMessage(`Queuing load operation for incubator slot ${incubatorSlot} to microscope ${microscopeIdForOrchestrator}`);
+        addWorkflowMessage(`Initiating transport: incubator slot ${incubatorSlot} → ${microscopeIdForOrchestrator}`);
         
-        // Use orchestrator service to handle the entire load operation
-        // New unified transport API: transport_plate(from_device, to_device, slot)
+        // Use unified transport API: transport_plate(from_device, to_device, slot)
+        // This moves the plate from incubator to microscope via robotic arm
         const result = await orchestratorManagerService.transport_plate(
           "incubator",
           microscopeIdForOrchestrator,
@@ -393,8 +437,8 @@ const SampleSelector = ({
           setLoadedSampleOnMicroscope(selectedSampleId);
           // Refresh incubator data to get updated locations
           await fetchIncubatorData();
-          // Check transport queue status after operation
-          await checkTransportQueueStatus();
+          // Check orchestrator status after operation to surface latest transport state
+          await checkOrchestratorStatus();
         } else {
           throw new Error(result ? result.message : 'Unknown error from orchestrator');
         }
@@ -448,10 +492,10 @@ const SampleSelector = ({
         // Convert full service ID to the format expected by orchestrator
         const microscopeIdForOrchestrator = getOrchestratorMicroscopeId(selectedMicroscopeId);
         
-        addWorkflowMessage(`Queuing unload operation for incubator slot ${incubatorSlot} from microscope ${microscopeIdForOrchestrator}`);
+        addWorkflowMessage(`Initiating transport: ${microscopeIdForOrchestrator} → incubator slot ${incubatorSlot}`);
         
-        // Use orchestrator service to handle the entire unload operation
-        // New unified transport API: transport_plate(from_device, to_device, slot)
+        // Use unified transport API: transport_plate(from_device, to_device, slot)
+        // This moves the plate from microscope back to incubator via robotic arm
         const result = await orchestratorManagerService.transport_plate(
           microscopeIdForOrchestrator,
           "incubator",
@@ -466,8 +510,8 @@ const SampleSelector = ({
           setSelectedSampleId(null);
           // Refresh incubator data to get updated locations
           await fetchIncubatorData();
-          // Check transport queue status after operation
-          await checkTransportQueueStatus();
+          // Check orchestrator status after operation to surface latest transport state
+          await checkOrchestratorStatus();
         } else {
           throw new Error(result ? result.message : 'Unknown error from orchestrator');
         }

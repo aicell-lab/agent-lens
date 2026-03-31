@@ -1190,41 +1190,67 @@ const MicroscopeControlPanel = ({
     setIsSampleSelectorOpen(!isSampleSelectorOpen);
   };
 
-  // Poll transport queue status to determine if microscope is busy with sample operations
-  const pollTransportQueueStatus = useCallback(async () => {
+  // Poll orchestrator runtime status to determine if microscope is busy with transport operations
+  const pollOrchestratorStatus = useCallback(async () => {
     if (!orchestratorManagerService || !isRealMicroscope(selectedMicroscopeId)) {
       return;
     }
 
     try {
-      const status = await orchestratorManagerService.get_transport_queue_status();
+      const status = await orchestratorManagerService.get_runtime_status();
       
-      // Check if there's a current operation for this microscope
-      if (status && status.current_operation) {
-        const microscopeIdentifier = getOrchestratorMicroscopeId(selectedMicroscopeId);
-        // Check if the current operation is for this microscope
-        if (status.current_operation.microscope_id === microscopeIdentifier) {
-          console.log(`[TransportQueue] Microscope busy with operation: ${status.current_operation.action} for slot ${status.current_operation.incubator_slot}`);
-          updateMicroscopeBusy(true); // Only updates if value changes
-        } else {
-          // Operation is for a different microscope, we're not busy
-          updateMicroscopeBusy(false);
+      if (!status || !status.success) {
+        console.warn('[OrchestratorStatus] Runtime status unavailable:', status?.message);
+        return;
+      }
+      
+      const microscopeIdentifier = getOrchestratorMicroscopeId(selectedMicroscopeId);
+      const activeOps = status.active_operations || {};
+      const sampleFlags = status.sample_on_microscope_flags || {};
+      const inCriticalOp = status.in_critical_operation || false;
+      
+      // Check if there's an active operation involving this microscope
+      let microscopeHasActiveOperation = false;
+      let operationDetails = null;
+      
+      Object.entries(activeOps).forEach(([opId, opInfo]) => {
+        const opType = opInfo?.operation_type || '';
+        const resources = opInfo?.resources || [];
+        
+        // Check if this operation involves the current microscope
+        // Operations can be: transport-load, transport-unload, transport-load-hamilton, etc.
+        const involvesThisMicroscope = resources.some(r => 
+          r.includes(microscopeIdentifier) || 
+          (opType.includes('transport') && resources.includes('robotic-arm'))
+        );
+        
+        if (involvesThisMicroscope) {
+          microscopeHasActiveOperation = true;
+          operationDetails = { opId, opType, resources };
         }
+      });
+      
+      // Also check if sample is in transit (sample flag changes indicate ongoing transport)
+      const sampleInTransit = inCriticalOp && sampleFlags[microscopeIdentifier] === undefined;
+      
+      if (microscopeHasActiveOperation || sampleInTransit) {
+        console.log(`[OrchestratorStatus] Microscope busy with operation:`, operationDetails);
+        updateMicroscopeBusy(true);
       } else {
-        // No current operation in queue
+        // No active operation for this microscope
         // Add grace period: don't clear busy state if we set it recently (within 3 seconds)
-        // This prevents blinking when the orchestrator takes a moment to update the queue status
+        // This prevents blinking when the orchestrator takes a moment to update the status
         const timeSinceLastBusySet = Date.now() - lastBusySetTimeRef.current;
         const gracePeriodMs = 3000; // 3 seconds grace period
         
         if (timeSinceLastBusySet > gracePeriodMs) {
           updateMicroscopeBusy(false);
         } else {
-          console.log(`[TransportQueue] No operation in queue, but within grace period (${timeSinceLastBusySet}ms < ${gracePeriodMs}ms) - keeping busy state`);
+          console.log(`[OrchestratorStatus] No operation for this microscope, but within grace period (${timeSinceLastBusySet}ms < ${gracePeriodMs}ms) - keeping busy state`);
         }
       }
     } catch (error) {
-      console.error("[MicroscopeControlPanel] Error polling transport queue status:", error);
+      console.error("[MicroscopeControlPanel] Error polling orchestrator runtime status:", error);
       // Don't change busy state on error - keep current state
     }
   }, [orchestratorManagerService, selectedMicroscopeId, updateMicroscopeBusy]);
@@ -1273,8 +1299,8 @@ const MicroscopeControlPanel = ({
         }
         updateMicroscopeBusy(true);
       }
-      // Note: If no active imaging task, the transport queue polling (every 1 second)
-      // will handle setting busy state for sample operations
+      // Note: If no active imaging task, the orchestrator status polling (every 1 second)
+      // will handle setting busy state for sample/transport operations
 
     } catch (error) {
       appendLog(`Error fetching imaging tasks: ${error.message}`);
@@ -1296,23 +1322,23 @@ const MicroscopeControlPanel = ({
     }
   }, [fetchImagingTasks, selectedMicroscopeId, orchestratorManagerService]);
 
-  // Effect to poll transport queue status for sample operations
+  // Effect to poll orchestrator runtime status for sample/transport operations
   useEffect(() => {
     if (!orchestratorManagerService || !isRealMicroscope(selectedMicroscopeId)) {
       return;
     }
 
     // Poll immediately
-    pollTransportQueueStatus();
+    pollOrchestratorStatus();
     
     // Set up periodic polling every 1 second for real-time updates
-    const interval = setInterval(pollTransportQueueStatus, 1000);
+    const interval = setInterval(pollOrchestratorStatus, 1000);
     return () => clearInterval(interval);
-  }, [pollTransportQueueStatus, orchestratorManagerService, selectedMicroscopeId]);
+  }, [pollOrchestratorStatus, orchestratorManagerService, selectedMicroscopeId]);
 
   // Effect to provide immediate UI feedback when sample operations start
   // Note: We set busy=true immediately for instant feedback, then let the 1-second
-  // transport queue polling be the source of truth for the actual operation status
+  // orchestrator polling be the source of truth for the actual operation status
   useEffect(() => {
     if (
       currentOperation === 'loading' ||
