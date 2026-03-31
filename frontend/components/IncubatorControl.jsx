@@ -322,7 +322,9 @@ const IncubatorControl = ({
       armLightOn = true;
       
       addWorkflowMessage(`Initiating sample transport from microscope ${microscopeNumber} to incubator...`);
-      const transportResult = await roboticArmService.microscope_to_incubator(microscopeNumber);
+      // New unified transport API: transport_plate(from_device, to_device)
+      const fromDeviceId = getMicroscopeServiceIdForNumber(microscopeNumber)?.replace('reef-imaging/', '') || `microscope-squid-${microscopeNumber}`;
+      const transportResult = await roboticArmService.transport_plate(fromDeviceId, "incubator");
       if (transportResult && transportResult.success === false) {
         throw new Error(`Robotic arm transport failed: ${transportResult.message || 'Unknown error'}`);
       }

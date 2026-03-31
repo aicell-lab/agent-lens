@@ -379,9 +379,11 @@ const SampleSelector = ({
         addWorkflowMessage(`Queuing load operation for incubator slot ${incubatorSlot} to microscope ${microscopeIdForOrchestrator}`);
         
         // Use orchestrator service to handle the entire load operation
-        const result = await orchestratorManagerService.load_plate_from_incubator_to_microscope(
-          incubatorSlot, 
-          microscopeIdForOrchestrator
+        // New unified transport API: transport_plate(from_device, to_device, slot)
+        const result = await orchestratorManagerService.transport_plate(
+          "incubator",
+          microscopeIdForOrchestrator,
+          incubatorSlot
         );
         
         if (result && result.success) {
@@ -449,9 +451,11 @@ const SampleSelector = ({
         addWorkflowMessage(`Queuing unload operation for incubator slot ${incubatorSlot} from microscope ${microscopeIdForOrchestrator}`);
         
         // Use orchestrator service to handle the entire unload operation
-        const result = await orchestratorManagerService.unload_plate_from_microscope(
-          incubatorSlot, 
-          microscopeIdForOrchestrator
+        // New unified transport API: transport_plate(from_device, to_device, slot)
+        const result = await orchestratorManagerService.transport_plate(
+          microscopeIdForOrchestrator,
+          "incubator",
+          incubatorSlot
         );
         
         if (result && result.success) {
