@@ -1,6 +1,6 @@
 services:
   agent-lens:
-    image: ghcr.io/aicell-lab/agent-lens:sha-26c1dd9
+    image: ghcr.io/aicell-lab/agent-lens:sha-270ddfb
     container_name: agent-lens
     working_dir: /app
     pull_policy: if_not_present
@@ -39,7 +39,7 @@ services:
       - ALL
 
   squid-control:
-    image: ghcr.io/aicell-lab/squid-control:sha-14b34b1
+    image: ghcr.io/aicell-lab/squid-control:sha-00cbb19
     container_name: squid-control
     pull_policy: if_not_present
     network_mode: "host"
