@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import PropTypes from 'prop-types';
 import './LayerPanel.css';
 import DualRangeSlider from '../DualRangeSlider';
-import { getChannelColor, getMicroscopeNumber } from '../../utils';
+import { getChannelColor, isSampleOnMicroscope, fetchIncubatorSamples } from '../../utils';
 
 const LayerPanel = ({
   // Map Layers props
@@ -173,24 +173,15 @@ const LayerPanel = ({
       
       if (incubatorControlService && !isSimulatedMicroscope && selectedMicroscopeId) {
         try {
-          // Get the microscope number for the currently selected microscope
-          const currentMicroscopeNumber = getMicroscopeNumber(selectedMicroscopeId);
-          const targetLocation = currentMicroscopeNumber ? `microscope${currentMicroscopeNumber}` : null;
-          
-          if (targetLocation) {
-            const allSlotInfo = await incubatorControlService.get_slot_information();
-            // Only look for samples on the currently selected microscope
-            const loadedSample = allSlotInfo?.find(slot => 
-              slot.location === targetLocation
-            );
-            if (loadedSample?.name) {
-              sampleId = loadedSample.name;
-              console.log(`[LayerPanel] Found loaded sample on ${targetLocation}: ${sampleId}`);
-            } else {
-              console.log(`[LayerPanel] No sample found on ${targetLocation}`);
-            }
+          const allSlotInfo = await fetchIncubatorSamples(incubatorControlService);
+          const loadedSample = allSlotInfo?.find(slot =>
+            slot?.name && isSampleOnMicroscope(slot.location, selectedMicroscopeId)
+          );
+          if (loadedSample?.name) {
+            sampleId = loadedSample.name;
+            console.log(`[LayerPanel] Found loaded sample on ${selectedMicroscopeId}: ${sampleId}`);
           } else {
-            console.log(`[LayerPanel] Could not determine microscope number from selectedMicroscopeId: ${selectedMicroscopeId}`);
+            console.log(`[LayerPanel] No sample found on ${selectedMicroscopeId}`);
           }
         } catch (error) {
           console.log(`[LayerPanel] Failed to fetch incubator info:`, error);

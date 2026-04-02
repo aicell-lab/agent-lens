@@ -9,6 +9,7 @@ import {
   getOrchestratorMicroscopeId,
   isSampleOnMicroscope,
   getLocationDisplayName,
+  fetchIncubatorSamples,
 } from '../utils';
 
 const IncubatorControl = ({ 
@@ -95,27 +96,13 @@ const IncubatorControl = ({
   const fetchSlotInformation = async () => {
     if (incubatorControlService) {
       try {
-        const allSlotInfo = await incubatorControlService.get_slot_information();
-        // Handle both array and individual slot responses
+        const allSlotInfo = await fetchIncubatorSamples(incubatorControlService);
         const updatedSlotsInfo = Array(42).fill({});
-        if (Array.isArray(allSlotInfo)) {
-          allSlotInfo.forEach(slotInfo => {
-            if (slotInfo && slotInfo.incubator_slot && slotInfo.incubator_slot >= 1 && slotInfo.incubator_slot <= 42) {
-              updatedSlotsInfo[slotInfo.incubator_slot - 1] = slotInfo;
-            }
-          });
-        } else if (allSlotInfo) {
-          // If it returns a single slot info, handle it appropriately
-          // This is a fallback in case the service returns different format
-          for (let i = 1; i <= 42; i++) {
-            try {
-              const slotInfo = await incubatorControlService.get_slot_information(i);
-              updatedSlotsInfo[i - 1] = slotInfo || {};
-            } catch (error) {
-              updatedSlotsInfo[i - 1] = {};
-            }
+        allSlotInfo.forEach(slotInfo => {
+          if (slotInfo && slotInfo.incubator_slot && slotInfo.incubator_slot >= 1 && slotInfo.incubator_slot <= 42) {
+            updatedSlotsInfo[slotInfo.incubator_slot - 1] = slotInfo;
           }
-        }
+        });
         setSlotsInfo(updatedSlotsInfo);
         appendLog(`Slots information updated`);
       } catch (error) {
@@ -252,15 +239,13 @@ const IncubatorControl = ({
   // Helper function to check for microscope conflicts
   const checkMicroscopeConflict = async (microscopeNumber) => {
     try {
-      const allSlotInfo = await incubatorControlService.get_slot_information();
-      if (Array.isArray(allSlotInfo)) {
-        // Map microscope number to service ID, then use centralized utility
-        const targetMicroscopeId = getMicroscopeServiceIdForNumber(microscopeNumber);
-        const conflictSample = allSlotInfo.find(slot => 
-          slot && isSampleOnMicroscope(slot.location, targetMicroscopeId)
-        );
-        return conflictSample;
-      }
+      const allSlotInfo = await fetchIncubatorSamples(incubatorControlService);
+      // Map microscope number to service ID, then use centralized utility
+      const targetMicroscopeId = getMicroscopeServiceIdForNumber(microscopeNumber);
+      const conflictSample = allSlotInfo.find(slot => 
+        slot && isSampleOnMicroscope(slot.location, targetMicroscopeId)
+      );
+      return conflictSample;
     } catch (error) {
       console.error('Error checking microscope conflict:', error);
       return null;

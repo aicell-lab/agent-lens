@@ -8,6 +8,7 @@ import {
   validateStringInput,
   getOrchestratorMicroscopeId,
   isSimulatedMicroscope,
+  fetchIncubatorSamples,
 } from '../../utils'; // Import validation utilities
 import './ImagingTasksModal.css'; // We will create this CSS file
 
@@ -317,9 +318,9 @@ const ImagingTasksModal = ({
     setSlotsLoading(true);
     setSlotsError(null);
     try {
-      appendLog('Fetching incubator slot information...');
-      const allSlotInfo = await incubatorControlService.get_slot_information();
-      appendLog(`Received slot information for ${allSlotInfo.length} slots.`);
+      appendLog('Fetching incubator sample metadata...');
+      const allSlotInfo = await fetchIncubatorSamples(incubatorControlService);
+      appendLog(`Received sample metadata for ${allSlotInfo.length} incubator slots.`);
       
       const processedSlots = allSlotInfo
         .filter(slot => slot.name && slot.name.trim() !== '') // Only include slots with a non-empty name

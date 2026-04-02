@@ -301,6 +301,52 @@ export const isSampleInIncubator = (location) => {
 };
 
 /**
+ * Fetch canonical incubator sample metadata, preferring the dedicated
+ * get_incubator_samples() API with a fallback to legacy get_slot_information().
+ *
+ * @param {object} incubatorControlService - Hypha incubator service proxy
+ * @param {number|null} slot - Optional incubator slot number
+ * @returns {Promise<Array<object>>} Normalized sample records
+ */
+export const fetchIncubatorSamples = async (incubatorControlService, slot = null) => {
+  if (!incubatorControlService) {
+    throw new Error('Incubator control service not available.');
+  }
+
+  let samplePayload;
+  if (typeof incubatorControlService.get_incubator_samples === 'function') {
+    samplePayload = await incubatorControlService.get_incubator_samples(slot);
+  } else if (typeof incubatorControlService.get_slot_information === 'function') {
+    samplePayload = await incubatorControlService.get_slot_information(slot);
+  } else {
+    throw new Error(
+      'Incubator service does not expose get_incubator_samples() or get_slot_information().'
+    );
+  }
+
+  let sampleRecords;
+  if (samplePayload == null) {
+    sampleRecords = [];
+  } else if (Array.isArray(samplePayload)) {
+    sampleRecords = samplePayload;
+  } else {
+    sampleRecords = [samplePayload];
+  }
+
+  return sampleRecords
+    .filter(sample => sample && sample.incubator_slot != null)
+    .map(sample => ({
+      ...sample,
+      name: typeof sample.name === 'string' ? sample.name.trim() : sample.name || '',
+      status: sample.status || '',
+      location: sample.location || 'unknown',
+      well_plate_type: sample.well_plate_type || '96',
+      date_to_incubator: sample.date_to_incubator || '',
+    }))
+    .sort((left, right) => left.incubator_slot - right.incubator_slot);
+};
+
+/**
  * Get the microscope number from an orchestrator microscope ID.
  * Reverse of getOrchestratorMicroscopeId().
  * 
