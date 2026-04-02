@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
-import { isRealMicroscope, isSimulatedMicroscope, getMicroscopeNumber, getOrchestratorMicroscopeId, isSampleOnMicroscope, getLocationDisplayName, isSampleInIncubator } from '../utils';
+import { isRealMicroscope, isSimulatedMicroscope, getMicroscopeNumber, getOrchestratorMicroscopeId, isSampleOnMicroscope, getLocationDisplayName, isSampleInIncubator, fetchIncubatorSamples } from '../utils';
 
 // NOTE: Ensure corresponding CSS for .sample-selector-dropdown and .hidden is added.
 // .sample-selector-dropdown { position: absolute; top: 50px; /* Adjust as needed */ left: 20px; z-index: 1000; background: white; border: 1px solid #ccc; box-shadow: 0 2px 10px rgba(0,0,0,0.1); padding: 15px; border-radius: 5px; width: 300px; /* Or max-content */ }
@@ -203,7 +203,7 @@ const SampleSelector = ({
   const fetchIncubatorData = async () => {
     if (incubatorControlService && isRealMicroscopeSelected) {
       try {
-        const allSlotInfo = await incubatorControlService.get_slot_information();
+        const allSlotInfo = await fetchIncubatorSamples(incubatorControlService);
         const slots = (allSlotInfo || []).filter(slotInfo => 
           slotInfo && slotInfo.name && slotInfo.name.trim()
         ).map(slotInfo => ({
