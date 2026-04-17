@@ -837,7 +837,7 @@ class CellSegmenter:
 if __name__ == "__main__":
     import asyncio
 
-    cell_segmenter = CellSegmenter.func_or_class()
+    cell_segmenter = CellSegmenter()
 
     async def test():
         response = await cell_segmenter.start_fit()

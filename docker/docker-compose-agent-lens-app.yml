@@ -14,6 +14,7 @@ services:
       - "autoheal.enable=true"
     volumes:
       - /tmp/agent-lens-chroma:/app/chroma_cell_data
+      - ./healthcheck.sh:/healthcheck.sh:ro
     runtime: nvidia
     deploy:
       resources:
@@ -26,7 +27,7 @@ services:
         condition: on-failure
         delay: 20s
     healthcheck:
-      test: ["CMD", "/bin/sh", "-c", "curl -sf -H \"Authorization: Bearer ${WORKSPACE_TOKEN}\" https://hypha.aicell.io/reef-imaging/apps/agent-lens/is_service_healthy | jq -e '.status == \"ok\"' && curl -sf -H \"Authorization: Bearer ${WORKSPACE_TOKEN}\" https://hypha.aicell.io/reef-imaging/services/agent-lens-tools/is_service_healthy | jq -e '.status == \"ok\"'"]
+      test: ["CMD", "/bin/sh", "/healthcheck.sh"]
       interval: 30s
       timeout: 10s
       retries: 2
