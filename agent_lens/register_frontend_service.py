@@ -16,11 +16,6 @@ import numpy as np
 import sys
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.cors import CORSMiddleware
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
-from slowapi.middleware import SlowAPIMiddleware
-from starlette.requests import Request
 import uuid
 import asyncio
 import traceback
@@ -73,10 +68,7 @@ def get_frontend_api():
     else:
         allow_origins = ["https://hypha.aicell.io"]
 
-    limiter = Limiter(key_func=get_remote_address)
     app = FastAPI()
-    app.state.limiter = limiter
-    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
     # Add CORS middleware to allow cross-origin requests (e.g., from vizarr)
     # This must be added before other middleware
@@ -91,9 +83,6 @@ def get_frontend_api():
             "Content-Range",
         ],  # Expose headers needed by zarr clients
     )
-
-    # Add rate limiting middleware
-    app.add_middleware(SlowAPIMiddleware)
 
     # Add compression middleware to reduce bandwidth
     app.add_middleware(GZipMiddleware, minimum_size=500)
@@ -138,8 +127,7 @@ def get_frontend_api():
         )
 
     @app.post("/embedding/image")
-    @limiter.limit("10/minute")
-    async def generate_image_embedding(request: Request, image: UploadFile = File(...)):
+    async def generate_image_embedding(image: UploadFile = File(...)):
         """Generate both CLIP and DINOv2 image embeddings from an uploaded image.
 
         Returns both embeddings:
@@ -173,8 +161,7 @@ def get_frontend_api():
             raise HTTPException(status_code=500, detail=str(e))
 
     @app.post("/embedding/image-batch")
-    @limiter.limit("5/minute")
-    async def generate_image_embedding_batch(request: Request, images: List[UploadFile] = File(...)):
+    async def generate_image_embedding_batch(images: List[UploadFile] = File(...)):
         """Generate both CLIP and DINOv2 image embeddings from multiple uploaded images in batch.
 
         This endpoint uses optimized batch processing with parallel I/O for significantly faster
@@ -280,8 +267,7 @@ def get_frontend_api():
             raise HTTPException(status_code=500, detail=str(e))
 
     @app.post("/embedding/text")
-    @limiter.limit("30/minute")
-    async def generate_text_embedding_endpoint(request: Request, text: str):
+    async def generate_text_embedding_endpoint(text: str):
         """Generate a CLIP text embedding from a text input.
 
         Args:
@@ -637,9 +623,7 @@ def get_frontend_api():
     #########################################################################################
 
     @app.post("/similarity/collections")
-    @limiter.limit("30/minute")
     async def create_similarity_collection(
-        request: Request,
         collection_name: str,
         description: str = "Microscopy images collection",
         application_id: str = None,
@@ -756,9 +740,7 @@ def get_frontend_api():
             raise HTTPException(status_code=500, detail=str(e))
 
     @app.post("/similarity/insert")
-    @limiter.limit("20/minute")
     async def insert_image_for_similarity(
-        request: Request,
         collection_name: str,
         application_id: str,
         image_id: str,
@@ -875,9 +857,7 @@ def get_frontend_api():
             raise HTTPException(status_code=500, detail=str(e))
 
     @app.post("/similarity/insert-many")
-    @limiter.limit("10/minute")
     async def insert_many_images_for_similarity(
-        request: Request,
         collection_name: str,
         application_id: str,
         objects_json: str = Form(...),  # JSON string of objects array
@@ -1004,8 +984,7 @@ def get_frontend_api():
         }
 
     @app.post("/similarity/current-application")
-    @limiter.limit("30/minute")
-    async def set_current_application(request: Request, application_id: str):
+    async def set_current_application(application_id: str):
         """
         Set the currently active application ID.
 
@@ -1024,9 +1003,7 @@ def get_frontend_api():
         }
 
     @app.post("/similarity/search/text")
-    @limiter.limit("30/minute")
     async def search_similar_by_text(
-        request: Request,
         query_text: str, application_id: str = None, limit: int = 10
     ):
         """
@@ -1135,9 +1112,7 @@ def get_frontend_api():
             raise HTTPException(status_code=500, detail=str(e))
 
     @app.post("/similarity/search/image")
-    @limiter.limit("30/minute")
     async def search_similar_by_image(
-        request: Request,
         image: UploadFile = File(...), application_id: str = None, limit: int = 10
     ):
         """
@@ -1211,9 +1186,7 @@ def get_frontend_api():
             raise HTTPException(status_code=500, detail=str(e))
 
     @app.post("/similarity/search/vector")
-    @limiter.limit("30/minute")
     async def search_similar_by_vector(
-        request: Request,
         query_vector: List[float],
         application_id: str = None,
         limit: int = 10,

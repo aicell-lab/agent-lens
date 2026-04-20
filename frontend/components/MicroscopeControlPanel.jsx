@@ -129,6 +129,8 @@ const MicroscopeControlPanel = ({
 
   // Ref to track if the illumination channel change was initiated by the UI
   const channelSetByUIFlagRef = useRef(false);
+  const illuminationChannelRef = useRef("0");
+  const suppressManualHardwareSyncRef = useRef(false);
   
   // Ref to track when microscopeBusy was last set to true (to prevent premature clearing)
   const lastBusySetTimeRef = useRef(0);
@@ -305,6 +307,10 @@ const MicroscopeControlPanel = ({
   useEffect(() => {
     actualCameraExposureRef.current = actualCameraExposure;
   }, [actualCameraExposure]);
+
+  useEffect(() => {
+    illuminationChannelRef.current = illuminationChannel;
+  }, [illuminationChannel]);
 
   // Keep autoContrastEnabledRef in sync with state
   useEffect(() => {
@@ -489,6 +495,42 @@ const MicroscopeControlPanel = ({
     }
   };
 
+  const handleIlluminationChannelChange = async (newChannel) => {
+    if (!microscopeControlService || illuminationChannel === newChannel) return;
+
+    channelSetByUIFlagRef.current = true;
+    suppressManualHardwareSyncRef.current = true;
+    updateMicroscopeBusy(true);
+
+    try {
+      const status = await microscopeControlService.get_status();
+      const pair = getIntensityExposurePairFromStatus(status, newChannel) || [50, 100];
+      const [targetIntensity, targetExposure] = pair;
+      const channelNumber = parseInt(newChannel, 10);
+
+      setIlluminationChannel(newChannel);
+      setDesiredIlluminationIntensity(targetIntensity);
+      setDesiredCameraExposure(targetExposure);
+
+      appendLog(
+        `Switching channel to ${newChannel} with ${targetIntensity}% intensity and ${targetExposure}ms exposure...`
+      );
+      await microscopeControlService.set_illumination(channelNumber, targetIntensity);
+      await microscopeControlService.set_camera_exposure(channelNumber, targetExposure);
+      await fetchStatusAndUpdateActuals();
+    } catch (error) {
+      const conciseError = extractConciseErrorMessage(error);
+      appendLog(`Error switching illumination channel: ${conciseError}`);
+      console.error("[MicroscopeControlPanel] Error switching illumination channel:", error);
+      if (showNotification) showNotification(`Channel switch failed: ${conciseError}`, 'error');
+      await fetchStatusAndUpdateActuals();
+    } finally {
+      suppressManualHardwareSyncRef.current = false;
+      channelSetByUIFlagRef.current = false;
+      updateMicroscopeBusy(false);
+    }
+  };
+
   useEffect(() => {
     if (microscopeControlService) {
       const initAndSyncValues = async () => {
@@ -640,11 +682,13 @@ const MicroscopeControlPanel = ({
   // Effect to update illumination when desiredIlluminationIntensity or illuminationChannel changes
   useEffect(() => {
     if (!microscopeControlService) return;
+    if (suppressManualHardwareSyncRef.current) return;
 
     const handler = setTimeout(async () => {
       try {
-        appendLog(`Setting illumination (debounced) to channel ${illuminationChannel}, intensity ${desiredIlluminationIntensity}%`);
-        await microscopeControlService.set_illumination(parseInt(illuminationChannel, 10), desiredIlluminationIntensity);
+        const activeChannel = illuminationChannelRef.current;
+        appendLog(`Setting illumination (debounced) to channel ${activeChannel}, intensity ${desiredIlluminationIntensity}%`);
+        await microscopeControlService.set_illumination(parseInt(activeChannel, 10), desiredIlluminationIntensity);
         // fetchStatusAndUpdateActuals will be called in finally
       } catch (error) {
         appendLog(`Error setting illumination (debounced): ${error.message}`);
@@ -657,16 +701,18 @@ const MicroscopeControlPanel = ({
     }, 300); // 300ms debounce
 
     return () => clearTimeout(handler);
-  }, [desiredIlluminationIntensity, illuminationChannel, microscopeControlService, appendLog]);
+  }, [desiredIlluminationIntensity, microscopeControlService, appendLog]);
   
   // Effect to update camera exposure when desiredCameraExposure or illuminationChannel changes
   useEffect(() => {
     if (!microscopeControlService) return;
+    if (suppressManualHardwareSyncRef.current) return;
 
     const handler = setTimeout(async () => {
       try {
-        appendLog(`Setting camera exposure (debounced) for channel ${illuminationChannel} to ${desiredCameraExposure}ms`);
-        await microscopeControlService.set_camera_exposure(parseInt(illuminationChannel, 10), desiredCameraExposure);
+        const activeChannel = illuminationChannelRef.current;
+        appendLog(`Setting camera exposure (debounced) for channel ${activeChannel} to ${desiredCameraExposure}ms`);
+        await microscopeControlService.set_camera_exposure(parseInt(activeChannel, 10), desiredCameraExposure);
         await fetchStatusAndUpdateActuals(); // Update UI after successful set
         appendLog('Camera exposure updated successfully (debounced).');
       } catch (error) {
@@ -677,7 +723,7 @@ const MicroscopeControlPanel = ({
     }, 300); // 300ms debounce
 
     return () => clearTimeout(handler);
-  }, [desiredCameraExposure, illuminationChannel, microscopeControlService, appendLog]);
+  }, [desiredCameraExposure, microscopeControlService, appendLog]);
 
   // Effect to adjust video frame contrast
   useEffect(() => {
@@ -1948,8 +1994,7 @@ const MicroscopeControlPanel = ({
                       if (!microscopeControlService || currentOperation || microscopeBusy) return;
                       const newChannel = e.target.value;
                       if (illuminationChannel !== newChannel) {
-                        setIlluminationChannel(newChannel);
-                        channelSetByUIFlagRef.current = true;
+                        handleIlluminationChannelChange(newChannel);
                       }
                     }}
                     disabled={!microscopeControlService || currentOperation !== null || microscopeBusy}

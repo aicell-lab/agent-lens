@@ -20,7 +20,7 @@ html/
 bin/mc*
 bin/minio*
 *.log*
-
+.svamp/
 # ChromaDB local storage
 chroma_cell_data/
 *.chroma
