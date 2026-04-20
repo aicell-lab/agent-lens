@@ -61,14 +61,21 @@ def get_frontend_api():
     Returns:
         function: The FastAPI application.
     """
+    # Configure CORS origins from environment variable
+    _cors_origins_env = os.getenv("CORS_ALLOW_ORIGINS")
+    if _cors_origins_env:
+        allow_origins = [origin.strip() for origin in _cors_origins_env.split(",") if origin.strip()]
+    else:
+        allow_origins = ["https://hypha.aicell.io"]
+
     app = FastAPI()
 
     # Add CORS middleware to allow cross-origin requests (e.g., from vizarr)
     # This must be added before other middleware
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # Allow all origins
-        allow_credentials=False,  # Set to False when using allow_origins=["*"]
+        allow_origins=allow_origins,
+        allow_credentials=False,  # Must be False when multiple origins are allowed
         allow_methods=["GET", "OPTIONS"],  # Allow GET and OPTIONS for CORS preflight
         allow_headers=["Range"],  # Allow Range header for HTTP Range requests
         expose_headers=[

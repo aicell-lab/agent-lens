@@ -168,7 +168,6 @@ async def setup_service(server, server_id="agent-lens-tools"):
 - Microscope service caching for efficient connections
 
 **Data Analysis & Visualization:**
-- `make_umap_cluster_figure_interactive()` - UMAP clustering visualization with Plotly
 - `fetch_cell_data()` - Retrieve cell data from ChromaDB by UUIDs
 - `similarity_search_cells()` - Vector similarity search with metadata filtering
 - `reset_application()` - Reset ChromaDB collections
@@ -253,7 +252,6 @@ agent_lens/                 # Main Python package
     ├── artifact_manager.py    # Data storage and Zarr tile management
     ├── chroma_storage.py      # ChromaDB cell storage utilities
     ├── embedding_generator.py # CLIP/DINOv2 embedding generation
-    ├── umap_analysis_utils.py # UMAP clustering and visualization
     └── weaviate_search.py     # Similarity search utilities
 
 tests/                     # Test suite (project root level)

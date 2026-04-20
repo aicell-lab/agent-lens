@@ -58,7 +58,7 @@ def _load_dinov2_model():
 def _normalize_features(features: np.ndarray) -> np.ndarray:
     """L2-normalize feature vectors to unit length.
     
-    This is essential for consistent similarity calculations in Weaviate and UMAP.
+    This is essential for consistent similarity calculations in Weaviate.
     Without normalization, embeddings with different magnitudes will produce
     incorrect similarity scores.
     """
