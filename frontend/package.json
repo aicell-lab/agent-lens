@@ -16,7 +16,7 @@
     "bootstrap": "^5.3.3",
     "html2canvas": "^1.4.1",
     "hypha-core": "^0.20.86",
-    "hypha-rpc": "^0.21.33",
+    "hypha-rpc": "^0.21.40",
     "node-fetch": "^3.3.2",
     "ol": "^10.2.1",
 

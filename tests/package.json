@@ -10,7 +10,7 @@
     "dotenv": "^16.0.0"
   },
   "dependencies": {
-    "hypha-rpc": "^0.21.33",
+    "hypha-rpc": "^0.21.40",
     "zarrita": "^0.4.0"
   }
 }
